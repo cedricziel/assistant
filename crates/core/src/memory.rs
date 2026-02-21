@@ -7,6 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::Result;
 use chrono::Local;
 use tracing::{debug, warn};
 
@@ -154,7 +155,7 @@ impl MemoryLoader {
     }
 
     /// Append a timestamped note to today's daily notes file.
-    pub fn append_daily_note(&self, category: Option<&str>, note: &str) -> std::io::Result<()> {
+    pub fn append_daily_note(&self, category: Option<&str>, note: &str) -> Result<()> {
         if !self.enabled {
             return Ok(());
         }
@@ -165,17 +166,19 @@ impl MemoryLoader {
             Some(c) => format!("## {timestamp} [{c}]"),
             None => format!("## {timestamp}"),
         };
-        // Prepend a blank line only when appending to an existing file.
-        let entry = if path.exists() {
-            format!("\n{header}\n{note}\n")
-        } else {
-            format!("{header}\n{note}\n")
-        };
         use std::io::Write;
+        // Open (or create) the file before checking its size to avoid a TOCTOU
+        // race between path.exists() and the subsequent open.
         let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&path)?;
+        // Prepend a blank line only when appending to an existing non-empty file.
+        let entry = if file.metadata()?.len() > 0 {
+            format!("\n{header}\n{note}\n")
+        } else {
+            format!("{header}\n{note}\n")
+        };
         file.write_all(entry.as_bytes())?;
         Ok(())
     }
@@ -198,18 +201,13 @@ impl MemoryLoader {
     }
 
     /// Update a named memory file (append or replace).
-    pub fn update_file(&self, target: &str, content: &str, mode: &str) -> std::io::Result<PathBuf> {
+    pub fn update_file(&self, target: &str, content: &str, mode: &str) -> Result<PathBuf> {
         let path = match target {
             "soul" => &self.soul_path,
             "identity" => &self.identity_path,
             "user" => &self.user_path,
             "memory" => &self.memory_path,
-            _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("Unknown target: {target}"),
-                ))
-            }
+            _ => anyhow::bail!("Unknown target: {target}"),
         };
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -225,10 +223,7 @@ impl MemoryLoader {
                 writeln!(file, "\n{content}")?;
             }
             other => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("Unknown mode: {other} (expected \"replace\" or \"append\")"),
-                ));
+                anyhow::bail!("Unknown mode: {other} (expected \"replace\" or \"append\")");
             }
         }
         Ok(path.clone())

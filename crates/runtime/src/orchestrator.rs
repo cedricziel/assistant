@@ -965,7 +965,8 @@ mod tests {
             })
             .unwrap(),
         );
-        let config = AssistantConfig::default();
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false; // disable FS writes in unit tests
         let executor = Arc::new(SkillExecutor::new(
             storage.clone(),
             llm.clone(),

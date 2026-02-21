@@ -237,9 +237,6 @@ jobs:
               dst: /usr/local/bin/assistant-slack
               file_info:
                 mode: 0755
-            - src: ${{ env.BIN_DIR }}/config.toml.example
-              dst: /etc/assistant/config.toml.example
-              type: config|noreplace
           EOF
 
       - name: Create nfpm config for assistant-mattermost
@@ -260,9 +257,6 @@ jobs:
               dst: /usr/local/bin/assistant-mattermost
               file_info:
                 mode: 0755
-            - src: ${{ env.BIN_DIR }}/config.toml.example
-              dst: /etc/assistant/config.toml.example
-              type: config|noreplace
           EOF
 
       - name: Build .deb packages

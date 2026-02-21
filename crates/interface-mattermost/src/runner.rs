@@ -257,11 +257,17 @@ impl MattermostInterface {
             #[cfg(unix)]
             {
                 use tokio::signal::unix::{signal, SignalKind};
-                let mut sigterm =
-                    signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {}
-                    _ = sigterm.recv() => {}
+                match signal(SignalKind::terminate()) {
+                    Ok(mut sigterm) => {
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {}
+                            _ = sigterm.recv() => {}
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to install SIGTERM handler; only Ctrl+C shutdown will work");
+                        let _ = tokio::signal::ctrl_c().await;
+                    }
                 }
             }
             #[cfg(not(unix))]

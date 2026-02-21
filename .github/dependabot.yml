@@ -10,6 +10,16 @@ updates:
         patterns:
           - "*"
 
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      all-docker:
+        patterns:
+          - "*"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
