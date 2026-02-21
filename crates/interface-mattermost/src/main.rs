@@ -65,7 +65,7 @@ async fn bootstrap() -> Result<(Orchestrator, MattermostConfig)> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
     let config_path = assistant_dir.join("config.toml");
-    let config = load_config(&config_path)?;
+    let config = load_config(&config_path).await?;
 
     // Resolve database path.
     let db_path: PathBuf = config
@@ -133,7 +133,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 

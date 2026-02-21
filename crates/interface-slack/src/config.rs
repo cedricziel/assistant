@@ -2,8 +2,8 @@
 //!
 //! [`SlackConfig`] is defined in `assistant-core` so it can be embedded in
 //! [`AssistantConfig`][assistant_core::AssistantConfig].  This module
-//! re-exports it and adds runtime helpers that depend on the `dirs` crate,
-//! which is not a dependency of `assistant-core`.
+//! re-exports it and adds runtime helpers that resolve tokens from
+//! environment variables when not explicitly configured.
 
 pub use assistant_core::SlackConfig;
 

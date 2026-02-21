@@ -75,7 +75,10 @@ impl WebsocketHandler for MattermostHandler {
         };
         let post: mattermost_api::models::Post = match serde_json::from_str(post_json) {
             Ok(p) => p,
-            Err(_) => return,
+            Err(e) => {
+                warn!(error = %e, "Failed to deserialize Mattermost post payload");
+                return;
+            }
         };
 
         let channel_id = message.broadcast.channel_id.clone();
@@ -135,6 +138,7 @@ impl WebsocketHandler for MattermostHandler {
         };
 
         // Build per-turn Mattermost extension tools.
+        let reply_root_id_for_err = reply_root_id.clone();
         let extensions = build_mattermost_tools(
             channel_id.clone(),
             post_id,
@@ -152,6 +156,15 @@ impl WebsocketHandler for MattermostHandler {
 
         if let Err(e) = turn_result {
             tracing::error!(error = %e, elapsed_ms, "Orchestrator error");
+            // Notify the user so they aren't left waiting silently.
+            let err_body = mattermost_api::models::PostBody {
+                channel_id: channel_id.clone(),
+                message: "Sorry, something went wrong processing your message.".to_string(),
+                root_id: reply_root_id_for_err,
+            };
+            if let Err(post_err) = self.api.create_post(&err_body).await {
+                warn!(error = %post_err, "Failed to post error feedback to user");
+            }
         } else {
             info!(
                 channel = %channel_id,
@@ -214,8 +227,9 @@ impl MattermostInterface {
                 me.id
             }
             Err(e) => {
-                warn!(error = %e, "Failed to fetch bot user ID; reactions will be unavailable");
-                String::new()
+                anyhow::bail!(
+                    "Failed to fetch bot user ID (required for self-message filtering): {e}"
+                );
             }
         };
 
@@ -264,9 +278,9 @@ impl MattermostInterface {
                 conversations: conversations.clone(),
             };
 
-            // connect_to_websocket requires &mut self on the underlying client.
-            // We need to temporarily extract the inner Mattermost from the Arc.
-            // Since we're the only writer at this point, we can clone it for WS.
+            // connect_to_websocket requires &mut self.  Clone the inner client
+            // so the WS session gets its own mutable copy while REST calls
+            // continue through the shared Arc<Mattermost> in the handler.
             let mut ws_api = (*api).clone();
             let clean_disconnect = tokio::select! {
                 result = ws_api.connect_to_websocket(handler) => {

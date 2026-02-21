@@ -165,7 +165,12 @@ impl MemoryLoader {
             Some(c) => format!("## {timestamp} [{c}]"),
             None => format!("## {timestamp}"),
         };
-        let entry = format!("\n{header}\n{note}\n");
+        // Prepend a blank line only when appending to an existing file.
+        let entry = if path.exists() {
+            format!("\n{header}\n{note}\n")
+        } else {
+            format!("{header}\n{note}\n")
+        };
         use std::io::Write;
         let mut file = fs::OpenOptions::new()
             .create(true)

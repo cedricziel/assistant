@@ -119,7 +119,11 @@ async fn on_push_event(
         let guard = states.read().await;
         let s = guard
             .get_user_state::<SlackCallbackState>()
-            .expect("SlackCallbackState must be registered via with_user_state");
+            .ok_or_else(|| {
+                Box::<dyn std::error::Error + Send + Sync>::from(
+                    "SlackCallbackState not registered in states",
+                )
+            })?;
         (
             s.config.clone(),
             s.orchestrator.clone(),
@@ -385,6 +389,16 @@ async fn on_push_event(
 
     if let Err(e) = turn_result {
         error!(error = %e, elapsed_ms, "orchestrator error");
+        // Notify the user so they aren't left waiting silently.
+        let err_req = SlackApiChatPostMessageRequest::new(
+            channel_id.clone().into(),
+            SlackMessageContent::new()
+                .with_text("Sorry, something went wrong processing your message.".to_string()),
+        )
+        .with_thread_ts(thread_ts.clone());
+        if let Err(post_err) = session.chat_post_message(&err_req).await {
+            warn!(error = %post_err, "Failed to post error feedback to user");
+        }
         return Ok(());
     }
 

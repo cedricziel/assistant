@@ -41,12 +41,13 @@ impl ConfirmationCallback for AutoDenyConfirmation {
 /// Load [`AssistantConfig`] from a TOML file.
 ///
 /// Returns [`AssistantConfig::default()`] if the file does not exist.
-pub fn load_config(config_path: &Path) -> Result<AssistantConfig> {
+pub async fn load_config(config_path: &Path) -> Result<AssistantConfig> {
     if !config_path.exists() {
         return Ok(AssistantConfig::default());
     }
 
-    let raw = std::fs::read_to_string(config_path)
+    let raw = tokio::fs::read_to_string(config_path)
+        .await
         .with_context(|| format!("Failed to read config at {}", config_path.display()))?;
 
     let cfg = toml::from_str::<AssistantConfig>(&raw)

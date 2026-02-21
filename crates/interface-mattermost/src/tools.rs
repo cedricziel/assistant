@@ -107,7 +107,7 @@ impl SkillHandler for MattermostReactHandler {
             Err(e) => {
                 let msg = e.to_string();
                 // Mattermost returns an error if the reaction already exists.
-                if msg.contains("exists") || msg.contains("already") {
+                if msg.contains("exists") || msg.contains("already") || msg.contains("400") {
                     Ok(SkillOutput::success("Reaction already present"))
                 } else {
                     warn!(error = %e, "Failed to add Mattermost reaction");

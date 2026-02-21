@@ -155,6 +155,7 @@ impl SkillHandler for SlackReplyBlocksHandler {
 
 struct SlackUploadHandler {
     channel_id: String,
+    thread_ts: Option<SlackTs>,
     client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
     token: SlackApiToken,
 }
@@ -165,7 +166,6 @@ impl SkillHandler for SlackUploadHandler {
         "slack-upload"
     }
 
-    #[allow(deprecated)]
     async fn execute(
         &self,
         _def: &SkillDef,
@@ -185,18 +185,51 @@ impl SkillHandler for SlackUploadHandler {
             .and_then(|v| v.as_str())
             .map(|t| t.to_string());
 
+        let bytes = content.into_bytes();
+        let length = bytes.len();
+
         let session = self.client.open_session(&self.token);
-        let mut req = SlackApiFilesUploadRequest::new()
-            .with_channels(vec![self.channel_id.clone().into()])
-            .with_content(content)
-            .with_filename(filename);
-        if let Some(t) = title {
-            req = req.with_title(t);
+
+        // Step 1: request an upload URL from Slack.
+        let url_req = SlackApiFilesGetUploadUrlExternalRequest {
+            filename: filename.clone(),
+            length,
+            alt_txt: None,
+            snippet_type: None,
+        };
+        let url_resp = match session.get_upload_url_external(&url_req).await {
+            Ok(r) => r,
+            Err(e) => return Ok(SkillOutput::error(format!("Failed to get upload URL: {e}"))),
+        };
+
+        // Step 2: upload the file bytes to the returned URL.
+        let upload_req = SlackApiFilesUploadViaUrlRequest {
+            upload_url: url_resp.upload_url,
+            content: bytes,
+            content_type: "application/octet-stream".to_string(),
+        };
+        if let Err(e) = session.files_upload_via_url(&upload_req).await {
+            return Ok(SkillOutput::error(format!(
+                "Failed to upload file content: {e}"
+            )));
         }
 
-        match session.files_upload(&req).await {
+        // Step 3: complete the upload and share to the channel.
+        let complete_req = SlackApiFilesCompleteUploadExternalRequest {
+            files: vec![SlackApiFilesComplete {
+                id: url_resp.file_id,
+                title,
+            }],
+            channel_id: Some(self.channel_id.clone().into()),
+            initial_comment: None,
+            thread_ts: self.thread_ts.clone(),
+        };
+
+        match session.files_complete_upload_external(&complete_req).await {
             Ok(_) => Ok(SkillOutput::success("File uploaded successfully")),
-            Err(e) => Ok(SkillOutput::error(format!("Failed to upload file: {e}"))),
+            Err(e) => Ok(SkillOutput::error(format!(
+                "Failed to complete file upload: {e}"
+            ))),
         }
     }
 }
@@ -290,6 +323,7 @@ pub fn build_slack_tools(
             ),
             Arc::new(SlackUploadHandler {
                 channel_id,
+                thread_ts,
                 client,
                 token,
             }) as Arc<dyn SkillHandler>,
