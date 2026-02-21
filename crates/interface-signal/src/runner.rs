@@ -133,7 +133,10 @@ impl SignalInterface {
                     if !self.config.allowed_senders.is_empty()
                         && !self.config.allowed_senders.contains(&sender_str)
                     {
-                        warn!(sender = sender_str, "Ignoring message from non-allowlisted sender");
+                        warn!(
+                            sender = sender_str,
+                            "Ignoring message from non-allowlisted sender"
+                        );
                         continue;
                     }
 
