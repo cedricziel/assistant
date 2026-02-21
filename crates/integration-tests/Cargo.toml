@@ -1,0 +1,19 @@
+[package]
+name = "assistant-integration-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+assistant-core = { path = "../core" }
+assistant-llm = { path = "../llm" }
+assistant-storage = { path = "../storage" }
+assistant-runtime = { path = "../runtime" }
+assistant-skills-executor = { path = "../skills-executor" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+tracing-subscriber = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+serde_json = { workspace = true }
+testcontainers = "0.27"

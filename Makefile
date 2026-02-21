@@ -11,6 +11,9 @@ build-release:
 test:
 	cargo test --workspace
 
+test-integration:
+	cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture
+
 lint:
 	cargo clippy --workspace --all-features -- -D warnings
 
