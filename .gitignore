@@ -20,7 +20,8 @@ Cargo.lock
 *~
 
 # Tool-specific project metadata (not part of the project)
-.claude/
+.claude/settings.local.json
+.claude/worktrees/
 .serena/
 
 # Environment / secrets
