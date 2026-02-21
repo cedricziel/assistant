@@ -137,24 +137,61 @@ pub struct AssistantConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub mirror: MirrorConfig,
+    /// Signal messenger interface configuration (optional).
+    /// Populated from the `[signal]` section of `config.toml`.
+    pub signal: Option<SignalConfig>,
+}
+
+/// Configuration for the Signal messenger interface.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SignalConfig {
+    /// The phone number registered with Signal (e.g. `"+14155550123"`).
+    pub phone_number: Option<String>,
+
+    /// If non-empty, only messages from these sender identifiers are
+    /// dispatched to the orchestrator.  An empty list accepts all contacts.
+    #[serde(default)]
+    pub allowed_senders: Vec<String>,
+
+    /// Path where presage stores its Signal state.  Defaults to
+    /// `~/.assistant/signal-store` (resolved at runtime by the interface
+    /// crate, which has access to the `dirs` crate).
+    pub store_path: Option<String>,
+}
+
+fn default_llm_model() -> String {
+    "qwen2.5:7b".to_string()
+}
+fn default_llm_base_url() -> String {
+    "http://localhost:11434".to_string()
+}
+fn default_llm_max_iterations() -> usize {
+    10
+}
+fn default_llm_timeout_secs() -> u64 {
+    120
 }
 
 /// LLM / Ollama configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
+    #[serde(default = "default_llm_model")]
     pub model: String,
+    #[serde(default = "default_llm_base_url")]
     pub base_url: String,
+    #[serde(default = "default_llm_max_iterations")]
     pub max_iterations: usize,
+    #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
 }
 
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            model: "qwen2.5:7b".to_string(),
-            base_url: "http://localhost:11434".to_string(),
-            max_iterations: 10,
-            timeout_secs: 120,
+            model: default_llm_model(),
+            base_url: default_llm_base_url(),
+            max_iterations: default_llm_max_iterations(),
+            timeout_secs: default_llm_timeout_secs(),
         }
     }
 }

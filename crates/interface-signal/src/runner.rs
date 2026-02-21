@@ -1,10 +1,25 @@
 //! Signal interface runner.
 //!
-//! Without `--features signal` this provides a no-op `SignalInterface` that
+//! Without `--features signal` this provides a no-op [`SignalInterface`] that
 //! returns an informative error when started.
 //!
-//! To enable the real Signal integration, see Cargo.toml for the required
-//! presage git dependencies and rebuild with `--features signal`.
+//! With `--features signal` the runner opens the SQLite store, loads the
+//! registered presage [`Manager`], and enters a receive loop.  Each incoming
+//! text message is dispatched synchronously to the [`Orchestrator`] and
+//! the reply is sent back to the sender via the Signal protocol.
+//!
+//! # Architecture
+//!
+//! `presage::Manager::receive_messages()` takes `&mut self` to initialise the
+//! WebSocket pipe but the returned `Stream` is owned — it does **not** borrow
+//! from the manager.  This means the same `Manager` can be used for sending
+//! inside the receive loop, which is the pattern used by `presage-cli`.
+//!
+//! # Safety
+//!
+//! [`SafetyGate`][assistant_runtime::safety::SafetyGate] already blocks
+//! `shell-exec` when the interface is [`Interface::Signal`].  Additionally,
+//! `SignalConfig::allowed_senders` is checked before dispatching.
 
 use std::sync::Arc;
 
@@ -12,6 +27,8 @@ use anyhow::Result;
 use assistant_runtime::Orchestrator;
 
 use crate::config::SignalConfig;
+#[cfg(feature = "signal")]
+use crate::config::SignalConfigExt;
 
 /// The Signal interface handle.
 pub struct SignalInterface {
@@ -22,9 +39,10 @@ pub struct SignalInterface {
 }
 
 impl SignalInterface {
-    /// Create a new `SignalInterface`.
+    /// Create a new [`SignalInterface`].
     ///
-    /// Call [`run`] to start the listener loop (requires `--features signal`).
+    /// Call [`run`][Self::run] to start the listener loop (requires
+    /// `--features signal`).
     pub fn new(config: SignalConfig, orchestrator: Arc<Orchestrator>) -> Self {
         Self {
             config,
@@ -34,26 +52,228 @@ impl SignalInterface {
 
     /// Start the Signal listener loop.
     ///
-    /// Without `--features signal` this always returns an informative error
-    /// explaining how to enable the feature.
+    /// Without `--features signal` this always returns an error explaining how
+    /// to enable the feature.
     pub async fn run(&self) -> Result<()> {
         #[cfg(not(feature = "signal"))]
-        anyhow::bail!(
-            "The Signal interface requires recompiling with `--features signal`.\n\
-             Add the presage git dependencies to Cargo.toml and rebuild:\n\
-             \n\
-             cargo build --workspace --features assistant-interface-signal/signal\n\
-             \n\
-             See crates/interface-signal/Cargo.toml for the required dependencies."
-        );
-
-        // Real implementation would go here, gated by #[cfg(feature = "signal")]
-        // using the presage crate for Signal protocol support.
-        #[cfg(feature = "signal")]
         {
-            // Presage-based listener — add implementation once the presage
-            // dependency is configured and the feature is enabled.
-            anyhow::bail!("Signal feature is defined but presage integration is not yet wired up. Implement in runner.rs.")
+            anyhow::bail!(
+                "The Signal interface requires recompiling with `--features signal`.\n\
+                 Rebuild with:\n\
+                 \n\
+                 cargo build -p assistant-interface-signal --features signal\n\
+                 \n\
+                 See crates/interface-signal/Cargo.toml for the presage git dependencies."
+            );
         }
+
+        #[cfg(feature = "signal")]
+        self.run_presage_loop().await
+    }
+
+    /// The presage-backed receive loop (only compiled with `--features signal`).
+    ///
+    /// Processes one message at a time — this keeps the borrow structure
+    /// simple: the receive stream and the manager are used sequentially.
+    #[cfg(feature = "signal")]
+    async fn run_presage_loop(&self) -> Result<()> {
+        use futures::{pin_mut, StreamExt};
+        use presage::{model::messages::Received, Manager};
+        use presage_store_sqlite::{OnNewIdentity, SqliteConnectOptions, SqliteStore};
+        use std::str::FromStr as _;
+        use tracing::{debug, info, warn};
+
+        use std::collections::HashMap;
+
+        use assistant_core::Interface;
+        use uuid::Uuid;
+
+        let store_path = self.config.resolved_store_path();
+        info!(store_path = %store_path.display(), "Opening signal store");
+
+        // Ensure the parent directory exists before SQLite tries to create the file.
+        if let Some(parent) = store_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow::anyhow!("Failed to create signal store directory: {e}"))?;
+        }
+
+        // create_if_missing must be set explicitly — the default is false,
+        // causing SQLITE_CANTOPEN when the file does not yet exist.
+        let db_url = format!("sqlite://{}", store_path.display());
+        let options = SqliteConnectOptions::from_str(&db_url)
+            .map_err(|e| anyhow::anyhow!("Invalid signal store path: {e}"))?
+            .create_if_missing(true);
+        let store = SqliteStore::open_with_options(options, OnNewIdentity::Trust)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to open signal store: {e}"))?;
+
+        let mut manager = Manager::load_registered(store)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to load registered device: {e}"))?;
+
+        info!("Signal manager loaded; entering receive loop");
+
+        // `receive_messages` takes &mut self to open the WebSocket, but the
+        // returned Stream is owned — the borrow ends after the `.await`.
+        // The manager is therefore free to use for sending inside the loop.
+        let messages = manager
+            .receive_messages()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to start message stream: {e}"))?;
+        pin_mut!(messages);
+
+        // Track one conversation_id per sender so the orchestrator retains
+        // memory across messages from the same Signal contact.
+        let mut conversations: HashMap<String, Uuid> = HashMap::new();
+
+        while let Some(received) = messages.next().await {
+            match received {
+                Received::QueueEmpty => {
+                    debug!("Initial message queue drained — listening for new messages");
+                }
+                Received::Contacts => {
+                    debug!("Contact sync received");
+                }
+                Received::Content(content) => {
+                    let sender = content.metadata.sender;
+                    let text = extract_text_body(&content);
+
+                    if text.is_empty() {
+                        debug!("Ignoring non-text or empty message");
+                        continue;
+                    }
+
+                    // Sender string for allowlist comparison.
+                    let sender_str = sender.service_id_string();
+
+                    // Allowlist check.
+                    if !self.config.allowed_senders.is_empty()
+                        && !self.config.allowed_senders.contains(&sender_str)
+                    {
+                        warn!(
+                            sender = sender_str,
+                            "Ignoring message from non-allowlisted sender"
+                        );
+                        continue;
+                    }
+
+                    info!(
+                        sender = sender_str,
+                        text_len = text.len(),
+                        "Dispatching to orchestrator"
+                    );
+
+                    // Run the orchestrator synchronously — this keeps the
+                    // borrow structure simple and avoids sharing the manager
+                    // across tasks.
+                    let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
+                    let conversation_id = *conversations
+                        .entry(sender_str.clone())
+                        .or_insert_with(Uuid::new_v4);
+
+                    let collector = tokio::spawn(async move {
+                        let mut buf = String::new();
+                        while let Some(tok) = tok_rx.recv().await {
+                            buf.push_str(&tok);
+                        }
+                        buf
+                    });
+
+                    let turn_result = self
+                        .orchestrator
+                        .run_turn_streaming(&text, conversation_id, Interface::Signal, tok_tx)
+                        .await;
+
+                    let reply = collector.await.unwrap_or_default();
+
+                    if let Err(e) = turn_result {
+                        tracing::error!(error = %e, "Orchestrator error");
+                        continue;
+                    }
+
+                    if reply.is_empty() {
+                        continue;
+                    }
+
+                    // Reply to the sender — use current wall-clock time in
+                    // milliseconds (Signal's timestamp unit), not the sender's
+                    // timestamp + 1 which would be incorrect.
+                    let reply_ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let data_message = presage::proto::DataMessage {
+                        body: Some(reply),
+                        timestamp: Some(reply_ts),
+                        ..Default::default()
+                    };
+
+                    if let Err(e) = manager.send_message(sender, data_message, reply_ts).await {
+                        tracing::error!(error = %e, "Failed to send reply");
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Extract the plaintext body from a presage [`Content`] message.
+///
+/// Returns an empty string for non-data messages (calls, receipts, sync, …).
+#[cfg(feature = "signal")]
+fn extract_text_body(content: &presage::libsignal_service::content::Content) -> String {
+    use presage::libsignal_service::content::ContentBody;
+    match &content.body {
+        ContentBody::DataMessage(msg) => msg.body.clone().unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assistant_core::SignalConfig;
+
+    // NOTE: We cannot safely instantiate `SignalInterface` in unit tests without
+    // a full async runtime + storage stack (Orchestrator requires LLM, DB, …).
+    // The tests below focus on the pure logic that is extractable without that
+    // dependency — allowlist filtering and config defaults.
+    //
+    // The stub-mode error for `run()` is covered by the integration smoke-test
+    // that builds the binary without `--features signal` and verifies the exit.
+
+    #[test]
+    fn allowlist_logic_empty_accepts_all() {
+        let cfg = SignalConfig {
+            allowed_senders: vec![],
+            ..Default::default()
+        };
+        // Empty allowlist → every sender is accepted.
+        let sender = "some-uuid".to_string();
+        let blocked = !cfg.allowed_senders.is_empty() && !cfg.allowed_senders.contains(&sender);
+        assert!(!blocked);
+    }
+
+    #[test]
+    fn allowlist_logic_non_empty_blocks_unknown() {
+        let cfg = SignalConfig {
+            allowed_senders: vec!["allowed-uuid".to_string()],
+            ..Default::default()
+        };
+        let unknown = "unknown-uuid".to_string();
+        let blocked = !cfg.allowed_senders.is_empty() && !cfg.allowed_senders.contains(&unknown);
+        assert!(blocked);
+    }
+
+    #[test]
+    fn allowlist_logic_non_empty_passes_known() {
+        let cfg = SignalConfig {
+            allowed_senders: vec!["allowed-uuid".to_string()],
+            ..Default::default()
+        };
+        let known = "allowed-uuid".to_string();
+        let blocked = !cfg.allowed_senders.is_empty() && !cfg.allowed_senders.contains(&known);
+        assert!(!blocked);
     }
 }

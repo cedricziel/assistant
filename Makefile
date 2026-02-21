@@ -1,4 +1,4 @@
-.PHONY: all build test lint format clean check
+.PHONY: all build test lint lint-signal format clean check
 
 all: build
 
@@ -15,13 +15,19 @@ test-integration:
 	cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture
 
 lint:
-	cargo clippy --workspace --all-features -- -D warnings
+	# The `signal` feature introduces presage/libsignal git deps that conflict
+	# with other workspace crates at the crate.io version of curve25519-dalek.
+	# Run `make lint-signal` separately after resolving those deps.
+	cargo clippy --workspace -- -D warnings
+
+lint-signal:
+	cargo clippy -p assistant-interface-signal --features signal -- -D warnings
 
 format:
 	cargo fmt --all
 
 check:
-	cargo check --workspace --all-features
+	cargo check --workspace
 
 clean:
 	cargo clean
@@ -34,6 +40,7 @@ run:
 run-mcp:
 	cargo run -p mcp-server
 
-# Build with Signal feature enabled
+# Build the Signal interface binary with the presage integration.
+# Requires presage git deps to be resolvable (see crates/interface-signal/README.md).
 build-signal:
-	cargo build --workspace --features signal
+	cargo build -p assistant-interface-signal --features signal
