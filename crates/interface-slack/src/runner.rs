@@ -123,10 +123,13 @@ async fn on_push_event(
         return Ok(());
     }
 
+    // The ts of the original message — used to anchor reactions to it.
+    let msg_ts = msg.origin.ts.clone();
+
     info!(
         channel = %channel_id,
         user = %user_id,
-        ts = %thread_ts.0,
+        ts = %msg_ts.0,
         text_len = text.len(),
         "Dispatching to orchestrator"
     );
@@ -138,6 +141,17 @@ async fn on_push_event(
     };
 
     debug!(conversation_id = %conversation_id, "Using conversation");
+
+    // Acknowledge receipt with 👀 — visible while the orchestrator is running.
+    let session = client.open_session(&bot_token);
+    let ack_req = SlackApiReactionsAddRequest::new(
+        channel_id.clone().into(),
+        SlackReactionName("eyes".to_string()),
+        msg_ts.clone(),
+    );
+    if let Err(e) = session.reactions_add(&ack_req).await {
+        warn!(error = %e, "Failed to add eyes reaction");
+    }
 
     let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
     let collector = tokio::spawn(async move {
@@ -154,6 +168,14 @@ async fn on_push_event(
 
     let reply = collector.await.unwrap_or_default();
 
+    // Remove 👀 regardless of outcome.
+    let remove_req = SlackApiReactionsRemoveRequest::new(SlackReactionName("eyes".to_string()))
+        .with_channel(channel_id.clone().into())
+        .with_timestamp(msg_ts.clone());
+    if let Err(e) = session.reactions_remove(&remove_req).await {
+        warn!(error = %e, "Failed to remove eyes reaction");
+    }
+
     if let Err(e) = turn_result {
         tracing::error!(error = %e, "Orchestrator error");
         return Ok(());
@@ -167,7 +189,6 @@ async fn on_push_event(
     info!(channel = %channel_id, reply_len = reply.len(), "Posting reply to Slack");
 
     // Post the reply in the same thread as the triggering message.
-    let session = client.open_session(&bot_token);
     let post_req = SlackApiChatPostMessageRequest::new(
         channel_id.into(),
         SlackMessageContent::new().with_text(reply),
