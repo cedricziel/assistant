@@ -1,7 +1,9 @@
 [package]
 name = "assistant-interface-signal"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Signal messenger interface for the assistant (feature-gated)"
 
 # The "signal" feature gates the actual presage (Signal) messenger integration.
 # Build with:

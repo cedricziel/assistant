@@ -1,7 +1,9 @@
 [package]
 name = "assistant-mcp-server"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "stdio MCP server exposing assistant skills to Claude Code and other clients"
 
 [[bin]]
 name = "mcp-server"
