@@ -1,4 +1,4 @@
-.PHONY: all build test lint lint-signal format clean check
+.PHONY: all build test lint lint-signal format clean check install-hooks
 
 all: build
 
@@ -31,6 +31,9 @@ check:
 
 clean:
 	cargo clean
+
+install-hooks:
+	git config core.hooksPath .githooks
 
 # Run the CLI interface
 run:

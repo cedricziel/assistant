@@ -165,6 +165,20 @@ make run        # cargo run -p assistant-cli
 make run-mcp    # cargo run -p mcp-server
 ```
 
+### Pre-commit hooks
+
+Git hooks live in `.githooks/`. After cloning, activate them once:
+
+```sh
+make install-hooks
+```
+
+The pre-commit hook runs `cargo fmt --check`, `cargo clippy`, and `cargo machete` before every commit. Install [`cargo-machete`](https://github.com/bnjbvr/cargo-machete) if you don't have it:
+
+```sh
+cargo install cargo-machete
+```
+
 ## Signal interface
 
 The Signal interface is feature-gated and not enabled by default:
