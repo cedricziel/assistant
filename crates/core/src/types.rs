@@ -159,22 +159,39 @@ pub struct SignalConfig {
     pub store_path: Option<String>,
 }
 
+fn default_llm_model() -> String {
+    "qwen2.5:7b".to_string()
+}
+fn default_llm_base_url() -> String {
+    "http://localhost:11434".to_string()
+}
+fn default_llm_max_iterations() -> usize {
+    10
+}
+fn default_llm_timeout_secs() -> u64 {
+    120
+}
+
 /// LLM / Ollama configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
+    #[serde(default = "default_llm_model")]
     pub model: String,
+    #[serde(default = "default_llm_base_url")]
     pub base_url: String,
+    #[serde(default = "default_llm_max_iterations")]
     pub max_iterations: usize,
+    #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
 }
 
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            model: "qwen2.5:7b".to_string(),
-            base_url: "http://localhost:11434".to_string(),
-            max_iterations: 10,
-            timeout_secs: 120,
+            model: default_llm_model(),
+            base_url: default_llm_base_url(),
+            max_iterations: default_llm_max_iterations(),
+            timeout_secs: default_llm_timeout_secs(),
         }
     }
 }
