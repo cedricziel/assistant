@@ -15,7 +15,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }
-dirs = "5"
+dirs = "6"
 
 [dev-dependencies]
 tokio = { workspace = true }
