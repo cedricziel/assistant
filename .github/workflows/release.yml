@@ -83,6 +83,22 @@ jobs:
             cargo build --release --target ${{ matrix.target }} -p assistant-mcp-server
           fi
 
+      - name: Build assistant-slack
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p assistant-interface-slack
+          else
+            cargo build --release --target ${{ matrix.target }} -p assistant-interface-slack
+          fi
+
+      - name: Build assistant-mattermost
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p assistant-interface-mattermost
+          else
+            cargo build --release --target ${{ matrix.target }} -p assistant-interface-mattermost
+          fi
+
       - name: Build assistant-signal (non-fatal)
         continue-on-error: true
         run: |
@@ -104,6 +120,12 @@ jobs:
             cp "target/${{ matrix.target }}/release/assistant.exe" "${ARCHIVE}/" 2>/dev/null || true
           cp "target/${{ matrix.target }}/release/mcp-server" "${ARCHIVE}/" || \
             cp "target/${{ matrix.target }}/release/mcp-server.exe" "${ARCHIVE}/" 2>/dev/null || true
+
+          # Copy interface binaries
+          cp "target/${{ matrix.target }}/release/assistant-slack" "${ARCHIVE}/" 2>/dev/null || true
+          cp "target/${{ matrix.target }}/release/assistant-slack.exe" "${ARCHIVE}/" 2>/dev/null || true
+          cp "target/${{ matrix.target }}/release/assistant-mattermost" "${ARCHIVE}/" 2>/dev/null || true
+          cp "target/${{ matrix.target }}/release/assistant-mattermost.exe" "${ARCHIVE}/" 2>/dev/null || true
 
           # Copy signal binary if it was built
           cp "target/${{ matrix.target }}/release/assistant-signal" "${ARCHIVE}/" 2>/dev/null || true
@@ -197,15 +219,65 @@ jobs:
                 mode: 0755
           EOF
 
+      - name: Create nfpm config for assistant-slack
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          cat > nfpm-assistant-slack.yaml << EOF
+          name: "assistant-slack"
+          arch: "amd64"
+          platform: "linux"
+          version: "${VERSION}"
+          maintainer: "Cedric Ziel <cedric@cedric-ziel.com>"
+          description: "Slack Socket Mode interface for the AI assistant"
+          homepage: "https://github.com/cedricziel/assistant"
+          license: "MIT"
+          contents:
+            - src: ${{ env.BIN_DIR }}/assistant-slack
+              dst: /usr/local/bin/assistant-slack
+              file_info:
+                mode: 0755
+            - src: ${{ env.BIN_DIR }}/config.toml.example
+              dst: /etc/assistant/config.toml.example
+              type: config|noreplace
+          EOF
+
+      - name: Create nfpm config for assistant-mattermost
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          cat > nfpm-assistant-mattermost.yaml << EOF
+          name: "assistant-mattermost"
+          arch: "amd64"
+          platform: "linux"
+          version: "${VERSION}"
+          maintainer: "Cedric Ziel <cedric@cedric-ziel.com>"
+          description: "Mattermost WebSocket interface for the AI assistant"
+          homepage: "https://github.com/cedricziel/assistant"
+          license: "MIT"
+          contents:
+            - src: ${{ env.BIN_DIR }}/assistant-mattermost
+              dst: /usr/local/bin/assistant-mattermost
+              file_info:
+                mode: 0755
+            - src: ${{ env.BIN_DIR }}/config.toml.example
+              dst: /etc/assistant/config.toml.example
+              type: config|noreplace
+          EOF
+
       - name: Build .deb packages
         run: |
           nfpm package --config nfpm-assistant.yaml --packager deb --target ./dist/
           nfpm package --config nfpm-mcp-server.yaml --packager deb --target ./dist/
+          nfpm package --config nfpm-assistant-slack.yaml --packager deb --target ./dist/
+          nfpm package --config nfpm-assistant-mattermost.yaml --packager deb --target ./dist/
 
       - name: Build .rpm packages
         run: |
           nfpm package --config nfpm-assistant.yaml --packager rpm --target ./dist/
           nfpm package --config nfpm-mcp-server.yaml --packager rpm --target ./dist/
+          nfpm package --config nfpm-assistant-slack.yaml --packager rpm --target ./dist/
+          nfpm package --config nfpm-assistant-mattermost.yaml --packager rpm --target ./dist/
 
       - name: Upload packages to GitHub Release
         uses: softprops/action-gh-release@v2
