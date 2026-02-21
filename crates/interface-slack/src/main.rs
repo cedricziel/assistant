@@ -116,8 +116,8 @@ fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
 
 /// Bootstrap the common stack shared by all subcommands.
 ///
-/// Returns `(orchestrator, slack_config)`.
-async fn bootstrap() -> Result<(Orchestrator, SlackConfig)> {
+/// Returns `(orchestrator, storage, slack_config)`.
+async fn bootstrap() -> Result<(Orchestrator, Arc<StorageLayer>, SlackConfig)> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
     let config_path = assistant_dir.join("config.toml");
@@ -137,6 +137,8 @@ async fn bootstrap() -> Result<(Orchestrator, SlackConfig)> {
             .await
             .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
     );
+    // Keep a reference to pass to SlackInterface for thread history seeding.
+    let storage_ref = storage.clone();
 
     // Create skill registry.
     let mut registry = SkillRegistry::new(storage.pool.clone())
@@ -175,7 +177,7 @@ async fn bootstrap() -> Result<(Orchestrator, SlackConfig)> {
     // Extract the [slack] section from config (or use defaults).
     let slack_config: SlackConfig = config.slack.clone().unwrap_or_default();
 
-    Ok((orchestrator, slack_config))
+    Ok((orchestrator, storage_ref, slack_config))
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -194,8 +196,8 @@ async fn main() -> Result<()> {
 
     match cmd {
         Cmd::Run => {
-            let (orchestrator, slack_config) = bootstrap().await?;
-            let interface = SlackInterface::new(slack_config, Arc::new(orchestrator));
+            let (orchestrator, storage, slack_config) = bootstrap().await?;
+            let interface = SlackInterface::new(slack_config, Arc::new(orchestrator), storage);
             info!("Starting Slack interface");
             interface.run().await?;
         }
