@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig, Interface};
 use assistant_llm::{LlmClient, LlmClientConfig};
 use assistant_runtime::{orchestrator::ConfirmationCallback, ReactOrchestrator};
-use assistant_skills_executor::SkillExecutor;
+use assistant_skills_executor::{install_skill_from_source, SkillExecutor};
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use tracing::{info, warn};
@@ -229,11 +229,12 @@ fn print_help() {
     println!(
         "\nAssistant REPL commands:\n\
          \n\
-         /skills          List all registered skills\n\
-         /review          Review pending skill refinement proposals\n\
-         /model <name>    Switch model (takes effect on next startup)\n\
-         /help            Show this help message\n\
-         /quit | /exit    Exit the assistant\n\
+         /skills                       List all registered skills\n\
+         /review                       Review pending skill refinement proposals\n\
+         /install <path|owner/repo>    Install a skill from disk or GitHub\n\
+         /model <name>                 Switch model (takes effect on next startup)\n\
+         /help                         Show this help message\n\
+         /quit | /exit                 Exit the assistant\n\
          \n\
          Any other input is sent to the AI assistant.\n"
     );
@@ -254,6 +255,7 @@ async fn main() -> Result<()> {
     // 2. Resolve config path and load config.
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
+    let user_skills_dir = assistant_dir.join("skills");
     let config_path = assistant_dir.join("config.toml");
     let config = load_config(&config_path);
 
@@ -377,6 +379,28 @@ async fn main() -> Result<()> {
                                      with:\n  [llm]\n  model = \"{}\"\nand restart.",
                                     arg, arg
                                 );
+                            }
+                        }
+
+                        "install" => {
+                            if arg.is_empty() {
+                                eprintln!("Usage: /install <local-path> | <owner/repo[/path]>");
+                            } else {
+                                println!("Installing skill from '{arg}'...");
+                                match install_skill_from_source(
+                                    arg,
+                                    &user_skills_dir,
+                                    registry.clone(),
+                                )
+                                .await
+                                {
+                                    Ok(name) => {
+                                        println!("Skill '{name}' installed successfully.");
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Install failed: {e}");
+                                    }
+                                }
                             }
                         }
 

@@ -1,9 +1,11 @@
 //! MCP server request dispatcher.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use assistant_core::Interface;
 use assistant_runtime::ReactOrchestrator;
+use assistant_skills_executor::install_skill_from_source;
 use assistant_storage::registry::SkillRegistry;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
@@ -16,6 +18,7 @@ pub async fn handle_request(
     req: JsonRpcRequest,
     registry: Arc<SkillRegistry>,
     orchestrator: Arc<ReactOrchestrator>,
+    user_skills_dir: PathBuf,
 ) -> JsonRpcResponse {
     debug!(method = %req.method, "MCP request");
 
@@ -87,6 +90,20 @@ pub async fn handle_request(
                             "prompt": {
                                 "type": "string",
                                 "description": "The user message to process"
+                            }
+                        }
+                    }),
+                },
+                McpTool {
+                    name: "install_skill".to_string(),
+                    description: "Install a skill from a local path or GitHub repository (owner/repo[/path]).".to_string(),
+                    input_schema: json!({
+                        "type": "object",
+                        "required": ["source"],
+                        "properties": {
+                            "source": {
+                                "type": "string",
+                                "description": "A local filesystem path or 'owner/repo[/sub/path]' for GitHub"
                             }
                         }
                     }),
@@ -182,6 +199,33 @@ pub async fn handle_request(
                         }
                         Err(e) => {
                             warn!(error = %e, "run_prompt failed");
+                            JsonRpcResponse::err(req.id, -32603, e.to_string())
+                        }
+                    }
+                }
+
+                "install_skill" => {
+                    let source = match tool_input["source"].as_str() {
+                        Some(s) => s.to_string(),
+                        None => {
+                            return JsonRpcResponse::err(
+                                req.id,
+                                -32602,
+                                "Missing required parameter 'source'",
+                            );
+                        }
+                    };
+                    match install_skill_from_source(&source, &user_skills_dir, registry.clone())
+                        .await
+                    {
+                        Ok(name) => {
+                            let content = vec![ContentItem::text(format!(
+                                "Skill '{name}' installed successfully."
+                            ))];
+                            JsonRpcResponse::ok(req.id, json!({ "content": content }))
+                        }
+                        Err(e) => {
+                            warn!(source = %source, error = %e, "install_skill failed");
                             JsonRpcResponse::err(req.id, -32603, e.to_string())
                         }
                     }

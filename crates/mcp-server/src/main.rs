@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -8,7 +8,6 @@ use assistant_llm::{LlmClient, LlmClientConfig};
 use assistant_runtime::ReactOrchestrator;
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
-use std::path::Path;
 use tracing::{info, warn};
 
 mod protocol;
@@ -56,8 +55,12 @@ async fn main() -> Result<()> {
             skill_dirs.push((exe_dir.join("skills"), SkillSource::Builtin));
         }
     }
-    if let Some(home) = dirs::home_dir() {
-        skill_dirs.push((home.join(".assistant").join("skills"), SkillSource::User));
+    let user_skills_dir = dirs::home_dir()
+        .map(|h| h.join(".assistant").join("skills"))
+        .unwrap_or_else(|| PathBuf::from(".assistant/skills"));
+
+    if user_skills_dir.exists() || !skill_dirs.is_empty() {
+        skill_dirs.push((user_skills_dir.clone(), SkillSource::User));
     }
 
     let dirs_ref: Vec<(&Path, SkillSource)> = skill_dirs
@@ -123,8 +126,13 @@ async fn main() -> Result<()> {
             }
         };
 
-        let response =
-            server::handle_request(request, registry.clone(), orchestrator.clone()).await;
+        let response = server::handle_request(
+            request,
+            registry.clone(),
+            orchestrator.clone(),
+            user_skills_dir.clone(),
+        )
+        .await;
 
         let mut out = stdout.lock();
         serde_json::to_writer(&mut out, &response).ok();
