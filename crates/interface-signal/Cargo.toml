@@ -4,15 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 # The "signal" feature gates the actual presage (Signal) messenger integration.
-# To enable it, add the following to the workspace Cargo.toml's [patch.crates-io]
-# or use a local path override, then build with:
-#   cargo build --workspace --features assistant-interface-signal/signal
-#
-# Required git dependencies (add to your Cargo.toml when enabling):
-#   presage = { git = "https://github.com/whisperfish/presage", branch = "main" }
-#   presage-store-sled = { git = "https://github.com/whisperfish/presage", branch = "main" }
+# Build with:
+#   cargo build -p assistant-interface-signal --features signal
 [features]
-signal = []
+signal = ["dep:presage", "dep:presage-store-sqlite"]
 
 [dependencies]
 assistant-core = { path = "../core" }
@@ -29,3 +24,12 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 dirs = "6"
 toml = "1.0"
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+qr2term = "0.3"
+presage = { git = "https://github.com/whisperfish/presage", branch = "main", optional = true }
+presage-store-sqlite = { git = "https://github.com/whisperfish/presage", branch = "main", optional = true }
+
+[[bin]]
+name = "assistant-signal"
+path = "src/main.rs"

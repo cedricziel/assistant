@@ -1,30 +1,30 @@
 //! Signal interface configuration.
+//!
+//! [`SignalConfig`] is defined in `assistant-core` so it can be embedded in
+//! [`AssistantConfig`][assistant_core::AssistantConfig].  This module
+//! re-exports it and adds runtime helpers (e.g. `resolved_store_path`) that
+//! depend on the `dirs` crate, which is not a dependency of `assistant-core`.
 
-use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-/// Configuration for the Signal messenger interface.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SignalConfig {
-    /// The phone number registered with Signal (e.g. "+14155550123").
-    pub phone_number: Option<String>,
+pub use assistant_core::SignalConfig;
 
-    /// If non-empty, only these sender numbers are allowed to interact with
-    /// the bot.  An empty list means all contacts are accepted.
-    #[serde(default)]
-    pub allowed_senders: Vec<String>,
-
-    /// Path where presage stores its Signal state (defaults to
-    /// `~/.assistant/signal-store`).
-    pub store_path: Option<String>,
+/// Extension methods for [`SignalConfig`] that require the `dirs` crate.
+pub trait SignalConfigExt {
+    /// Resolve the store path.
+    ///
+    /// Falls back to `~/.assistant/signal-store` if no path is configured,
+    /// and to `.signal-store` relative to the working directory as a last
+    /// resort.
+    fn resolved_store_path(&self) -> PathBuf;
 }
 
-impl SignalConfig {
-    /// Resolve the store path, falling back to `~/.assistant/signal-store`.
-    pub fn resolved_store_path(&self) -> std::path::PathBuf {
+impl SignalConfigExt for SignalConfig {
+    fn resolved_store_path(&self) -> PathBuf {
         self.store_path
             .as_ref()
-            .map(std::path::PathBuf::from)
+            .map(PathBuf::from)
             .or_else(|| dirs::home_dir().map(|h| h.join(".assistant").join("signal-store")))
-            .unwrap_or_else(|| std::path::PathBuf::from(".signal-store"))
+            .unwrap_or_else(|| PathBuf::from(".signal-store"))
     }
 }
