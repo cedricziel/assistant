@@ -50,10 +50,7 @@ async fn install_from_local(
     }
     let skill_md = src_path.join("SKILL.md");
     if !skill_md.exists() {
-        return Err(anyhow!(
-            "No SKILL.md found in '{}'",
-            src_path.display()
-        ));
+        return Err(anyhow!("No SKILL.md found in '{}'", src_path.display()));
     }
 
     // Parse to get the name
@@ -98,13 +95,9 @@ async fn install_from_github(
 
     // Fetch SKILL.md from the default branch
     let skill_md_url = if sub_path.is_empty() {
-        format!(
-            "https://raw.githubusercontent.com/{owner}/{repo}/main/SKILL.md"
-        )
+        format!("https://raw.githubusercontent.com/{owner}/{repo}/main/SKILL.md")
     } else {
-        format!(
-            "https://raw.githubusercontent.com/{owner}/{repo}/main/{sub_path}/SKILL.md"
-        )
+        format!("https://raw.githubusercontent.com/{owner}/{repo}/main/{sub_path}/SKILL.md")
     };
 
     debug!(url = %skill_md_url, "Fetching SKILL.md from GitHub");
@@ -126,14 +119,15 @@ async fn install_from_github(
         ));
     }
 
-    let skill_md_content = resp
-        .text()
-        .await
-        .context("Failed to read response body")?;
+    let skill_md_content = resp.text().await.context("Failed to read response body")?;
 
     // Parse just the frontmatter to get the skill name
-    let temp_def = assistant_core::parser::parse_skill_content(&skill_md_content, skills_dir, SkillSource::User)
-        .context("Failed to parse fetched SKILL.md")?;
+    let temp_def = assistant_core::parser::parse_skill_content(
+        &skill_md_content,
+        skills_dir,
+        SkillSource::User,
+    )
+    .context("Failed to parse fetched SKILL.md")?;
 
     let skill_name = temp_def.name.clone();
     let dest = skills_dir.join(&skill_name);
