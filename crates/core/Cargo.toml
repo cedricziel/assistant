@@ -13,7 +13,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 # YAML frontmatter parser (serde_yaml is deprecated — use gray_matter)
-gray_matter = "0.2"
+gray_matter = "0.3"
 # For derive macros on enums
 strum = { version = "0.27", features = ["derive"] }
 

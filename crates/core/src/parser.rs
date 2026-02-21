@@ -36,13 +36,16 @@ pub fn parse_skill_dir(dir: &Path, source: SkillSource) -> Result<SkillDef> {
 
 /// Parse SKILL.md content directly (useful for testing)
 pub fn parse_skill_content(content: &str, dir: &Path, source: SkillSource) -> Result<SkillDef> {
-    let matter = Matter::<YAML>::new().parse(content);
+    let matter: gray_matter::ParsedEntity<serde_json::Value> = Matter::<YAML>::new()
+        .parse(content)
+        .context("Failed to parse SKILL.md frontmatter")?;
 
-    let front: Frontmatter = matter
-        .data
-        .ok_or_else(|| anyhow::anyhow!("SKILL.md has no YAML frontmatter"))?
-        .deserialize()
-        .context("Failed to deserialize SKILL.md frontmatter")?;
+    let front: Frontmatter = serde_json::from_value(
+        matter
+            .data
+            .ok_or_else(|| anyhow::anyhow!("SKILL.md has no YAML frontmatter"))?,
+    )
+    .context("Failed to deserialize SKILL.md frontmatter")?;
 
     // Derive execution tier from metadata.tier
     let tier = derive_tier(&front.metadata, dir);

@@ -13,7 +13,7 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
 # Ollama client with streaming support
-ollama-rs = { version = "0.2", features = ["stream"] }
+ollama-rs = { version = "0.3", features = ["stream"] }
 # HTTP client for direct API calls if needed
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 # Regex for ReAct parsing

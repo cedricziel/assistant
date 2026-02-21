@@ -19,8 +19,8 @@ chrono = { workspace = true }
 # HTTP for web-fetch builtin
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 # HTML stripping for web-fetch
-scraper = "0.21"
+scraper = "0.25"
 # cron expression parsing for schedule-task
-cron = "0.12"
+cron = "0.15"
 # home directory
-dirs = "5"
+dirs = "6"
