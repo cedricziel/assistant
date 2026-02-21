@@ -63,6 +63,9 @@ extism = "1"
 testcontainers = "0.27"
 # Slack / Mattermost interfaces
 slack-morphism = { version = "2", features = ["hyper"] }
+# Force rustls TLS on the tokio-tungstenite transitive dep (slack-morphism only
+# enables the cert-store feature, not the actual TLS impl, causing wss:// to fail)
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 mattermost_api = "0.8"
 # Internal crates
 core = { path = "crates/core" }

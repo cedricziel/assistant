@@ -19,6 +19,13 @@ clap = { workspace = true }
 dirs = { workspace = true }
 toml = { workspace = true }
 slack-morphism = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+# tokio-tungstenite is not used directly — it forces rustls-tls-native-roots
+# onto the transitive dep pulled in by slack-morphism (which only enables the
+# cert-store feature, leaving wss:// connections broken without this override).
+[package.metadata.cargo-machete]
+ignored = ["tokio-tungstenite"]
 
 [[bin]]
 name = "assistant-slack"
