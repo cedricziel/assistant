@@ -41,6 +41,9 @@ struct SlackCallbackState {
     bot_token: SlackApiToken,
     /// One conversation UUID per (channel_id, user_id) pair.
     conversations: Arc<Mutex<HashMap<(String, String), Uuid>>>,
+    /// Unix timestamp (seconds) recorded at startup. Messages with a Slack `ts`
+    /// older than this are stale catch-up events and are silently dropped.
+    started_at: f64,
 }
 
 // ── Push-event callback (free async fn — function pointer, not closure) ───────
@@ -51,7 +54,7 @@ async fn on_push_event(
     states: SlackClientEventsUserState,
 ) -> UserCallbackResult<()> {
     // Retrieve shared state; clone the Arcs before dropping the guard.
-    let (config, orchestrator, bot_token, conversations) = {
+    let (config, orchestrator, bot_token, conversations, started_at) = {
         let guard = states.read().await;
         let s = guard
             .get_user_state::<SlackCallbackState>()
@@ -61,6 +64,7 @@ async fn on_push_event(
             s.orchestrator.clone(),
             s.bot_token.clone(),
             s.conversations.clone(),
+            s.started_at,
         )
     };
 
@@ -69,13 +73,16 @@ async fn on_push_event(
         return Ok(());
     };
 
-    // Skip bot/system messages: subtype, bot_id, display_as_bot, or no user.
-    let is_bot = matches!(msg.subtype, Some(SlackMessageEventType::BotMessage))
+    // Only process plain human messages (subtype == None).
+    // Any subtype (bot_message, message_changed, message_deleted, …) means
+    // a system/bot/meta event — including the message_changed event Slack fires
+    // when we add a reaction, which would otherwise cause a duplicate reply.
+    if msg.subtype.is_some()
         || msg.sender.bot_id.is_some()
         || msg.sender.display_as_bot.unwrap_or(false)
-        || msg.sender.user.is_none();
-    if is_bot {
-        debug!("Ignoring bot/system message");
+        || msg.sender.user.is_none()
+    {
+        debug!(subtype = ?msg.subtype, "Ignoring non-human message");
         return Ok(());
     }
 
@@ -125,6 +132,14 @@ async fn on_push_event(
 
     // The ts of the original message — used to anchor reactions to it.
     let msg_ts = msg.origin.ts.clone();
+
+    // Drop messages that predate our startup — these are catch-up events
+    // replayed by Slack after a reconnect and should not be reprocessed.
+    let msg_unix: f64 = msg_ts.0.parse().unwrap_or(0.0);
+    if msg_unix < started_at {
+        debug!(ts = %msg_ts.0, started_at, "Dropping pre-startup message");
+        return Ok(());
+    }
 
     info!(
         channel = %channel_id,
@@ -248,13 +263,19 @@ impl SlackInterface {
         let bot_token = SlackApiToken::new(bot_token_str.into());
         let app_token = SlackApiToken::new(app_token_str.into());
 
-        info!("Connecting to Slack via Socket Mode");
+        let started_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+
+        info!(started_at, "Connecting to Slack via Socket Mode");
 
         let state = SlackCallbackState {
             config: self.config.clone(),
             orchestrator: self.orchestrator.clone(),
             bot_token: bot_token.clone(),
             conversations: Arc::new(Mutex::new(HashMap::new())),
+            started_at,
         };
 
         let listener_environment = Arc::new(
