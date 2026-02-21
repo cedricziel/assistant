@@ -24,3 +24,5 @@ scraper = "0.25"
 cron = "0.15"
 # home directory
 dirs = "6"
+# WASM plugin execution via extism
+extism = "1"
