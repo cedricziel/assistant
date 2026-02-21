@@ -79,29 +79,19 @@ impl ConfirmationCallback for AutoDenyConfirmation {
 
 // ── Config loading ────────────────────────────────────────────────────────────
 
-fn load_config(config_path: &Path) -> AssistantConfig {
+fn load_config(config_path: &Path) -> Result<AssistantConfig> {
     if !config_path.exists() {
-        return AssistantConfig::default();
+        return Ok(AssistantConfig::default());
     }
 
-    let raw = match std::fs::read_to_string(config_path) {
-        Ok(s) => s,
-        Err(e) => {
-            warn!("Failed to read config at {}: {e}", config_path.display());
-            return AssistantConfig::default();
-        }
-    };
+    let raw = std::fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read config at {}", config_path.display()))?;
 
-    match toml::from_str::<AssistantConfig>(&raw) {
-        Ok(cfg) => {
-            info!("Loaded config from {}", config_path.display());
-            cfg
-        }
-        Err(e) => {
-            warn!("Failed to parse config at {}: {e}", config_path.display());
-            AssistantConfig::default()
-        }
-    }
+    let cfg = toml::from_str::<AssistantConfig>(&raw)
+        .with_context(|| format!("Failed to parse config at {}", config_path.display()))?;
+
+    info!("Loaded config from {}", config_path.display());
+    Ok(cfg)
 }
 
 // ── Skill directories ─────────────────────────────────────────────────────────
@@ -131,7 +121,7 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
     let config_path = assistant_dir.join("config.toml");
-    let config = load_config(&config_path);
+    let config = load_config(&config_path)?;
 
     // Resolve database path.
     let db_path: PathBuf = config
