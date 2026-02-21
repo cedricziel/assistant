@@ -1,6 +1,9 @@
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig, Interface};
@@ -298,7 +301,11 @@ async fn main() -> Result<()> {
     let llm = Arc::new(LlmClient::new(llm_config).context("Failed to create LLM client")?);
 
     // 7. Build skill executor.
-    let executor = Arc::new(SkillExecutor::new(storage.clone(), llm.clone(), registry.clone()));
+    let executor = Arc::new(SkillExecutor::new(
+        storage.clone(),
+        llm.clone(),
+        registry.clone(),
+    ));
 
     // 8. Build orchestrator.
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(CliConfirmation);
