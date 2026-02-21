@@ -78,7 +78,7 @@ impl SignalInterface {
     #[cfg(feature = "signal")]
     async fn run_presage_loop(&self) -> Result<()> {
         use futures::{pin_mut, StreamExt};
-        use presage::{Manager, Received};
+        use presage::{model::messages::Received, Manager};
         use presage_store_sqlite::{OnNewIdentity, SqliteStore};
         use tracing::{debug, info, warn};
 
@@ -127,7 +127,7 @@ impl SignalInterface {
                     }
 
                     // Sender string for allowlist comparison.
-                    let sender_str = format!("{sender}");
+                    let sender_str = sender.service_id_string();
 
                     // Allowlist check.
                     if !self.config.allowed_senders.is_empty()
@@ -199,8 +199,8 @@ impl SignalInterface {
 ///
 /// Returns an empty string for non-data messages (calls, receipts, sync, …).
 #[cfg(feature = "signal")]
-fn extract_text_body(content: &presage::Content) -> String {
-    use presage::ContentBody;
+fn extract_text_body(content: &presage::libsignal_service::content::Content) -> String {
+    use presage::libsignal_service::content::ContentBody;
     match &content.body {
         ContentBody::DataMessage(msg) => msg.body.clone().unwrap_or_default(),
         _ => String::new(),

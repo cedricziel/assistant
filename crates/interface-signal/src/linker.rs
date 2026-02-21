@@ -36,10 +36,10 @@ pub async fn link_device(store_path: &Path, device_name: &str) -> Result<()> {
 
     #[cfg(feature = "signal")]
     {
-        use futures::future;
+        use futures::{channel::oneshot, future};
+        use presage::libsignal_service::configuration::SignalServers;
         use presage::Manager;
         use presage_store_sqlite::{OnNewIdentity, SqliteStore};
-        use tokio::sync::oneshot;
 
         tracing::info!(
             store_path = %store_path.display(),
@@ -67,7 +67,7 @@ pub async fn link_device(store_path: &Path, device_name: &str) -> Result<()> {
         let (link_result, qr_result) = future::join(
             Manager::link_secondary_device(
                 store,
-                presage::SignalServers::Production,
+                SignalServers::Production,
                 device_name.to_string(),
                 provisioning_tx,
             ),
