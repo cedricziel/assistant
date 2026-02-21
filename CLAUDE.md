@@ -87,6 +87,8 @@ make run-mcp    # cargo run -p mcp-server
 
 Always run `make lint` and `make format` before committing.
 
+**Pre-commit hooks are mandatory.** Run `make install-hooks` after cloning to activate them. The hook enforces `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo machete --with-metadata` on every commit. Do not bypass or disable the hook.
+
 ## Commit style
 
 Semantic commits: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.

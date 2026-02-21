@@ -8,13 +8,10 @@ assistant-core = { path = "../core" }
 assistant-llm = { path = "../llm" }
 assistant-storage = { path = "../storage" }
 tokio = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true }
 chrono = { workspace = true }
 # HTTP for web-fetch builtin
 reqwest = { workspace = true }
