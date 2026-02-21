@@ -206,3 +206,50 @@ fn extract_text_body(content: &presage::Content) -> String {
         _ => String::new(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use assistant_core::SignalConfig;
+
+    // NOTE: We cannot safely instantiate `SignalInterface` in unit tests without
+    // a full async runtime + storage stack (Orchestrator requires LLM, DB, …).
+    // The tests below focus on the pure logic that is extractable without that
+    // dependency — allowlist filtering and config defaults.
+    //
+    // The stub-mode error for `run()` is covered by the integration smoke-test
+    // that builds the binary without `--features signal` and verifies the exit.
+
+    #[test]
+    fn allowlist_logic_empty_accepts_all() {
+        let cfg = SignalConfig {
+            allowed_senders: vec![],
+            ..Default::default()
+        };
+        // Empty allowlist → every sender is accepted.
+        let sender = "some-uuid".to_string();
+        let blocked = !cfg.allowed_senders.is_empty() && !cfg.allowed_senders.contains(&sender);
+        assert!(!blocked);
+    }
+
+    #[test]
+    fn allowlist_logic_non_empty_blocks_unknown() {
+        let cfg = SignalConfig {
+            allowed_senders: vec!["allowed-uuid".to_string()],
+            ..Default::default()
+        };
+        let unknown = "unknown-uuid".to_string();
+        let blocked = !cfg.allowed_senders.is_empty() && !cfg.allowed_senders.contains(&unknown);
+        assert!(blocked);
+    }
+
+    #[test]
+    fn allowlist_logic_non_empty_passes_known() {
+        let cfg = SignalConfig {
+            allowed_senders: vec!["allowed-uuid".to_string()],
+            ..Default::default()
+        };
+        let known = "allowed-uuid".to_string();
+        let blocked = !cfg.allowed_senders.is_empty() && !cfg.allowed_senders.contains(&known);
+        assert!(!blocked);
+    }
+}

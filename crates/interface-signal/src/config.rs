@@ -28,3 +28,71 @@ impl SignalConfigExt for SignalConfig {
             .unwrap_or_else(|| PathBuf::from(".signal-store"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_store_path_is_used_verbatim() {
+        let cfg = SignalConfig {
+            store_path: Some("/tmp/my-signal-store".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.resolved_store_path(),
+            std::path::PathBuf::from("/tmp/my-signal-store")
+        );
+    }
+
+    #[test]
+    fn default_store_path_falls_back_to_home() {
+        let cfg = SignalConfig::default();
+        let path = cfg.resolved_store_path();
+        assert!(
+            path.ends_with(".assistant/signal-store"),
+            "unexpected path: {path:?}"
+        );
+    }
+
+    #[test]
+    fn allowed_senders_empty_by_default() {
+        let cfg = SignalConfig::default();
+        assert!(cfg.allowed_senders.is_empty());
+    }
+
+    #[test]
+    fn signal_config_roundtrips_toml() {
+        let toml_str = r#"
+            phone_number = "+14155550123"
+            allowed_senders = ["uuid-a", "uuid-b"]
+            store_path = "/var/lib/signal"
+        "#;
+        let cfg: SignalConfig = toml::from_str(toml_str).expect("parse");
+        assert_eq!(cfg.phone_number.as_deref(), Some("+14155550123"));
+        assert_eq!(cfg.allowed_senders, ["uuid-a", "uuid-b"]);
+        assert_eq!(
+            cfg.resolved_store_path(),
+            std::path::PathBuf::from("/var/lib/signal")
+        );
+    }
+
+    #[test]
+    fn assistant_config_with_signal_section_roundtrips() {
+        let toml_str = r#"
+            [signal]
+            phone_number = "+14155550123"
+            allowed_senders = ["uuid-x"]
+        "#;
+        let cfg: assistant_core::AssistantConfig = toml::from_str(toml_str).expect("parse");
+        let sig = cfg.signal.expect("signal section present");
+        assert_eq!(sig.phone_number.as_deref(), Some("+14155550123"));
+        assert_eq!(sig.allowed_senders, ["uuid-x"]);
+    }
+
+    #[test]
+    fn assistant_config_without_signal_section_is_none() {
+        let cfg: assistant_core::AssistantConfig = toml::from_str("").expect("parse");
+        assert!(cfg.signal.is_none());
+    }
+}
