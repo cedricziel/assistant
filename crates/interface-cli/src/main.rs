@@ -268,7 +268,7 @@ async fn main() -> Result<()> {
     let llm = Arc::new(LlmClient::new(llm_config).context("Failed to create LLM client")?);
 
     // 7. Build skill executor.
-    let executor = Arc::new(SkillExecutor::new(storage.clone()));
+    let executor = Arc::new(SkillExecutor::new(storage.clone(), llm.clone(), registry.clone()));
 
     // 8. Build orchestrator.
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(CliConfirmation);

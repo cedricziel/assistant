@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
     );
 
     // ── Skill executor ────────────────────────────────────────────────────────
-    let executor = Arc::new(SkillExecutor::new(storage.clone()));
+    let executor = Arc::new(SkillExecutor::new(storage.clone(), llm.clone(), registry.clone()));
 
     // ── Orchestrator ──────────────────────────────────────────────────────────
     let orchestrator = Arc::new(ReactOrchestrator::new(

@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput, SkillTier};
-use assistant_storage::StorageLayer;
+use assistant_llm::LlmClient;
+use assistant_storage::{SkillRegistry, StorageLayer};
 
 pub struct SkillExecutor {
     storage: Arc<StorageLayer>,
@@ -11,17 +12,20 @@ pub struct SkillExecutor {
 }
 
 impl SkillExecutor {
-    pub fn new(storage: Arc<StorageLayer>) -> Self {
+    pub fn new(
+        storage: Arc<StorageLayer>,
+        llm: Arc<LlmClient>,
+        registry: Arc<SkillRegistry>,
+    ) -> Self {
         let mut executor = Self {
             storage: storage.clone(),
             builtin_handlers: HashMap::new(),
         };
-        // Register all builtin handlers
-        executor.register_builtins();
+        executor.register_builtins(llm, registry);
         executor
     }
 
-    fn register_builtins(&mut self) {
+    fn register_builtins(&mut self, llm: Arc<LlmClient>, registry: Arc<SkillRegistry>) {
         use crate::builtins::*;
         let storage = self.storage.clone();
         let handlers: Vec<Arc<dyn SkillHandler>> = vec![
@@ -30,19 +34,13 @@ impl SkillExecutor {
             Arc::new(MemorySearchHandler::new(storage.clone())),
             Arc::new(WebFetchHandler::new()),
             Arc::new(ShellExecHandler::new()),
-            Arc::new(SelfAnalyzeHandler::new(storage.clone())),
+            Arc::new(ListSkillsHandler::new(registry.clone())),
+            Arc::new(SelfAnalyzeHandler::new(storage.clone(), llm, registry)),
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
         ];
         for h in handlers {
             self.builtin_handlers.insert(h.skill_name().to_string(), h);
         }
-    }
-
-    /// Register a `ListSkillsHandler` that already holds a reference to the skill registry.
-    /// This must be called separately after the registry is available.
-    pub fn register_list_skills_handler(&mut self, handler: Arc<dyn SkillHandler>) {
-        self.builtin_handlers
-            .insert(handler.skill_name().to_string(), handler);
     }
 
     pub async fn execute(

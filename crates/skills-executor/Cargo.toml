@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 assistant-core = { path = "../core" }
+assistant-llm = { path = "../llm" }
 assistant-storage = { path = "../storage" }
 tokio = { workspace = true }
 serde = { workspace = true }

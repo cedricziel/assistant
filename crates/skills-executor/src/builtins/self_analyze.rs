@@ -1,24 +1,28 @@
 //! Builtin handler for self-analyze skill.
 //!
-//! Queries the TraceStore for statistics on a given skill and returns a
-//! formatted analysis summary. Queues a pending skill_refinements row via
-//! the RefinementsStore — no raw sqlx needed.
+//! Queries the TraceStore for statistics on a given skill, sends those stats
+//! along with the current SKILL.md body to the LLM, and stores the resulting
+//! improved SKILL.md as a pending refinement proposal.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput};
-use assistant_storage::StorageLayer;
+use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
+use assistant_storage::{SkillRegistry, StorageLayer};
 use async_trait::async_trait;
+use tracing::{debug, warn};
 
 pub struct SelfAnalyzeHandler {
     storage: Arc<StorageLayer>,
+    llm: Arc<LlmClient>,
+    registry: Arc<SkillRegistry>,
 }
 
 impl SelfAnalyzeHandler {
-    pub fn new(storage: Arc<StorageLayer>) -> Self {
-        Self { storage }
+    pub fn new(storage: Arc<StorageLayer>, llm: Arc<LlmClient>, registry: Arc<SkillRegistry>) -> Self {
+        Self { storage, llm, registry }
     }
 }
 
@@ -58,7 +62,7 @@ impl SkillHandler for SelfAnalyzeHandler {
             }
         };
 
-        // Format summary
+        // Format summary for the user
         let mut lines: Vec<String> = Vec::new();
         lines.push(format!("Self-analysis for skill: {}", skill_name));
         lines.push(format!(
@@ -94,30 +98,92 @@ impl SkillHandler for SelfAnalyzeHandler {
                 "No execution history found for '{}'. Run the skill a few times first.",
                 skill_name
             ));
-        } else {
-            // Queue a pending skill_refinements row via the storage layer.
-            let placeholder_md = format!(
-                "# Pending analysis for {}\n\nThis row was inserted by self-analyze as a placeholder.\nThe runtime should replace proposed_skill_md with an LLM-generated proposal.",
-                skill_name
-            );
-            let rationale = format!(
-                "Automated: {} total executions, {} errors, {:.1}ms avg duration. Deeper analysis requires LLM call.",
-                stats.total, stats.error_count, stats.avg_duration_ms
-            );
-
-            let refinement_id = self
-                .storage
-                .refinements_store()
-                .insert(&skill_name, &placeholder_md, &rationale)
-                .await?;
-
-            lines.push(String::new());
-            lines.push(format!(
-                "A pending refinement proposal (id: {}) has been queued.",
-                refinement_id
-            ));
-            lines.push("Run '/review' to see and apply it.".to_string());
+            return Ok(SkillOutput::success(lines.join("\n")));
         }
+
+        // Look up the current SKILL.md body from the registry
+        let current_body = if let Some(def) = self.registry.get(&skill_name).await {
+            def.body.clone()
+        } else {
+            String::new()
+        };
+
+        // Build a self-improvement prompt and ask the LLM for a better SKILL.md
+        debug!(skill = %skill_name, "Requesting LLM-generated skill refinement");
+
+        let system_prompt = "You are an expert at writing clear, precise AI skill instructions. \
+            You will receive execution statistics and the current SKILL.md body for a skill. \
+            Respond with an improved SKILL.md body (the Markdown section only, without frontmatter) \
+            that would help the AI use this skill more effectively and avoid past errors. \
+            Be concise and actionable.";
+
+        let error_summary = if stats.common_errors.is_empty() {
+            "None observed.".to_string()
+        } else {
+            stats.common_errors.join("; ")
+        };
+
+        let user_prompt = format!(
+            "Skill: {}\n\nExecution statistics (last {} runs):\n\
+            - Total: {}\n- Successes: {}\n- Failures: {}\n\
+            - Avg duration: {:.1} ms\n- Common errors: {}\n\n\
+            Current SKILL.md instructions:\n---\n{}\n---\n\n\
+            Please write an improved version of the instructions section only.",
+            skill_name,
+            window,
+            stats.total,
+            stats.success_count,
+            stats.error_count,
+            stats.avg_duration_ms,
+            error_summary,
+            current_body,
+        );
+
+        let sub_history = vec![ChatHistoryMessage {
+            role: ChatRole::User,
+            content: user_prompt,
+        }];
+
+        let proposed_skill_md = match self.llm.chat(system_prompt, &sub_history, &[]).await {
+            Ok(LlmResponse::FinalAnswer(text)) => text,
+            Ok(LlmResponse::Thinking(text)) => text,
+            Ok(LlmResponse::ToolCall { name, .. }) => {
+                warn!(
+                    skill = %skill_name,
+                    tool = %name,
+                    "LLM returned tool call during self-analyze; using fallback"
+                );
+                format!(
+                    "# {}\n\n(LLM returned a tool call instead of text. Run self-analyze again.)",
+                    skill_name
+                )
+            }
+            Err(e) => {
+                warn!(skill = %skill_name, err = %e, "LLM call failed during self-analyze");
+                return Ok(SkillOutput::error(format!(
+                    "LLM call failed while generating improvement proposal: {e}"
+                )));
+            }
+        };
+
+        let rationale = format!(
+            "Automated analysis: {} total executions, {} errors, {:.1}ms avg. \
+            LLM-generated improvement proposal.",
+            stats.total, stats.error_count, stats.avg_duration_ms
+        );
+
+        let refinement_id = self
+            .storage
+            .refinements_store()
+            .insert(&skill_name, &proposed_skill_md, &rationale)
+            .await?;
+
+        lines.push(String::new());
+        lines.push(format!(
+            "Refinement proposal generated (id: {}).",
+            refinement_id
+        ));
+        lines.push("Run '/review' in the CLI to inspect and apply it.".to_string());
 
         Ok(SkillOutput::success(lines.join("\n")))
     }
