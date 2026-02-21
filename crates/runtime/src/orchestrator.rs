@@ -59,6 +59,7 @@ pub struct Orchestrator {
     disabled_skills: Vec<String>,
     trace_enabled: bool,
     confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
+    memory_loader: assistant_core::MemoryLoader,
 }
 
 impl Orchestrator {
@@ -79,6 +80,8 @@ impl Orchestrator {
         executor: Arc<SkillExecutor>,
         config: &assistant_core::AssistantConfig,
     ) -> Self {
+        let memory_loader = assistant_core::MemoryLoader::new(config);
+        memory_loader.ensure_defaults();
         Self {
             llm,
             storage,
@@ -88,6 +91,7 @@ impl Orchestrator {
             disabled_skills: config.skills.disabled.clone(),
             trace_enabled: config.mirror.trace_enabled,
             confirmation_callback: None,
+            memory_loader,
         }
     }
 
@@ -173,7 +177,7 @@ impl Orchestrator {
         let all_skill_refs: Vec<&assistant_core::SkillDef> =
             ext_defs.iter().chain(global_skills.iter()).collect();
 
-        let system_prompt = "You are a helpful AI assistant.";
+        let system_prompt = self.memory_loader.load_system_prompt();
 
         // 5. Build LLM history from prior turns + current message.
         let mut history: Vec<ChatHistoryMessage> = prior
@@ -210,7 +214,7 @@ impl Orchestrator {
 
             let response = self
                 .llm
-                .chat(system_prompt, &history, &all_skill_refs)
+                .chat(&system_prompt, &history, &all_skill_refs)
                 .await?;
 
             match response {
@@ -289,8 +293,8 @@ impl Orchestrator {
 
                         if matches!(skill_def.tier, SkillTier::Prompt) {
                             let sub_system = format!(
-                                "You are a helpful AI assistant.\n\n## Skill: {}\n\n{}",
-                                skill_def.name, skill_def.body
+                                "{}\n\n## Skill: {}\n\n{}",
+                                system_prompt, skill_def.name, skill_def.body
                             );
                             let sub_input = format_params_as_prompt(&name, &params);
                             let sub_history = vec![ChatHistoryMessage {
@@ -441,7 +445,7 @@ impl Orchestrator {
 
         // 5. Build the base system prompt.
         //    Skills are passed as a separate `tools` argument to the LLM client.
-        let system_prompt = "You are a helpful AI assistant.";
+        let system_prompt = self.memory_loader.load_system_prompt();
 
         // 6. Build LLM history from prior turns, then append the current message.
         let mut history: Vec<ChatHistoryMessage> = prior
@@ -476,7 +480,7 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
-            let response = self.llm.chat(system_prompt, &history, &skill_refs).await?;
+            let response = self.llm.chat(&system_prompt, &history, &skill_refs).await?;
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
@@ -537,8 +541,8 @@ impl Orchestrator {
                         debug!(skill = %name, "Prompt-tier skill: running sub-LLM call");
 
                         let sub_system = format!(
-                            "You are a helpful AI assistant.\n\n## Skill: {}\n\n{}",
-                            skill_def.name, skill_def.body
+                            "{}\n\n## Skill: {}\n\n{}",
+                            system_prompt, skill_def.name, skill_def.body
                         );
                         let sub_input = format_params_as_prompt(&name, &params);
                         let sub_history = vec![assistant_llm::ChatHistoryMessage {
@@ -696,7 +700,7 @@ impl Orchestrator {
         let skill_defs = self.registry.list().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
-        let system_prompt = "You are a helpful AI assistant.";
+        let system_prompt = self.memory_loader.load_system_prompt();
 
         let mut history: Vec<ChatHistoryMessage> = prior
             .into_iter()
@@ -734,7 +738,7 @@ impl Orchestrator {
             let response = self
                 .llm
                 .chat_streaming(
-                    system_prompt,
+                    &system_prompt,
                     &history,
                     &skill_refs,
                     Some(token_sink.clone()),
@@ -790,8 +794,8 @@ impl Orchestrator {
 
                     if matches!(skill_def.tier, SkillTier::Prompt) {
                         let sub_system = format!(
-                            "You are a helpful AI assistant.\n\n## Skill: {}\n\n{}",
-                            skill_def.name, skill_def.body
+                            "{}\n\n## Skill: {}\n\n{}",
+                            system_prompt, skill_def.name, skill_def.body
                         );
                         let sub_input = format_params_as_prompt(&name, &params);
                         let sub_history = vec![assistant_llm::ChatHistoryMessage {
@@ -995,17 +999,19 @@ mod tests {
             })
             .unwrap(),
         );
+        let config = AssistantConfig::default();
         let executor = Arc::new(SkillExecutor::new(
             storage.clone(),
             llm.clone(),
             registry.clone(),
+            Arc::new(config.clone()),
         ));
         let orch = Arc::new(Orchestrator::new(
             llm,
             storage.clone(),
             registry,
             executor,
-            &AssistantConfig::default(),
+            &config,
         ));
         (orch, storage)
     }

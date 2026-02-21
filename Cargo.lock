@@ -222,6 +222,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "dirs",
  "gray_matter",
  "serde",
  "serde_json",

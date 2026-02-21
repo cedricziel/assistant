@@ -94,13 +94,13 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
 
+    let config = AssistantConfig::default();
     let executor = Arc::new(SkillExecutor::new(
         storage.clone(),
         llm.clone(),
         registry.clone(),
+        Arc::new(config.clone()),
     ));
-
-    let config = AssistantConfig::default();
 
     let orchestrator = Arc::new(Orchestrator::new(llm, storage, registry, executor, &config));
 

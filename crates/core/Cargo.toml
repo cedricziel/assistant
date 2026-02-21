@@ -13,6 +13,7 @@ async-trait = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
+dirs = { workspace = true }
 # YAML frontmatter parser (serde_yaml is deprecated — use gray_matter)
 gray_matter = { workspace = true }
 

@@ -165,6 +165,7 @@ async fn bootstrap() -> Result<(Orchestrator, MattermostConfig)> {
         storage.clone(),
         llm.clone(),
         registry.clone(),
+        Arc::new(config.clone()),
     ));
 
     // Build orchestrator with auto-deny confirmation.

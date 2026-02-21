@@ -167,6 +167,7 @@ async fn bootstrap() -> Result<(Orchestrator, Arc<StorageLayer>, SlackConfig)> {
         storage.clone(),
         llm.clone(),
         registry.clone(),
+        Arc::new(config.clone()),
     ));
 
     // Build orchestrator with auto-deny confirmation.

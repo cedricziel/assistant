@@ -139,6 +139,8 @@ pub struct AssistantConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub mirror: MirrorConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
     /// Signal messenger interface configuration (optional).
     /// Populated from the `[signal]` section of `config.toml`.
     pub signal: Option<SignalConfig>,
@@ -275,6 +277,41 @@ impl Default for MirrorConfig {
         Self {
             trace_enabled: true,
             analysis_window: 50,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Configuration for the agent's persistent markdown memory files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    /// Whether memory loading is enabled (default: true)
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Path to SOUL.md — personality, values, core truths
+    pub soul_path: Option<String>,
+    /// Path to IDENTITY.md — name, role, structured identity profile
+    pub identity_path: Option<String>,
+    /// Path to USER.md — user profile, preferences, timezone
+    pub user_path: Option<String>,
+    /// Path to MEMORY.md — curated long-term memory
+    pub memory_path: Option<String>,
+    /// Directory for daily append-only notes (YYYY-MM-DD.md)
+    pub notes_dir: Option<String>,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            soul_path: None,
+            identity_path: None,
+            user_path: None,
+            memory_path: None,
+            notes_dir: None,
         }
     }
 }
