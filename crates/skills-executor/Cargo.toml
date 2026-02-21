@@ -18,13 +18,13 @@ chrono = { workspace = true }
 # HTTP for web-fetch builtin
 reqwest = { workspace = true }
 # HTML stripping for web-fetch
-scraper = "0.25"
+scraper = { workspace = true }
 # cron expression parsing for schedule-task
-cron = "0.15"
+cron = { workspace = true }
 # home directory
-dirs = "6"
+dirs = { workspace = true }
 # WASM plugin execution via extism
-extism = "1"
+extism = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

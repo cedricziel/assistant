@@ -43,6 +43,24 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 toml = "1.0"
+# Async streams
+futures = "0.3"
+# Terminal line editor
+reedline = "0.45"
+# QR code terminal rendering
+qr2term = "0.3"
+# YAML frontmatter parser (serde_yaml is deprecated)
+gray_matter = "0.3"
+# SQL persistence
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }
+# cron expression parsing
+cron = "0.15"
+# HTML parsing for web-fetch builtin
+scraper = "0.25"
+# WASM plugin execution
+extism = "1"
+# Integration testing
+testcontainers = "0.27"
 # Slack / Mattermost interfaces
 slack-morphism = { version = "2", features = ["hyper"] }
 mattermost_api = "0.8"

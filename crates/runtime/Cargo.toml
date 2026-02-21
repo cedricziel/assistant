@@ -17,4 +17,4 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 # cron expression parsing for scheduler
-cron = "0.15"
+cron = { workspace = true }

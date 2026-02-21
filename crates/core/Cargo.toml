@@ -14,7 +14,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 # YAML frontmatter parser (serde_yaml is deprecated — use gray_matter)
-gray_matter = "0.3"
+gray_matter = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

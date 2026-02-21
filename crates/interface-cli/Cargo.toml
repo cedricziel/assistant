@@ -26,8 +26,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 # Terminal line editor
-reedline = "0.45"
+reedline = { workspace = true }
 # Config file parsing
-toml = "1.0"
+toml = { workspace = true }
 # Home directory
-dirs = "6"
+dirs = { workspace = true }
