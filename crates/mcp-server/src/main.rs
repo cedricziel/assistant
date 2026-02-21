@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
         .db_path
         .as_ref()
         .map(PathBuf::from)
-        .or_else(|| assistant_storage::default_db_path())
+        .or_else(assistant_storage::default_db_path)
         .context("Cannot determine database path")?;
 
     let storage = Arc::new(StorageLayer::new(&db_path).await?);

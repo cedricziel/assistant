@@ -125,7 +125,7 @@ pub enum Interface {
 }
 
 /// Top-level assistant configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssistantConfig {
     #[serde(default)]
     pub llm: LlmConfig,
@@ -137,18 +137,6 @@ pub struct AssistantConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub mirror: MirrorConfig,
-}
-
-impl Default for AssistantConfig {
-    fn default() -> Self {
-        Self {
-            llm: LlmConfig::default(),
-            storage: StorageConfig::default(),
-            skills: SkillsConfig::default(),
-            mcp: McpConfig::default(),
-            mirror: MirrorConfig::default(),
-        }
-    }
 }
 
 /// LLM / Ollama configuration
@@ -186,31 +174,16 @@ pub enum ToolCallMode {
 }
 
 /// Storage configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StorageConfig {
     pub db_path: Option<String>,
 }
 
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self { db_path: None }
-    }
-}
-
 /// Skills configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SkillsConfig {
     pub extra_dirs: Vec<String>,
     pub disabled: Vec<String>,
-}
-
-impl Default for SkillsConfig {
-    fn default() -> Self {
-        Self {
-            extra_dirs: Vec::new(),
-            disabled: Vec::new(),
-        }
-    }
 }
 
 /// MCP server configuration
