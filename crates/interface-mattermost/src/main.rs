@@ -26,13 +26,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::{skill::SkillSource, AssistantConfig};
+use assistant_core::skill::SkillSource;
 use assistant_llm::{LlmClient, LlmClientConfig};
-use assistant_runtime::{orchestrator::ConfirmationCallback, Orchestrator};
+use assistant_runtime::{
+    bootstrap::{load_config, skill_dirs, AutoDenyConfirmation},
+    orchestrator::ConfirmationCallback,
+    Orchestrator,
+};
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
 use clap::Parser;
-use tracing::{info, warn};
+use tracing::info;
 
 use assistant_interface_mattermost::{config::MattermostConfig, MattermostInterface};
 
@@ -50,60 +54,6 @@ enum Cmd {
     /// Requires a Mattermost personal access token and server URL configured
     /// in ~/.assistant/config.toml under [mattermost].
     Run,
-}
-
-// ── Confirmation callback ────────────────────────────────────────────────────
-
-/// A confirmation callback that always denies, suitable for an automated
-/// interface where interactive prompts are not possible.
-///
-/// `SafetyGate` already blocks `shell-exec` on Mattermost; this callback
-/// provides a second layer for skills marked `confirmation_required`.
-struct AutoDenyConfirmation;
-
-impl ConfirmationCallback for AutoDenyConfirmation {
-    fn confirm(&self, skill_name: &str, _params: &serde_json::Value) -> bool {
-        warn!(
-            skill = skill_name,
-            "Mattermost interface: auto-denying confirmation-required skill"
-        );
-        false
-    }
-}
-
-// ── Config loading ────────────────────────────────────────────────────────────
-
-fn load_config(config_path: &Path) -> Result<AssistantConfig> {
-    if !config_path.exists() {
-        return Ok(AssistantConfig::default());
-    }
-
-    let raw = std::fs::read_to_string(config_path)
-        .with_context(|| format!("Failed to read config at {}", config_path.display()))?;
-
-    let cfg = toml::from_str::<AssistantConfig>(&raw)
-        .with_context(|| format!("Failed to parse config at {}", config_path.display()))?;
-
-    info!("Loaded config from {}", config_path.display());
-    Ok(cfg)
-}
-
-// ── Skill directories ─────────────────────────────────────────────────────────
-
-fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
-    let mut dirs: Vec<(PathBuf, SkillSource)> = Vec::new();
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            dirs.push((exe_dir.join("skills"), SkillSource::Builtin));
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        dirs.push((home.join(".assistant").join("skills"), SkillSource::User));
-    }
-
-    dirs
 }
 
 // ── Stack bootstrap ───────────────────────────────────────────────────────────
@@ -163,7 +113,9 @@ async fn bootstrap() -> Result<(Orchestrator, MattermostConfig)> {
     ));
 
     // Build orchestrator with auto-deny confirmation.
-    let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(AutoDenyConfirmation);
+    let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(AutoDenyConfirmation {
+        interface_name: "Mattermost",
+    });
     let orchestrator = Orchestrator::new(llm, storage, registry, executor, &config)
         .with_confirmation_callback(confirmation_cb);
 

@@ -85,7 +85,10 @@ struct SlackCallbackState {
 /// - `Some(MessageRole::Assistant)` — bot / assistant message
 /// - `None` — system event (message_changed, message_deleted, …); skip
 fn classify_history_msg(msg: &SlackHistoryMessage) -> Option<MessageRole> {
-    let is_bot = msg.sender.bot_id.is_some() || msg.sender.display_as_bot.unwrap_or(false);
+    // Incoming-webhook bot messages have subtype=BotMessage but no bot_id.
+    let is_bot = msg.sender.bot_id.is_some()
+        || msg.sender.display_as_bot.unwrap_or(false)
+        || matches!(msg.subtype, Some(SlackMessageEventType::BotMessage));
 
     if is_bot {
         return Some(MessageRole::Assistant);
@@ -537,14 +540,20 @@ impl SlackInterface {
 
             if connected {
                 // Race the event-serve loop against shutdown.
-                tokio::select! {
+                let clean_close = tokio::select! {
                     _ = socket_mode_listener.serve() => {
                         info!("Slack Socket Mode connection closed, reconnecting…");
+                        true
                     }
                     _ = shutdown_rx.changed() => {
                         info!("Shutdown during serve, exiting");
                         return Ok(());
                     }
+                };
+                // A clean server-initiated close means the connection was healthy;
+                // reset the backoff so the next reconnect happens quickly.
+                if clean_close {
+                    backoff = std::time::Duration::from_secs(1);
                 }
             }
 

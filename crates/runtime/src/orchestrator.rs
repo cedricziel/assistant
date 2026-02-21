@@ -10,7 +10,7 @@ use assistant_core::{
 };
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
 use assistant_skills_executor::SkillExecutor;
-use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use assistant_storage::{conversations::ConversationStore, registry::SkillRegistry, StorageLayer};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -153,23 +153,9 @@ impl Orchestrator {
         let ext_defs: Vec<assistant_core::SkillDef> =
             extensions.into_iter().map(|(def, _)| def).collect();
 
-        // 1. Ensure conversation exists in SQLite.
-        let conv_store = self.storage.conversation_store();
-        conv_store
-            .create_conversation_with_id(conversation_id, None)
-            .await?;
-
-        // 2. Load prior turns before saving current message to avoid duplication.
-        let prior = conv_store.load_history(conversation_id).await?;
-        let base_turn = prior.len() as i64;
-
-        // 3. Persist the user message.
-        let user_msg = {
-            let mut m = assistant_core::Message::user(conversation_id, user_message);
-            m.turn = base_turn;
-            m
-        };
-        conv_store.save_message(&user_msg).await?;
+        // 1-3. Set up conversation, load prior history, persist user message.
+        let (conv_store, mut history, base_turn) =
+            self.prepare_history(user_message, conversation_id).await?;
 
         // 4. Load global skills and merge with extensions for LLM tool listing.
         //    Extension defs come first so the LLM sees them prominently.
@@ -178,26 +164,6 @@ impl Orchestrator {
             ext_defs.iter().chain(global_skills.iter()).collect();
 
         let system_prompt = self.memory_loader.load_system_prompt();
-
-        // 5. Build LLM history from prior turns + current message.
-        let mut history: Vec<ChatHistoryMessage> = prior
-            .into_iter()
-            .filter_map(|m| match m.role {
-                MessageRole::User => Some(ChatHistoryMessage {
-                    role: ChatRole::User,
-                    content: m.content,
-                }),
-                MessageRole::Assistant => Some(ChatHistoryMessage {
-                    role: ChatRole::Assistant,
-                    content: m.content,
-                }),
-                _ => None,
-            })
-            .collect();
-        history.push(ChatHistoryMessage {
-            role: ChatRole::User,
-            content: user_message.to_string(),
-        });
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -417,27 +383,9 @@ impl Orchestrator {
             "Starting turn"
         );
 
-        // 1. Ensure conversation exists in SQLite.
-        let conv_store = self.storage.conversation_store();
-        conv_store
-            .create_conversation_with_id(conversation_id, None)
-            .await?;
-
-        // 2. Load prior turns *before* saving the current message so that the
-        //    current message does not appear twice in the LLM history.
-        let prior = conv_store.load_history(conversation_id).await?;
-        // base_turn is used to assign monotonically increasing turn numbers so
-        // that ORDER BY turn in load_history gives correct chronological order
-        // across multiple conversation turns.
-        let base_turn = prior.len() as i64;
-
-        // 3. Persist the user message.
-        let user_msg = {
-            let mut m = Message::user(conversation_id, user_message);
-            m.turn = base_turn;
-            m
-        };
-        conv_store.save_message(&user_msg).await?;
+        // 1-3. Set up conversation, load prior history, persist user message.
+        let (conv_store, mut history, base_turn) =
+            self.prepare_history(user_message, conversation_id).await?;
 
         // 4. Load all registered skills.
         let skill_defs = self.registry.list().await;
@@ -446,26 +394,6 @@ impl Orchestrator {
         // 5. Build the base system prompt.
         //    Skills are passed as a separate `tools` argument to the LLM client.
         let system_prompt = self.memory_loader.load_system_prompt();
-
-        // 6. Build LLM history from prior turns, then append the current message.
-        let mut history: Vec<ChatHistoryMessage> = prior
-            .into_iter()
-            .filter_map(|m| match m.role {
-                MessageRole::User => Some(ChatHistoryMessage {
-                    role: ChatRole::User,
-                    content: m.content,
-                }),
-                MessageRole::Assistant => Some(ChatHistoryMessage {
-                    role: ChatRole::Assistant,
-                    content: m.content,
-                }),
-                _ => None,
-            })
-            .collect();
-        history.push(ChatHistoryMessage {
-            role: ChatRole::User,
-            content: user_message.to_string(),
-        });
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -681,45 +609,14 @@ impl Orchestrator {
             "Starting streaming turn"
         );
 
-        let conv_store = self.storage.conversation_store();
-        conv_store
-            .create_conversation_with_id(conversation_id, None)
-            .await?;
-
-        // Load prior turns before saving the current message to avoid duplication.
-        let prior = conv_store.load_history(conversation_id).await?;
-        let base_turn = prior.len() as i64;
-
-        let user_msg = {
-            let mut m = Message::user(conversation_id, user_message);
-            m.turn = base_turn;
-            m
-        };
-        conv_store.save_message(&user_msg).await?;
+        // Set up conversation, load prior history, persist user message.
+        let (conv_store, mut history, base_turn) =
+            self.prepare_history(user_message, conversation_id).await?;
 
         let skill_defs = self.registry.list().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
         let system_prompt = self.memory_loader.load_system_prompt();
-
-        let mut history: Vec<ChatHistoryMessage> = prior
-            .into_iter()
-            .filter_map(|m| match m.role {
-                MessageRole::User => Some(ChatHistoryMessage {
-                    role: ChatRole::User,
-                    content: m.content,
-                }),
-                MessageRole::Assistant => Some(ChatHistoryMessage {
-                    role: ChatRole::Assistant,
-                    content: m.content,
-                }),
-                _ => None,
-            })
-            .collect();
-        history.push(ChatHistoryMessage {
-            role: ChatRole::User,
-            content: user_message.to_string(),
-        });
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -898,6 +795,59 @@ impl Orchestrator {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// Prepare conversation history for a new turn.
+    ///
+    /// 1. Creates the conversation row if it does not exist.
+    /// 2. Loads all prior messages.
+    /// 3. Persists the incoming user message.
+    /// 4. Builds an LLM-ready [`ChatHistoryMessage`] list (user + assistant)
+    ///    with the new user message appended.
+    ///
+    /// Returns `(conv_store, history, base_turn)` where `base_turn` is the
+    /// turn index of the user message just saved (used to assign monotonically
+    /// increasing turn numbers to later assistant messages).
+    async fn prepare_history(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+    ) -> Result<(ConversationStore, Vec<ChatHistoryMessage>, i64)> {
+        let conv_store = self.storage.conversation_store();
+        conv_store
+            .create_conversation_with_id(conversation_id, None)
+            .await?;
+
+        let prior = conv_store.load_history(conversation_id).await?;
+        let base_turn = prior.len() as i64;
+
+        let user_msg = {
+            let mut m = Message::user(conversation_id, user_message);
+            m.turn = base_turn;
+            m
+        };
+        conv_store.save_message(&user_msg).await?;
+
+        let mut history: Vec<ChatHistoryMessage> = prior
+            .into_iter()
+            .filter_map(|m| match m.role {
+                MessageRole::User => Some(ChatHistoryMessage {
+                    role: ChatRole::User,
+                    content: m.content,
+                }),
+                MessageRole::Assistant => Some(ChatHistoryMessage {
+                    role: ChatRole::Assistant,
+                    content: m.content,
+                }),
+                _ => None,
+            })
+            .collect();
+        history.push(ChatHistoryMessage {
+            role: ChatRole::User,
+            content: user_message.to_string(),
+        });
+
+        Ok((conv_store, history, base_turn))
+    }
 
     /// Append an observation message to the chat history.
     ///

@@ -39,7 +39,7 @@ Install to your workspace. Copy the **Bot Token** (`xoxb-...`).
 
 ### 6. Invite the bot to a channel
 
-```
+```text
 /invite @your-bot-name
 ```
 

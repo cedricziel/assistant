@@ -1,3 +1,4 @@
+pub mod bootstrap;
 pub mod orchestrator;
 pub mod safety;
 pub mod scheduler;

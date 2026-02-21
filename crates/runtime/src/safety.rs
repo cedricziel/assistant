@@ -28,20 +28,18 @@ impl SafetyGate {
         // 2. Shell execution is not permitted over remote/automated interfaces
         //    because it would allow arbitrary code execution triggered by external
         //    messages.
-        if skill.name == "shell-exec" && *interface == Interface::Signal {
-            return Err("shell-exec is not available via the Signal interface".to_string());
-        }
-        if skill.name == "shell-exec"
-            && matches!(*interface, Interface::Slack | Interface::Mattermost)
-        {
-            let name = match interface {
-                Interface::Slack => "Slack",
-                Interface::Mattermost => "Mattermost",
-                _ => unreachable!(),
+        if skill.name == "shell-exec" {
+            let blocked_iface = match interface {
+                Interface::Signal => Some("Signal"),
+                Interface::Slack => Some("Slack"),
+                Interface::Mattermost => Some("Mattermost"),
+                _ => None,
             };
-            return Err(format!(
-                "shell-exec is not available via the {name} interface"
-            ));
+            if let Some(iface_name) = blocked_iface {
+                return Err(format!(
+                    "shell-exec is not available via the {iface_name} interface"
+                ));
+            }
         }
 
         Ok(())
