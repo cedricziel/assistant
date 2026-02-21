@@ -122,6 +122,8 @@ pub enum Interface {
     Cli,
     Signal,
     Mcp,
+    Slack,
+    Mattermost,
 }
 
 /// Top-level assistant configuration
@@ -140,6 +142,12 @@ pub struct AssistantConfig {
     /// Signal messenger interface configuration (optional).
     /// Populated from the `[signal]` section of `config.toml`.
     pub signal: Option<SignalConfig>,
+    /// Slack interface configuration (optional).
+    /// Populated from the `[slack]` section of `config.toml`.
+    pub slack: Option<SlackConfig>,
+    /// Mattermost interface configuration (optional).
+    /// Populated from the `[mattermost]` section of `config.toml`.
+    pub mattermost: Option<MattermostConfig>,
 }
 
 /// Configuration for the Signal messenger interface.
@@ -157,6 +165,36 @@ pub struct SignalConfig {
     /// `~/.assistant/signal-store` (resolved at runtime by the interface
     /// crate, which has access to the `dirs` crate).
     pub store_path: Option<String>,
+}
+
+/// Configuration for the Slack interface.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SlackConfig {
+    /// Bot OAuth token (`xoxb-…`) for sending messages via the Web API.
+    pub bot_token: Option<String>,
+    /// App-level token (`xapp-…`) for Socket Mode connections.
+    pub app_token: Option<String>,
+    /// If non-empty, only dispatch messages from these channel IDs.
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+    /// If non-empty, only dispatch messages from these Slack user IDs.
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+}
+
+/// Configuration for the Mattermost interface.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MattermostConfig {
+    /// Base URL of the Mattermost server (e.g. `"https://mattermost.example.com"`).
+    pub server_url: Option<String>,
+    /// Personal access token or bot token for authentication.
+    pub token: Option<String>,
+    /// If non-empty, only dispatch messages from these channel IDs.
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+    /// If non-empty, only dispatch messages from these Mattermost user IDs.
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
 }
 
 fn default_llm_model() -> String {
