@@ -228,3 +228,103 @@ pub trait SkillHandler: Send + Sync {
         ctx: &ExecutionContext,
     ) -> anyhow::Result<SkillOutput>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    fn make_skill(dir: &std::path::Path) -> SkillDef {
+        SkillDef {
+            name: "test-skill".to_string(),
+            description: "Test skill".to_string(),
+            license: None,
+            compatibility: None,
+            allowed_tools: vec![],
+            metadata: HashMap::new(),
+            body: String::new(),
+            dir: dir.to_path_buf(),
+            tier: SkillTier::Builtin,
+            mutating: false,
+            confirmation_required: false,
+            source: SkillSource::Builtin,
+        }
+    }
+
+    #[test]
+    fn auxiliary_files_empty_when_no_subdirs() {
+        let tmp = TempDir::new().unwrap();
+        let skill = make_skill(tmp.path());
+        assert!(skill.auxiliary_files().is_empty());
+        assert!(!skill.has_auxiliary_files());
+    }
+
+    #[test]
+    fn auxiliary_files_returns_references() {
+        let tmp = TempDir::new().unwrap();
+        let refs_dir = tmp.path().join("references");
+        std::fs::create_dir(&refs_dir).unwrap();
+        std::fs::write(refs_dir.join("REFERENCE.md"), "# Reference").unwrap();
+
+        let skill = make_skill(tmp.path());
+        let files = skill.auxiliary_files();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, AuxFileCategory::References);
+        assert_eq!(
+            files[0].1,
+            std::path::PathBuf::from("references/REFERENCE.md")
+        );
+    }
+
+    #[test]
+    fn auxiliary_files_skips_hidden_files() {
+        let tmp = TempDir::new().unwrap();
+        let refs_dir = tmp.path().join("references");
+        std::fs::create_dir(&refs_dir).unwrap();
+        std::fs::write(refs_dir.join(".hidden"), "hidden").unwrap();
+        std::fs::write(refs_dir.join("visible.md"), "visible").unwrap();
+
+        let skill = make_skill(tmp.path());
+        let files = skill.auxiliary_files();
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].1.file_name().unwrap().to_str().unwrap(),
+            "visible.md"
+        );
+    }
+
+    #[test]
+    fn auxiliary_files_all_categories() {
+        let tmp = TempDir::new().unwrap();
+        for dir_name in &["scripts", "references", "assets"] {
+            let sub_dir = tmp.path().join(dir_name);
+            std::fs::create_dir(&sub_dir).unwrap();
+            std::fs::write(sub_dir.join("file.txt"), "content").unwrap();
+        }
+
+        let skill = make_skill(tmp.path());
+        let files = skill.auxiliary_files();
+        assert_eq!(files.len(), 3);
+
+        let category_dirs: std::collections::HashSet<String> = files
+            .iter()
+            .map(|(cat, _)| cat.dir_name().to_string())
+            .collect();
+        assert!(category_dirs.contains("scripts"));
+        assert!(category_dirs.contains("references"));
+        assert!(category_dirs.contains("assets"));
+    }
+
+    #[test]
+    fn auxiliary_files_ignores_unknown_subdirs() {
+        let tmp = TempDir::new().unwrap();
+        // Create a dir that is NOT one of the three known categories
+        let unknown = tmp.path().join("unknown");
+        std::fs::create_dir(&unknown).unwrap();
+        std::fs::write(unknown.join("file.txt"), "content").unwrap();
+
+        let skill = make_skill(tmp.path());
+        assert!(skill.auxiliary_files().is_empty());
+    }
+}
