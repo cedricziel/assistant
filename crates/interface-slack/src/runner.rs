@@ -39,6 +39,12 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+/// Short preview of a string for log output (avoids flooding logs with long messages).
+fn preview(s: &str, max: usize) -> &str {
+    let end = s.char_indices().nth(max).map(|(i, _)| i).unwrap_or(s.len());
+    &s[..end]
+}
+
 use crate::config::{SlackConfig, SlackConfigExt};
 
 // ── Shared callback state ─────────────────────────────────────────────────────
@@ -191,7 +197,8 @@ async fn on_push_event(
         ts = %msg_ts.0,
         thread_ts = %thread_ts.0,
         text_len = text.len(),
-        "Dispatching to orchestrator"
+        text_preview = preview(&text, 120),
+        "Incoming message"
     );
 
     // Key conversations by (channel_id, thread_ts) so every message in the
@@ -269,6 +276,7 @@ async fn on_push_event(
     }
 
     // Acknowledge receipt with 👀 — visible while the orchestrator is running.
+    debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.add eyes");
     let ack_req = SlackApiReactionsAddRequest::new(
         channel_id.clone().into(),
         SlackReactionName("eyes".to_string()),
@@ -279,7 +287,7 @@ async fn on_push_event(
         if msg.contains("already_reacted") {
             debug!("Eyes reaction already present, skipping");
         } else {
-            warn!(error = %e, "Failed to add eyes reaction");
+            warn!(error = %e, "reactions.add eyes failed");
         }
     }
 
@@ -292,31 +300,53 @@ async fn on_push_event(
         buf
     });
 
+    let orchestrator_start = std::time::Instant::now();
+    debug!(
+        conversation_id = %conversation_id,
+        text_len = text.len(),
+        "orchestrator.run_turn_streaming →"
+    );
     let turn_result = orchestrator
         .run_turn_streaming(&text, conversation_id, Interface::Slack, tok_tx)
         .await;
+    let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
     let reply = collector.await.unwrap_or_default();
 
     // Remove 👀 regardless of outcome.
+    debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.remove eyes");
     let remove_req = SlackApiReactionsRemoveRequest::new(SlackReactionName("eyes".to_string()))
         .with_channel(channel_id.clone().into())
         .with_timestamp(msg_ts.clone());
     if let Err(e) = session.reactions_remove(&remove_req).await {
-        warn!(error = %e, "Failed to remove eyes reaction");
+        warn!(error = %e, "reactions.remove eyes failed");
     }
 
     if let Err(e) = turn_result {
-        tracing::error!(error = %e, "Orchestrator error");
+        tracing::error!(error = %e, elapsed_ms, "orchestrator error");
         return Ok(());
     }
+
+    debug!(
+        conversation_id = %conversation_id,
+        elapsed_ms,
+        reply_len = reply.len(),
+        reply_preview = preview(&reply, 120),
+        "orchestrator.run_turn_streaming ← ok"
+    );
 
     if reply.is_empty() {
-        debug!(channel = %channel_id, "Orchestrator returned empty reply, skipping post");
+        debug!(channel = %channel_id, "empty reply, skipping post");
         return Ok(());
     }
 
-    info!(channel = %channel_id, reply_len = reply.len(), "Posting reply to Slack");
+    info!(
+        channel = %channel_id,
+        thread_ts = %thread_ts.0,
+        reply_len = reply.len(),
+        reply_preview = preview(&reply, 120),
+        "chat.postMessage →"
+    );
 
     // Post the reply in the same thread as the triggering message.
     let post_req = SlackApiChatPostMessageRequest::new(
@@ -325,7 +355,9 @@ async fn on_push_event(
     )
     .with_thread_ts(thread_ts);
     if let Err(e) = session.chat_post_message(&post_req).await {
-        tracing::error!(error = %e, "Failed to post Slack reply");
+        tracing::error!(error = %e, "chat.postMessage failed");
+    } else {
+        debug!("chat.postMessage ← ok");
     }
 
     Ok(())
@@ -365,6 +397,8 @@ impl SlackInterface {
     }
 
     /// Start the Slack Socket Mode listener loop, reconnecting on disconnect.
+    ///
+    /// The loop exits cleanly on SIGINT (Ctrl+C) or SIGTERM.
     pub async fn run(&self) -> Result<()> {
         let bot_token_str = self.config.resolved_bot_token().ok_or_else(|| {
             anyhow::anyhow!(
@@ -387,9 +421,37 @@ impl SlackInterface {
         // Conversation map persists across reconnects so in-flight context is not lost.
         let conversations = Arc::new(Mutex::new(HashMap::new()));
 
+        // ── Graceful shutdown ─────────────────────────────────────────────────
+        // A watch channel delivers the shutdown signal across all select! points
+        // in the reconnect loop without the permit-loss race of Notify.
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(async move {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{signal, SignalKind};
+                let mut sigterm =
+                    signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = sigterm.recv() => {}
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+            info!("Shutdown signal received, stopping…");
+            let _ = shutdown_tx.send(true);
+        });
+
         let mut backoff = std::time::Duration::from_secs(1);
 
         loop {
+            // Exit immediately if shutdown was signalled between iterations.
+            if *shutdown_rx.borrow() {
+                break;
+            }
+
             let started_at = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -420,19 +482,51 @@ impl SlackInterface {
                 callbacks,
             );
 
-            match socket_mode_listener.listen_for(&app_token).await {
-                Ok(()) => {
-                    socket_mode_listener.serve().await;
-                    info!("Slack Socket Mode connection closed, reconnecting…");
+            // Race connection setup against shutdown.
+            let connected = tokio::select! {
+                result = socket_mode_listener.listen_for(&app_token) => {
+                    match result {
+                        Ok(()) => true,
+                        Err(e) => {
+                            warn!(error = %e, delay_secs = backoff.as_secs(),
+                                  "Slack connection failed, retrying");
+                            false
+                        }
+                    }
                 }
-                Err(e) => {
-                    warn!(error = %e, delay_secs = backoff.as_secs(), "Slack connection failed, retrying");
+                _ = shutdown_rx.changed() => {
+                    info!("Shutdown during connection, exiting");
+                    return Ok(());
+                }
+            };
+
+            if connected {
+                // Race the event-serve loop against shutdown.
+                tokio::select! {
+                    _ = socket_mode_listener.serve() => {
+                        info!("Slack Socket Mode connection closed, reconnecting…");
+                    }
+                    _ = shutdown_rx.changed() => {
+                        info!("Shutdown during serve, exiting");
+                        return Ok(());
+                    }
                 }
             }
 
-            tokio::time::sleep(backoff).await;
+            // Backoff sleep — also interruptible by shutdown.
+            tokio::select! {
+                _ = tokio::time::sleep(backoff) => {}
+                _ = shutdown_rx.changed() => {
+                    info!("Shutdown during backoff, exiting");
+                    return Ok(());
+                }
+            }
+
             backoff = (backoff * 2).min(std::time::Duration::from_secs(60));
         }
+
+        info!("Slack interface stopped");
+        Ok(())
     }
 }
 
