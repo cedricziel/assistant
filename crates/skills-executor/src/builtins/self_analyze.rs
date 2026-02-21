@@ -21,8 +21,16 @@ pub struct SelfAnalyzeHandler {
 }
 
 impl SelfAnalyzeHandler {
-    pub fn new(storage: Arc<StorageLayer>, llm: Arc<LlmClient>, registry: Arc<SkillRegistry>) -> Self {
-        Self { storage, llm, registry }
+    pub fn new(
+        storage: Arc<StorageLayer>,
+        llm: Arc<LlmClient>,
+        registry: Arc<SkillRegistry>,
+    ) -> Self {
+        Self {
+            storage,
+            llm,
+            registry,
+        }
     }
 }
 
