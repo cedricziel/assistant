@@ -88,6 +88,27 @@ impl SignalInterface {
         use assistant_core::Interface;
         use uuid::Uuid;
 
+        // ── Graceful shutdown ─────────────────────────────────────────────────
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(async move {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{signal, SignalKind};
+                let mut sigterm =
+                    signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = sigterm.recv() => {}
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+            info!("Shutdown signal received, stopping…");
+            let _ = shutdown_tx.send(true);
+        });
+
         let store_path = self.config.resolved_store_path();
         info!(store_path = %store_path.display(), "Opening signal store");
 
@@ -126,7 +147,24 @@ impl SignalInterface {
         // memory across messages from the same Signal contact.
         let mut conversations: HashMap<String, Uuid> = HashMap::new();
 
-        while let Some(received) = messages.next().await {
+        loop {
+            let maybe_received = tokio::select! {
+                biased;
+                _ = shutdown_rx.changed() => {
+                    info!("Shutdown signal received, exiting receive loop");
+                    break;
+                }
+                msg = messages.next() => msg,
+            };
+
+            let received = match maybe_received {
+                Some(r) => r,
+                None => {
+                    info!("Signal message stream ended");
+                    break;
+                }
+            };
+
             match received {
                 Received::QueueEmpty => {
                     debug!("Initial message queue drained — listening for new messages");
@@ -179,21 +217,30 @@ impl SignalInterface {
                         buf
                     });
 
+                    let orchestrator_start = std::time::Instant::now();
                     let turn_result = self
                         .orchestrator
                         .run_turn_streaming(&text, conversation_id, Interface::Signal, tok_tx)
                         .await;
+                    let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
                     let reply = collector.await.unwrap_or_default();
 
                     if let Err(e) = turn_result {
-                        tracing::error!(error = %e, "Orchestrator error");
+                        tracing::error!(error = %e, elapsed_ms, "Orchestrator error");
                         continue;
                     }
 
                     if reply.is_empty() {
                         continue;
                     }
+
+                    info!(
+                        sender = sender_str,
+                        elapsed_ms,
+                        reply_len = reply.len(),
+                        "Sending reply"
+                    );
 
                     // Reply to the sender — use current wall-clock time in
                     // milliseconds (Signal's timestamp unit), not the sender's
@@ -215,6 +262,7 @@ impl SignalInterface {
             }
         }
 
+        info!("Signal interface stopped");
         Ok(())
     }
 }

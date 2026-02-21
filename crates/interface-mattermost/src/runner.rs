@@ -29,6 +29,12 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+/// Short preview of a string for log output.
+fn preview(s: &str, max: usize) -> &str {
+    let end = s.char_indices().nth(max).map(|(i, _)| i).unwrap_or(s.len());
+    &s[..end]
+}
+
 use crate::config::{MattermostConfig, MattermostConfigExt};
 
 // ── WebSocket handler ─────────────────────────────────────────────────────────
@@ -88,7 +94,8 @@ impl WebsocketHandler for MattermostHandler {
             channel = %channel_id,
             user = %user_id,
             text_len = text.len(),
-            "Dispatching to orchestrator"
+            text_preview = preview(&text, 120),
+            "Incoming message"
         );
 
         let conversation_id = {
@@ -106,21 +113,31 @@ impl WebsocketHandler for MattermostHandler {
             buf
         });
 
+        let orchestrator_start = std::time::Instant::now();
         let turn_result = self
             .orchestrator
             .run_turn_streaming(&text, conversation_id, Interface::Mattermost, tok_tx)
             .await;
+        let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
         let reply = collector.await.unwrap_or_default();
 
         if let Err(e) = turn_result {
-            tracing::error!(error = %e, "Orchestrator error");
+            tracing::error!(error = %e, elapsed_ms, "Orchestrator error");
             return;
         }
 
         if reply.is_empty() {
             return;
         }
+
+        info!(
+            channel = %channel_id,
+            elapsed_ms,
+            reply_len = reply.len(),
+            reply_preview = preview(&reply, 120),
+            "Posting reply"
+        );
 
         // Post reply to the same channel.
         let body = mattermost_api::models::PostBody {
@@ -150,7 +167,9 @@ impl MattermostInterface {
         }
     }
 
-    /// Start the Mattermost WebSocket listener loop.
+    /// Start the Mattermost WebSocket listener loop, reconnecting on disconnect.
+    ///
+    /// Exits cleanly on SIGINT (Ctrl+C) or SIGTERM.
     pub async fn run(&self) -> Result<()> {
         let server_url = self.config.resolved_server_url().ok_or_else(|| {
             anyhow::anyhow!(
@@ -166,8 +185,8 @@ impl MattermostInterface {
             )
         })?;
 
-        info!(server = %server_url, "Connecting to Mattermost");
-
+        // Build the client once; connect_to_websocket takes &mut self so the
+        // same api instance is reused across reconnects.
         let auth = AuthenticationData::from_access_token(token);
         let mut api = Mattermost::new(&server_url, auth)
             .map_err(|e| anyhow::anyhow!("Failed to create Mattermost client: {e}"))?;
@@ -177,17 +196,76 @@ impl MattermostInterface {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to authenticate with Mattermost: {e}"))?;
 
-        let handler = MattermostHandler {
-            config: self.config.clone(),
-            orchestrator: self.orchestrator.clone(),
-            api: api.clone(),
-            conversations: Arc::new(Mutex::new(HashMap::new())),
-        };
+        // Conversation map persists across reconnects.
+        let conversations: Arc<Mutex<HashMap<(String, String), Uuid>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
-        api.connect_to_websocket(handler)
-            .await
-            .map_err(|e| anyhow::anyhow!("Mattermost WebSocket error: {e}"))?;
+        // ── Graceful shutdown ─────────────────────────────────────────────────
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(async move {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{signal, SignalKind};
+                let mut sigterm =
+                    signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = sigterm.recv() => {}
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+            info!("Shutdown signal received, stopping…");
+            let _ = shutdown_tx.send(true);
+        });
 
+        let mut backoff = std::time::Duration::from_secs(1);
+
+        loop {
+            if *shutdown_rx.borrow() {
+                break;
+            }
+
+            info!(server = %server_url, "Connecting to Mattermost WebSocket");
+
+            let handler = MattermostHandler {
+                config: self.config.clone(),
+                orchestrator: self.orchestrator.clone(),
+                api: api.clone(),
+                conversations: conversations.clone(),
+            };
+
+            tokio::select! {
+                result = api.connect_to_websocket(handler) => {
+                    match result {
+                        Ok(()) => info!("Mattermost WebSocket closed, reconnecting…"),
+                        Err(e) => warn!(
+                            error = %e,
+                            delay_secs = backoff.as_secs(),
+                            "Mattermost connection error, retrying"
+                        ),
+                    }
+                }
+                _ = shutdown_rx.changed() => {
+                    info!("Shutdown during WebSocket, exiting");
+                    return Ok(());
+                }
+            }
+
+            tokio::select! {
+                _ = tokio::time::sleep(backoff) => {}
+                _ = shutdown_rx.changed() => {
+                    info!("Shutdown during backoff, exiting");
+                    return Ok(());
+                }
+            }
+
+            backoff = (backoff * 2).min(std::time::Duration::from_secs(60));
+        }
+
+        info!("Mattermost interface stopped");
         Ok(())
     }
 }
