@@ -40,7 +40,8 @@ pub async fn link_device(store_path: &Path, device_name: &str) -> Result<()> {
         use futures::{channel::oneshot, future};
         use presage::libsignal_service::configuration::SignalServers;
         use presage::Manager;
-        use presage_store_sqlite::{OnNewIdentity, SqliteStore};
+        use presage_store_sqlite::{OnNewIdentity, SqliteConnectOptions, SqliteStore};
+        use std::str::FromStr as _;
 
         tracing::info!(
             store_path = %store_path.display(),
@@ -51,7 +52,10 @@ pub async fn link_device(store_path: &Path, device_name: &str) -> Result<()> {
         // Ensure the parent directory exists before SQLite tries to create the file.
         if let Some(parent) = store_path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create signal store directory: {}", parent.display())
+                format!(
+                    "Failed to create signal store directory: {}",
+                    parent.display()
+                )
             })?;
         }
 
