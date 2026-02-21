@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig, Interface};
 use assistant_llm::{LlmClient, LlmClientConfig};
-use assistant_runtime::{orchestrator::ConfirmationCallback, ReactOrchestrator};
+use assistant_runtime::{orchestrator::ConfirmationCallback, Orchestrator};
 use assistant_skills_executor::{install_skill_from_source, SkillExecutor};
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
@@ -297,9 +297,8 @@ async fn main() -> Result<()> {
 
     // 8. Build orchestrator.
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(CliConfirmation);
-    let orchestrator =
-        ReactOrchestrator::new(llm, storage.clone(), registry.clone(), executor, &config)
-            .with_confirmation_callback(confirmation_cb);
+    let orchestrator = Orchestrator::new(llm, storage.clone(), registry.clone(), executor, &config)
+        .with_confirmation_callback(confirmation_cb);
 
     // 9. One conversation per session.
     let conversation_id = Uuid::new_v4();

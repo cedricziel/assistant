@@ -1,5 +1,5 @@
 //! Background scheduler — polls for due scheduled tasks and runs them via the
-//! ReAct orchestrator.
+//! orchestrator.
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -13,13 +13,13 @@ use cron::Schedule;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::orchestrator::ReactOrchestrator;
+use crate::orchestrator::Orchestrator;
 
 /// Spawn a background tokio task that checks for due scheduled tasks every
 /// `poll_interval` and runs them through the orchestrator.
 pub fn spawn_scheduler(
     storage: Arc<StorageLayer>,
-    orchestrator: Arc<ReactOrchestrator>,
+    orchestrator: Arc<Orchestrator>,
     poll_interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -34,7 +34,7 @@ pub fn spawn_scheduler(
     })
 }
 
-async fn run_due_tasks(storage: &StorageLayer, orchestrator: &ReactOrchestrator) -> Result<()> {
+async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> Result<()> {
     let now = Utc::now();
     let task_store = storage.scheduled_task_store();
     let due = task_store.due_tasks(now).await?;

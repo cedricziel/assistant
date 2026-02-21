@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig};
 use assistant_llm::{LlmClient, LlmClientConfig};
-use assistant_runtime::ReactOrchestrator;
+use assistant_runtime::Orchestrator;
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
 use tracing::{info, warn};
@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
     ));
 
     // ── Orchestrator ──────────────────────────────────────────────────────────
-    let orchestrator = Arc::new(ReactOrchestrator::new(
+    let orchestrator = Arc::new(Orchestrator::new(
         llm,
         storage.clone(),
         registry.clone(),

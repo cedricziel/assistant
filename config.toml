@@ -6,10 +6,7 @@
 model = "qwen2.5:7b"
 # Ollama API base URL
 base_url = "http://localhost:11434"
-# Tool calling mode: "native" | "react" | "auto"
-# "auto": try native first, fall back to ReAct if model doesn't support it
-tool_call_mode = "auto"
-# Maximum ReAct iterations per turn
+# Maximum tool-calling iterations per turn
 max_iterations = 10
 # Timeout for LLM calls (seconds)
 timeout_secs = 120

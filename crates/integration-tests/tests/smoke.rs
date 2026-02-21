@@ -1,5 +1,5 @@
 //! Smoke tests that spin up a real Ollama container via testcontainers and
-//! exercise the full ReAct loop end-to-end.
+//! exercise the full tool-calling loop end-to-end.
 //!
 //! Run with:
 //!   cargo test -p assistant-integration-tests --test smoke -- --ignored
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::{skill::SkillSource, types::Interface, AssistantConfig};
 use assistant_llm::{LlmClient, LlmClientConfig};
-use assistant_runtime::ReactOrchestrator;
+use assistant_runtime::Orchestrator;
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
 use testcontainers::{
@@ -24,8 +24,8 @@ use testcontainers::{
 use uuid::Uuid;
 
 const OLLAMA_PORT: u16 = 11434;
-/// Small model that fits in CI: ~270 MB, fast to pull.
-const MODEL: &str = "smollm2:135m";
+/// Smallest reliably capable model with native tool-calling support: ~934 MB.
+const MODEL: &str = "qwen2.5:1.5b";
 
 // ── Container helper ──────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ async fn pull_model(base_url: &str, model: &str) -> Result<()> {
 // ── Shared test fixture ───────────────────────────────────────────────────────
 
 struct Fixture {
-    orchestrator: Arc<ReactOrchestrator>,
+    orchestrator: Arc<Orchestrator>,
     conversation_id: Uuid,
 }
 
@@ -90,7 +90,6 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     let llm_config = LlmClientConfig {
         model: MODEL.to_string(),
         base_url: base_url.to_string(),
-        tool_call_mode: assistant_core::types::ToolCallMode::React,
         timeout_secs: 120,
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
@@ -103,9 +102,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
 
     let config = AssistantConfig::default();
 
-    let orchestrator = Arc::new(ReactOrchestrator::new(
-        llm, storage, registry, executor, &config,
-    ));
+    let orchestrator = Arc::new(Orchestrator::new(llm, storage, registry, executor, &config));
 
     Ok(Fixture {
         orchestrator,

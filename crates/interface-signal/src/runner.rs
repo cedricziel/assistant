@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_runtime::ReactOrchestrator;
+use assistant_runtime::Orchestrator;
 
 use crate::config::SignalConfig;
 
@@ -18,14 +18,14 @@ pub struct SignalInterface {
     #[allow(dead_code)]
     config: SignalConfig,
     #[allow(dead_code)]
-    orchestrator: Arc<ReactOrchestrator>,
+    orchestrator: Arc<Orchestrator>,
 }
 
 impl SignalInterface {
     /// Create a new `SignalInterface`.
     ///
     /// Call [`run`] to start the listener loop (requires `--features signal`).
-    pub fn new(config: SignalConfig, orchestrator: Arc<ReactOrchestrator>) -> Self {
+    pub fn new(config: SignalConfig, orchestrator: Arc<Orchestrator>) -> Self {
         Self {
             config,
             orchestrator,

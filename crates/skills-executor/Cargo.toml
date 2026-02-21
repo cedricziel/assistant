@@ -17,7 +17,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 # HTTP for web-fetch builtin
-reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+reqwest = { workspace = true }
 # HTML stripping for web-fetch
 scraper = "0.25"
 # cron expression parsing for schedule-task

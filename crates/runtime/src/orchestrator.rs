@@ -1,4 +1,4 @@
-//! ReAct orchestrator — the main turn-processing loop that wires together the
+//! Orchestrator — the main turn-processing loop that wires together the
 //! LLM client, skill registry, and skill executor.
 
 use std::collections::HashMap;
@@ -33,9 +33,9 @@ pub struct TurnResult {
     pub traces: Vec<ExecutionTrace>,
 }
 
-// ── ReactOrchestrator ─────────────────────────────────────────────────────────
+// ── Orchestrator ──────────────────────────────────────────────────────────────
 
-/// Drives the ReAct (Reason + Act) loop for a single conversation turn.
+/// Drives the tool-calling loop for a single conversation turn.
 ///
 /// Each call to [`run_turn`] performs the following high-level algorithm:
 ///
@@ -48,7 +48,7 @@ pub struct TurnResult {
 ///    confirm with the user, execute the skill, record an [`ExecutionTrace`],
 ///    and append an `OBSERVATION` to the conversation history.
 /// 6. Persist the final assistant message and return [`TurnResult`].
-pub struct ReactOrchestrator {
+pub struct Orchestrator {
     llm: Arc<LlmClient>,
     storage: Arc<StorageLayer>,
     registry: Arc<SkillRegistry>,
@@ -59,7 +59,7 @@ pub struct ReactOrchestrator {
     confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
 }
 
-impl ReactOrchestrator {
+impl Orchestrator {
     /// Create a new orchestrator.
     ///
     /// # Parameters
@@ -114,7 +114,7 @@ impl ReactOrchestrator {
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
-            "Starting ReAct turn"
+            "Starting turn"
         );
 
         // 1. Ensure conversation exists in SQLite.
@@ -137,9 +137,7 @@ impl ReactOrchestrator {
 
         // 4. Build the base system prompt.
         //    The LLM client's `chat()` method handles injecting skill info in
-        //    ReAct mode, so we pass an empty system prompt here and let the
-        //    client enrich it.  For native mode the skills are passed as a
-        //    separate `tools` argument.
+        //    Skills are passed as a separate `tools` argument to the LLM client.
         let system_prompt = "You are a helpful AI assistant.";
 
         // 5. Bootstrap history with the current user message.
@@ -150,9 +148,9 @@ impl ReactOrchestrator {
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
-        // 6. ReAct loop.
+        // 6. Tool-calling loop.
         for iteration in 0..self.max_iterations {
-            debug!(iteration, "ReAct loop iteration");
+            debug!(iteration, "Tool-calling loop iteration");
 
             let ctx = ExecutionContext {
                 conversation_id,
@@ -359,7 +357,7 @@ impl ReactOrchestrator {
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
-            "Starting streaming ReAct turn"
+            "Starting streaming turn"
         );
 
         let conv_store = self.storage.conversation_store();
@@ -387,7 +385,7 @@ impl ReactOrchestrator {
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
         for iteration in 0..self.max_iterations {
-            debug!(iteration, "Streaming ReAct loop iteration");
+            debug!(iteration, "Streaming tool-calling loop iteration");
 
             let ctx = ExecutionContext {
                 conversation_id,
@@ -564,9 +562,8 @@ impl ReactOrchestrator {
 
     /// Append an observation message to the chat history.
     ///
-    /// In ReAct mode the observation is added as a `tool` role message so the
-    /// LLM can recognise it as skill output.  The `skill_name` is embedded in
-    /// the content prefix for models that do not understand the `tool` role.
+    /// The observation is added as a `tool` role message so the LLM can
+    /// recognise it as skill output.
     fn append_observation(
         &self,
         history: &mut Vec<ChatHistoryMessage>,
