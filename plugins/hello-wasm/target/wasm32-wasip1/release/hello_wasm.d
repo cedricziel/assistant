@@ -1,1 +1,0 @@
-/Users/cedricziel/private/code/assistant/.claude/worktrees/wasm/plugins/hello-wasm/target/wasm32-wasip1/release/hello_wasm.wasm: /Users/cedricziel/private/code/assistant/.claude/worktrees/wasm/plugins/hello-wasm/src/lib.rs
