@@ -24,8 +24,8 @@ use testcontainers::{
 use uuid::Uuid;
 
 const OLLAMA_PORT: u16 = 11434;
-/// Smallest model with native tool-calling support: ~394 MB.
-const MODEL: &str = "qwen2.5:0.5b";
+/// Smallest reliably capable model with native tool-calling support: ~934 MB.
+const MODEL: &str = "qwen2.5:1.5b";
 
 // ── Container helper ──────────────────────────────────────────────────────────
 
