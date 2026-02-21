@@ -216,13 +216,19 @@ impl MemoryLoader {
         }
         match mode {
             "replace" => fs::write(path, content)?,
-            _ => {
+            "append" => {
                 use std::io::Write;
                 let mut file = fs::OpenOptions::new()
                     .create(true)
                     .append(true)
                     .open(path)?;
                 writeln!(file, "\n{content}")?;
+            }
+            other => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Unknown mode: {other} (expected \"replace\" or \"append\")"),
+                ));
             }
         }
         Ok(path.clone())

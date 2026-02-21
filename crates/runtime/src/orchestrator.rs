@@ -257,6 +257,22 @@ impl Orchestrator {
                             continue;
                         }
 
+                        // Confirmation gate — mirrors the gate in run_turn / run_turn_streaming.
+                        if skill_def.confirmation_required && ctx.interactive {
+                            if let Some(cb) = &self.confirmation_callback {
+                                if !cb.confirm(&name, &params) {
+                                    let observation = format!("User denied execution of '{name}'.");
+                                    info!(%observation);
+                                    self.append_observation(
+                                        &mut history,
+                                        &observation,
+                                        Some(&name),
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+
                         if matches!(skill_def.tier, SkillTier::Prompt) {
                             let sub_system = format!(
                                 "{}\n\n## Skill: {}\n\n{}",

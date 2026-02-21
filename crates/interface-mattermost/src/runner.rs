@@ -16,13 +16,14 @@
 //! for [`Interface::Mattermost`].  Additionally, `allowed_channels` and
 //! `allowed_users` allowlists are checked before dispatching.
 
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::Interface;
 use assistant_runtime::Orchestrator;
 use async_trait::async_trait;
+use lru::LruCache;
 use mattermost_api::prelude::*;
 use mattermost_api::socket::WebsocketEventType;
 use serde::Deserialize;
@@ -57,7 +58,8 @@ struct MattermostHandler {
     /// The bot's own Mattermost user ID — required for posting reactions.
     bot_user_id: String,
     /// One conversation UUID per (channel_id, root_post_id) pair.
-    conversations: Arc<Mutex<HashMap<(String, String), Uuid>>>,
+    /// Capped at 10 000 entries (LRU eviction) to prevent unbounded growth.
+    conversations: Arc<Mutex<LruCache<(String, String), Uuid>>>,
 }
 
 #[async_trait]
@@ -133,8 +135,14 @@ impl WebsocketHandler for MattermostHandler {
         let thread_key = reply_root_id.clone().unwrap_or_else(|| post_id.clone());
         let conversation_id = {
             let mut map = self.conversations.lock().await;
-            *map.entry((channel_id.clone(), thread_key))
-                .or_insert_with(Uuid::new_v4)
+            let key = (channel_id.clone(), thread_key);
+            if let Some(&id) = map.get(&key) {
+                id
+            } else {
+                let id = Uuid::new_v4();
+                map.put(key, id);
+                id
+            }
         };
 
         // Build per-turn Mattermost extension tools.
@@ -237,8 +245,11 @@ impl MattermostInterface {
         let api = Arc::new(api);
 
         // Conversation map persists across reconnects.
-        let conversations: Arc<Mutex<HashMap<(String, String), Uuid>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        // Bounded to 10 000 entries (LRU) so the bot doesn't leak memory over
+        // days of continuous operation across many unique threads.
+        let conversations: Arc<Mutex<LruCache<(String, String), Uuid>>> = Arc::new(Mutex::new(
+            LruCache::new(NonZeroUsize::new(10_000).expect("capacity is non-zero")),
+        ));
 
         // ── Graceful shutdown ─────────────────────────────────────────────────
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
