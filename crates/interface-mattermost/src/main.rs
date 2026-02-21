@@ -6,14 +6,8 @@
 //!
 //! # Building
 //!
-//! Without the Mattermost feature (stub only):
 //! ```sh
 //! cargo build -p assistant-interface-mattermost
-//! ```
-//!
-//! With the full Mattermost integration (mattermost_api):
-//! ```sh
-//! cargo build -p assistant-interface-mattermost --features mattermost
 //! ```
 //!
 //! # Configuration

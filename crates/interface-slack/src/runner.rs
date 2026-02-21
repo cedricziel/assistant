@@ -36,7 +36,7 @@ use assistant_runtime::Orchestrator;
 use assistant_storage::StorageLayer;
 use slack_morphism::prelude::*;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Short preview of a string for log output (avoids flooding logs with long messages).
@@ -206,10 +206,13 @@ async fn on_push_event(
             debug!(ts = %msg_ts.0, "Skipping duplicate event (already processed on other connection)");
             return Ok(());
         }
-        // Prune to prevent unbounded growth; ts values are monotonically
-        // increasing so a cleared entry can never match a future message.
+        // Prune to prevent unbounded growth. Clear older entries but retain the
+        // ts we just inserted so a delayed duplicate from the other connection
+        // is still rejected after the prune.
         if seen.len() > 500 {
+            let current = msg_ts.0.clone();
             seen.clear();
+            seen.insert(current);
         }
     }
 
@@ -265,42 +268,68 @@ async fn on_push_event(
         {
             warn!(error = %e, "Failed to create conversation for history seeding");
         } else {
-            let replies_req = SlackApiConversationsRepliesRequest::new(
-                channel_id.clone().into(),
-                thread_ts.clone(),
-            );
-            match session.conversations_replies(&replies_req).await {
-                Ok(resp) => {
-                    let mut seeded = 0usize;
-                    for hist_msg in &resp.messages {
-                        // Skip the triggering message — the orchestrator adds it.
-                        if hist_msg.origin.ts == msg_ts {
-                            continue;
+            // Paginate through all replies — Slack may return `has_more: true`
+            // with a cursor for long-lived threads (>100 messages per page).
+            let mut cursor: Option<SlackCursorId> = None;
+            let mut seeded = 0usize;
+            let mut fetch_error = false;
+            loop {
+                let mut replies_req = SlackApiConversationsRepliesRequest::new(
+                    channel_id.clone().into(),
+                    thread_ts.clone(),
+                );
+                if let Some(ref c) = cursor {
+                    replies_req = replies_req.with_cursor(c.clone());
+                }
+                match session.conversations_replies(&replies_req).await {
+                    Ok(resp) => {
+                        for hist_msg in &resp.messages {
+                            // Skip the triggering message — the orchestrator adds it.
+                            if hist_msg.origin.ts == msg_ts {
+                                continue;
+                            }
+                            let role = match classify_history_msg(hist_msg) {
+                                Some(r) => r,
+                                None => continue,
+                            };
+                            let content =
+                                hist_msg.content.text.as_deref().unwrap_or("").to_string();
+                            if content.is_empty() {
+                                continue;
+                            }
+                            let msg_to_seed = Message::new(conversation_id, role, content);
+                            if let Err(e) = conv_store.save_message(&msg_to_seed).await {
+                                warn!(error = %e, "Failed to seed thread history message");
+                            } else {
+                                seeded += 1;
+                            }
                         }
-                        let role = match classify_history_msg(hist_msg) {
-                            Some(r) => r,
-                            None => continue,
-                        };
-                        let content = hist_msg.content.text.as_deref().unwrap_or("").to_string();
-                        if content.is_empty() {
-                            continue;
-                        }
-                        let msg_to_seed = Message::new(conversation_id, role, content);
-                        if let Err(e) = conv_store.save_message(&msg_to_seed).await {
-                            warn!(error = %e, "Failed to seed thread history message");
+                        // Advance cursor; exit loop when all pages consumed.
+                        if resp
+                            .response_metadata
+                            .as_ref()
+                            .and_then(|m| m.next_cursor.as_ref())
+                            .map(|c| !c.0.is_empty())
+                            .unwrap_or(false)
+                        {
+                            cursor = resp.response_metadata.and_then(|m| m.next_cursor);
                         } else {
-                            seeded += 1;
+                            break;
                         }
                     }
-                    info!(
-                        conversation_id = %conversation_id,
-                        seeded,
-                        "Seeded thread history"
-                    );
+                    Err(e) => {
+                        warn!(error = %e, "Failed to fetch thread history; proceeding without context");
+                        fetch_error = true;
+                        break;
+                    }
                 }
-                Err(e) => {
-                    warn!(error = %e, "Failed to fetch thread history; proceeding without context");
-                }
+            }
+            if !fetch_error {
+                info!(
+                    conversation_id = %conversation_id,
+                    seeded,
+                    "Seeded thread history"
+                );
             }
         }
     }
@@ -352,7 +381,7 @@ async fn on_push_event(
     }
 
     if let Err(e) = turn_result {
-        tracing::error!(error = %e, elapsed_ms, "orchestrator error");
+        error!(error = %e, elapsed_ms, "orchestrator error");
         return Ok(());
     }
 
@@ -372,7 +401,7 @@ fn on_error(
     _client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
     _states: SlackClientEventsUserState,
 ) -> HttpStatusCode {
-    tracing::error!(error = %err, "Slack Socket Mode error");
+    error!(error = %err, "Slack Socket Mode error");
     HttpStatusCode::OK
 }
 

@@ -7,7 +7,7 @@
 
 pub use assistant_core::SlackConfig;
 
-/// Extension methods for [`SlackConfig`] that require the `dirs` crate.
+/// Extension methods for [`SlackConfig`] that resolve tokens from the environment.
 pub trait SlackConfigExt {
     /// Return the bot token, falling back to the `SLACK_BOT_TOKEN` environment
     /// variable if no token is configured in `config.toml`.

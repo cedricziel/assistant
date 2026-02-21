@@ -27,7 +27,7 @@ use mattermost_api::prelude::*;
 use mattermost_api::socket::WebsocketEventType;
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Short preview of a string for log output.
@@ -93,6 +93,12 @@ impl WebsocketHandler for MattermostHandler {
         };
 
         if text.is_empty() {
+            return;
+        }
+
+        // Ignore the bot's own messages to prevent infinite reply loops.
+        if !self.bot_user_id.is_empty() && user_id == self.bot_user_id {
+            debug!(user_id = %user_id, "Ignoring message from self");
             return;
         }
 
@@ -262,21 +268,35 @@ impl MattermostInterface {
             // We need to temporarily extract the inner Mattermost from the Arc.
             // Since we're the only writer at this point, we can clone it for WS.
             let mut ws_api = (*api).clone();
-            tokio::select! {
+            let clean_disconnect = tokio::select! {
                 result = ws_api.connect_to_websocket(handler) => {
                     match result {
-                        Ok(()) => info!("Mattermost WebSocket closed, reconnecting…"),
-                        Err(e) => warn!(
-                            error = %e,
-                            delay_secs = backoff.as_secs(),
-                            "Mattermost connection error, retrying"
-                        ),
+                        Ok(()) => {
+                            info!("Mattermost WebSocket closed, reconnecting…");
+                            true
+                        }
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                delay_secs = backoff.as_secs(),
+                                "Mattermost connection error, retrying"
+                            );
+                            false
+                        }
                     }
                 }
                 _ = shutdown_rx.changed() => {
                     info!("Shutdown during WebSocket, exiting");
                     return Ok(());
                 }
+            };
+
+            // Reset backoff after a clean connection so transient failures don't
+            // permanently slow down reconnects after recovery.
+            if clean_disconnect {
+                backoff = std::time::Duration::from_secs(1);
+            } else {
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(60));
             }
 
             tokio::select! {
@@ -286,8 +306,6 @@ impl MattermostInterface {
                     return Ok(());
                 }
             }
-
-            backoff = (backoff * 2).min(std::time::Duration::from_secs(60));
         }
 
         info!("Mattermost interface stopped");

@@ -18,12 +18,13 @@ This generates an **App-Level Token** (`xapp-...`) with scope `connections:write
 
 **OAuth & Permissions → Bot Token Scopes:**
 
-| Scope              | Purpose                  |
-| ------------------ | ------------------------ |
-| `chat:write`       | Post replies             |
-| `channels:history` | Read messages            |
-| `channels:read`    | List channels (optional) |
-| `im:history`       | Read DMs (optional)      |
+| Scope              | Purpose                    |
+| ------------------ | -------------------------- |
+| `chat:write`       | Post replies               |
+| `reactions:write`  | Add/remove emoji reactions |
+| `channels:history` | Read messages              |
+| `channels:read`    | List channels (optional)   |
+| `im:history`       | Read DMs (optional)        |
 
 ### 4. Subscribe to events
 

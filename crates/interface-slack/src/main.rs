@@ -6,14 +6,8 @@
 //!
 //! # Building
 //!
-//! Without the Slack feature (stub only):
 //! ```sh
 //! cargo build -p assistant-interface-slack
-//! ```
-//!
-//! With the full Slack integration (slack-morphism):
-//! ```sh
-//! cargo build -p assistant-interface-slack --features slack
 //! ```
 //!
 //! # Configuration
