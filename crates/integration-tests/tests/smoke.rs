@@ -24,8 +24,8 @@ use testcontainers::{
 use uuid::Uuid;
 
 const OLLAMA_PORT: u16 = 11434;
-/// Small model that fits in CI: ~270 MB, fast to pull.
-const MODEL: &str = "smollm2:135m";
+/// Smallest model with native tool-calling support: ~394 MB.
+const MODEL: &str = "qwen2.5:0.5b";
 
 // ── Container helper ──────────────────────────────────────────────────────────
 

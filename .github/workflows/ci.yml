@@ -124,7 +124,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.ollama/models
-          key: ollama-smollm2-135m
+          key: ollama-qwen2.5-0.5b
 
       - name: Run smoke tests
         run: make test-integration
