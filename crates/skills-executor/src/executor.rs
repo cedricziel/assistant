@@ -35,6 +35,7 @@ impl SkillExecutor {
             Arc::new(WebFetchHandler::new()),
             Arc::new(ShellExecHandler::new()),
             Arc::new(ListSkillsHandler::new(registry.clone())),
+            Arc::new(SkillFileReadHandler::new(registry.clone())),
             Arc::new(SelfAnalyzeHandler::new(storage.clone(), llm, registry)),
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
         ];

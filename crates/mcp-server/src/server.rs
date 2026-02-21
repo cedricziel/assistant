@@ -179,6 +179,24 @@ pub async fn handle_request(
                     description: skill.description.clone(),
                     mime_type: "text/markdown".to_string(),
                 });
+
+                // Auxiliary files (scripts/, references/, assets/)
+                for (category, rel_path) in skill.auxiliary_files() {
+                    let filename = rel_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    resources.push(McpResource {
+                        uri: format!("skills://{}/{}", skill.name, rel_path.display()),
+                        name: filename.to_string(),
+                        description: format!(
+                            "{} file for {} skill",
+                            category.dir_name(),
+                            skill.name
+                        ),
+                        mime_type: category.mime_type().to_string(),
+                    });
+                }
             }
 
             JsonRpcResponse::ok(req.id, json!({ "resources": resources }))
@@ -207,20 +225,64 @@ pub async fn handle_request(
                     serde_json::to_string_pretty(&json!({ "skills": items })).unwrap_or_default(),
                 )];
                 JsonRpcResponse::ok(req.id, json!({ "contents": content }))
-            } else if let Some(skill_name) = uri.strip_prefix("skills://") {
-                match registry.get(skill_name).await {
-                    Some(skill) => {
-                        let skill_md_path = skill.dir.join("SKILL.md");
-                        let text = std::fs::read_to_string(&skill_md_path)
-                            .unwrap_or_else(|_| skill.body.clone());
-                        let content = vec![ContentItem::text(text)];
-                        JsonRpcResponse::ok(req.id, json!({ "contents": content }))
+            } else if let Some(path) = uri.strip_prefix("skills://") {
+                let segments: Vec<&str> = path.splitn(3, '/').collect();
+                match segments.len() {
+                    // skills://<name> — return SKILL.md
+                    1 => {
+                        let skill_name = segments[0];
+                        match registry.get(skill_name).await {
+                            Some(skill) => {
+                                let skill_md_path = skill.dir.join("SKILL.md");
+                                let text = std::fs::read_to_string(&skill_md_path)
+                                    .unwrap_or_else(|_| skill.body.clone());
+                                let content = vec![ContentItem::text(text)];
+                                JsonRpcResponse::ok(req.id, json!({ "contents": content }))
+                            }
+                            None => JsonRpcResponse::err(
+                                req.id,
+                                -32602,
+                                format!("Skill '{skill_name}' not found"),
+                            ),
+                        }
                     }
-                    None => JsonRpcResponse::err(
-                        req.id,
-                        -32602,
-                        format!("Skill '{skill_name}' not found"),
-                    ),
+                    // skills://<name>/<category>/<filename> — return auxiliary file
+                    // splitn(3, '/') yields [name, category, filename] for "name/category/filename"
+                    3 if matches!(segments[1], "scripts" | "references" | "assets") => {
+                        let skill_name = segments[0];
+                        let category = segments[1];
+                        let filename = segments[2];
+                        match registry.get(skill_name).await {
+                            Some(skill) => {
+                                let file_path = skill.dir.join(category).join(filename);
+                                match std::fs::read_to_string(&file_path) {
+                                    Ok(text) => {
+                                        let content = vec![ContentItem::text(text)];
+                                        JsonRpcResponse::ok(
+                                            req.id,
+                                            json!({ "contents": content }),
+                                        )
+                                    }
+                                    Err(_) => JsonRpcResponse::err(
+                                        req.id,
+                                        -32602,
+                                        format!(
+                                            "File '{category}/{filename}' not found in skill '{skill_name}'"
+                                        ),
+                                    ),
+                                }
+                            }
+                            None => JsonRpcResponse::err(
+                                req.id,
+                                -32602,
+                                format!("Skill '{skill_name}' not found"),
+                            ),
+                        }
+                    }
+                    // Invalid category or unexpected segment count
+                    _ => {
+                        JsonRpcResponse::err(req.id, -32602, format!("Invalid resource URI: {uri}"))
+                    }
                 }
             } else {
                 JsonRpcResponse::err(req.id, -32602, format!("Unknown resource URI: {uri}"))
