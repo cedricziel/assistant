@@ -128,11 +128,15 @@ impl Orchestrator {
         // 2. Load prior turns *before* saving the current message so that the
         //    current message does not appear twice in the LLM history.
         let prior = conv_store.load_history(conversation_id).await?;
+        // base_turn is used to assign monotonically increasing turn numbers so
+        // that ORDER BY turn in load_history gives correct chronological order
+        // across multiple conversation turns.
+        let base_turn = prior.len() as i64;
 
         // 3. Persist the user message.
         let user_msg = {
             let mut m = Message::user(conversation_id, user_message);
-            m.turn = 0;
+            m.turn = base_turn;
             m
         };
         conv_store.save_message(&user_msg).await?;
@@ -188,7 +192,7 @@ impl Orchestrator {
                     // Persist assistant message.
                     let assistant_msg = {
                         let mut m = Message::assistant(conversation_id, &text);
-                        m.turn = iteration as i64 + 1;
+                        m.turn = base_turn + iteration as i64 + 1;
                         m
                     };
                     conv_store.save_message(&assistant_msg).await?;
@@ -386,10 +390,11 @@ impl Orchestrator {
 
         // Load prior turns before saving the current message to avoid duplication.
         let prior = conv_store.load_history(conversation_id).await?;
+        let base_turn = prior.len() as i64;
 
         let user_msg = {
             let mut m = Message::user(conversation_id, user_message);
-            m.turn = 0;
+            m.turn = base_turn;
             m
         };
         conv_store.save_message(&user_msg).await?;
@@ -448,7 +453,7 @@ impl Orchestrator {
 
                     let assistant_msg = {
                         let mut m = Message::assistant(conversation_id, &text);
-                        m.turn = iteration as i64 + 1;
+                        m.turn = base_turn + iteration as i64 + 1;
                         m
                     };
                     conv_store.save_message(&assistant_msg).await?;
@@ -643,5 +648,268 @@ fn format_params_as_prompt(skill_name: &str, params: &serde_json::Value) -> Stri
         )
     } else {
         format!("Execute the '{skill_name}' skill.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use assistant_core::{types::Interface, AssistantConfig, Message};
+    use assistant_llm::{LlmClient, LlmClientConfig};
+    use assistant_skills_executor::SkillExecutor;
+    use assistant_storage::{registry::SkillRegistry, StorageLayer};
+    use serde_json::{json, Value};
+    use uuid::Uuid;
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    use super::Orchestrator;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// Minimal Ollama final-answer response.
+    fn ollama_answer(text: &str) -> Value {
+        json!({
+            "model": "test",
+            "message": { "role": "assistant", "content": text },
+            "done": true
+        })
+    }
+
+    /// Mount a mock that returns a final answer for every POST /api/chat.
+    async fn mount_answer(server: &MockServer, text: &str) {
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer(text)))
+            .mount(server)
+            .await;
+    }
+
+    /// Build an [`Orchestrator`] wired to `base_url` with a fresh in-memory DB.
+    /// Returns the orchestrator and a handle to the storage so tests can seed data.
+    async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: base_url.to_string(),
+                timeout_secs: 10,
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(SkillExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+        ));
+        let orch = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            registry,
+            executor,
+            &AssistantConfig::default(),
+        ));
+        (orch, storage)
+    }
+
+    /// Extract the `messages` array from an intercepted Ollama request body.
+    fn messages_in(req: &wiremock::Request) -> Vec<Value> {
+        let body: Value = serde_json::from_slice(&req.body).unwrap();
+        body["messages"].as_array().cloned().unwrap_or_default()
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
+
+    /// First turn: the LLM receives only the system prompt + current user message.
+    #[tokio::test]
+    async fn first_turn_sends_only_current_message() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("hello", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 1);
+
+        let msgs = messages_in(&reqs[0]);
+        // [system, user(hello)]
+        assert_eq!(msgs.len(), 2, "expected [system, user], got {msgs:?}");
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "hello");
+    }
+
+    /// Second turn: prior user + assistant messages are prepended before the
+    /// current user message.
+    #[tokio::test]
+    async fn second_turn_includes_prior_history() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("first message", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("second message", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 2);
+
+        let msgs = messages_in(&reqs[1]);
+        // [system, user(first), assistant(pong), user(second)]
+        assert_eq!(msgs.len(), 4, "expected 4 messages on turn 2, got {msgs:?}");
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "first message");
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert_eq!(msgs[2]["content"], "pong");
+        assert_eq!(msgs[3]["role"], "user");
+        assert_eq!(msgs[3]["content"], "second message");
+    }
+
+    /// The current user message must appear exactly once — not duplicated by
+    /// load_history returning the already-saved message.
+    #[tokio::test]
+    async fn current_message_not_duplicated() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("turn one", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("turn two", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        let msgs = messages_in(reqs.last().unwrap());
+
+        let count = msgs
+            .iter()
+            .filter(|m| m["role"] == "user" && m["content"] == "turn two")
+            .count();
+        assert_eq!(
+            count, 1,
+            "current message must appear exactly once; found {count}"
+        );
+    }
+
+    /// Manually seeded history (e.g. from Slack thread hydration) is included
+    /// in the LLM payload on the first bot turn in that conversation.
+    #[tokio::test]
+    async fn seeded_history_included_in_llm_call() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, storage) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        // Seed the conversation store directly (simulates Slack thread hydration).
+        let conv_store = storage.conversation_store();
+        conv_store
+            .create_conversation_with_id(conv_id, Some("slack:C001:1234"))
+            .await
+            .unwrap();
+
+        let mut seed_user = Message::user(conv_id, "seeded user message");
+        seed_user.turn = 0;
+        conv_store.save_message(&seed_user).await.unwrap();
+
+        let mut seed_bot = Message::assistant(conv_id, "seeded bot reply");
+        seed_bot.turn = 1;
+        conv_store.save_message(&seed_bot).await.unwrap();
+
+        orch.run_turn("follow-up", conv_id, Interface::Slack)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 1);
+
+        let msgs = messages_in(&reqs[0]);
+        // [system, seeded_user, seeded_bot, follow_up]
+        assert_eq!(msgs.len(), 4, "expected 4 messages, got {msgs:?}");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "seeded user message");
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert_eq!(msgs[2]["content"], "seeded bot reply");
+        assert_eq!(msgs[3]["role"], "user");
+        assert_eq!(msgs[3]["content"], "follow-up");
+    }
+
+    /// Three-turn conversation accumulates history correctly across all turns.
+    #[tokio::test]
+    async fn three_turns_accumulate_history() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "reply").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("turn 1", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("turn 2", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("turn 3", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 3);
+
+        // Third request: [system, u1, a1, u2, a2, u3]
+        let msgs = messages_in(&reqs[2]);
+        assert_eq!(msgs.len(), 6, "expected 6 messages on turn 3, got {msgs:?}");
+        assert_eq!(msgs[1]["content"], "turn 1");
+        assert_eq!(msgs[2]["content"], "reply");
+        assert_eq!(msgs[3]["content"], "turn 2");
+        assert_eq!(msgs[4]["content"], "reply");
+        assert_eq!(msgs[5]["content"], "turn 3");
+    }
+
+    /// Different conversation IDs are fully isolated — no history bleed.
+    #[tokio::test]
+    async fn different_conversations_are_isolated() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_a = Uuid::new_v4();
+        let conv_b = Uuid::new_v4();
+
+        orch.run_turn("conv-a message", conv_a, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("conv-b message", conv_b, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+
+        // conv-b's request must not contain conv-a's message.
+        let msgs_b = messages_in(&reqs[1]);
+        let bleed = msgs_b.iter().any(|m| m["content"] == "conv-a message");
+        assert!(
+            !bleed,
+            "conv-a history must not appear in conv-b's LLM call"
+        );
     }
 }
