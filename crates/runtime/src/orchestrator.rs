@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, ExecutionTrace, Interface, Message, SkillTier};
+use assistant_core::{
+    ExecutionContext, ExecutionTrace, Interface, Message, MessageRole, SkillTier,
+};
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
@@ -123,7 +125,11 @@ impl Orchestrator {
             .create_conversation_with_id(conversation_id, None)
             .await?;
 
-        // 2. Persist the user message.
+        // 2. Load prior turns *before* saving the current message so that the
+        //    current message does not appear twice in the LLM history.
+        let prior = conv_store.load_history(conversation_id).await?;
+
+        // 3. Persist the user message.
         let user_msg = {
             let mut m = Message::user(conversation_id, user_message);
             m.turn = 0;
@@ -131,24 +137,37 @@ impl Orchestrator {
         };
         conv_store.save_message(&user_msg).await?;
 
-        // 3. Load all registered skills.
+        // 4. Load all registered skills.
         let skill_defs = self.registry.list().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
-        // 4. Build the base system prompt.
-        //    The LLM client's `chat()` method handles injecting skill info in
+        // 5. Build the base system prompt.
         //    Skills are passed as a separate `tools` argument to the LLM client.
         let system_prompt = "You are a helpful AI assistant.";
 
-        // 5. Bootstrap history with the current user message.
-        let mut history: Vec<ChatHistoryMessage> = vec![ChatHistoryMessage {
+        // 6. Build LLM history from prior turns, then append the current message.
+        let mut history: Vec<ChatHistoryMessage> = prior
+            .into_iter()
+            .filter_map(|m| match m.role {
+                MessageRole::User => Some(ChatHistoryMessage {
+                    role: ChatRole::User,
+                    content: m.content,
+                }),
+                MessageRole::Assistant => Some(ChatHistoryMessage {
+                    role: ChatRole::Assistant,
+                    content: m.content,
+                }),
+                _ => None,
+            })
+            .collect();
+        history.push(ChatHistoryMessage {
             role: ChatRole::User,
             content: user_message.to_string(),
-        }];
+        });
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
-        // 6. Tool-calling loop.
+        // 7. Tool-calling loop.
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Tool-calling loop iteration");
 
@@ -365,6 +384,9 @@ impl Orchestrator {
             .create_conversation_with_id(conversation_id, None)
             .await?;
 
+        // Load prior turns before saving the current message to avoid duplication.
+        let prior = conv_store.load_history(conversation_id).await?;
+
         let user_msg = {
             let mut m = Message::user(conversation_id, user_message);
             m.turn = 0;
@@ -377,10 +399,24 @@ impl Orchestrator {
 
         let system_prompt = "You are a helpful AI assistant.";
 
-        let mut history: Vec<ChatHistoryMessage> = vec![ChatHistoryMessage {
+        let mut history: Vec<ChatHistoryMessage> = prior
+            .into_iter()
+            .filter_map(|m| match m.role {
+                MessageRole::User => Some(ChatHistoryMessage {
+                    role: ChatRole::User,
+                    content: m.content,
+                }),
+                MessageRole::Assistant => Some(ChatHistoryMessage {
+                    role: ChatRole::Assistant,
+                    content: m.content,
+                }),
+                _ => None,
+            })
+            .collect();
+        history.push(ChatHistoryMessage {
             role: ChatRole::User,
             content: user_message.to_string(),
-        }];
+        });
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
