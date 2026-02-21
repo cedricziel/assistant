@@ -27,7 +27,7 @@
 //! [`ConversationStore`] before the orchestrator runs.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -60,6 +60,14 @@ struct SlackCallbackState {
     /// Using `thread_ts` (instead of `user_id`) ensures every message in the
     /// same thread shares a single LLM conversation.
     conversations: Arc<Mutex<HashMap<(String, String), Uuid>>>,
+    /// Deduplication set of already-processed message `ts` values.
+    ///
+    /// `slack-morphism` opens two WebSocket connections for redundancy; both
+    /// deliver the same push event, so without this guard each message would
+    /// be processed twice.  Entries are retained until the set exceeds 500
+    /// items, at which point it is cleared (ts values are monotonically
+    /// increasing, so an old entry will never match a new message).
+    processed_ts: Arc<Mutex<HashSet<String>>>,
     /// Unix timestamp (seconds) recorded at startup. Messages with a Slack `ts`
     /// older than this are stale catch-up events and are silently dropped.
     started_at: f64,
@@ -103,7 +111,7 @@ async fn on_push_event(
     states: SlackClientEventsUserState,
 ) -> UserCallbackResult<()> {
     // Retrieve shared state; clone the Arcs before dropping the guard.
-    let (config, orchestrator, bot_token, conversations, started_at, storage) = {
+    let (config, orchestrator, bot_token, conversations, processed_ts, started_at, storage) = {
         let guard = states.read().await;
         let s = guard
             .get_user_state::<SlackCallbackState>()
@@ -113,6 +121,7 @@ async fn on_push_event(
             s.orchestrator.clone(),
             s.bot_token.clone(),
             s.conversations.clone(),
+            s.processed_ts.clone(),
             s.started_at,
             s.storage.clone(),
         )
@@ -132,7 +141,12 @@ async fn on_push_event(
         || msg.sender.display_as_bot.unwrap_or(false)
         || msg.sender.user.is_none()
     {
-        debug!(subtype = ?msg.subtype, "Ignoring non-human message");
+        debug!(
+            subtype = ?msg.subtype,
+            bot_id = ?msg.sender.bot_id,
+            has_user = msg.sender.user.is_some(),
+            "Ignoring non-human message"
+        );
         return Ok(());
     }
 
@@ -182,6 +196,21 @@ async fn on_push_event(
 
     // The ts of the original message — used to anchor reactions to it.
     let msg_ts = msg.origin.ts.clone();
+
+    // Deduplicate: slack-morphism opens two WebSocket connections; both deliver
+    // the same push event, which would cause double processing without this guard.
+    {
+        let mut seen = processed_ts.lock().await;
+        if !seen.insert(msg_ts.0.clone()) {
+            debug!(ts = %msg_ts.0, "Skipping duplicate event (already processed on other connection)");
+            return Ok(());
+        }
+        // Prune to prevent unbounded growth; ts values are monotonically
+        // increasing so a cleared entry can never match a future message.
+        if seen.len() > 500 {
+            seen.clear();
+        }
+    }
 
     // Drop messages that predate our startup — these are catch-up events
     // replayed by Slack after a reconnect and should not be reprocessed.
@@ -420,6 +449,9 @@ impl SlackInterface {
 
         // Conversation map persists across reconnects so in-flight context is not lost.
         let conversations = Arc::new(Mutex::new(HashMap::new()));
+        // Dedup set persists across reconnects so a message delivered on one
+        // connection is not reprocessed when the other connection reconnects.
+        let processed_ts: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
         // ── Graceful shutdown ─────────────────────────────────────────────────
         // A watch channel delivers the shutdown signal across all select! points
@@ -464,6 +496,7 @@ impl SlackInterface {
                 orchestrator: self.orchestrator.clone(),
                 bot_token: bot_token.clone(),
                 conversations: conversations.clone(),
+                processed_ts: processed_ts.clone(),
                 started_at,
                 storage: self.storage.clone(),
             };
