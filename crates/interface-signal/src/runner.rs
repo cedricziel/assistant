@@ -88,6 +88,12 @@ impl SignalInterface {
         let store_path = self.config.resolved_store_path();
         info!(store_path = %store_path.display(), "Opening signal store");
 
+        // Ensure the parent directory exists before SQLite tries to create the file.
+        if let Some(parent) = store_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow::anyhow!("Failed to create signal store directory: {e}"))?;
+        }
+
         let db_url = format!("sqlite://{}", store_path.display());
         let store = SqliteStore::open(&db_url, OnNewIdentity::Trust)
             .await

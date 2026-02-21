@@ -36,6 +36,7 @@ pub async fn link_device(store_path: &Path, device_name: &str) -> Result<()> {
 
     #[cfg(feature = "signal")]
     {
+        use anyhow::Context as _;
         use futures::{channel::oneshot, future};
         use presage::libsignal_service::configuration::SignalServers;
         use presage::Manager;
@@ -46,6 +47,13 @@ pub async fn link_device(store_path: &Path, device_name: &str) -> Result<()> {
             device_name,
             "Opening signal store for device linking"
         );
+
+        // Ensure the parent directory exists before SQLite tries to create the file.
+        if let Some(parent) = store_path.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create signal store directory: {}", parent.display())
+            })?;
+        }
 
         // presage-store-sqlite uses a SQLite URL.
         let db_url = format!("sqlite://{}", store_path.display());
