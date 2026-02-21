@@ -39,6 +39,13 @@ reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], defau
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# CLI / config
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+toml = "1.0"
+# Slack / Mattermost interfaces
+slack-morphism = { version = "2", features = ["hyper"] }
+mattermost_api = "0.8"
 # Internal crates
 core = { path = "crates/core" }
 llm = { path = "crates/llm" }
