@@ -248,7 +248,7 @@ impl SlackInterface {
         }
     }
 
-    /// Start the Slack Socket Mode listener loop.
+    /// Start the Slack Socket Mode listener loop, reconnecting on disconnect.
     pub async fn run(&self) -> Result<()> {
         let bot_token_str = self.config.resolved_bot_token().ok_or_else(|| {
             anyhow::anyhow!(
@@ -268,43 +268,54 @@ impl SlackInterface {
         let bot_token = SlackApiToken::new(bot_token_str.into());
         let app_token = SlackApiToken::new(app_token_str.into());
 
-        let started_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
+        // Conversation map persists across reconnects so in-flight context is not lost.
+        let conversations = Arc::new(Mutex::new(HashMap::new()));
 
-        info!(started_at, "Connecting to Slack via Socket Mode");
+        let mut backoff = std::time::Duration::from_secs(1);
 
-        let state = SlackCallbackState {
-            config: self.config.clone(),
-            orchestrator: self.orchestrator.clone(),
-            bot_token: bot_token.clone(),
-            conversations: Arc::new(Mutex::new(HashMap::new())),
-            started_at,
-        };
+        loop {
+            let started_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64();
 
-        let listener_environment = Arc::new(
-            SlackClientEventsListenerEnvironment::new(client.clone())
-                .with_error_handler(on_error)
-                .with_user_state(state),
-        );
+            info!(started_at, "Connecting to Slack via Socket Mode");
 
-        let callbacks = SlackSocketModeListenerCallbacks::new().with_push_events(on_push_event);
+            let state = SlackCallbackState {
+                config: self.config.clone(),
+                orchestrator: self.orchestrator.clone(),
+                bot_token: bot_token.clone(),
+                conversations: conversations.clone(),
+                started_at,
+            };
 
-        let socket_mode_listener = SlackClientSocketModeListener::new(
-            &SlackClientSocketModeConfig::new(),
-            listener_environment,
-            callbacks,
-        );
+            let listener_environment = Arc::new(
+                SlackClientEventsListenerEnvironment::new(client.clone())
+                    .with_error_handler(on_error)
+                    .with_user_state(state),
+            );
 
-        socket_mode_listener
-            .listen_for(&app_token)
-            .await
-            .map_err(|e| anyhow::anyhow!("Slack Socket Mode listener error: {e}"))?;
+            let callbacks = SlackSocketModeListenerCallbacks::new().with_push_events(on_push_event);
 
-        socket_mode_listener.serve().await;
+            let socket_mode_listener = SlackClientSocketModeListener::new(
+                &SlackClientSocketModeConfig::new(),
+                listener_environment,
+                callbacks,
+            );
 
-        Ok(())
+            match socket_mode_listener.listen_for(&app_token).await {
+                Ok(()) => {
+                    socket_mode_listener.serve().await;
+                    info!("Slack Socket Mode connection closed, reconnecting…");
+                }
+                Err(e) => {
+                    warn!(error = %e, delay_secs = backoff.as_secs(), "Slack connection failed, retrying");
+                }
+            }
+
+            tokio::time::sleep(backoff).await;
+            backoff = (backoff * 2).min(std::time::Duration::from_secs(60));
+        }
     }
 }
 
