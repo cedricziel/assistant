@@ -165,7 +165,12 @@ async fn on_push_event(
         msg_ts.clone(),
     );
     if let Err(e) = session.reactions_add(&ack_req).await {
-        warn!(error = %e, "Failed to add eyes reaction");
+        let msg = e.to_string();
+        if msg.contains("already_reacted") {
+            debug!("Eyes reaction already present, skipping");
+        } else {
+            warn!(error = %e, "Failed to add eyes reaction");
+        }
     }
 
     let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
