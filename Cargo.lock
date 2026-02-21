@@ -148,6 +148,7 @@ dependencies = [
  "anyhow",
  "assistant-core",
  "async-trait",
+ "futures",
  "ollama-rs",
  "regex",
  "reqwest",
