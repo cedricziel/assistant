@@ -2,7 +2,14 @@
 # Copy to ~/.assistant/config.toml and customize
 
 [llm]
-# Ollama model to use for inference
+# Ollama model to use for inference.
+# Requires native tool-calling support. Recommended choices (2026):
+#
+#   ≤ 8 GB VRAM  — qwen2.5:7b (default), llama3.1:8b, mistral:7b-instruct-v0.3
+#   ≤ 12 GB VRAM — qwen2.5:14b (recommended upgrade), deepseek-r1:14b, phi4:14b
+#   ≤ 24 GB VRAM — qwen2.5:32b
+#
+# Use Q4_K_M quantization for 14 B+ models.
 model = "qwen2.5:7b"
 # Ollama API base URL
 base_url = "http://localhost:11434"

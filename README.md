@@ -38,6 +38,28 @@ assistant> /install anthropics/skills/web-search
 assistant> /quit
 ```
 
+## Model recommendations (2026)
+
+All models below support Ollama native tool-calling. Use `Q4_K_M` quantization for 14 B+
+models to stay within the stated VRAM budget.
+
+| VRAM budget | Model                      | VRAM (Q4_K_M) | Speed     | Notes                               |
+| ----------- | -------------------------- | ------------- | --------- | ----------------------------------- |
+| **≤ 8 GB**  | `qwen2.5:7b` _(default)_   | ~7 GB         | ~40 tok/s | Great tool-calling; multilingual    |
+| **≤ 8 GB**  | `llama3.1:8b`              | ~8 GB         | ~40 tok/s | Excellent agentic quality           |
+| **≤ 8 GB**  | `mistral:7b-instruct-v0.3` | ~7 GB         | ~45 tok/s | Fastest; 85 % tool accuracy         |
+| **≤ 12 GB** | `qwen2.5:14b`              | ~10.7 GB      | ~20 tok/s | Best all-round; recommended upgrade |
+| **≤ 12 GB** | `deepseek-r1:14b`          | ~11 GB        | ~15 tok/s | Best complex reasoning              |
+| **≤ 12 GB** | `phi4:14b`                 | ~11 GB        | ~18 tok/s | Compact; good structured output     |
+| **≤ 24 GB** | `qwen2.5:32b`              | ~22 GB        | ~10 tok/s | Near-frontier reasoning locally     |
+
+Pull any model and set it in `~/.assistant/config.toml`:
+
+```sh
+ollama pull qwen2.5:14b
+# then set model = "qwen2.5:14b" in ~/.assistant/config.toml
+```
+
 ## Built-in skills
 
 | Skill           | Description                                                | Tier    |
@@ -127,6 +149,7 @@ Copy `config.toml` to `~/.assistant/config.toml` and edit:
 
 ```toml
 [llm]
+# Conservative default (≤ 8 GB VRAM). For 12 GB VRAM, try qwen2.5:14b.
 model = "qwen2.5:7b"          # any Ollama model with tool-calling support
 base_url = "http://localhost:11434"
 tool_call_mode = "auto"        # "auto" | "native" | "react"

@@ -7,11 +7,23 @@ conventions, and rules for working in this repository.
 
 A Rust workspace implementing a local, self-improving AI assistant. Key properties:
 
-- **LLM**: Ollama (default `qwen2.5:7b`); native tool-calling first, ReAct text-parsing fallback
+- **LLM**: Ollama (hardcoded fallback `qwen2.5:7b`; override via `config.toml`); native tool-calling only
 - **Skills**: [Agent Skills](https://agentskills.io) open standard — `SKILL.md` directories, portable across tools
 - **Storage**: SQLite via `sqlx` with 4 embedded migrations
 - **Self-improvement**: every execution writes an `ExecutionTrace`; `self-analyze` generates SKILL.md proposals queued for `/review`
 - **MCP server**: stdio JSON-RPC 2.0 exposing skills to Claude Code and other MCP clients
+
+## Recommended Ollama models (2026, ≤ 12 GB VRAM)
+
+| Model                      | VRAM (Q4_K_M) | Tool-calling | Notes                               |
+| -------------------------- | ------------- | ------------ | ----------------------------------- |
+| `qwen2.5:14b`              | ~10.7 GB      | Excellent    | Best all-round; recommended upgrade |
+| `qwen2.5:7b`               | ~7-8 GB       | Very good    | Default; fastest option on 12 GB    |
+| `llama3.1:8b`              | ~8 GB         | Excellent    | 40+ tok/s; strong agentic quality   |
+| `mistral:7b-instruct-v0.3` | ~7 GB         | Good (85 %)  | Fastest; 45 tok/s                   |
+| `deepseek-r1:14b`          | ~11 GB        | Excellent    | Best for complex reasoning          |
+
+> Use `Q4_K_M` quantization for 14 B models. Avoid Q3 — significant quality loss.
 
 ## Crate map
 
