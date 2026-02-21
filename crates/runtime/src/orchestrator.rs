@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, ExecutionTrace, Interface, Message};
+use assistant_core::{ExecutionContext, ExecutionTrace, Interface, Message, SkillTier};
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
@@ -215,6 +215,57 @@ impl ReactOrchestrator {
                         }
                     }
 
+                    // For prompt-tier skills, invoke a sub-LLM call instead of the executor.
+                    // The SKILL.md body becomes the system prompt; params are formatted as user input.
+                    if matches!(skill_def.tier, SkillTier::Prompt) {
+                        debug!(skill = %name, "Prompt-tier skill: running sub-LLM call");
+
+                        let sub_system = format!(
+                            "You are a helpful AI assistant.\n\n## Skill: {}\n\n{}",
+                            skill_def.name, skill_def.body
+                        );
+                        let sub_input = format_params_as_prompt(&name, &params);
+                        let sub_history = vec![assistant_llm::ChatHistoryMessage {
+                            role: assistant_llm::ChatRole::User,
+                            content: sub_input,
+                        }];
+
+                        let start = std::time::Instant::now();
+                        let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
+                        let duration_ms = start.elapsed().as_millis() as i64;
+
+                        let observation = match sub_result {
+                            Ok(LlmResponse::FinalAnswer(text)) => text,
+                            Ok(LlmResponse::ToolCall { name: n, .. }) => {
+                                format!("Prompt-skill sub-call returned unexpected tool call: {n}")
+                            }
+                            Ok(LlmResponse::Thinking(text)) => text,
+                            Err(err) => {
+                                warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
+                                format!("Error running prompt skill '{name}': {err}")
+                            }
+                        };
+
+                        let mut trace = ExecutionTrace::new(
+                            conversation_id,
+                            iteration as i64,
+                            &name,
+                            params.clone(),
+                        );
+                        trace = trace.with_success(observation.clone(), duration_ms);
+
+                        if self.trace_enabled {
+                            let trace_store = self.storage.trace_store();
+                            if let Err(e) = trace_store.insert(&trace).await {
+                                warn!("Failed to persist prompt-tier trace: {e}");
+                            }
+                        }
+                        traces.push(trace);
+
+                        self.append_observation(&mut history, &observation, Some(&name));
+                        continue;
+                    }
+
                     // Convert JSON params to the HashMap the executor expects.
                     let params_map: HashMap<String, serde_json::Value> =
                         if let serde_json::Value::Object(map) = &params {
@@ -310,5 +361,32 @@ impl ReactOrchestrator {
             role: ChatRole::Tool,
             content,
         });
+    }
+}
+
+// ── Module-level helpers ───────────────────────────────────────────────────────
+
+/// Format skill params as a human-readable prompt for sub-LLM calls (prompt-tier skills).
+fn format_params_as_prompt(skill_name: &str, params: &serde_json::Value) -> String {
+    if let serde_json::Value::Object(map) = params {
+        if map.is_empty() {
+            return format!("Execute the '{skill_name}' skill.");
+        }
+        let param_lines: Vec<String> = map
+            .iter()
+            .map(|(k, v)| {
+                let val = match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                format!("- {k}: {val}")
+            })
+            .collect();
+        format!(
+            "Execute the '{skill_name}' skill with the following parameters:\n{}",
+            param_lines.join("\n")
+        )
+    } else {
+        format!("Execute the '{skill_name}' skill.")
     }
 }
