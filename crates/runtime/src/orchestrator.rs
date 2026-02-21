@@ -9,6 +9,7 @@ use assistant_core::{ExecutionContext, ExecutionTrace, Interface, Message, Skill
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -332,6 +333,227 @@ impl ReactOrchestrator {
         }
 
         // Reached iteration limit.
+        anyhow::bail!(
+            "Max iterations ({}) reached without a final answer",
+            self.max_iterations
+        );
+    }
+
+    /// Like [`run_turn`] but streams final-answer tokens through `token_sink`
+    /// as they are generated.
+    ///
+    /// Tool-call and observation steps are silent — only the tokens that make
+    /// up the final answer are forwarded.  The complete answer is also
+    /// returned in [`TurnResult`] so callers can persist or process it.
+    ///
+    /// The `token_sink` channel is **not** closed by this method; callers
+    /// should drop their own `Receiver` (or call `close()`) to signal
+    /// completion.
+    pub async fn run_turn_streaming(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        token_sink: mpsc::Sender<String>,
+    ) -> Result<TurnResult> {
+        info!(
+            conversation_id = %conversation_id,
+            interface = ?interface,
+            "Starting streaming ReAct turn"
+        );
+
+        let conv_store = self.storage.conversation_store();
+        conv_store
+            .create_conversation_with_id(conversation_id, None)
+            .await?;
+
+        let user_msg = {
+            let mut m = Message::user(conversation_id, user_message);
+            m.turn = 0;
+            m
+        };
+        conv_store.save_message(&user_msg).await?;
+
+        let skill_defs = self.registry.list().await;
+        let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
+
+        let system_prompt = "You are a helpful AI assistant.";
+
+        let mut history: Vec<ChatHistoryMessage> = vec![ChatHistoryMessage {
+            role: ChatRole::User,
+            content: user_message.to_string(),
+        }];
+
+        let mut traces: Vec<ExecutionTrace> = Vec::new();
+
+        for iteration in 0..self.max_iterations {
+            debug!(iteration, "Streaming ReAct loop iteration");
+
+            let ctx = ExecutionContext {
+                conversation_id,
+                turn: iteration as i64,
+                interface: interface.clone(),
+                interactive: matches!(interface, Interface::Cli),
+            };
+
+            // Pass the token sink on every LLM call.  The LLM client forwards
+            // tokens only when it determines the response is a final answer.
+            let response = self
+                .llm
+                .chat_streaming(
+                    system_prompt,
+                    &history,
+                    &skill_refs,
+                    Some(token_sink.clone()),
+                )
+                .await?;
+
+            match response {
+                LlmResponse::FinalAnswer(text) => {
+                    info!(iteration, "Streaming LLM returned final answer");
+
+                    let assistant_msg = {
+                        let mut m = Message::assistant(conversation_id, &text);
+                        m.turn = iteration as i64 + 1;
+                        m
+                    };
+                    conv_store.save_message(&assistant_msg).await?;
+
+                    return Ok(TurnResult {
+                        answer: text,
+                        traces,
+                    });
+                }
+
+                LlmResponse::ToolCall { name, params } => {
+                    info!(skill = %name, iteration, "Streaming LLM requested skill execution");
+
+                    let Some(skill_def) = self.registry.get(&name).await else {
+                        let observation = format!("Skill '{}' not found in registry.", name);
+                        warn!(%observation);
+                        self.append_observation(&mut history, &observation, None);
+                        continue;
+                    };
+
+                    if let Err(reason) =
+                        SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
+                    {
+                        let observation = format!("Skill blocked: {reason}");
+                        warn!(%observation);
+                        self.append_observation(&mut history, &observation, Some(&name));
+                        continue;
+                    }
+
+                    if skill_def.confirmation_required && ctx.interactive {
+                        if let Some(cb) = &self.confirmation_callback {
+                            if !cb.confirm(&name, &params) {
+                                let observation = format!("User denied execution of '{name}'.");
+                                info!(%observation);
+                                self.append_observation(&mut history, &observation, Some(&name));
+                                continue;
+                            }
+                        }
+                    }
+
+                    if matches!(skill_def.tier, SkillTier::Prompt) {
+                        let sub_system = format!(
+                            "You are a helpful AI assistant.\n\n## Skill: {}\n\n{}",
+                            skill_def.name, skill_def.body
+                        );
+                        let sub_input = format_params_as_prompt(&name, &params);
+                        let sub_history = vec![assistant_llm::ChatHistoryMessage {
+                            role: assistant_llm::ChatRole::User,
+                            content: sub_input,
+                        }];
+
+                        let start = std::time::Instant::now();
+                        let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
+                        let duration_ms = start.elapsed().as_millis() as i64;
+
+                        let observation = match sub_result {
+                            Ok(LlmResponse::FinalAnswer(text)) => text,
+                            Ok(LlmResponse::ToolCall { name: n, .. }) => {
+                                format!("Prompt-skill sub-call returned unexpected tool call: {n}")
+                            }
+                            Ok(LlmResponse::Thinking(text)) => text,
+                            Err(err) => {
+                                warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
+                                format!("Error running prompt skill '{name}': {err}")
+                            }
+                        };
+
+                        let mut trace = ExecutionTrace::new(
+                            conversation_id,
+                            iteration as i64,
+                            &name,
+                            params.clone(),
+                        );
+                        trace = trace.with_success(observation.clone(), duration_ms);
+
+                        if self.trace_enabled {
+                            let trace_store = self.storage.trace_store();
+                            if let Err(e) = trace_store.insert(&trace).await {
+                                warn!("Failed to persist prompt-tier trace: {e}");
+                            }
+                        }
+                        traces.push(trace);
+
+                        self.append_observation(&mut history, &observation, Some(&name));
+                        continue;
+                    }
+
+                    let params_map: HashMap<String, serde_json::Value> =
+                        if let serde_json::Value::Object(map) = &params {
+                            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                        } else {
+                            HashMap::new()
+                        };
+
+                    let start = std::time::Instant::now();
+                    let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
+                    let duration_ms = start.elapsed().as_millis() as i64;
+
+                    let mut trace = ExecutionTrace::new(
+                        conversation_id,
+                        iteration as i64,
+                        &name,
+                        params.clone(),
+                    );
+
+                    let observation = match exec_result {
+                        Ok(output) => {
+                            trace = trace.with_success(output.content.clone(), duration_ms);
+                            output.content
+                        }
+                        Err(err) => {
+                            warn!(skill = %name, %err, "Skill execution failed");
+                            let msg = err.to_string();
+                            trace = trace.with_error(msg.clone(), duration_ms);
+                            format!("Error executing '{name}': {msg}")
+                        }
+                    };
+
+                    if self.trace_enabled {
+                        let trace_store = self.storage.trace_store();
+                        if let Err(e) = trace_store.insert(&trace).await {
+                            warn!("Failed to persist execution trace: {e}");
+                        }
+                    }
+
+                    traces.push(trace);
+                    self.append_observation(&mut history, &observation, Some(&name));
+                }
+
+                LlmResponse::Thinking(text) => {
+                    debug!(iteration, "Streaming LLM emitted thinking step");
+                    history.push(ChatHistoryMessage {
+                        role: ChatRole::Assistant,
+                        content: text,
+                    });
+                }
+            }
+        }
+
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations

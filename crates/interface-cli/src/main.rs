@@ -1,9 +1,6 @@
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig, Interface};
@@ -12,6 +9,7 @@ use assistant_runtime::{orchestrator::ConfirmationCallback, ReactOrchestrator};
 use assistant_skills_executor::{install_skill_from_source, SkillExecutor};
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
+use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -198,32 +196,22 @@ async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Result<
     Ok(())
 }
 
-// ── Spinner ───────────────────────────────────────────────────────────────────
+// ── Token streaming ───────────────────────────────────────────────────────────
 
-/// Spawn a background task that prints a spinner until `stop` is set to `true`.
-/// Returns the `Arc<AtomicBool>` stop flag and the task join handle.
-/// Call `stop.store(true, Ordering::Relaxed)` then await the handle to cleanly stop.
-fn start_spinner() -> (Arc<AtomicBool>, tokio::task::JoinHandle<()>) {
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_clone = stop.clone();
-    let handle = tokio::spawn(async move {
-        let frames = ['-', '\\', '|', '/'];
-        let mut i = 0usize;
+/// Spawn a background task that prints tokens from `rx` to stdout as they
+/// arrive.  Returns a join handle; the task exits when the channel is closed
+/// (i.e. when the orchestrator drops its `Sender`).
+fn start_token_printer(mut rx: mpsc::Receiver<String>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
         let mut stdout = io::stdout();
-        loop {
-            if stop_clone.load(Ordering::Relaxed) {
-                // Clear the spinner line
-                print!("\r   \r");
-                let _ = stdout.flush();
-                break;
-            }
-            print!("\r{} ", frames[i % frames.len()]);
+        while let Some(token) = rx.recv().await {
+            print!("{token}");
             let _ = stdout.flush();
-            i += 1;
-            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
         }
-    });
-    (stop, handle)
+        // Trailing newline so the next prompt appears on its own line.
+        println!("\n");
+        let _ = stdout.flush();
+    })
 }
 
 // ── Print help ────────────────────────────────────────────────────────────────
@@ -430,21 +418,20 @@ async fn main() -> Result<()> {
                     continue;
                 }
 
-                // Normal user input — run through the orchestrator.
-                let (stop_spinner, spinner_handle) = start_spinner();
-                let turn_result = orchestrator
-                    .run_turn(input, conversation_id, Interface::Cli)
-                    .await;
-                stop_spinner.store(true, Ordering::Relaxed);
-                let _ = spinner_handle.await;
+                // Normal user input — run through the orchestrator with
+                // live token streaming.
+                let (tx, rx) = mpsc::channel::<String>(64);
+                let printer = start_token_printer(rx);
 
-                match turn_result {
-                    Ok(result) => {
-                        println!("\n{}\n", result.answer);
-                    }
-                    Err(e) => {
-                        eprintln!("\nError: {e}\n");
-                    }
+                let turn_result = orchestrator
+                    .run_turn_streaming(input, conversation_id, Interface::Cli, tx)
+                    .await;
+
+                // Wait for the printer to flush all buffered tokens.
+                let _ = printer.await;
+
+                if let Err(e) = turn_result {
+                    eprintln!("Error: {e}\n");
                 }
             }
 
