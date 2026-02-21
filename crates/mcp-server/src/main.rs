@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
         llm,
         storage.clone(),
         registry.clone(),
-        executor,
+        executor.clone(),
         &config,
     ));
 
@@ -133,6 +133,7 @@ async fn main() -> Result<()> {
         let response = server::handle_request(
             request,
             registry.clone(),
+            executor.clone(),
             orchestrator.clone(),
             user_skills_dir.clone(),
         )
