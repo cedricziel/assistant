@@ -8,6 +8,7 @@ members = [
     "crates/mcp-server",
     "crates/interface-cli",
     "crates/interface-signal",
+    "crates/integration-tests",
 ]
 resolver = "2"
 
