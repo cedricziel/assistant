@@ -606,8 +606,7 @@ impl LlmClient {
                     let trimmed = full_text.trim_start();
                     if let Some(after_prefix_raw) = trimmed.strip_prefix(ANSWER_PREFIX) {
                         // Strip the prefix (and optional space) for display.
-                        let after_prefix =
-                            after_prefix_raw.trim_start_matches([' ', '\n']);
+                        let after_prefix = after_prefix_raw.trim_start_matches([' ', '\n']);
                         if !after_prefix.is_empty() {
                             let _ = sink.send(after_prefix.to_string()).await;
                         }
