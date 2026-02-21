@@ -99,6 +99,300 @@ impl Orchestrator {
 
     // ── Main entry point ──────────────────────────────────────────────────────
 
+    /// Process one turn of the conversation with per-turn extension skills.
+    ///
+    /// Extension skills are injected by the calling interface (e.g. Slack,
+    /// Mattermost) and are checked before the global skill registry.  They
+    /// bypass the [`SafetyGate`] — the interface is responsible for vetting
+    /// them before passing them in.
+    ///
+    /// Unlike [`run_turn`] / [`run_turn_streaming`], this method does **not**
+    /// return the final answer; replies are expected to happen as side-effects
+    /// of the extension tool calls (e.g. `slack-reply`).  If the LLM emits a
+    /// `FinalAnswer` without calling a reply tool, it is persisted to the DB
+    /// but not forwarded anywhere.
+    ///
+    /// # Parameters
+    /// * `user_message` — the raw user input
+    /// * `conversation_id` — the UUID of the conversation
+    /// * `interface` — the originating interface
+    /// * `extensions` — per-turn `(SkillDef, handler)` pairs; names must be
+    ///   unique and must not collide with global skill names
+    pub async fn run_turn_with_tools(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        extensions: Vec<(
+            assistant_core::SkillDef,
+            Arc<dyn assistant_core::SkillHandler>,
+        )>,
+    ) -> Result<()> {
+        info!(
+            conversation_id = %conversation_id,
+            interface = ?interface,
+            extension_count = extensions.len(),
+            "Starting turn with extension tools"
+        );
+
+        // Build extension lookup: name → (def, handler).
+        let ext_map: HashMap<
+            String,
+            (
+                assistant_core::SkillDef,
+                Arc<dyn assistant_core::SkillHandler>,
+            ),
+        > = extensions
+            .iter()
+            .map(|(def, h)| (def.name.clone(), (def.clone(), h.clone())))
+            .collect();
+        let ext_defs: Vec<assistant_core::SkillDef> =
+            extensions.into_iter().map(|(def, _)| def).collect();
+
+        // 1. Ensure conversation exists in SQLite.
+        let conv_store = self.storage.conversation_store();
+        conv_store
+            .create_conversation_with_id(conversation_id, None)
+            .await?;
+
+        // 2. Load prior turns before saving current message to avoid duplication.
+        let prior = conv_store.load_history(conversation_id).await?;
+        let base_turn = prior.len() as i64;
+
+        // 3. Persist the user message.
+        let user_msg = {
+            let mut m = assistant_core::Message::user(conversation_id, user_message);
+            m.turn = base_turn;
+            m
+        };
+        conv_store.save_message(&user_msg).await?;
+
+        // 4. Load global skills and merge with extensions for LLM tool listing.
+        //    Extension defs come first so the LLM sees them prominently.
+        let global_skills = self.registry.list().await;
+        let all_skill_refs: Vec<&assistant_core::SkillDef> =
+            ext_defs.iter().chain(global_skills.iter()).collect();
+
+        let system_prompt = "You are a helpful AI assistant.";
+
+        // 5. Build LLM history from prior turns + current message.
+        let mut history: Vec<ChatHistoryMessage> = prior
+            .into_iter()
+            .filter_map(|m| match m.role {
+                MessageRole::User => Some(ChatHistoryMessage {
+                    role: ChatRole::User,
+                    content: m.content,
+                }),
+                MessageRole::Assistant => Some(ChatHistoryMessage {
+                    role: ChatRole::Assistant,
+                    content: m.content,
+                }),
+                _ => None,
+            })
+            .collect();
+        history.push(ChatHistoryMessage {
+            role: ChatRole::User,
+            content: user_message.to_string(),
+        });
+
+        let mut traces: Vec<ExecutionTrace> = Vec::new();
+
+        // 6. Tool-calling loop.
+        for iteration in 0..self.max_iterations {
+            debug!(iteration, "Extension-tools loop iteration");
+
+            let ctx = ExecutionContext {
+                conversation_id,
+                turn: iteration as i64,
+                interface: interface.clone(),
+                interactive: false,
+            };
+
+            let response = self
+                .llm
+                .chat(system_prompt, &history, &all_skill_refs)
+                .await?;
+
+            match response {
+                // ── Final answer ──────────────────────────────────────────────
+                LlmResponse::FinalAnswer(text) => {
+                    info!(iteration, "LLM returned final answer (no auto-post)");
+
+                    let assistant_msg = {
+                        let mut m = assistant_core::Message::assistant(conversation_id, &text);
+                        m.turn = base_turn + iteration as i64 + 1;
+                        m
+                    };
+                    conv_store.save_message(&assistant_msg).await?;
+
+                    // Replies happen via extension tool calls — we do not post here.
+                    return Ok(());
+                }
+
+                // ── Tool call ─────────────────────────────────────────────────
+                LlmResponse::ToolCall { name, params } => {
+                    info!(skill = %name, iteration, "LLM requested skill execution");
+
+                    // Extension tools take priority and bypass the safety gate.
+                    let (observation, trace_result) = if let Some((ext_def, handler)) =
+                        ext_map.get(&name)
+                    {
+                        debug!(skill = %name, "Dispatching to extension handler");
+
+                        let params_map: HashMap<String, serde_json::Value> =
+                            if let serde_json::Value::Object(map) = &params {
+                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                            } else {
+                                HashMap::new()
+                            };
+
+                        let start = std::time::Instant::now();
+                        let exec_result = handler.execute(ext_def, params_map, &ctx).await;
+                        let duration_ms = start.elapsed().as_millis() as i64;
+
+                        let mut trace = ExecutionTrace::new(
+                            conversation_id,
+                            iteration as i64,
+                            &name,
+                            params.clone(),
+                        );
+                        let obs = match exec_result {
+                            Ok(output) => {
+                                trace = trace.with_success(output.content.clone(), duration_ms);
+                                output.content
+                            }
+                            Err(err) => {
+                                warn!(skill = %name, %err, "Extension skill execution failed");
+                                let msg = err.to_string();
+                                trace = trace.with_error(msg.clone(), duration_ms);
+                                format!("Error executing '{name}': {msg}")
+                            }
+                        };
+                        (obs, trace)
+                    } else {
+                        // Global registry path — look up def and apply safety gate.
+                        let Some(skill_def) = self.registry.get(&name).await else {
+                            let observation = format!("Skill '{}' not found in registry.", name);
+                            warn!(%observation);
+                            self.append_observation(&mut history, &observation, None);
+                            continue;
+                        };
+
+                        if let Err(reason) =
+                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
+                        {
+                            let observation = format!("Skill blocked: {reason}");
+                            warn!(%observation);
+                            self.append_observation(&mut history, &observation, Some(&name));
+                            continue;
+                        }
+
+                        if matches!(skill_def.tier, SkillTier::Prompt) {
+                            let sub_system = format!(
+                                "You are a helpful AI assistant.\n\n## Skill: {}\n\n{}",
+                                skill_def.name, skill_def.body
+                            );
+                            let sub_input = format_params_as_prompt(&name, &params);
+                            let sub_history = vec![ChatHistoryMessage {
+                                role: ChatRole::User,
+                                content: sub_input,
+                            }];
+
+                            let start = std::time::Instant::now();
+                            let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
+                            let duration_ms = start.elapsed().as_millis() as i64;
+
+                            let observation = match sub_result {
+                                Ok(LlmResponse::FinalAnswer(text)) => text,
+                                Ok(LlmResponse::ToolCall { name: n, .. }) => format!(
+                                    "Prompt-skill sub-call returned unexpected tool call: {n}"
+                                ),
+                                Ok(LlmResponse::Thinking(text)) => text,
+                                Err(err) => {
+                                    warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
+                                    format!("Error running prompt skill '{name}': {err}")
+                                }
+                            };
+
+                            let mut trace = ExecutionTrace::new(
+                                conversation_id,
+                                iteration as i64,
+                                &name,
+                                params.clone(),
+                            );
+                            trace = trace.with_success(observation.clone(), duration_ms);
+
+                            if self.trace_enabled {
+                                let trace_store = self.storage.trace_store();
+                                if let Err(e) = trace_store.insert(&trace).await {
+                                    warn!("Failed to persist prompt-tier trace: {e}");
+                                }
+                            }
+                            traces.push(trace);
+                            self.append_observation(&mut history, &observation, Some(&name));
+                            continue;
+                        }
+
+                        let params_map: HashMap<String, serde_json::Value> =
+                            if let serde_json::Value::Object(map) = &params {
+                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                            } else {
+                                HashMap::new()
+                            };
+
+                        let start = std::time::Instant::now();
+                        let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
+                        let duration_ms = start.elapsed().as_millis() as i64;
+
+                        let mut trace = ExecutionTrace::new(
+                            conversation_id,
+                            iteration as i64,
+                            &name,
+                            params.clone(),
+                        );
+                        let obs = match exec_result {
+                            Ok(output) => {
+                                debug!(skill = %name, duration_ms, "Skill execution completed");
+                                trace = trace.with_success(output.content.clone(), duration_ms);
+                                output.content
+                            }
+                            Err(err) => {
+                                warn!(skill = %name, %err, "Skill execution failed");
+                                let msg = err.to_string();
+                                trace = trace.with_error(msg.clone(), duration_ms);
+                                format!("Error executing '{name}': {msg}")
+                            }
+                        };
+                        (obs, trace)
+                    };
+
+                    if self.trace_enabled {
+                        let trace_store = self.storage.trace_store();
+                        if let Err(e) = trace_store.insert(&trace_result).await {
+                            warn!("Failed to persist execution trace: {e}");
+                        }
+                    }
+                    traces.push(trace_result);
+                    self.append_observation(&mut history, &observation, Some(&name));
+                }
+
+                // ── Intermediate thinking step ────────────────────────────────
+                LlmResponse::Thinking(text) => {
+                    debug!(iteration, "LLM emitted thinking step");
+                    history.push(ChatHistoryMessage {
+                        role: ChatRole::Assistant,
+                        content: text,
+                    });
+                }
+            }
+        }
+
+        anyhow::bail!(
+            "Max iterations ({}) reached without a final answer",
+            self.max_iterations
+        );
+    }
+
     /// Process one turn of the conversation.
     ///
     /// # Parameters

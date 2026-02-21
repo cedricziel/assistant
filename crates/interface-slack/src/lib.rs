@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod runner;
+pub mod tools;
 
 pub use assistant_core::SlackConfig;
 pub use runner::SlackInterface;

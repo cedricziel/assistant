@@ -25,6 +25,7 @@ use assistant_runtime::Orchestrator;
 use async_trait::async_trait;
 use mattermost_api::prelude::*;
 use mattermost_api::socket::WebsocketEventType;
+use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -36,6 +37,13 @@ fn preview(s: &str, max: usize) -> &str {
 }
 
 use crate::config::{MattermostConfig, MattermostConfigExt};
+use crate::tools::build_mattermost_tools;
+
+/// Minimal response for `GET /users/me` — we only need the user ID.
+#[derive(Debug, Deserialize)]
+struct MeUser {
+    id: String,
+}
 
 // ── WebSocket handler ─────────────────────────────────────────────────────────
 
@@ -44,9 +52,11 @@ use crate::config::{MattermostConfig, MattermostConfigExt};
 struct MattermostHandler {
     config: MattermostConfig,
     orchestrator: Arc<Orchestrator>,
-    /// Cloned Mattermost client used for posting replies.
-    api: Mattermost,
-    /// One conversation UUID per (channel_id, user_id) pair.
+    /// Shared Mattermost client used for posting replies and reactions.
+    api: Arc<Mattermost>,
+    /// The bot's own Mattermost user ID — required for posting reactions.
+    bot_user_id: String,
+    /// One conversation UUID per (channel_id, root_post_id) pair.
     conversations: Arc<Mutex<HashMap<(String, String), Uuid>>>,
 }
 
@@ -70,7 +80,17 @@ impl WebsocketHandler for MattermostHandler {
 
         let channel_id = message.broadcast.channel_id.clone();
         let user_id = post.user_id.clone();
+        let post_id = post.id.clone();
         let text = post.message.clone();
+
+        // Determine the thread root for replies.
+        // If the triggering post is itself a reply, keep using its root_id.
+        // Otherwise create a new thread rooted at this post.
+        let reply_root_id = if post.root_id.is_empty() {
+            Some(post_id.clone())
+        } else {
+            Some(post.root_id.clone())
+        };
 
         if text.is_empty() {
             return;
@@ -93,60 +113,45 @@ impl WebsocketHandler for MattermostHandler {
         info!(
             channel = %channel_id,
             user = %user_id,
+            post_id = %post_id,
             text_len = text.len(),
             text_preview = preview(&text, 120),
             "Incoming message"
         );
 
+        // Key conversations by (channel_id, root_post_id) so every message in
+        // the same thread shares a single LLM conversation context.
+        let thread_key = reply_root_id.clone().unwrap_or_else(|| post_id.clone());
         let conversation_id = {
             let mut map = self.conversations.lock().await;
-            *map.entry((channel_id.clone(), user_id.clone()))
+            *map.entry((channel_id.clone(), thread_key))
                 .or_insert_with(Uuid::new_v4)
         };
 
-        let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
-        let collector = tokio::spawn(async move {
-            let mut buf = String::new();
-            while let Some(tok) = tok_rx.recv().await {
-                buf.push_str(&tok);
-            }
-            buf
-        });
+        // Build per-turn Mattermost extension tools.
+        let extensions = build_mattermost_tools(
+            channel_id.clone(),
+            post_id,
+            reply_root_id,
+            self.bot_user_id.clone(),
+            self.api.clone(),
+        );
 
         let orchestrator_start = std::time::Instant::now();
         let turn_result = self
             .orchestrator
-            .run_turn_streaming(&text, conversation_id, Interface::Mattermost, tok_tx)
+            .run_turn_with_tools(&text, conversation_id, Interface::Mattermost, extensions)
             .await;
         let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
-        let reply = collector.await.unwrap_or_default();
-
         if let Err(e) = turn_result {
             tracing::error!(error = %e, elapsed_ms, "Orchestrator error");
-            return;
-        }
-
-        if reply.is_empty() {
-            return;
-        }
-
-        info!(
-            channel = %channel_id,
-            elapsed_ms,
-            reply_len = reply.len(),
-            reply_preview = preview(&reply, 120),
-            "Posting reply"
-        );
-
-        // Post reply to the same channel.
-        let body = mattermost_api::models::PostBody {
-            channel_id: channel_id.clone(),
-            message: reply,
-            root_id: None,
-        };
-        if let Err(e) = self.api.create_post(&body).await {
-            tracing::error!(error = %e, "Failed to post Mattermost reply");
+        } else {
+            info!(
+                channel = %channel_id,
+                elapsed_ms,
+                "orchestrator.run_turn_with_tools ← ok"
+            );
         }
     }
 }
@@ -196,6 +201,21 @@ impl MattermostInterface {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to authenticate with Mattermost: {e}"))?;
 
+        // Fetch the bot's own user ID — required for posting reactions.
+        let bot_user_id: String = match api.query::<MeUser>("GET", "users/me", None, None).await {
+            Ok(me) => {
+                info!(user_id = %me.id, "Fetched bot user ID");
+                me.id
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to fetch bot user ID; reactions will be unavailable");
+                String::new()
+            }
+        };
+
+        // Wrap in Arc so handlers can share the same client without cloning it.
+        let api = Arc::new(api);
+
         // Conversation map persists across reconnects.
         let conversations: Arc<Mutex<HashMap<(String, String), Uuid>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -234,11 +254,16 @@ impl MattermostInterface {
                 config: self.config.clone(),
                 orchestrator: self.orchestrator.clone(),
                 api: api.clone(),
+                bot_user_id: bot_user_id.clone(),
                 conversations: conversations.clone(),
             };
 
+            // connect_to_websocket requires &mut self on the underlying client.
+            // We need to temporarily extract the inner Mattermost from the Arc.
+            // Since we're the only writer at this point, we can clone it for WS.
+            let mut ws_api = (*api).clone();
             tokio::select! {
-                result = api.connect_to_websocket(handler) => {
+                result = ws_api.connect_to_websocket(handler) => {
                     match result {
                         Ok(()) => info!("Mattermost WebSocket closed, reconnecting…"),
                         Err(e) => warn!(

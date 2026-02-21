@@ -46,6 +46,7 @@ fn preview(s: &str, max: usize) -> &str {
 }
 
 use crate::config::{SlackConfig, SlackConfigExt};
+use crate::tools::build_slack_tools;
 
 // ── Shared callback state ─────────────────────────────────────────────────────
 
@@ -320,27 +321,26 @@ async fn on_push_event(
         }
     }
 
-    let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
-    let collector = tokio::spawn(async move {
-        let mut buf = String::new();
-        while let Some(tok) = tok_rx.recv().await {
-            buf.push_str(&tok);
-        }
-        buf
-    });
+    // Build per-turn Slack extension tools.  The LLM calls these to post
+    // replies, react, or upload files.  No auto-reply after the turn.
+    let extensions = build_slack_tools(
+        channel_id.clone(),
+        Some(thread_ts.clone()),
+        msg_ts.clone(),
+        client.clone(),
+        bot_token.clone(),
+    );
 
     let orchestrator_start = std::time::Instant::now();
     debug!(
         conversation_id = %conversation_id,
         text_len = text.len(),
-        "orchestrator.run_turn_streaming →"
+        "orchestrator.run_turn_with_tools →"
     );
     let turn_result = orchestrator
-        .run_turn_streaming(&text, conversation_id, Interface::Slack, tok_tx)
+        .run_turn_with_tools(&text, conversation_id, Interface::Slack, extensions)
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
-
-    let reply = collector.await.unwrap_or_default();
 
     // Remove 👀 regardless of outcome.
     debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.remove eyes");
@@ -359,35 +359,8 @@ async fn on_push_event(
     debug!(
         conversation_id = %conversation_id,
         elapsed_ms,
-        reply_len = reply.len(),
-        reply_preview = preview(&reply, 120),
-        "orchestrator.run_turn_streaming ← ok"
+        "orchestrator.run_turn_with_tools ← ok"
     );
-
-    if reply.is_empty() {
-        debug!(channel = %channel_id, "empty reply, skipping post");
-        return Ok(());
-    }
-
-    info!(
-        channel = %channel_id,
-        thread_ts = %thread_ts.0,
-        reply_len = reply.len(),
-        reply_preview = preview(&reply, 120),
-        "chat.postMessage →"
-    );
-
-    // Post the reply in the same thread as the triggering message.
-    let post_req = SlackApiChatPostMessageRequest::new(
-        channel_id.into(),
-        SlackMessageContent::new().with_text(reply),
-    )
-    .with_thread_ts(thread_ts);
-    if let Err(e) = session.chat_post_message(&post_req).await {
-        tracing::error!(error = %e, "chat.postMessage failed");
-    } else {
-        debug!("chat.postMessage ← ok");
-    }
 
     Ok(())
 }
