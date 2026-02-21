@@ -118,7 +118,6 @@ impl SignalInterface {
                 }
                 Received::Content(content) => {
                     let sender = content.metadata.sender;
-                    let timestamp = content.metadata.timestamp;
                     let text = extract_text_body(&content);
 
                     if text.is_empty() {
@@ -176,8 +175,13 @@ impl SignalInterface {
                         continue;
                     }
 
-                    // Reply to the sender.
-                    let reply_ts = timestamp + 1;
+                    // Reply to the sender — use current wall-clock time in
+                    // milliseconds (Signal's timestamp unit), not the sender's
+                    // timestamp + 1 which would be incorrect.
+                    let reply_ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
                     let data_message = presage::proto::DataMessage {
                         body: Some(reply),
                         timestamp: Some(reply_ts),
