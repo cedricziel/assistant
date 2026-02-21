@@ -83,6 +83,8 @@ impl SignalInterface {
         use std::str::FromStr as _;
         use tracing::{debug, info, warn};
 
+        use std::collections::HashMap;
+
         use assistant_core::Interface;
         use uuid::Uuid;
 
@@ -119,6 +121,10 @@ impl SignalInterface {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to start message stream: {e}"))?;
         pin_mut!(messages);
+
+        // Track one conversation_id per sender so the orchestrator retains
+        // memory across messages from the same Signal contact.
+        let mut conversations: HashMap<String, Uuid> = HashMap::new();
 
         while let Some(received) = messages.next().await {
             match received {
@@ -161,7 +167,9 @@ impl SignalInterface {
                     // borrow structure simple and avoids sharing the manager
                     // across tasks.
                     let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
-                    let conversation_id = Uuid::new_v4();
+                    let conversation_id = *conversations
+                        .entry(sender_str.clone())
+                        .or_insert_with(Uuid::new_v4);
 
                     let collector = tokio::spawn(async move {
                         let mut buf = String::new();
