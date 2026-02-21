@@ -1,9 +1,6 @@
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig, Interface};
@@ -198,21 +195,51 @@ async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Result<
     Ok(())
 }
 
+// ── Token printer ─────────────────────────────────────────────────────────────
+
+/// Spawn a background task that prints streaming tokens to stdout as they
+/// arrive via `token_rx`.  The first token clears the spinner line before
+/// printing, giving a seamless transition.  Returns the join handle; the
+/// task exits automatically when the sender is dropped.
+fn start_token_printer(
+    mut token_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut first = true;
+        let mut stdout = io::stdout();
+        while let Some(token) = token_rx.recv().await {
+            if first {
+                // Clear any spinner residue on the current line.
+                print!("\r");
+                first = false;
+            }
+            print!("{token}");
+            let _ = stdout.flush();
+        }
+        // Ensure the answer ends on its own line.
+        if !first {
+            println!();
+            let _ = stdout.flush();
+        }
+    })
+}
+
 // ── Spinner ───────────────────────────────────────────────────────────────────
 
-/// Spawn a background task that prints a spinner until `stop` is set to `true`.
-/// Returns the `Arc<AtomicBool>` stop flag and the task join handle.
-/// Call `stop.store(true, Ordering::Relaxed)` then await the handle to cleanly stop.
-fn start_spinner() -> (Arc<AtomicBool>, tokio::task::JoinHandle<()>) {
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_clone = stop.clone();
+/// Spawn a background task that prints a spinner.  Used during tool-call
+/// iterations where the LLM produces no content tokens.
+fn start_spinner() -> (
+    tokio::sync::watch::Sender<bool>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
     let handle = tokio::spawn(async move {
         let frames = ['-', '\\', '|', '/'];
         let mut i = 0usize;
         let mut stdout = io::stdout();
         loop {
-            if stop_clone.load(Ordering::Relaxed) {
-                // Clear the spinner line
+            if *stop_rx.borrow() {
+                // Clear the spinner line.
                 print!("\r   \r");
                 let _ = stdout.flush();
                 break;
@@ -220,10 +247,17 @@ fn start_spinner() -> (Arc<AtomicBool>, tokio::task::JoinHandle<()>) {
             print!("\r{} ", frames[i % frames.len()]);
             let _ = stdout.flush();
             i += 1;
-            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(120)) => {}
+                _ = stop_rx.changed() => {
+                    print!("\r   \r");
+                    let _ = stdout.flush();
+                    break;
+                }
+            }
         }
     });
-    (stop, handle)
+    (stop_tx, handle)
 }
 
 // ── Print help ────────────────────────────────────────────────────────────────
@@ -430,22 +464,28 @@ async fn main() -> Result<()> {
                     continue;
                 }
 
-                // Normal user input — run through the orchestrator.
-                let (stop_spinner, spinner_handle) = start_spinner();
-                let turn_result = orchestrator
-                    .run_turn(input, conversation_id, Interface::Cli)
-                    .await;
-                stop_spinner.store(true, Ordering::Relaxed);
-                let _ = spinner_handle.await;
+                // Normal user input — run through the orchestrator with streaming.
+                let (token_tx, token_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-                match turn_result {
-                    Ok(result) => {
-                        println!("\n{}\n", result.answer);
-                    }
-                    Err(e) => {
-                        eprintln!("\nError: {e}\n");
-                    }
+                // Show a spinner while the LLM is working (e.g. during tool calls).
+                let (stop_spinner, spinner_handle) = start_spinner();
+
+                // Print tokens as they arrive; spinner clears on the first token.
+                let printer_handle = start_token_printer(token_rx);
+
+                let turn_result = orchestrator
+                    .run_turn_streaming(input, conversation_id, Interface::Cli, token_tx)
+                    .await;
+
+                // Stop spinner (no-op if tokens already cleared it).
+                let _ = stop_spinner.send(true);
+                let _ = spinner_handle.await;
+                let _ = printer_handle.await;
+
+                if let Err(e) = turn_result {
+                    eprintln!("\nError: {e}\n");
                 }
+                println!();
             }
 
             Ok(Signal::CtrlC) => {

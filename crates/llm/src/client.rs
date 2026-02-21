@@ -164,6 +164,39 @@ impl LlmClient {
         }
     }
 
+    /// Send a chat turn, streaming content tokens to `token_tx` as they arrive.
+    ///
+    /// For native tool-call mode: content tokens are sent as each chunk arrives
+    /// from the Ollama streaming endpoint. Tool-call responses typically have
+    /// empty content, so no tokens are forwarded for those turns.
+    ///
+    /// For ReAct mode: the full response is accumulated, then parsed. If the
+    /// result is a `FinalAnswer`, the answer text is sent as a single token.
+    ///
+    /// Returns the parsed [`LlmResponse`] once the model is done.
+    pub async fn chat_stream(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        skills: &[&SkillDef],
+        token_tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<LlmResponse> {
+        match self.effective_mode() {
+            ToolCallMode::Native => {
+                self.chat_native_stream(system_prompt, history, skills, token_tx)
+                    .await
+            }
+            ToolCallMode::React => {
+                self.chat_react_stream(system_prompt, history, skills, token_tx)
+                    .await
+            }
+            ToolCallMode::Auto => {
+                self.chat_auto_stream(system_prompt, history, skills, token_tx)
+                    .await
+            }
+        }
+    }
+
     // ── Mode resolution ───────────────────────────────────────────────────────
 
     fn effective_mode(&self) -> ToolCallMode {
@@ -339,6 +372,202 @@ impl LlmClient {
         let raw_text = response.message.content;
         let step = ReActParser::parse(&raw_text);
         Ok(react_step_to_response(step))
+    }
+
+    // ── Streaming native (via reqwest) ───────────────────────────────────────
+
+    /// Streaming variant of [`chat_native`].  Content tokens are forwarded to
+    /// `token_tx` as each NDJSON chunk arrives.  Tool-call responses typically
+    /// carry empty content, so nothing will be forwarded during tool turns.
+    async fn chat_native_stream(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        skills: &[&SkillDef],
+        token_tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<LlmResponse> {
+        debug!(
+            model = %self.config.model,
+            skills = skills.len(),
+            "Sending native streaming request to Ollama"
+        );
+
+        let messages = build_json_messages(system_prompt, history);
+        let tools: Vec<Value> = skills.iter().map(|s| skill_to_tool_json(s)).collect();
+
+        let body = json!({
+            "model": self.config.model,
+            "messages": messages,
+            "tools": tools,
+            "stream": true,
+        });
+
+        let url = format!("{}/api/chat", self.config.base_url.trim_end_matches('/'));
+
+        let resp = self
+            .http
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("HTTP streaming request to Ollama /api/chat failed")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Ollama returned {status}: {text}");
+        }
+
+        let mut content_buf = String::new();
+        let mut tool_calls_buf: Vec<Value> = Vec::new();
+        let mut line_buf = String::new();
+        let mut resp = resp;
+
+        while let Some(chunk) = resp.chunk().await? {
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            line_buf.push_str(&chunk_str);
+
+            // Process all complete newline-delimited JSON lines.
+            while let Some(pos) = line_buf.find('\n') {
+                let line = line_buf[..pos].trim().to_string();
+                line_buf = line_buf[pos + 1..].to_string();
+
+                if line.is_empty() {
+                    continue;
+                }
+
+                if let Ok(json) = serde_json::from_str::<Value>(&line) {
+                    // Forward content tokens immediately.
+                    if let Some(content) = json.pointer("/message/content").and_then(|v| v.as_str())
+                    {
+                        if !content.is_empty() {
+                            content_buf.push_str(content);
+                            let _ = token_tx.send(content.to_string());
+                        }
+                    }
+                    // Accumulate tool calls (appear near end of stream).
+                    if let Some(tcs) = json
+                        .pointer("/message/tool_calls")
+                        .and_then(|v| v.as_array())
+                    {
+                        tool_calls_buf.extend(tcs.iter().cloned());
+                    }
+                }
+            }
+        }
+
+        // Determine final response type from accumulated data.
+        if let Some(first) = tool_calls_buf.first() {
+            let name = first
+                .pointer("/function/name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let params = first
+                .pointer("/function/arguments")
+                .cloned()
+                .unwrap_or(Value::Object(serde_json::Map::new()));
+
+            if !name.is_empty() {
+                debug!(skill = %name, "Native streaming: tool call received");
+                return Ok(LlmResponse::ToolCall { name, params });
+            }
+        }
+
+        debug!("Native streaming: final answer received");
+        Ok(LlmResponse::FinalAnswer(content_buf))
+    }
+
+    // ── Streaming ReAct (via ollama-rs) ──────────────────────────────────────
+
+    /// Streaming variant of [`chat_react`].  The full text is accumulated from
+    /// the stream before parsing.  If the result is a `FinalAnswer`, the answer
+    /// text is forwarded to `token_tx` as a single chunk.  Raw ReAct-format
+    /// content (THOUGHT/ACTION markers) is not forwarded to avoid confusing UI.
+    async fn chat_react_stream(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        skills: &[&SkillDef],
+        token_tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<LlmResponse> {
+        use tokio_stream::StreamExt as _;
+
+        debug!(
+            model = %self.config.model,
+            "Sending ReAct streaming request to Ollama"
+        );
+
+        let react_system = if system_prompt.is_empty() {
+            build_system_prompt(skills)
+        } else {
+            format!("{}\n\n{}", system_prompt, build_system_prompt(skills))
+        };
+
+        let messages = build_ollama_messages(&react_system, history);
+        let request = ChatMessageRequest::new(self.config.model.clone(), messages);
+
+        let mut stream = self
+            .ollama
+            .send_chat_messages_stream(request)
+            .await
+            .map_err(|e| anyhow::anyhow!("Ollama streaming chat request failed: {e}"))?;
+
+        let mut raw_text = String::new();
+        while let Some(Ok(res)) = stream.next().await {
+            raw_text.push_str(&res.message.content);
+        }
+
+        let step = ReActParser::parse(&raw_text);
+
+        // Only forward the clean answer text, not raw ReAct markers.
+        if let ReActStep::Answer(ref text) = step {
+            let _ = token_tx.send(text.clone());
+        }
+
+        Ok(react_step_to_response(step))
+    }
+
+    // ── Streaming auto mode ───────────────────────────────────────────────────
+
+    async fn chat_auto_stream(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        skills: &[&SkillDef],
+        token_tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<LlmResponse> {
+        debug!("Auto streaming: trying native tool-calling first");
+
+        match self
+            .chat_native_stream(system_prompt, history, skills, token_tx)
+            .await
+        {
+            Ok(response @ LlmResponse::ToolCall { .. }) => {
+                self.set_tool_call_capable(true);
+                debug!("Auto streaming: model supports native tool-calling");
+                Ok(response)
+            }
+            Ok(LlmResponse::FinalAnswer(text)) if ReActParser::looks_like_react(&text) => {
+                warn!(
+                    "Auto streaming: native response looks like ReAct \
+                     — switching to ReAct for this session"
+                );
+                self.set_tool_call_capable(false);
+                // Re-parse without a second LLM call; tokens already forwarded.
+                Ok(react_step_to_response(ReActParser::parse(&text)))
+            }
+            Ok(response) => {
+                self.set_tool_call_capable(true);
+                Ok(response)
+            }
+            Err(err) => {
+                warn!(%err, "Auto streaming: native failed, falling back to ReAct");
+                self.set_tool_call_capable(false);
+                self.chat_react_stream(system_prompt, history, skills, token_tx)
+                    .await
+            }
+        }
     }
 }
 

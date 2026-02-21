@@ -110,6 +110,35 @@ impl ReactOrchestrator {
         conversation_id: Uuid,
         interface: Interface,
     ) -> Result<TurnResult> {
+        self.run_turn_internal(user_message, conversation_id, interface, None)
+            .await
+    }
+
+    /// Process one turn of the conversation, streaming final-answer tokens to
+    /// `token_tx` as they arrive from the LLM.
+    ///
+    /// Tokens are forwarded only for the final answer step.  During tool-call
+    /// iterations the native Ollama endpoint produces empty content, so nothing
+    /// is forwarded then.  Drop or close the receiver once this method returns
+    /// to signal the end of the stream.
+    pub async fn run_turn_streaming(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        token_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Result<TurnResult> {
+        self.run_turn_internal(user_message, conversation_id, interface, Some(token_tx))
+            .await
+    }
+
+    async fn run_turn_internal(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        token_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ) -> Result<TurnResult> {
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
@@ -160,7 +189,13 @@ impl ReactOrchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
-            let response = self.llm.chat(system_prompt, &history, &skill_refs).await?;
+            let response = if let Some(ref tx) = token_tx {
+                self.llm
+                    .chat_stream(system_prompt, &history, &skill_refs, tx)
+                    .await?
+            } else {
+                self.llm.chat(system_prompt, &history, &skill_refs).await?
+            };
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
