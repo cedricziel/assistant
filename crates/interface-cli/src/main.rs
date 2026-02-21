@@ -1,6 +1,6 @@
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig, Interface};
@@ -195,6 +195,34 @@ async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Result<
     Ok(())
 }
 
+// ── Spinner ───────────────────────────────────────────────────────────────────
+
+/// Spawn a background task that prints a spinner until `stop` is set to `true`.
+/// Returns the `Arc<AtomicBool>` stop flag and the task join handle.
+/// Call `stop.store(true, Ordering::Relaxed)` then await the handle to cleanly stop.
+fn start_spinner() -> (Arc<AtomicBool>, tokio::task::JoinHandle<()>) {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_clone = stop.clone();
+    let handle = tokio::spawn(async move {
+        let frames = ['-', '\\', '|', '/'];
+        let mut i = 0usize;
+        let mut stdout = io::stdout();
+        loop {
+            if stop_clone.load(Ordering::Relaxed) {
+                // Clear the spinner line
+                print!("\r   \r");
+                let _ = stdout.flush();
+                break;
+            }
+            print!("\r{} ", frames[i % frames.len()]);
+            let _ = stdout.flush();
+            i += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        }
+    });
+    (stop, handle)
+}
+
 // ── Print help ────────────────────────────────────────────────────────────────
 
 fn print_help() {
@@ -372,10 +400,14 @@ async fn main() -> Result<()> {
                 }
 
                 // Normal user input — run through the orchestrator.
-                match orchestrator
+                let (stop_spinner, spinner_handle) = start_spinner();
+                let turn_result = orchestrator
                     .run_turn(input, conversation_id, Interface::Cli)
-                    .await
-                {
+                    .await;
+                stop_spinner.store(true, Ordering::Relaxed);
+                let _ = spinner_handle.await;
+
+                match turn_result {
                     Ok(result) => {
                         println!("\n{}\n", result.answer);
                     }
