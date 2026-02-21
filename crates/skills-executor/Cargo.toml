@@ -25,3 +25,9 @@ cron = "0.15"
 dirs = "6"
 # WASM plugin execution via extism
 extism = "1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+assistant-storage = { path = "../storage" }
+uuid = { workspace = true }

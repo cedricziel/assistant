@@ -15,3 +15,6 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 # YAML frontmatter parser (serde_yaml is deprecated — use gray_matter)
 gray_matter = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

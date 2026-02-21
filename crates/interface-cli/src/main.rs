@@ -220,7 +220,7 @@ fn print_help() {
     println!(
         "\nAssistant REPL commands:\n\
          \n\
-         /skills                       List all registered skills\n\
+         /skills [name]                 List all skills, or show detail for one\n\
          /review                       Review pending skill refinement proposals\n\
          /install <path|owner/repo>    Install a skill from disk or GitHub\n\
          /model <name>                 Switch model (takes effect on next startup)\n\
@@ -336,21 +336,40 @@ async fn main() -> Result<()> {
 
                     match cmd {
                         "skills" => {
-                            let skills = registry.list().await;
-                            if skills.is_empty() {
-                                println!("No skills registered.");
-                            } else {
-                                println!("\nRegistered skills ({}):\n", skills.len());
-                                for s in &skills {
-                                    println!(
-                                        "  {:30}  tier={:8}  source={:10}  dir={}",
-                                        s.name,
-                                        s.tier.label(),
-                                        s.source,
-                                        s.dir.display()
-                                    );
+                            if arg.is_empty() {
+                                let skills = registry.list().await;
+                                if skills.is_empty() {
+                                    println!("No skills registered.");
+                                } else {
+                                    println!("\nRegistered skills ({}):\n", skills.len());
+                                    for s in &skills {
+                                        println!(
+                                            "  {:30}  tier={:8}  source={:10}  dir={}",
+                                            s.name,
+                                            s.tier.label(),
+                                            s.source,
+                                            s.dir.display()
+                                        );
+                                    }
+                                    println!();
+                                }
+                            } else if let Some(skill) = registry.get(arg).await {
+                                println!("\nSkill: {}", skill.name);
+                                println!("  Tier:        {}", skill.tier.label());
+                                println!("  Source:      {}", skill.source);
+                                println!("  Directory:   {}", skill.dir.display());
+                                if !skill.description.is_empty() {
+                                    println!("  Description: {}", skill.description);
+                                }
+                                if skill.has_auxiliary_files() {
+                                    println!("\n  Auxiliary files:");
+                                    for (_category, path) in skill.auxiliary_files() {
+                                        println!("    {}", path.display());
+                                    }
                                 }
                                 println!();
+                            } else {
+                                eprintln!("Skill '{arg}' not found.");
                             }
                         }
 

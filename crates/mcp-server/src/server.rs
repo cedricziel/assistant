@@ -1,11 +1,12 @@
 //! MCP server request dispatcher.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use assistant_core::Interface;
+use assistant_core::{ExecutionContext, Interface};
 use assistant_runtime::Orchestrator;
-use assistant_skills_executor::install_skill_from_source;
+use assistant_skills_executor::{install_skill_from_source, SkillExecutor};
 use assistant_storage::registry::SkillRegistry;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
@@ -17,6 +18,7 @@ use crate::protocol::*;
 pub async fn handle_request(
     req: JsonRpcRequest,
     registry: Arc<SkillRegistry>,
+    executor: Arc<SkillExecutor>,
     orchestrator: Arc<Orchestrator>,
     user_skills_dir: PathBuf,
 ) -> JsonRpcResponse {
@@ -48,67 +50,34 @@ pub async fn handle_request(
 
         // ── Tools ─────────────────────────────────────────────────────────────
         "tools/list" => {
-            let tools = vec![
-                McpTool {
-                    name: "list_skills".to_string(),
-                    description: "List all registered assistant skills with their names, descriptions, and tiers.".to_string(),
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {
-                            "filter": {
-                                "type": "string",
-                                "description": "Optional filter string to match against skill names or descriptions"
-                            }
-                        }
-                    }),
-                },
-                McpTool {
-                    name: "invoke_skill".to_string(),
-                    description: "Invoke a named assistant skill and return its output.".to_string(),
-                    input_schema: json!({
-                        "type": "object",
-                        "required": ["name"],
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "The skill name to invoke (e.g. 'web-fetch')"
-                            },
-                            "params": {
-                                "type": "object",
-                                "description": "Parameters to pass to the skill"
-                            }
-                        }
-                    }),
-                },
-                McpTool {
-                    name: "run_prompt".to_string(),
-                    description: "Send a prompt to the assistant and get a full ReAct response, including any skill invocations.".to_string(),
-                    input_schema: json!({
-                        "type": "object",
-                        "required": ["prompt"],
-                        "properties": {
-                            "prompt": {
-                                "type": "string",
-                                "description": "The user message to process"
-                            }
-                        }
-                    }),
-                },
-                McpTool {
-                    name: "install_skill".to_string(),
-                    description: "Install a skill from a local path or GitHub repository (owner/repo[/path]).".to_string(),
-                    input_schema: json!({
-                        "type": "object",
-                        "required": ["source"],
-                        "properties": {
-                            "source": {
-                                "type": "string",
-                                "description": "A local filesystem path or 'owner/repo[/sub/path]' for GitHub"
-                            }
-                        }
-                    }),
-                },
-            ];
+            let skills = registry.list().await;
+            let mut tools: Vec<McpTool> = skills.iter().map(skill_to_mcp_tool).collect();
+
+            // Management tools appended after the per-skill entries.
+            tools.push(McpTool {
+                name: "run_prompt".to_string(),
+                description:
+                    "Send a prompt through the full ReAct loop (may invoke multiple skills)."
+                        .to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "required": ["prompt"],
+                    "properties": {
+                        "prompt": { "type": "string", "description": "The user message to process" }
+                    }
+                }),
+            });
+            tools.push(McpTool {
+                name: "install_skill".to_string(),
+                description: "Install a skill from a local path or GitHub (owner/repo[/path]).".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "required": ["source"],
+                    "properties": {
+                        "source": { "type": "string", "description": "Local path or owner/repo[/sub/path]" }
+                    }
+                }),
+            });
 
             JsonRpcResponse::ok(req.id, json!({ "tools": tools }))
         }
@@ -117,121 +86,79 @@ pub async fn handle_request(
             let tool_name = req.params["name"].as_str().unwrap_or("").to_string();
             let tool_input = req.params["arguments"].clone();
 
-            match tool_name.as_str() {
-                "list_skills" => {
-                    let filter = tool_input["filter"].as_str().unwrap_or("").to_lowercase();
-                    let skills = registry.list().await;
-                    let filtered: Vec<_> = skills
-                        .iter()
-                        .filter(|s| {
-                            filter.is_empty()
-                                || s.name.to_lowercase().contains(&filter)
-                                || s.description.to_lowercase().contains(&filter)
-                        })
-                        .collect();
+            // ── Management tools ──────────────────────────────────────────────
+            if tool_name == "run_prompt" {
+                let Some(prompt) = tool_input["prompt"].as_str() else {
+                    return JsonRpcResponse::err(
+                        req.id,
+                        -32602,
+                        "Missing required parameter 'prompt'",
+                    );
+                };
+                return match orchestrator
+                    .run_turn(prompt, Uuid::new_v4(), Interface::Mcp)
+                    .await
+                {
+                    Ok(turn) => {
+                        let content = vec![ContentItem::text(turn.answer)];
+                        JsonRpcResponse::ok(req.id, json!({ "content": content }))
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "run_prompt failed");
+                        JsonRpcResponse::err(req.id, -32603, e.to_string())
+                    }
+                };
+            }
 
-                    let text = filtered
-                        .iter()
-                        .map(|s| format!("{}\t[{}]\t{}", s.name, s.tier, s.description))
-                        .collect::<Vec<_>>()
-                        .join("\n");
+            if tool_name == "install_skill" {
+                let Some(source) = tool_input["source"].as_str() else {
+                    return JsonRpcResponse::err(
+                        req.id,
+                        -32602,
+                        "Missing required parameter 'source'",
+                    );
+                };
+                return match install_skill_from_source(source, &user_skills_dir, registry.clone())
+                    .await
+                {
+                    Ok(name) => {
+                        let content = vec![ContentItem::text(format!("Skill '{name}' installed."))];
+                        JsonRpcResponse::ok(req.id, json!({ "content": content }))
+                    }
+                    Err(e) => {
+                        warn!(source, error = %e, "install_skill failed");
+                        JsonRpcResponse::err(req.id, -32603, e.to_string())
+                    }
+                };
+            }
 
-                    let content = vec![ContentItem::text(if text.is_empty() {
-                        "No skills found.".to_string()
-                    } else {
-                        format!("Available skills ({}):\n{}", filtered.len(), text)
-                    })];
+            // ── Per-skill dynamic dispatch ─────────────────────────────────────
+            let Some(skill_def) = registry.get(&tool_name).await else {
+                return JsonRpcResponse::err(req.id, -32601, format!("Unknown tool: {tool_name}"));
+            };
 
+            let params: HashMap<String, Value> = if let Value::Object(map) = &tool_input {
+                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            } else {
+                HashMap::new()
+            };
+
+            let ctx = ExecutionContext {
+                conversation_id: Uuid::new_v4(),
+                turn: 0,
+                interface: Interface::Mcp,
+                interactive: false,
+            };
+
+            match executor.execute(&skill_def, params, &ctx).await {
+                Ok(output) => {
+                    let content = vec![ContentItem::text(output.content)];
                     JsonRpcResponse::ok(req.id, json!({ "content": content }))
                 }
-
-                "invoke_skill" => {
-                    let name = match tool_input["name"].as_str() {
-                        Some(n) => n.to_string(),
-                        None => {
-                            return JsonRpcResponse::err(
-                                req.id,
-                                -32602,
-                                "Missing required parameter 'name'",
-                            );
-                        }
-                    };
-                    let prompt = format!(
-                        "Use the {} skill with parameters: {}",
-                        name,
-                        tool_input.get("params").unwrap_or(&Value::Null)
-                    );
-                    let result = orchestrator
-                        .run_turn(&prompt, Uuid::new_v4(), Interface::Mcp)
-                        .await;
-
-                    match result {
-                        Ok(turn) => {
-                            let content = vec![ContentItem::text(turn.answer)];
-                            JsonRpcResponse::ok(req.id, json!({ "content": content }))
-                        }
-                        Err(e) => {
-                            warn!(skill = %name, error = %e, "invoke_skill failed");
-                            JsonRpcResponse::err(req.id, -32603, e.to_string())
-                        }
-                    }
+                Err(e) => {
+                    warn!(skill = %tool_name, error = %e, "Skill execution failed");
+                    JsonRpcResponse::err(req.id, -32603, e.to_string())
                 }
-
-                "run_prompt" => {
-                    let prompt = match tool_input["prompt"].as_str() {
-                        Some(p) => p.to_string(),
-                        None => {
-                            return JsonRpcResponse::err(
-                                req.id,
-                                -32602,
-                                "Missing required parameter 'prompt'",
-                            );
-                        }
-                    };
-                    let result = orchestrator
-                        .run_turn(&prompt, Uuid::new_v4(), Interface::Mcp)
-                        .await;
-
-                    match result {
-                        Ok(turn) => {
-                            let content = vec![ContentItem::text(turn.answer)];
-                            JsonRpcResponse::ok(req.id, json!({ "content": content }))
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "run_prompt failed");
-                            JsonRpcResponse::err(req.id, -32603, e.to_string())
-                        }
-                    }
-                }
-
-                "install_skill" => {
-                    let source = match tool_input["source"].as_str() {
-                        Some(s) => s.to_string(),
-                        None => {
-                            return JsonRpcResponse::err(
-                                req.id,
-                                -32602,
-                                "Missing required parameter 'source'",
-                            );
-                        }
-                    };
-                    match install_skill_from_source(&source, &user_skills_dir, registry.clone())
-                        .await
-                    {
-                        Ok(name) => {
-                            let content = vec![ContentItem::text(format!(
-                                "Skill '{name}' installed successfully."
-                            ))];
-                            JsonRpcResponse::ok(req.id, json!({ "content": content }))
-                        }
-                        Err(e) => {
-                            warn!(source = %source, error = %e, "install_skill failed");
-                            JsonRpcResponse::err(req.id, -32603, e.to_string())
-                        }
-                    }
-                }
-
-                other => JsonRpcResponse::err(req.id, -32601, format!("Unknown tool: {other}")),
             }
         }
 
@@ -252,6 +179,24 @@ pub async fn handle_request(
                     description: skill.description.clone(),
                     mime_type: "text/markdown".to_string(),
                 });
+
+                // Auxiliary files (scripts/, references/, assets/)
+                for (category, rel_path) in skill.auxiliary_files() {
+                    let filename = rel_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    resources.push(McpResource {
+                        uri: format!("skills://{}/{}", skill.name, rel_path.display()),
+                        name: filename.to_string(),
+                        description: format!(
+                            "{} file for {} skill",
+                            category.dir_name(),
+                            skill.name
+                        ),
+                        mime_type: category.mime_type().to_string(),
+                    });
+                }
             }
 
             JsonRpcResponse::ok(req.id, json!({ "resources": resources }))
@@ -280,20 +225,64 @@ pub async fn handle_request(
                     serde_json::to_string_pretty(&json!({ "skills": items })).unwrap_or_default(),
                 )];
                 JsonRpcResponse::ok(req.id, json!({ "contents": content }))
-            } else if let Some(skill_name) = uri.strip_prefix("skills://") {
-                match registry.get(skill_name).await {
-                    Some(skill) => {
-                        let skill_md_path = skill.dir.join("SKILL.md");
-                        let text = std::fs::read_to_string(&skill_md_path)
-                            .unwrap_or_else(|_| skill.body.clone());
-                        let content = vec![ContentItem::text(text)];
-                        JsonRpcResponse::ok(req.id, json!({ "contents": content }))
+            } else if let Some(path) = uri.strip_prefix("skills://") {
+                let segments: Vec<&str> = path.splitn(3, '/').collect();
+                match segments.len() {
+                    // skills://<name> — return SKILL.md
+                    1 => {
+                        let skill_name = segments[0];
+                        match registry.get(skill_name).await {
+                            Some(skill) => {
+                                let skill_md_path = skill.dir.join("SKILL.md");
+                                let text = std::fs::read_to_string(&skill_md_path)
+                                    .unwrap_or_else(|_| skill.body.clone());
+                                let content = vec![ContentItem::text(text)];
+                                JsonRpcResponse::ok(req.id, json!({ "contents": content }))
+                            }
+                            None => JsonRpcResponse::err(
+                                req.id,
+                                -32602,
+                                format!("Skill '{skill_name}' not found"),
+                            ),
+                        }
                     }
-                    None => JsonRpcResponse::err(
-                        req.id,
-                        -32602,
-                        format!("Skill '{skill_name}' not found"),
-                    ),
+                    // skills://<name>/<category>/<filename> — return auxiliary file
+                    // splitn(3, '/') yields [name, category, filename] for "name/category/filename"
+                    3 if matches!(segments[1], "scripts" | "references" | "assets") => {
+                        let skill_name = segments[0];
+                        let category = segments[1];
+                        let filename = segments[2];
+                        match registry.get(skill_name).await {
+                            Some(skill) => {
+                                let file_path = skill.dir.join(category).join(filename);
+                                match std::fs::read_to_string(&file_path) {
+                                    Ok(text) => {
+                                        let content = vec![ContentItem::text(text)];
+                                        JsonRpcResponse::ok(
+                                            req.id,
+                                            json!({ "contents": content }),
+                                        )
+                                    }
+                                    Err(_) => JsonRpcResponse::err(
+                                        req.id,
+                                        -32602,
+                                        format!(
+                                            "File '{category}/{filename}' not found in skill '{skill_name}'"
+                                        ),
+                                    ),
+                                }
+                            }
+                            None => JsonRpcResponse::err(
+                                req.id,
+                                -32602,
+                                format!("Skill '{skill_name}' not found"),
+                            ),
+                        }
+                    }
+                    // Invalid category or unexpected segment count
+                    _ => {
+                        JsonRpcResponse::err(req.id, -32602, format!("Invalid resource URI: {uri}"))
+                    }
                 }
             } else {
                 JsonRpcResponse::err(req.id, -32602, format!("Unknown resource URI: {uri}"))
@@ -309,5 +298,21 @@ pub async fn handle_request(
                 JsonRpcResponse::ok(None, json!({}))
             }
         }
+    }
+}
+
+/// Convert a [`SkillDef`] into an [`McpTool`] for the `tools/list` response.
+///
+/// `params_schema()` returns the raw *properties map* stored in SKILL.md metadata,
+/// so we wrap it in the full JSON Schema object envelope that MCP's `inputSchema` expects.
+fn skill_to_mcp_tool(skill: &assistant_core::SkillDef) -> McpTool {
+    let input_schema = match skill.params_schema() {
+        Some(properties) => json!({ "type": "object", "properties": properties }),
+        None => json!({ "type": "object", "properties": {} }),
+    };
+    McpTool {
+        name: skill.name.clone(),
+        description: skill.description.clone(),
+        input_schema,
     }
 }

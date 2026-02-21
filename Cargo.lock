@@ -215,6 +215,7 @@ dependencies = [
  "gray_matter",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
  "uuid",
 ]
@@ -327,8 +328,10 @@ dependencies = [
  "reqwest",
  "scraper",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
