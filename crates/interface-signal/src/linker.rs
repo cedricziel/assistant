@@ -59,9 +59,14 @@ pub async fn link_device(store_path: &Path, device_name: &str) -> Result<()> {
             })?;
         }
 
-        // presage-store-sqlite uses a SQLite URL.
+        // presage-store-sqlite uses a SQLite URL; create_if_missing must be
+        // explicit — the default is false, causing SQLITE_CANTOPEN on a fresh
+        // install where the file does not yet exist.
         let db_url = format!("sqlite://{}", store_path.display());
-        let store = SqliteStore::open(&db_url, OnNewIdentity::Trust)
+        let options = SqliteConnectOptions::from_str(&db_url)
+            .with_context(|| format!("Invalid signal store path: {}", store_path.display()))?
+            .create_if_missing(true);
+        let store = SqliteStore::open_with_options(options, OnNewIdentity::Trust)
             .await
             .map_err(|e| {
                 anyhow::anyhow!(

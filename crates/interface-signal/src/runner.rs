@@ -79,7 +79,8 @@ impl SignalInterface {
     async fn run_presage_loop(&self) -> Result<()> {
         use futures::{pin_mut, StreamExt};
         use presage::{model::messages::Received, Manager};
-        use presage_store_sqlite::{OnNewIdentity, SqliteStore};
+        use presage_store_sqlite::{OnNewIdentity, SqliteConnectOptions, SqliteStore};
+        use std::str::FromStr as _;
         use tracing::{debug, info, warn};
 
         use assistant_core::Interface;
@@ -94,8 +95,13 @@ impl SignalInterface {
                 .map_err(|e| anyhow::anyhow!("Failed to create signal store directory: {e}"))?;
         }
 
+        // create_if_missing must be set explicitly — the default is false,
+        // causing SQLITE_CANTOPEN when the file does not yet exist.
         let db_url = format!("sqlite://{}", store_path.display());
-        let store = SqliteStore::open(&db_url, OnNewIdentity::Trust)
+        let options = SqliteConnectOptions::from_str(&db_url)
+            .map_err(|e| anyhow::anyhow!("Invalid signal store path: {e}"))?
+            .create_if_missing(true);
+        let store = SqliteStore::open_with_options(options, OnNewIdentity::Trust)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to open signal store: {e}"))?;
 
