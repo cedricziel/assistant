@@ -1,20 +1,9 @@
-use std::sync::{Arc, Mutex};
-
 use anyhow::Context as _;
-use assistant_core::{types::ToolCallMode, SkillDef};
+use assistant_core::SkillDef;
 use futures::StreamExt as _;
-use ollama_rs::{
-    generation::chat::{request::ChatMessageRequest, ChatMessage, MessageRole},
-    Ollama,
-};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
-use tracing::{debug, warn};
-
-use crate::{
-    prompts::build_system_prompt,
-    react::{ReActParser, ReActStep},
-};
+use tracing::debug;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -28,7 +17,7 @@ pub struct ChatHistoryMessage {
     pub content: String,
 }
 
-/// Chat participant role (mirrors `ollama_rs::MessageRole` without leaking it).
+/// Chat participant role.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatRole {
     System,
@@ -56,7 +45,6 @@ pub enum LlmResponse {
 pub struct LlmClientConfig {
     pub model: String,
     pub base_url: String,
-    pub tool_call_mode: ToolCallMode,
     pub timeout_secs: u64,
 }
 
@@ -65,7 +53,6 @@ impl Default for LlmClientConfig {
         Self {
             model: "qwen2.5:7b".to_string(),
             base_url: "http://localhost:11434".to_string(),
-            tool_call_mode: ToolCallMode::Auto,
             timeout_secs: 120,
         }
     }
@@ -76,7 +63,6 @@ impl From<&assistant_core::LlmConfig> for LlmClientConfig {
         Self {
             model: cfg.model.clone(),
             base_url: cfg.base_url.clone(),
-            tool_call_mode: cfg.tool_call_mode.clone(),
             timeout_secs: cfg.timeout_secs,
         }
     }
@@ -84,60 +70,27 @@ impl From<&assistant_core::LlmConfig> for LlmClientConfig {
 
 // ── LlmClient ────────────────────────────────────────────────────────────────
 
-/// High-level LLM client with automatic tool-calling strategy selection.
+/// High-level LLM client using Ollama native tool-calling.
 ///
-/// Supports two invocation paths:
-///
-/// 1. **Native Ollama tool-calling** (preferred when the model supports it):
-///    Sends the request with a `tools` array (built from skill definitions) to
-///    the Ollama `/api/chat` endpoint via `reqwest`, and parses `tool_calls`
-///    from the JSON response.
-///
-/// 2. **ReAct text fallback**: Injects skill descriptions into the system
-///    prompt, sends a plain chat request via `ollama_rs`, and parses the
-///    `THOUGHT:`/`ACTION:`/`ANSWER:` output with [`ReActParser`].
-///
-/// When `tool_call_mode` is [`ToolCallMode::Auto`], the client tries native
-/// tool-calling first. If the response contains no `tool_calls` but the text
-/// contains ReAct markers, it records that the model does not support native
-/// tool-calling and switches to ReAct for all subsequent calls.
+/// Sends requests with a `tools` array (built from skill definitions) to the
+/// Ollama `/api/chat` endpoint and parses `tool_calls` from the JSON response.
+/// If the model does not support native tool-calling, the call will return a
+/// `FinalAnswer` (or the request will fail with an explicit error).
 pub struct LlmClient {
     config: LlmClientConfig,
-    ollama: Ollama,
-    /// Shared reqwest client used for the native-tool-call path.
+    /// Shared reqwest client for all requests.
     http: reqwest::Client,
-    /// `None` = not yet determined, `Some(true)` = native OK, `Some(false)` = use ReAct.
-    tool_call_capable: Arc<Mutex<Option<bool>>>,
 }
 
 impl LlmClient {
     /// Create a new client from the given configuration.
     pub fn new(config: LlmClientConfig) -> anyhow::Result<Self> {
-        let base_url = config.base_url.trim_end_matches('/');
-
-        // Derive host + port for the ollama_rs client.
-        let parsed = format!("{}/", base_url)
-            .parse::<url::Url>()
-            .with_context(|| format!("invalid Ollama base_url: {}", config.base_url))?;
-
-        let scheme = parsed.scheme();
-        let host = parsed.host_str().unwrap_or("localhost");
-        let port = parsed.port().unwrap_or(11434);
-        let host_with_scheme = format!("{scheme}://{host}");
-
-        let ollama = Ollama::new(host_with_scheme, port);
-
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(config.timeout_secs))
             .build()
             .context("failed to build reqwest client")?;
 
-        Ok(Self {
-            config,
-            ollama,
-            http,
-            tool_call_capable: Arc::new(Mutex::new(None)),
-        })
+        Ok(Self { config, http })
     }
 
     /// Create a client directly from a `LlmConfig` (convenience wrapper).
@@ -150,20 +103,16 @@ impl LlmClient {
     /// Send a chat turn and return the model's response.
     ///
     /// # Parameters
-    /// * `system_prompt` – base system instructions (extended in ReAct mode)
+    /// * `system_prompt` – base system instructions
     /// * `history` – previous messages in the conversation
-    /// * `skills` – skills available for this turn
+    /// * `skills` – skills available for this turn (passed as native tools)
     pub async fn chat(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         skills: &[&SkillDef],
     ) -> anyhow::Result<LlmResponse> {
-        match self.effective_mode() {
-            ToolCallMode::Native => self.chat_native(system_prompt, history, skills).await,
-            ToolCallMode::React => self.chat_react(system_prompt, history, skills).await,
-            ToolCallMode::Auto => self.chat_auto(system_prompt, history, skills).await,
-        }
+        self.chat_native(system_prompt, history, skills).await
     }
 
     /// Like [`chat`] but streams final-answer tokens through `token_sink` as
@@ -179,75 +128,8 @@ impl LlmClient {
         skills: &[&SkillDef],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse> {
-        match self.effective_mode() {
-            ToolCallMode::Native => {
-                self.chat_native_streaming(system_prompt, history, skills, token_sink)
-                    .await
-            }
-            ToolCallMode::React => {
-                self.chat_react_streaming(system_prompt, history, skills, token_sink)
-                    .await
-            }
-            ToolCallMode::Auto => {
-                self.chat_auto_streaming(system_prompt, history, skills, token_sink)
-                    .await
-            }
-        }
-    }
-
-    // ── Mode resolution ───────────────────────────────────────────────────────
-
-    fn effective_mode(&self) -> ToolCallMode {
-        match self.config.tool_call_mode {
-            ToolCallMode::Auto => match *self.tool_call_capable.lock().unwrap() {
-                Some(true) => ToolCallMode::Native,
-                Some(false) => ToolCallMode::React,
-                None => ToolCallMode::Auto,
-            },
-            ref m => m.clone(),
-        }
-    }
-
-    fn set_tool_call_capable(&self, capable: bool) {
-        *self.tool_call_capable.lock().unwrap() = Some(capable);
-    }
-
-    // ── Auto mode ─────────────────────────────────────────────────────────────
-
-    async fn chat_auto(
-        &self,
-        system_prompt: &str,
-        history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
-    ) -> anyhow::Result<LlmResponse> {
-        debug!("Auto mode: trying native tool-calling first");
-
-        match self.chat_native(system_prompt, history, skills).await {
-            Ok(response @ LlmResponse::ToolCall { .. }) => {
-                self.set_tool_call_capable(true);
-                debug!("Auto mode: model supports native tool-calling");
-                Ok(response)
-            }
-            Ok(LlmResponse::FinalAnswer(text)) if ReActParser::looks_like_react(&text) => {
-                warn!(
-                    "Auto mode: native call returned no tool_calls but response looks like ReAct \
-                     — switching to ReAct for this session"
-                );
-                self.set_tool_call_capable(false);
-                // Re-parse the text we already have via the ReAct parser.
-                Ok(react_step_to_response(ReActParser::parse(&text)))
-            }
-            Ok(response) => {
-                // Clean final answer; assume native mode is fine.
-                self.set_tool_call_capable(true);
-                Ok(response)
-            }
-            Err(err) => {
-                warn!(%err, "Auto mode: native tool-calling failed, falling back to ReAct");
-                self.set_tool_call_capable(false);
-                self.chat_react(system_prompt, history, skills).await
-            }
-        }
+        self.chat_native_streaming(system_prompt, history, skills, token_sink)
+            .await
     }
 
     // ── Native tool-calling (via reqwest) ────────────────────────────────────
@@ -336,80 +218,6 @@ impl LlmClient {
 
         debug!("Native request returned no tool_calls; treating as final answer");
         Ok(LlmResponse::FinalAnswer(content))
-    }
-
-    // ── ReAct fallback (via ollama-rs) ────────────────────────────────────────
-
-    async fn chat_react(
-        &self,
-        system_prompt: &str,
-        history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
-    ) -> anyhow::Result<LlmResponse> {
-        debug!(
-            model = %self.config.model,
-            "Sending ReAct text request to Ollama"
-        );
-
-        // Build a combined system prompt that includes the ReAct skill listing.
-        let react_system = if system_prompt.is_empty() {
-            build_system_prompt(skills)
-        } else {
-            format!("{}\n\n{}", system_prompt, build_system_prompt(skills))
-        };
-
-        let messages = build_ollama_messages(&react_system, history);
-        let request = ChatMessageRequest::new(self.config.model.clone(), messages);
-
-        let response = self
-            .ollama
-            .send_chat_messages(request)
-            .await
-            .map_err(|e| anyhow::anyhow!("Ollama chat request failed: {e}"))?;
-
-        let raw_text = response.message.content;
-        let step = ReActParser::parse(&raw_text);
-        Ok(react_step_to_response(step))
-    }
-
-    // ── Streaming variants ────────────────────────────────────────────────────
-
-    async fn chat_auto_streaming(
-        &self,
-        system_prompt: &str,
-        history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
-        token_sink: Option<mpsc::Sender<String>>,
-    ) -> anyhow::Result<LlmResponse> {
-        debug!("Auto streaming mode: trying native tool-calling first");
-
-        match self
-            .chat_native_streaming(system_prompt, history, skills, token_sink.clone())
-            .await
-        {
-            Ok(response @ LlmResponse::ToolCall { .. }) => {
-                self.set_tool_call_capable(true);
-                Ok(response)
-            }
-            Ok(LlmResponse::FinalAnswer(text)) if ReActParser::looks_like_react(&text) => {
-                warn!(
-                    "Auto streaming: native call returned no tool_calls but response looks like \
-                     ReAct — switching to ReAct for this session"
-                );
-                self.set_tool_call_capable(false);
-                Ok(react_step_to_response(ReActParser::parse(&text)))
-            }
-            Ok(response) => {
-                self.set_tool_call_capable(true);
-                Ok(response)
-            }
-            Err(err) => {
-                warn!(%err, "Auto streaming: native failed, falling back to ReAct");
-                self.set_tool_call_capable(false);
-                self.chat_react_streaming(system_prompt, history, skills, token_sink)
-                    .await
-            }
-        }
     }
 
     /// Native streaming: sends `"stream": true` to Ollama and forwards content
@@ -544,86 +352,6 @@ impl LlmClient {
 
         Ok(LlmResponse::FinalAnswer(content))
     }
-
-    /// ReAct streaming: streams via `ollama_rs` and forwards tokens once we
-    /// determine the response is a `FinalAnswer` (i.e. it starts with
-    /// `ANSWER:`).  Tokens that are part of a `THOUGHT:` or `ACTION:` block
-    /// are not forwarded to `token_sink`.
-    async fn chat_react_streaming(
-        &self,
-        system_prompt: &str,
-        history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
-        token_sink: Option<mpsc::Sender<String>>,
-    ) -> anyhow::Result<LlmResponse> {
-        debug!(
-            model = %self.config.model,
-            "Sending ReAct streaming request to Ollama"
-        );
-
-        let react_system = if system_prompt.is_empty() {
-            build_system_prompt(skills)
-        } else {
-            format!("{}\n\n{}", system_prompt, build_system_prompt(skills))
-        };
-
-        let messages = build_ollama_messages(&react_system, history);
-        let request = ChatMessageRequest::new(self.config.model.clone(), messages);
-
-        let mut stream = self
-            .ollama
-            .send_chat_messages_stream(request)
-            .await
-            .map_err(|e| anyhow::anyhow!("Ollama streaming request failed: {:?}", e))?;
-
-        let mut full_text = String::new();
-        // Once we know this is a FinalAnswer, track how many chars we've already
-        // forwarded so we can send only the new portion each iteration.
-        let mut forwarded_len: Option<usize> = None;
-        // The stripped prefix ("ANSWER: ") length once detected.
-        const ANSWER_PREFIX: &str = "ANSWER:";
-
-        while let Some(item) = stream.next().await {
-            let chunk = item.map_err(|e| anyhow::anyhow!("Ollama stream chunk error: {:?}", e))?;
-            let token = chunk.message.content;
-            if token.is_empty() {
-                continue;
-            }
-
-            full_text.push_str(&token);
-
-            // Only stream tokens once we've confirmed this is a final answer.
-            if let Some(ref sink) = token_sink {
-                if let Some(fwd) = forwarded_len {
-                    // Already identified as FinalAnswer — send the new tokens.
-                    let new_part = &full_text[fwd..];
-                    if !new_part.is_empty() {
-                        let _ = sink.send(new_part.to_string()).await;
-                        forwarded_len = Some(full_text.len());
-                    }
-                } else {
-                    // Not yet determined — check if we have enough text to decide.
-                    let trimmed = full_text.trim_start();
-                    if let Some(after_prefix_raw) = trimmed.strip_prefix(ANSWER_PREFIX) {
-                        // Strip the prefix (and optional space) for display.
-                        let after_prefix = after_prefix_raw.trim_start_matches([' ', '\n']);
-                        if !after_prefix.is_empty() {
-                            let _ = sink.send(after_prefix.to_string()).await;
-                        }
-                        forwarded_len = Some(full_text.len());
-                    } else if trimmed.len() > 20 {
-                        // Long enough to be confident it's not an ANSWER: block.
-                        // Don't stream (it's a THOUGHT: or ACTION:).
-                        forwarded_len = Some(full_text.len()); // sentinel: don't stream
-                    }
-                    // else: still accumulating prefix — wait for more tokens.
-                }
-            }
-        }
-
-        let step = ReActParser::parse(&full_text);
-        Ok(react_step_to_response(step))
-    }
 }
 
 // ── Free helpers ──────────────────────────────────────────────────────────────
@@ -668,34 +396,4 @@ fn build_json_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> V
     }
 
     messages
-}
-
-/// Build the `ollama_rs` `ChatMessage` list for the ReAct (ollama-rs) path.
-fn build_ollama_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Vec<ChatMessage> {
-    let mut messages = Vec::with_capacity(history.len() + 1);
-
-    if !system_prompt.is_empty() {
-        messages.push(ChatMessage::system(system_prompt.to_string()));
-    }
-
-    for msg in history {
-        let role = match msg.role {
-            ChatRole::System => MessageRole::System,
-            ChatRole::User => MessageRole::User,
-            ChatRole::Assistant => MessageRole::Assistant,
-            ChatRole::Tool => MessageRole::Tool,
-        };
-        messages.push(ChatMessage::new(role, msg.content.clone()));
-    }
-
-    messages
-}
-
-/// Convert a parsed [`ReActStep`] into an [`LlmResponse`].
-fn react_step_to_response(step: ReActStep) -> LlmResponse {
-    match step {
-        ReActStep::ToolCall { name, params } => LlmResponse::ToolCall { name, params },
-        ReActStep::Answer(text) => LlmResponse::FinalAnswer(text),
-        ReActStep::Thought(text) => LlmResponse::Thinking(text),
-    }
 }

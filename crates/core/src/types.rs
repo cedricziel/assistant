@@ -144,7 +144,6 @@ pub struct AssistantConfig {
 pub struct LlmConfig {
     pub model: String,
     pub base_url: String,
-    pub tool_call_mode: ToolCallMode,
     pub max_iterations: usize,
     pub timeout_secs: u64,
 }
@@ -154,23 +153,10 @@ impl Default for LlmConfig {
         Self {
             model: "qwen2.5:7b".to_string(),
             base_url: "http://localhost:11434".to_string(),
-            tool_call_mode: ToolCallMode::Auto,
             max_iterations: 10,
             timeout_secs: 120,
         }
     }
-}
-
-/// How the LLM invokes skills
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ToolCallMode {
-    /// Try native Ollama tool-calling first, fall back to ReAct if unsupported
-    Auto,
-    /// Always use native Ollama tool-calling
-    Native,
-    /// Always use ReAct text parsing
-    React,
 }
 
 /// Storage configuration

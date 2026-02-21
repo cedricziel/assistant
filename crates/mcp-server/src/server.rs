@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use assistant_core::Interface;
-use assistant_runtime::ReactOrchestrator;
+use assistant_runtime::Orchestrator;
 use assistant_skills_executor::install_skill_from_source;
 use assistant_storage::registry::SkillRegistry;
 use serde_json::{json, Value};
@@ -17,7 +17,7 @@ use crate::protocol::*;
 pub async fn handle_request(
     req: JsonRpcRequest,
     registry: Arc<SkillRegistry>,
-    orchestrator: Arc<ReactOrchestrator>,
+    orchestrator: Arc<Orchestrator>,
     user_skills_dir: PathBuf,
 ) -> JsonRpcResponse {
     debug!(method = %req.method, "MCP request");

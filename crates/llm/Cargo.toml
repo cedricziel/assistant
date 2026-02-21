@@ -12,14 +12,8 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
-# Ollama client with streaming support
-ollama-rs = { version = "0.3", features = ["stream"] }
-# HTTP client for direct API calls if needed
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-# Regex for ReAct parsing
-regex = "1"
-# URL parsing (same version as ollama-rs dependency)
-url = "2"
+# HTTP client for native Ollama API calls
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 # Async stream utilities (for streaming responses)
 futures = "0.3"
 
