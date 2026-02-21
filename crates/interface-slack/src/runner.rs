@@ -65,8 +65,19 @@ async fn on_push_event(
     };
 
     let SlackEventCallbackBody::Message(msg) = &event.event else {
+        debug!(event_type = ?event.event, "Ignoring non-message event");
         return Ok(());
     };
+
+    // Skip bot/system messages: subtype, bot_id, display_as_bot, or no user.
+    let is_bot = matches!(msg.subtype, Some(SlackMessageEventType::BotMessage))
+        || msg.sender.bot_id.is_some()
+        || msg.sender.display_as_bot.unwrap_or(false)
+        || msg.sender.user.is_none();
+    if is_bot {
+        debug!("Ignoring bot/system message");
+        return Ok(());
+    }
 
     let channel_id = msg
         .origin
@@ -88,9 +99,15 @@ async fn on_push_event(
         .unwrap_or("")
         .to_string();
 
-    // Skip bot messages and empty text.
-    if text.is_empty() || msg.sender.bot_id.is_some() {
-        debug!("Ignoring bot message or empty text");
+    // Thread ts: inherit an existing thread or start a new one from this message.
+    let thread_ts = msg
+        .origin
+        .thread_ts
+        .clone()
+        .unwrap_or_else(|| msg.origin.ts.clone());
+
+    if text.is_empty() {
+        debug!(channel = %channel_id, user = %user_id, "Ignoring empty message");
         return Ok(());
     }
 
@@ -106,13 +123,21 @@ async fn on_push_event(
         return Ok(());
     }
 
-    info!(channel = %channel_id, user = %user_id, text_len = text.len(), "Dispatching to orchestrator");
+    info!(
+        channel = %channel_id,
+        user = %user_id,
+        ts = %thread_ts.0,
+        text_len = text.len(),
+        "Dispatching to orchestrator"
+    );
 
     let conversation_id = {
         let mut map = conversations.lock().await;
         *map.entry((channel_id.clone(), user_id.clone()))
             .or_insert_with(Uuid::new_v4)
     };
+
+    debug!(conversation_id = %conversation_id, "Using conversation");
 
     let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
     let collector = tokio::spawn(async move {
@@ -135,15 +160,19 @@ async fn on_push_event(
     }
 
     if reply.is_empty() {
+        debug!(channel = %channel_id, "Orchestrator returned empty reply, skipping post");
         return Ok(());
     }
 
-    // Post the reply to the originating channel.
+    info!(channel = %channel_id, reply_len = reply.len(), "Posting reply to Slack");
+
+    // Post the reply in the same thread as the triggering message.
     let session = client.open_session(&bot_token);
     let post_req = SlackApiChatPostMessageRequest::new(
         channel_id.into(),
         SlackMessageContent::new().with_text(reply),
-    );
+    )
+    .with_thread_ts(thread_ts);
     if let Err(e) = session.chat_post_message(&post_req).await {
         tracing::error!(error = %e, "Failed to post Slack reply");
     }
