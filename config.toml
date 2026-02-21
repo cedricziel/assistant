@@ -1,0 +1,48 @@
+# Default configuration for the AI assistant
+# Copy to ~/.assistant/config.toml and customize
+
+[llm]
+# Ollama model to use for inference
+model = "qwen2.5:7b"
+# Ollama API base URL
+base_url = "http://localhost:11434"
+# Tool calling mode: "native" | "react" | "auto"
+# "auto": try native first, fall back to ReAct if model doesn't support it
+tool_call_mode = "auto"
+# Maximum ReAct iterations per turn
+max_iterations = 10
+# Timeout for LLM calls (seconds)
+timeout_secs = 120
+
+[storage]
+# Path to SQLite database (~/.assistant/assistant.db by default)
+# db_path = "~/.assistant/assistant.db"
+
+[skills]
+# Directories to scan for skills (in priority order):
+# 1. ~/.assistant/skills/ (user personal)
+# 2. <project>/.assistant/skills/ (project-scoped, auto-detected)
+# 3. <binary dir>/skills/ (built-in, always included)
+
+# Extra skill directories to include
+# extra_dirs = []
+
+# Skills to disable (by name)
+# disabled = []
+
+[mcp]
+# Enable the MCP server
+enabled = true
+# Listen address for MCP server
+listen = "127.0.0.1:3000"
+
+[self_improvement]
+# Enable passive execution trace collection
+trace_enabled = true
+# How many recent traces to include in self-analysis (per skill)
+analysis_window = 50
+
+[signal]
+# Signal interface settings (only used if compiled with --features signal)
+# phone_number = "+1234567890"
+# allowed_senders = []   # If set, only these numbers can interact with the bot

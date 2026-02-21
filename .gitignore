@@ -1,0 +1,38 @@
+# Rust / Cargo
+/target/
+Cargo.lock
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Tool-specific project metadata (not part of the project)
+.claude/
+.serena/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Assistant runtime data
+~/.assistant/
+
+# WASM plugins (compiled artefacts, not source)
+*.wasm
+
+# Logs
+*.log

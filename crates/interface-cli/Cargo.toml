@@ -1,0 +1,32 @@
+[package]
+name = "assistant-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "assistant"
+path = "src/main.rs"
+
+[lib]
+name = "assistant_interface_cli"
+path = "src/lib.rs"
+
+[dependencies]
+assistant-core = { path = "../core" }
+assistant-storage = { path = "../storage" }
+assistant-llm = { path = "../llm" }
+assistant-skills-executor = { path = "../skills-executor" }
+assistant-runtime = { path = "../runtime" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+# Terminal line editor
+reedline = "0.40"
+# Config file parsing
+toml = "0.8"
+# Home directory
+dirs = "5"

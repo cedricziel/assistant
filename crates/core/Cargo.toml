@@ -1,0 +1,21 @@
+[package]
+name = "assistant-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+# YAML frontmatter parser (serde_yaml is deprecated — use gray_matter)
+gray_matter = "0.2"
+# For derive macros on enums
+strum = { version = "0.27", features = ["derive"] }
+
+[dev-dependencies]
+tokio = { workspace = true }

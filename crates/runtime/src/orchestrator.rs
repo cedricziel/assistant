@@ -1,0 +1,314 @@
+//! ReAct orchestrator — the main turn-processing loop that wires together the
+//! LLM client, skill registry, and skill executor.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use anyhow::Result;
+use assistant_core::{ExecutionContext, ExecutionTrace, Interface, Message};
+use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
+use assistant_skills_executor::SkillExecutor;
+use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use tracing::{debug, info, warn};
+use uuid::Uuid;
+
+use crate::safety::SafetyGate;
+
+// ── Public types ──────────────────────────────────────────────────────────────
+
+/// Callback trait for requesting user confirmation before executing a skill.
+/// Typically implemented by the CLI interface.
+pub trait ConfirmationCallback: Send + Sync {
+    /// Return `true` if the user confirms execution of `skill_name` with
+    /// `params`, or `false` to deny.
+    fn confirm(&self, skill_name: &str, params: &serde_json::Value) -> bool;
+}
+
+/// The result of a single orchestrator turn.
+pub struct TurnResult {
+    /// The assistant's final answer to the user.
+    pub answer: String,
+    /// All skill execution traces collected during this turn.
+    pub traces: Vec<ExecutionTrace>,
+}
+
+// ── ReactOrchestrator ─────────────────────────────────────────────────────────
+
+/// Drives the ReAct (Reason + Act) loop for a single conversation turn.
+///
+/// Each call to [`run_turn`] performs the following high-level algorithm:
+///
+/// 1. Ensure a conversation row exists in SQLite.
+/// 2. Persist the user message.
+/// 3. Load all registered skills from the registry.
+/// 4. Repeatedly call the LLM until it returns a `FinalAnswer` or the
+///    iteration limit is reached.
+/// 5. For each `ToolCall` response: gate through [`SafetyGate`], optionally
+///    confirm with the user, execute the skill, record an [`ExecutionTrace`],
+///    and append an `OBSERVATION` to the conversation history.
+/// 6. Persist the final assistant message and return [`TurnResult`].
+pub struct ReactOrchestrator {
+    llm: Arc<LlmClient>,
+    storage: Arc<StorageLayer>,
+    registry: Arc<SkillRegistry>,
+    executor: Arc<SkillExecutor>,
+    max_iterations: usize,
+    disabled_skills: Vec<String>,
+    trace_enabled: bool,
+    confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
+}
+
+impl ReactOrchestrator {
+    /// Create a new orchestrator.
+    ///
+    /// # Parameters
+    /// * `llm` — the LLM client (Ollama wrapper)
+    /// * `storage` — the SQLite storage layer
+    /// * `registry` — skill registry (for skill lookups and listing)
+    /// * `executor` — skill executor (dispatches to builtin / script / prompt
+    ///   handlers)
+    /// * `config` — assistant configuration (controls iteration limit, disabled
+    ///   skills, and trace logging)
+    pub fn new(
+        llm: Arc<LlmClient>,
+        storage: Arc<StorageLayer>,
+        registry: Arc<SkillRegistry>,
+        executor: Arc<SkillExecutor>,
+        config: &assistant_core::AssistantConfig,
+    ) -> Self {
+        Self {
+            llm,
+            storage,
+            registry,
+            executor,
+            max_iterations: config.llm.max_iterations,
+            disabled_skills: config.skills.disabled.clone(),
+            trace_enabled: config.mirror.trace_enabled,
+            confirmation_callback: None,
+        }
+    }
+
+    /// Attach a confirmation callback (used by the CLI interface).
+    pub fn with_confirmation_callback(mut self, cb: Arc<dyn ConfirmationCallback>) -> Self {
+        self.confirmation_callback = Some(cb);
+        self
+    }
+
+    // ── Main entry point ──────────────────────────────────────────────────────
+
+    /// Process one turn of the conversation.
+    ///
+    /// # Parameters
+    /// * `user_message` — the raw user input
+    /// * `conversation_id` — the UUID of the conversation; a new row is created
+    ///   in SQLite automatically if one does not exist yet
+    /// * `interface` — the interface that originated this request (affects
+    ///   safety checks and whether confirmation prompts are allowed)
+    pub async fn run_turn(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+    ) -> Result<TurnResult> {
+        info!(
+            conversation_id = %conversation_id,
+            interface = ?interface,
+            "Starting ReAct turn"
+        );
+
+        // 1. Ensure conversation exists in SQLite.
+        let conv_store = self.storage.conversation_store();
+        conv_store
+            .create_conversation_with_id(conversation_id, None)
+            .await?;
+
+        // 2. Persist the user message.
+        let user_msg = {
+            let mut m = Message::user(conversation_id, user_message);
+            m.turn = 0;
+            m
+        };
+        conv_store.save_message(&user_msg).await?;
+
+        // 3. Load all registered skills.
+        let skill_defs = self.registry.list().await;
+        let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
+
+        // 4. Build the base system prompt.
+        //    The LLM client's `chat()` method handles injecting skill info in
+        //    ReAct mode, so we pass an empty system prompt here and let the
+        //    client enrich it.  For native mode the skills are passed as a
+        //    separate `tools` argument.
+        let system_prompt = "You are a helpful AI assistant.";
+
+        // 5. Bootstrap history with the current user message.
+        let mut history: Vec<ChatHistoryMessage> = vec![ChatHistoryMessage {
+            role: ChatRole::User,
+            content: user_message.to_string(),
+        }];
+
+        let mut traces: Vec<ExecutionTrace> = Vec::new();
+
+        // 6. ReAct loop.
+        for iteration in 0..self.max_iterations {
+            debug!(iteration, "ReAct loop iteration");
+
+            let ctx = ExecutionContext {
+                conversation_id,
+                turn: iteration as i64,
+                interface: interface.clone(),
+                interactive: matches!(interface, Interface::Cli),
+            };
+
+            let response = self.llm.chat(system_prompt, &history, &skill_refs).await?;
+
+            match response {
+                // ── Final answer ──────────────────────────────────────────────
+                LlmResponse::FinalAnswer(text) => {
+                    info!(iteration, "LLM returned final answer");
+
+                    // Persist assistant message.
+                    let assistant_msg = {
+                        let mut m = Message::assistant(conversation_id, &text);
+                        m.turn = iteration as i64 + 1;
+                        m
+                    };
+                    conv_store.save_message(&assistant_msg).await?;
+
+                    return Ok(TurnResult {
+                        answer: text,
+                        traces,
+                    });
+                }
+
+                // ── Tool call ─────────────────────────────────────────────────
+                LlmResponse::ToolCall { name, params } => {
+                    info!(skill = %name, iteration, "LLM requested skill execution");
+
+                    // Look up the skill definition.
+                    let Some(skill_def) = self.registry.get(&name).await else {
+                        let observation = format!("Skill '{}' not found in registry.", name);
+                        warn!(%observation);
+                        self.append_observation(&mut history, &observation, None);
+                        continue;
+                    };
+
+                    // Safety gate.
+                    if let Err(reason) =
+                        SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
+                    {
+                        let observation = format!("Skill blocked: {reason}");
+                        warn!(%observation);
+                        self.append_observation(&mut history, &observation, Some(&name));
+                        continue;
+                    }
+
+                    // Confirmation gate (for mutating / confirmation-required skills).
+                    if skill_def.confirmation_required && ctx.interactive {
+                        if let Some(cb) = &self.confirmation_callback {
+                            if !cb.confirm(&name, &params) {
+                                let observation = format!("User denied execution of '{name}'.");
+                                info!(%observation);
+                                self.append_observation(&mut history, &observation, Some(&name));
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Convert JSON params to the HashMap the executor expects.
+                    let params_map: HashMap<String, serde_json::Value> =
+                        if let serde_json::Value::Object(map) = &params {
+                            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                        } else {
+                            HashMap::new()
+                        };
+
+                    // Execute the skill and measure duration.
+                    let start = std::time::Instant::now();
+                    let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
+                    let duration_ms = start.elapsed().as_millis() as i64;
+
+                    // Build execution trace.
+                    let mut trace = ExecutionTrace::new(
+                        conversation_id,
+                        iteration as i64,
+                        &name,
+                        params.clone(),
+                    );
+
+                    let observation = match exec_result {
+                        Ok(output) => {
+                            debug!(
+                                skill = %name,
+                                duration_ms,
+                                success = output.success,
+                                "Skill execution completed"
+                            );
+                            trace = trace.with_success(output.content.clone(), duration_ms);
+                            output.content
+                        }
+                        Err(err) => {
+                            warn!(skill = %name, %err, "Skill execution failed");
+                            let msg = err.to_string();
+                            trace = trace.with_error(msg.clone(), duration_ms);
+                            format!("Error executing '{name}': {msg}")
+                        }
+                    };
+
+                    // Persist trace if enabled.
+                    if self.trace_enabled {
+                        let trace_store = self.storage.trace_store();
+                        if let Err(e) = trace_store.insert(&trace).await {
+                            warn!("Failed to persist execution trace: {e}");
+                        }
+                    }
+
+                    traces.push(trace);
+
+                    // Append OBSERVATION to history.
+                    self.append_observation(&mut history, &observation, Some(&name));
+                }
+
+                // ── Intermediate thinking step ────────────────────────────────
+                LlmResponse::Thinking(text) => {
+                    debug!(iteration, "LLM emitted thinking step");
+                    history.push(ChatHistoryMessage {
+                        role: ChatRole::Assistant,
+                        content: text,
+                    });
+                }
+            }
+        }
+
+        // Reached iteration limit.
+        anyhow::bail!(
+            "Max iterations ({}) reached without a final answer",
+            self.max_iterations
+        );
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// Append an observation message to the chat history.
+    ///
+    /// In ReAct mode the observation is added as a `tool` role message so the
+    /// LLM can recognise it as skill output.  The `skill_name` is embedded in
+    /// the content prefix for models that do not understand the `tool` role.
+    fn append_observation(
+        &self,
+        history: &mut Vec<ChatHistoryMessage>,
+        observation: &str,
+        skill_name: Option<&str>,
+    ) {
+        let content = if let Some(name) = skill_name {
+            format!("OBSERVATION ({name}): {observation}")
+        } else {
+            format!("OBSERVATION: {observation}")
+        };
+
+        history.push(ChatHistoryMessage {
+            role: ChatRole::Tool,
+            content,
+        });
+    }
+}
