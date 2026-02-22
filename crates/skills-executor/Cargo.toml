@@ -27,6 +27,8 @@ cron = { workspace = true }
 dirs = { workspace = true }
 # WASM plugin execution via extism
 extism = { workspace = true }
+# JSON Schema validation for tool param checking
+jsonschema = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -8,6 +8,7 @@ use assistant_core::{
 };
 use assistant_llm::LlmClient;
 use assistant_storage::{SkillRegistry, StorageLayer};
+use tracing::warn;
 
 pub struct SkillExecutor {
     storage: Arc<StorageLayer>,
@@ -109,6 +110,10 @@ impl SkillExecutor {
     ) -> Result<SkillOutput> {
         // Check tool handlers first (primitive tools)
         if let Some(tool) = self.tool_handlers.get(&def.name) {
+            // Validate params against the declared JSON Schema before dispatch.
+            if let Some(err) = validate_params(&def.name, &tool.params_schema(), &params) {
+                return Ok(err);
+            }
             return tool.run(params, ctx).await;
         }
         // Then check SKILL.md-backed handlers
@@ -123,28 +128,11 @@ impl SkillExecutor {
 
     /// Returns `SkillDef` objects synthesised from self-describing tool handlers.
     pub fn synthetic_skill_defs(&self) -> Vec<SkillDef> {
-        let mut defs = Vec::new();
-        for tool in self.tool_handlers.values() {
-            let mut metadata = HashMap::new();
-            let schema = tool.params_schema();
-            if let Ok(json_str) = serde_json::to_string(&schema) {
-                metadata.insert("params".to_string(), json_str);
-            }
-            defs.push(SkillDef {
-                name: tool.name().to_string(),
-                description: tool.description().to_string(),
-                license: None,
-                compatibility: None,
-                allowed_tools: vec![],
-                metadata,
-                body: String::new(),
-                dir: std::path::PathBuf::new(),
-                tier: SkillTier::Builtin,
-                mutating: tool.is_mutating(),
-                confirmation_required: tool.requires_confirmation(),
-                source: SkillSource::Builtin,
-            });
-        }
+        let mut defs: Vec<SkillDef> = self
+            .tool_handlers
+            .values()
+            .map(|tool| skill_def_from_tool(tool.as_ref()))
+            .collect();
         defs.sort_by(|a, b| a.name.cmp(&b.name));
         defs
     }
@@ -152,25 +140,71 @@ impl SkillExecutor {
     /// Look up a single synthetic skill def by name. Returns `None` if the
     /// tool handler does not exist.
     pub fn get_synthetic_def(&self, name: &str) -> Option<SkillDef> {
-        let tool = self.tool_handlers.get(name)?;
-        let mut metadata = HashMap::new();
-        let schema = tool.params_schema();
-        if let Ok(json_str) = serde_json::to_string(&schema) {
-            metadata.insert("params".to_string(), json_str);
+        self.tool_handlers
+            .get(name)
+            .map(|tool| skill_def_from_tool(tool.as_ref()))
+    }
+}
+
+/// Build a [`SkillDef`] from a [`ToolHandler`], including both `params` and
+/// `output_schema` in the metadata map.
+fn skill_def_from_tool(tool: &dyn ToolHandler) -> SkillDef {
+    let mut metadata = HashMap::new();
+    if let Ok(s) = serde_json::to_string(&tool.params_schema()) {
+        metadata.insert("params".to_string(), s);
+    }
+    if let Some(out) = tool.output_schema() {
+        if let Ok(s) = serde_json::to_string(&out) {
+            metadata.insert("output_schema".to_string(), s);
         }
-        Some(SkillDef {
-            name: tool.name().to_string(),
-            description: tool.description().to_string(),
-            license: None,
-            compatibility: None,
-            allowed_tools: vec![],
-            metadata,
-            body: String::new(),
-            dir: std::path::PathBuf::new(),
-            tier: SkillTier::Builtin,
-            mutating: tool.is_mutating(),
-            confirmation_required: tool.requires_confirmation(),
-            source: SkillSource::Builtin,
-        })
+    }
+    SkillDef {
+        name: tool.name().to_string(),
+        description: tool.description().to_string(),
+        license: None,
+        compatibility: None,
+        allowed_tools: vec![],
+        metadata,
+        body: String::new(),
+        dir: std::path::PathBuf::new(),
+        tier: SkillTier::Builtin,
+        mutating: tool.is_mutating(),
+        confirmation_required: tool.requires_confirmation(),
+        source: SkillSource::Builtin,
+    }
+}
+
+/// Validate `params` against the tool's JSON Schema.
+///
+/// Returns `Some(SkillOutput::error(...))` if validation fails so the caller
+/// can short-circuit immediately. Returns `None` if params are valid or the
+/// schema cannot be compiled (non-fatal — we proceed and let the handler
+/// catch any issues itself).
+fn validate_params(
+    tool_name: &str,
+    schema: &serde_json::Value,
+    params: &HashMap<String, serde_json::Value>,
+) -> Option<SkillOutput> {
+    let instance =
+        serde_json::Value::Object(params.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+    match jsonschema::validator_for(schema) {
+        Err(e) => {
+            warn!("Failed to compile params schema for '{tool_name}': {e}");
+            None
+        }
+        Ok(validator) => {
+            let errors: Vec<String> = validator
+                .iter_errors(&instance)
+                .map(|e| e.to_string())
+                .collect();
+            if errors.is_empty() {
+                None
+            } else {
+                Some(SkillOutput::error(format!(
+                    "Invalid parameters for '{tool_name}': {}",
+                    errors.join("; ")
+                )))
+            }
+        }
     }
 }

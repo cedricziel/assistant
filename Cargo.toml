@@ -61,6 +61,8 @@ cron = "0.15"
 scraper = "0.25"
 # Glob pattern matching for file-glob builtin
 glob = "0.3"
+# JSON Schema validation for tool param checking
+jsonschema = "0.26"
 # WASM plugin execution
 extism = "1"
 # Integration testing

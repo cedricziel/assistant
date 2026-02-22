@@ -54,6 +54,18 @@ impl ToolHandler for BashHandler {
         true
     }
 
+    fn output_schema(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "exit_code": {"type": "integer", "description": "Process exit code (0 = success)"},
+                "stdout": {"type": "string", "description": "Standard output"},
+                "stderr": {"type": "string", "description": "Standard error"}
+            },
+            "required": ["exit_code", "stdout", "stderr"]
+        }))
+    }
+
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
@@ -125,7 +137,12 @@ impl ToolHandler for BashHandler {
                     parts.push("(no output)".to_string());
                 }
 
-                Ok(ToolOutput::success(parts.join("\n\n")))
+                let data = serde_json::json!({
+                    "exit_code": exit_code,
+                    "stdout": stdout,
+                    "stderr": stderr
+                });
+                Ok(ToolOutput::success(parts.join("\n\n")).with_data(data))
             }
         }
     }

@@ -48,6 +48,15 @@ pub trait ToolHandler: Send + Sync {
         false
     }
 
+    /// Optional JSON Schema describing the structure of `ToolOutput.data`.
+    ///
+    /// Return `Some(schema)` if this tool populates `ToolOutput.data` with
+    /// structured JSON. The schema is stored in `SkillDef` metadata and
+    /// included in tool observations so the model knows what to expect.
+    fn output_schema(&self) -> Option<Value> {
+        None
+    }
+
     /// Execute the tool with the given parameters.
     async fn run(
         &self,
