@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ExecutionContext, ExecutionTrace, Interface, Message, MessageRole, SkillTier,
+    ExecutionContext, ExecutionTrace, Interface, Message, MessageRole, SkillDef, SkillSource,
+    SkillTier,
 };
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
 use assistant_skills_executor::SkillExecutor;
@@ -36,6 +37,40 @@ pub struct TurnResult {
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
+
+// ── Built-in extension tools ──────────────────────────────────────────────────
+
+/// Build the `end_turn` SkillDef that `run_turn_with_tools` always injects.
+///
+/// The tool carries no real handler — the orchestrator loop detects it by name
+/// and exits cleanly.  Exposing it as a proper tool gives the LLM a first-class,
+/// typed way to signal "I'm done" without having to return a plain FinalAnswer.
+fn end_turn_def() -> SkillDef {
+    let mut metadata = HashMap::new();
+    metadata.insert("tier".to_string(), "builtin".to_string());
+    metadata.insert(
+        "params".to_string(),
+        r#"{"type":"object","properties":{"reason":{"type":"string","description":"Brief reason the turn is ending (e.g. \"replied\", \"no reply needed\"). Used for logging only."}}}"#
+            .to_string(),
+    );
+    SkillDef {
+        name: "end_turn".to_string(),
+        description: "Signal that this turn is complete. Call this once you have sent your reply \
+             (or decided no reply is needed). The `reason` field is optional and used for \
+             logging only."
+            .to_string(),
+        license: None,
+        compatibility: None,
+        allowed_tools: vec![],
+        metadata,
+        body: String::new(),
+        dir: std::path::PathBuf::new(),
+        tier: SkillTier::Builtin,
+        mutating: false,
+        confirmation_required: false,
+        source: SkillSource::Builtin,
+    }
+}
 
 /// Drives the tool-calling loop for a single conversation turn.
 ///
@@ -153,8 +188,14 @@ impl Orchestrator {
             .iter()
             .map(|(def, h)| (def.name.clone(), (def.clone(), h.clone())))
             .collect();
-        let ext_defs: Vec<assistant_core::SkillDef> =
+        // Always inject `end_turn` unless the caller already provided one.
+        // It is handled directly in the dispatch loop below (no real handler).
+        let et_def = end_turn_def();
+        let mut ext_defs: Vec<assistant_core::SkillDef> =
             extensions.into_iter().map(|(def, _)| def).collect();
+        if !ext_defs.iter().any(|d| d.name == "end_turn") && !ext_map.contains_key("end_turn") {
+            ext_defs.push(et_def);
+        }
 
         // 1-3. Set up conversation, load prior history, persist user message.
         let (conv_store, mut history, base_turn) =
@@ -168,9 +209,10 @@ impl Orchestrator {
             ext_defs.iter().chain(global_skills.iter()).collect();
 
         let base_system_prompt = self.cached_system_prompt.clone();
-        // When extension tools are present the LLM must use them to post replies;
-        // returning a plain FinalAnswer will silently drop the response.  Append
-        // an explicit instruction so the LLM knows it has to call a tool.
+        // When extension tools are present, guide the LLM to use them.
+        // We soft-encourage the reply tool rather than hard-requiring it; a
+        // FinalAnswer fallback still exists for models that ignore instructions.
+        // The one hard requirement is `end_turn` — call it to signal completion.
         let system_prompt = if ext_defs.is_empty() {
             base_system_prompt
         } else {
@@ -179,28 +221,28 @@ impl Orchestrator {
                 .filter(|d| d.name.contains("reply") || d.name.contains("post"))
                 .map(|d| d.name.as_str())
                 .collect();
-            let tool_list = if reply_tools.is_empty() {
-                ext_defs
-                    .iter()
-                    .map(|d| d.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+            let reply_hint = if reply_tools.is_empty() {
+                String::new()
             } else {
-                reply_tools.join(", ")
+                format!(
+                    "To send a response to the user, prefer calling `{}`. ",
+                    reply_tools.join("` or `")
+                )
             };
             format!(
                 "{base_system_prompt}\n\n---\n\n\
-                IMPORTANT: You are operating inside a messaging interface. \
-                You MUST call one of the following tools to deliver your response \
-                to the user: {tool_list}. \
-                Do NOT return a plain-text final answer — the user will never see it. \
-                Always end every turn by calling a reply tool."
+                You are operating inside a messaging interface. \
+                {reply_hint}\
+                When you have finished your turn — whether or not you sent a reply — \
+                call `end_turn` to signal completion."
             )
         };
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
-        // Track whether a reply-capable extension tool has already been called
-        // this turn so the FinalAnswer auto-post fallback does not double-post.
+        // Whether `end_turn` was called explicitly this turn.
+        let mut turn_ended = false;
+        // Safety net: tracks whether a reply-capable extension tool was called,
+        // so the FinalAnswer auto-post fallback does not double-post.
         let mut replied = false;
 
         // 6. Tool-calling loop.
@@ -305,6 +347,35 @@ impl Orchestrator {
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
+
+                        // `end_turn` is handled directly — no real executor.
+                        if name == "end_turn" {
+                            let reason = params
+                                .get("reason")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("done");
+                            info!(iteration, reason, "end_turn called; stopping turn");
+
+                            // Record a trace so end_turn decisions are visible in
+                            // the execution history alongside other tool calls.
+                            let mut trace = ExecutionTrace::new(
+                                conversation_id,
+                                iteration as i64,
+                                "end_turn",
+                                params.clone(),
+                            );
+                            trace = trace.with_success(format!("end_turn: {reason}"), 0);
+                            if self.trace_enabled {
+                                let trace_store = self.storage.trace_store();
+                                if let Err(e) = trace_store.insert(&trace).await {
+                                    warn!("Failed to persist end_turn trace: {e}");
+                                }
+                            }
+                            traces.push(trace);
+
+                            turn_ended = true;
+                            break;
+                        }
 
                         // Extension tools take priority and bypass the safety gate.
                         let (observation, trace_result) = if let Some((ext_def, handler)) =
@@ -489,10 +560,10 @@ impl Orchestrator {
                         self.append_observation(&mut history, &observation, Some(&name));
                     }
 
-                    // A reply tool was called during this iteration — the user has
-                    // already received a message.  Return immediately so the LLM
-                    // does not get another turn and call the reply tool again.
-                    if replied {
+                    // Exit the turn if either the LLM called `end_turn` explicitly
+                    // or a reply-capable tool was called (safety net for models that
+                    // skip `end_turn` but do use the reply tool correctly).
+                    if turn_ended || replied {
                         return Ok(());
                     }
                 }
