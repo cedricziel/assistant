@@ -26,25 +26,30 @@ A Rust workspace implementing a local, self-improving AI assistant. Key properti
 
 ## Crate map
 
-| Crate                        | Path                      | Purpose                                                                                                                           |
-| ---------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `assistant-core`             | `crates/core`             | `SkillDef`, parser, all shared types (`Message`, `ExecutionContext`, `AssistantConfig`, …)                                        |
-| `assistant-llm`              | `crates/llm`              | `LlmClient` — Ollama native tool-call + ReAct fallback; `ReActParser`; prompt builder                                             |
-| `assistant-storage`          | `crates/storage`          | `StorageLayer` (SQLite pool + migrations), `SkillRegistry`, `TraceStore`, `MemoryStore`, `RefinementsStore`, `ScheduledTaskStore` |
-| `assistant-runtime`          | `crates/runtime`          | `Orchestrator` (main ReAct loop), `SafetyGate`, background `Scheduler`                                                            |
-| `assistant-skills-executor`  | `crates/skills-executor`  | `SkillExecutor` dispatches by tier; all builtin handlers; `install_skill_from_source`                                             |
-| `assistant-mcp-server`       | `crates/mcp-server`       | stdio MCP server — `tools/list`, `tools/call`, `resources/list`, `resources/read`                                                 |
-| `assistant-cli`              | `crates/interface-cli`    | reedline REPL binary; `/skills`, `/review`, `/install`, `/model`, `/help`                                                         |
-| `assistant-interface-signal` | `crates/interface-signal` | Signal interface stub (feature-gated, no active deps)                                                                             |
+| Crate                            | Path                          | Purpose                                                                                                                           |
+| -------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `assistant-core`                 | `crates/core`                 | `SkillDef`, parser, all shared types (`Message`, `ExecutionContext`, `AssistantConfig`, …)                                        |
+| `assistant-llm`                  | `crates/llm`                  | `LlmProvider` trait + `LlmClient`; `ReActParser`; prompt builder; `Arc<dyn LlmProvider>` is the extension point for new backends  |
+| `assistant-provider-ollama`      | `crates/provider-ollama`      | Concrete `LlmProvider` impl for Ollama — native tool-call + ReAct fallback                                                        |
+| `assistant-storage`              | `crates/storage`              | `StorageLayer` (SQLite pool + migrations), `SkillRegistry`, `TraceStore`, `MemoryStore`, `RefinementsStore`, `ScheduledTaskStore` |
+| `assistant-runtime`              | `crates/runtime`              | `Orchestrator` (main ReAct loop), `SafetyGate`, background `Scheduler`                                                            |
+| `assistant-skills-executor`      | `crates/skills-executor`      | `SkillExecutor` dispatches by tier; all builtin handlers; `install_skill_from_source`                                             |
+| `assistant-mcp-server`           | `crates/mcp-server`           | stdio MCP server — `tools/list`, `tools/call`, `resources/list`, `resources/read`                                                 |
+| `assistant-cli`                  | `crates/interface-cli`        | reedline REPL binary; `/skills`, `/review`, `/install`, `/model`, `/help`                                                         |
+| `assistant-interface-slack`      | `crates/interface-slack`      | Slack bot via Socket Mode (no public URL); see `docs/slack.md`                                                                    |
+| `assistant-interface-mattermost` | `crates/interface-mattermost` | Mattermost bot interface                                                                                                          |
+| `assistant-interface-signal`     | `crates/interface-signal`     | Signal interface stub (feature-gated, no active deps)                                                                             |
+| `assistant-integration-tests`    | `crates/integration-tests`    | End-to-end smoke tests (run with `make test-integration`)                                                                         |
 
 Dependency order (no cycles):
 
 ```
 interface-cli ──► runtime ──► llm ──► core
-                      │
+                      │         └──► provider-ollama
                       ├──► storage ──► core
                       └──► skills-executor ──► llm, storage, core
 mcp-server ──► runtime, skills-executor, storage, core
+interface-slack / interface-mattermost ──► runtime, storage, core
 ```
 
 ## Key files
@@ -55,14 +60,16 @@ mcp-server ──► runtime, skills-executor, storage, core
 | `crates/core/src/types.rs`                | `Message`, `ExecutionContext`, `ExecutionTrace`, `AssistantConfig`, `Interface`                         |
 | `crates/core/src/parser.rs`               | `parse_skill_dir()`, `parse_skill_content()`, `discover_skills()`                                       |
 | `crates/core/src/memory.rs`               | `MemoryLoader` — loads/bootstraps `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md` from `~/.assistant/` |
-| `crates/llm/src/client.rs`                | `LlmClient::chat()` — auto-detects native vs ReAct mode                                                 |
+| `crates/llm/src/provider.rs`              | `LlmProvider` trait — implement to add a new backend (OpenAI, Anthropic, …)                             |
+| `crates/llm/src/client.rs`                | `LlmClient::chat()` — wraps `Arc<dyn LlmProvider>`; routes to provider                                  |
+| `crates/provider-ollama/src/provider.rs`  | `OllamaProvider` — concrete Ollama impl of `LlmProvider`                                                |
 | `crates/storage/src/registry.rs`          | `SkillRegistry` — in-memory + SQLite skill map                                                          |
 | `crates/runtime/src/orchestrator.rs`      | `Orchestrator::run_turn()` — the main loop                                                              |
 | `crates/runtime/src/safety.rs`            | `SafetyGate::check()` — blocks shell-exec on Signal, honours disabled list                              |
 | `crates/skills-executor/src/executor.rs`  | `SkillExecutor::new(storage, llm, registry)`                                                            |
 | `crates/skills-executor/src/installer.rs` | `install_skill_from_source()` — local path or GitHub                                                    |
 | `migrations/`                             | `001_conversations.sql` → `004_memory.sql` (embedded via `include_str!`)                                |
-| `skills/*/SKILL.md`                       | Built-in skill definitions (14 skills)                                                                  |
+| `skills/*/SKILL.md`                       | Built-in skill definitions (13 skills)                                                                  |
 | `config.toml`                             | Config template — copy to `~/.assistant/config.toml`                                                    |
 
 ## Skill tiers
@@ -91,6 +98,7 @@ Determined by `metadata.tier` in a `SKILL.md` frontmatter:
 ```sh
 make build            # cargo build --workspace
 make build-release    # cargo build --workspace --release
+make check            # cargo check --workspace (fast syntax check, no codegen)
 make test             # cargo test --workspace
 make test-integration # integration smoke tests (requires --ignored flag internally)
 make lint             # cargo clippy --workspace -D warnings   ← run before committing
@@ -99,6 +107,10 @@ make format           # cargo fmt --all                        ← run before co
 make run              # cargo run -p assistant-cli
 make run-mcp          # cargo run -p mcp-server
 make build-signal     # cargo build -p assistant-interface-signal --features signal
+
+# Chat interfaces (no Makefile shorthand — run directly):
+cargo run -p assistant-interface-slack        # Slack bot (Socket Mode)
+cargo run -p assistant-interface-mattermost   # Mattermost bot
 ```
 
 Always run `make lint` and `make format` before committing.
