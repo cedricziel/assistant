@@ -31,3 +31,5 @@ reedline = { workspace = true }
 toml = { workspace = true }
 # Home directory
 dirs = { workspace = true }
+# Argument parsing
+clap = { workspace = true }

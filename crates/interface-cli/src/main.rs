@@ -3,15 +3,36 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::{skill::SkillSource, AssistantConfig, Interface};
+use assistant_core::{skill::SkillSource, AssistantConfig, Interface, MemoryLoader};
 use assistant_llm::{LlmClient, LlmClientConfig};
 use assistant_runtime::{orchestrator::ConfirmationCallback, Orchestrator};
 use assistant_skills_executor::{install_skill_from_source, SkillExecutor};
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
+use clap::{Parser, Subcommand};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
+
+// ── Argument parsing ──────────────────────────────────────────────────────────
+
+#[derive(Parser)]
+#[command(name = "assistant", about = "Local AI assistant")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Wipe all assistant data (database, memory files, daily notes) and
+    /// re-seed fresh defaults. The next run starts completely clean.
+    Reset {
+        /// Skip the confirmation prompt (useful for scripts).
+        #[arg(short, long)]
+        yes: bool,
+    },
+}
 
 // ── CLI confirmation callback ─────────────────────────────────────────────────
 
@@ -231,6 +252,72 @@ fn print_help() {
     );
 }
 
+// ── reset subcommand ─────────────────────────────────────────────────────────
+
+fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Result<()> {
+    let loader = MemoryLoader::new(config);
+
+    // Collect everything that will be removed so we can show the user upfront.
+    let memory_files = [
+        loader.soul_path().to_path_buf(),
+        loader.identity_path().to_path_buf(),
+        loader.user_path().to_path_buf(),
+        loader.memory_path().to_path_buf(),
+    ];
+
+    println!("This will permanently delete:\n");
+    println!("  Database : {}", db_path.display());
+    for p in &memory_files {
+        println!("  Memory   : {}", p.display());
+    }
+    // notes_dir is not exposed via a public getter; reconstruct from home.
+    let notes_dir = dirs::home_dir()
+        .map(|h| h.join(".assistant").join("memory"))
+        .unwrap_or_else(|| PathBuf::from(".assistant/memory"));
+    println!("  Notes dir: {}", notes_dir.display());
+    println!();
+
+    if !skip_confirm {
+        print!("Are you sure? [y/N] ");
+        io::stdout().flush().ok();
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf).ok();
+        if !matches!(buf.trim().to_lowercase().as_str(), "y" | "yes") {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    // Delete the SQLite database file.
+    if db_path.exists() {
+        std::fs::remove_file(db_path)
+            .with_context(|| format!("Failed to remove database at {}", db_path.display()))?;
+        println!("Removed: {}", db_path.display());
+    }
+
+    // Delete the four core memory files.
+    for p in &memory_files {
+        if p.exists() {
+            std::fs::remove_file(p).with_context(|| format!("Failed to remove {}", p.display()))?;
+            println!("Removed: {}", p.display());
+        }
+    }
+
+    // Delete the daily notes directory.
+    if notes_dir.exists() {
+        std::fs::remove_dir_all(&notes_dir)
+            .with_context(|| format!("Failed to remove {}", notes_dir.display()))?;
+        println!("Removed: {}", notes_dir.display());
+    }
+
+    // Re-seed default memory files so the next session starts with sensible
+    // content rather than an empty directory.
+    loader.ensure_defaults();
+    println!("\nDefaults restored. Assistant is ready for a fresh start.");
+
+    Ok(())
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -243,14 +330,17 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    // 2. Resolve config path and load config.
+    // 2. Parse CLI arguments.
+    let cli = Cli::parse();
+
+    // 3. Resolve config path and load config.
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
     let user_skills_dir = assistant_dir.join("skills");
     let config_path = assistant_dir.join("config.toml");
     let config = load_config(&config_path);
 
-    // 3. Resolve database path.
+    // 4. Resolve database path.
     let db_path: PathBuf = config
         .storage
         .db_path
@@ -259,14 +349,21 @@ async fn main() -> Result<()> {
         .or_else(|| Some(assistant_dir.join("assistant.db")))
         .unwrap();
 
-    // 4. Open storage layer (creates the DB and runs migrations).
+    // 5. Dispatch subcommands before opening heavy resources.
+    if let Some(command) = cli.command {
+        match command {
+            Command::Reset { yes } => return cmd_reset(&db_path, &config, yes),
+        }
+    }
+
+    // 6. Open storage layer (creates the DB and runs migrations).
     let storage = Arc::new(
         StorageLayer::new(&db_path)
             .await
             .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
     );
 
-    // 5. Create skill registry and load skills from disk.
+    // 7. Create skill registry and load skills from disk.
     let mut registry = SkillRegistry::new(storage.pool.clone())
         .await
         .context("Failed to create skill registry")?;
@@ -289,11 +386,11 @@ async fn main() -> Result<()> {
 
     let registry = Arc::new(registry);
 
-    // 6. Build LLM client.
+    // 8. Build LLM client.
     let llm_config = LlmClientConfig::from(&config.llm);
     let llm = Arc::new(LlmClient::new(llm_config).context("Failed to create LLM client")?);
 
-    // 7. Build skill executor.
+    // 9. Build skill executor.
     let executor = Arc::new(SkillExecutor::new(
         storage.clone(),
         llm.clone(),
@@ -301,12 +398,12 @@ async fn main() -> Result<()> {
         Arc::new(config.clone()),
     ));
 
-    // 8. Build orchestrator.
+    // 10. Build orchestrator.
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(CliConfirmation);
     let orchestrator = Orchestrator::new(llm, storage.clone(), registry.clone(), executor, &config)
         .with_confirmation_callback(confirmation_cb);
 
-    // 9. One conversation per session.
+    // 11. One conversation per session.
     let conversation_id = Uuid::new_v4();
     info!(conversation_id = %conversation_id, "Starting CLI session");
 
@@ -315,14 +412,14 @@ async fn main() -> Result<()> {
         config.llm.model
     );
 
-    // 10. Build the reedline editor and prompt.
+    // 12. Build the reedline editor and prompt.
     let mut editor = Reedline::create();
     let prompt = DefaultPrompt::new(
         DefaultPromptSegment::Basic("assistant".to_string()),
         DefaultPromptSegment::Empty,
     );
 
-    // 11. REPL loop.
+    // 13. REPL loop.
     loop {
         let sig = editor.read_line(&prompt);
 
