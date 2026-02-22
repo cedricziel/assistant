@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig};
-use assistant_llm::{LlmClient, LlmClientConfig};
+use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::Orchestrator;
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
@@ -82,8 +82,7 @@ async fn main() -> Result<()> {
 
     // ── LLM client ────────────────────────────────────────────────────────────
     let llm = Arc::new(
-        LlmClient::new(LlmClientConfig::from(&config.llm))
-            .context("Failed to create LLM client")?,
+        OllamaProvider::from_llm_config(&config.llm).context("Failed to create LLM client")?,
     );
 
     // ── Skill executor ────────────────────────────────────────────────────────

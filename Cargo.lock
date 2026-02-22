@@ -215,7 +215,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
+ "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
  "assistant-storage",
@@ -271,7 +271,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
+ "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
  "assistant-storage",
@@ -295,7 +295,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
+ "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
  "assistant-storage",
@@ -319,7 +319,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
+ "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
  "assistant-storage",
@@ -358,7 +358,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
+ "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
  "assistant-storage",
@@ -381,7 +381,6 @@ dependencies = [
  "assistant-llm",
  "async-trait",
  "tokio",
- "tracing",
 ]
 
 [[package]]

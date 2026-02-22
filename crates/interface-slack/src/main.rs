@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assistant_core::skill::SkillSource;
-use assistant_llm::{LlmClient, LlmClientConfig};
+use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{
     bootstrap::{load_config, skill_dirs, AutoDenyConfirmation},
     orchestrator::ConfirmationCallback,
@@ -108,8 +108,9 @@ async fn bootstrap() -> Result<(Orchestrator, Arc<StorageLayer>, SlackConfig)> {
     let registry = Arc::new(registry);
 
     // Build LLM client.
-    let llm_config = LlmClientConfig::from(&config.llm);
-    let llm = Arc::new(LlmClient::new(llm_config).context("Failed to create LLM client")?);
+    let llm = Arc::new(
+        OllamaProvider::from_llm_config(&config.llm).context("Failed to create LLM client")?,
+    );
 
     // Build skill executor.
     let executor = Arc::new(SkillExecutor::new(

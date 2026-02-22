@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig};
-use assistant_llm::{LlmClient, LlmClientConfig};
+use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{orchestrator::ConfirmationCallback, Orchestrator};
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
@@ -162,8 +162,9 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
     let registry = Arc::new(registry);
 
     // Build LLM client.
-    let llm_config = LlmClientConfig::from(&config.llm);
-    let llm = Arc::new(LlmClient::new(llm_config).context("Failed to create LLM client")?);
+    let llm = Arc::new(
+        OllamaProvider::from_llm_config(&config.llm).context("Failed to create LLM client")?,
+    );
 
     // Build skill executor.
     let executor = Arc::new(SkillExecutor::new(

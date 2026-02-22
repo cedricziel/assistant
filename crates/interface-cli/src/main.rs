@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig, Interface, MemoryLoader};
-use assistant_llm::{LlmClient, LlmClientConfig};
+use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{
     orchestrator::ConfirmationCallback, scheduler::spawn_scheduler, Orchestrator,
 };
@@ -391,8 +391,9 @@ async fn main() -> Result<()> {
     let registry = Arc::new(registry);
 
     // 8. Build LLM client.
-    let llm_config = LlmClientConfig::from(&config.llm);
-    let llm = Arc::new(LlmClient::new(llm_config).context("Failed to create LLM client")?);
+    let llm = Arc::new(
+        OllamaProvider::from_llm_config(&config.llm).context("Failed to create LLM client")?,
+    );
 
     // 9. Build skill executor.
     let executor = Arc::new(SkillExecutor::new(

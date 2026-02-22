@@ -15,7 +15,7 @@ signal = ["dep:presage", "dep:presage-store-sqlite"]
 assistant-core = { path = "../core" }
 assistant-runtime = { path = "../runtime" }
 assistant-storage = { path = "../storage" }
-assistant-llm = { path = "../llm" }
+assistant-provider-ollama = { path = "../provider-ollama" }
 assistant-skills-executor = { path = "../skills-executor" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
