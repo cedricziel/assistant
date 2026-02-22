@@ -16,8 +16,6 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::safety::SafetyGate;
-
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// Callback trait for requesting user confirmation before executing a skill.
@@ -81,7 +79,7 @@ fn end_turn_def() -> SkillDef {
 /// 3. Load all registered skills from the registry.
 /// 4. Repeatedly call the LLM until it returns a `FinalAnswer` or the
 ///    iteration limit is reached.
-/// 5. For each `ToolCall` response: gate through [`SafetyGate`], optionally
+/// 5. For each `ToolCall` response: check disabled-skills list, optionally
 ///    confirm with the user, execute the skill, record an [`ExecutionTrace`],
 ///    and append an `OBSERVATION` to the conversation history.
 /// 6. Persist the final assistant message and return [`TurnResult`].
@@ -144,7 +142,7 @@ impl Orchestrator {
     ///
     /// Extension skills are injected by the calling interface (e.g. Slack,
     /// Mattermost) and are checked before the global skill registry.  They
-    /// bypass the [`SafetyGate`] — the interface is responsible for vetting
+    /// bypass the disabled-skills list — the interface is responsible for vetting
     /// them before passing them in.
     ///
     /// Unlike [`run_turn`] / [`run_turn_streaming`], this method does **not**
@@ -468,10 +466,9 @@ impl Orchestrator {
                                 },
                             };
 
-                            if let Err(reason) =
-                                SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
-                            {
-                                let observation = format!("Skill blocked: {reason}");
+                            if self.disabled_skills.iter().any(|s| s == &name) {
+                                let observation =
+                                    format!("Skill '{name}' is disabled by configuration.");
                                 warn!(%observation);
                                 self.append_tool_result(&mut history, &name, &observation);
                                 let tr_msg = Self::make_tool_result_message(
@@ -772,11 +769,10 @@ impl Orchestrator {
                             },
                         };
 
-                        // Safety gate.
-                        if let Err(reason) =
-                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
-                        {
-                            let observation = format!("Skill blocked: {reason}");
+                        // Disabled-skills gate.
+                        if self.disabled_skills.iter().any(|s| s == &name) {
+                            let observation =
+                                format!("Skill '{name}' is disabled by configuration.");
                             warn!(%observation);
                             self.append_tool_result(&mut history, &name, &observation);
                             let tr_msg = Self::make_tool_result_message(
@@ -1079,10 +1075,9 @@ impl Orchestrator {
                             },
                         };
 
-                        if let Err(reason) =
-                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
-                        {
-                            let observation = format!("Skill blocked: {reason}");
+                        if self.disabled_skills.iter().any(|s| s == &name) {
+                            let observation =
+                                format!("Skill '{name}' is disabled by configuration.");
                             warn!(%observation);
                             self.append_tool_result(&mut history, &name, &observation);
                             let tr_msg = Self::make_tool_result_message(

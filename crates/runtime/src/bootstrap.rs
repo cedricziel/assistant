@@ -22,9 +22,8 @@ use crate::orchestrator::ConfirmationCallback;
 /// A [`ConfirmationCallback`] that always denies, suitable for automated
 /// interfaces where interactive prompts are not possible.
 ///
-/// [`crate::safety::SafetyGate`] already blocks `shell-exec` for remote
-/// interfaces; this callback provides a second layer for skills marked
-/// `confirmation_required`.
+/// This callback handles skills marked `confirmation_required` in automated
+/// interfaces where the user cannot be interactively prompted.
 pub struct AutoDenyConfirmation {
     /// Human-readable interface name used in log messages (e.g. `"Slack"`).
     pub interface_name: &'static str,
