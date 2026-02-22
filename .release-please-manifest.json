@@ -1,12 +1,3 @@
 {
-  "crates/core": "0.1.0",
-  "crates/llm": "0.1.0",
-  "crates/storage": "0.1.0",
-  "crates/runtime": "0.1.0",
-  "crates/skills-executor": "0.1.0",
-  "crates/mcp-server": "0.1.0",
-  "crates/interface-cli": "0.1.0",
-  "crates/interface-signal": "0.1.0",
-  "crates/interface-slack": "0.1.0",
-  "crates/interface-mattermost": "0.1.0"
+  "crates/interface-cli": "0.1.0"
 }

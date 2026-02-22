@@ -3,48 +3,64 @@
   "release-type": "rust",
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,
-  "linked-versions": true,
-  "changelog-path": "CHANGELOG.md",
   "packages": {
-    "crates/core": {
-      "component": "assistant-core",
-      "release-type": "rust"
-    },
-    "crates/llm": {
-      "component": "assistant-llm",
-      "release-type": "rust"
-    },
-    "crates/storage": {
-      "component": "assistant-storage",
-      "release-type": "rust"
-    },
-    "crates/runtime": {
-      "component": "assistant-runtime",
-      "release-type": "rust"
-    },
-    "crates/skills-executor": {
-      "component": "assistant-skills-executor",
-      "release-type": "rust"
-    },
-    "crates/mcp-server": {
-      "component": "assistant-mcp-server",
-      "release-type": "rust"
-    },
     "crates/interface-cli": {
-      "component": "assistant-cli",
-      "release-type": "rust"
-    },
-    "crates/interface-signal": {
-      "component": "assistant-interface-signal",
-      "release-type": "rust"
-    },
-    "crates/interface-slack": {
-      "component": "assistant-interface-slack",
-      "release-type": "rust"
-    },
-    "crates/interface-mattermost": {
-      "component": "assistant-interface-mattermost",
-      "release-type": "rust"
+      "component": "assistant",
+      "release-type": "rust",
+      "include-component-in-tag": false,
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "crates/core/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/llm/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/storage/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/runtime/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/skills-executor/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/mcp-server/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/interface-signal/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/interface-slack/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/interface-mattermost/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.package.version"
+        }
+      ]
     }
   }
 }
