@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ExecutionContext, ExecutionTrace, Interface, Message, MessageRole, SkillDef, SkillSource,
-    SkillTier,
+    ExecutionContext, ExecutionTrace, Interface, MemoryLoader, Message, MessageRole, SkillDef,
+    SkillSource, SkillTier,
 };
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
 use assistant_skills_executor::SkillExecutor;
@@ -94,9 +94,9 @@ pub struct Orchestrator {
     disabled_skills: Vec<String>,
     trace_enabled: bool,
     confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
-    /// System prompt cached once at session start; changes to memory files take
-    /// effect on the next session (same behaviour as OpenClaw).
-    cached_system_prompt: String,
+    /// Memory loader used to rebuild the system prompt at the start of every
+    /// turn so that writes made by memory skills are reflected immediately.
+    memory_loader: MemoryLoader,
 }
 
 impl Orchestrator {
@@ -117,9 +117,8 @@ impl Orchestrator {
         executor: Arc<SkillExecutor>,
         config: &assistant_core::AssistantConfig,
     ) -> Self {
-        let memory_loader = assistant_core::MemoryLoader::new(config);
+        let memory_loader = MemoryLoader::new(config);
         memory_loader.ensure_defaults();
-        let cached_system_prompt = memory_loader.load_system_prompt();
         Self {
             llm,
             storage,
@@ -129,7 +128,7 @@ impl Orchestrator {
             disabled_skills: config.skills.disabled.clone(),
             trace_enabled: config.mirror.trace_enabled,
             confirmation_callback: None,
-            cached_system_prompt,
+            memory_loader,
         }
     }
 
@@ -208,7 +207,7 @@ impl Orchestrator {
         let all_skill_refs: Vec<&assistant_core::SkillDef> =
             ext_defs.iter().chain(global_skills.iter()).collect();
 
-        let base_system_prompt = self.cached_system_prompt.clone();
+        let base_system_prompt = self.memory_loader.load_system_prompt();
         // When extension tools are present, guide the LLM to use them.
         // We soft-encourage the reply tool rather than hard-requiring it; a
         // FinalAnswer fallback still exists for models that ignore instructions.
@@ -635,9 +634,10 @@ impl Orchestrator {
         let skill_defs = self.merge_skill_defs().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
-        // 5. Build the base system prompt from the session-cached copy.
+        // 5. Build the system prompt fresh from disk so that any memory writes
+        //    made earlier in this turn are immediately visible to the LLM.
         //    Skills are passed as a separate `tools` argument to the LLM client.
-        let system_prompt = self.cached_system_prompt.clone();
+        let system_prompt = self.memory_loader.load_system_prompt();
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -903,7 +903,7 @@ impl Orchestrator {
         let skill_defs = self.merge_skill_defs().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
-        let system_prompt = self.cached_system_prompt.clone();
+        let system_prompt = self.memory_loader.load_system_prompt();
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -1296,12 +1296,17 @@ fn format_params_as_prompt(skill_name: &str, params: &serde_json::Value) -> Stri
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
-    use assistant_core::{types::Interface, AssistantConfig, Message};
+    use assistant_core::{
+        types::Interface, AssistantConfig, ExecutionContext, Message, SkillDef, SkillOutput,
+        SkillSource, SkillTier,
+    };
     use assistant_llm::{LlmClient, LlmClientConfig, LlmProvider};
     use assistant_skills_executor::SkillExecutor;
     use assistant_storage::{registry::SkillRegistry, StorageLayer};
+    use async_trait::async_trait;
     use serde_json::{json, Value};
     use uuid::Uuid;
     use wiremock::{
@@ -1310,6 +1315,55 @@ mod tests {
     };
 
     use super::Orchestrator;
+
+    // ── Extension-tool test helpers ───────────────────────────────────────────
+
+    /// A no-op reply handler: always succeeds with content "replied".
+    struct NoopReplyHandler;
+
+    #[async_trait]
+    impl assistant_core::SkillHandler for NoopReplyHandler {
+        fn skill_name(&self) -> &str {
+            "test-reply"
+        }
+
+        async fn execute(
+            &self,
+            _def: &SkillDef,
+            _params: HashMap<String, Value>,
+            _ctx: &ExecutionContext,
+        ) -> anyhow::Result<SkillOutput> {
+            Ok(SkillOutput {
+                content: "replied".to_string(),
+                success: true,
+                data: None,
+            })
+        }
+    }
+
+    /// Minimal SkillDef for the `test-reply` extension tool.
+    fn test_reply_def() -> SkillDef {
+        let mut metadata = HashMap::new();
+        metadata.insert("tier".to_string(), "builtin".to_string());
+        metadata.insert(
+            "params".to_string(),
+            r#"{"type":"object","properties":{"text":{"type":"string"}}}"#.to_string(),
+        );
+        SkillDef {
+            name: "test-reply".to_string(),
+            description: "Send a reply in tests.".to_string(),
+            license: None,
+            compatibility: None,
+            allowed_tools: vec![],
+            metadata,
+            body: String::new(),
+            dir: std::path::PathBuf::new(),
+            tier: SkillTier::Builtin,
+            mutating: false,
+            confirmation_required: false,
+            source: SkillSource::Builtin,
+        }
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1334,6 +1388,17 @@ mod tests {
     /// Build an [`Orchestrator`] wired to `base_url` with a fresh in-memory DB.
     /// Returns the orchestrator and a handle to the storage so tests can seed data.
     async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false; // disable FS writes in unit tests
+        build_with_config(base_url, config).await
+    }
+
+    /// Like [`build`] but with a caller-supplied config (e.g. to enable memory
+    /// with custom file paths).
+    async fn build_with_config(
+        base_url: &str,
+        config: AssistantConfig,
+    ) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
         let llm: Arc<dyn LlmProvider> = Arc::new(
@@ -1344,8 +1409,6 @@ mod tests {
             })
             .unwrap(),
         );
-        let mut config = AssistantConfig::default();
-        config.memory.enabled = false; // disable FS writes in unit tests
         let executor = Arc::new(SkillExecutor::new(
             storage.clone(),
             llm.clone(),
@@ -1795,5 +1858,257 @@ mod tests {
         // The tool_calls array must name the skill.
         let tc = &assistant_with_calls[0]["tool_calls"][0]["function"]["name"];
         assert_eq!(tc, "my-skill");
+    }
+
+    // ── run_turn_with_tools history tests ────────────────────────────────────
+
+    /// `run_turn_with_tools` must persist the assistant's tool-call message and
+    /// the tool result to the database so that a subsequent turn sends the full
+    /// conversation history to the LLM — including those entries.
+    ///
+    /// Sequence verified:
+    ///   Turn 1 LLM request:  [system, user("msg1")]
+    ///   Turn 1 LLM response: tool_calls = [test-reply]
+    ///   → handler runs; replied=true; turn 1 exits
+    ///   Turn 2 LLM request:  [system, user("msg1"),
+    ///                          assistant{tool_calls:[test-reply]},
+    ///                          tool{name:test-reply, content:"replied"},
+    ///                          user("msg2")]
+    #[tokio::test]
+    async fn run_turn_with_tools_preserves_full_history_across_turns() {
+        let server = MockServer::start().await;
+
+        // Turn 1: LLM calls test-reply → replied=true → turn ends.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["test-reply"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Turn 2: LLM calls end_turn → turn ends.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["end_turn"])),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        let ext: Vec<(SkillDef, Arc<dyn assistant_core::SkillHandler>)> =
+            vec![(test_reply_def(), Arc::new(NoopReplyHandler))];
+
+        // Turn 1.
+        orch.run_turn_with_tools("msg1", conv_id, Interface::Slack, ext.clone())
+            .await
+            .unwrap();
+
+        // Turn 2.
+        orch.run_turn_with_tools("msg2", conv_id, Interface::Slack, ext)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(
+            reqs.len(),
+            2,
+            "expected exactly 2 LLM calls, got {}",
+            reqs.len()
+        );
+
+        // Inspect turn 2's request.
+        let msgs = messages_in(&reqs[1]);
+        // [system, user(msg1), assistant{tool_calls}, tool(test-reply), user(msg2)]
+        assert_eq!(
+            msgs.len(),
+            5,
+            "turn 2 should carry 5 messages (system + 3 from turn-1 history + user(msg2)); got {msgs:?}"
+        );
+
+        assert_eq!(msgs[0]["role"], "system");
+
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "msg1");
+
+        // The assistant message from turn 1 must be a tool-call message, not
+        // plain text — this is the Ollama multi-turn wire format requirement.
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert!(
+            msgs[2]["tool_calls"].is_array(),
+            "turn-1 assistant message must carry tool_calls, not plain content; msgs: {msgs:?}"
+        );
+        assert_eq!(
+            msgs[2]["tool_calls"][0]["function"]["name"], "test-reply",
+            "tool call must name test-reply; msgs: {msgs:?}"
+        );
+
+        // The tool result from turn 1.
+        assert_eq!(msgs[3]["role"], "tool");
+        let obs = msgs[3]["content"].as_str().unwrap_or("");
+        assert!(
+            obs.contains("replied"),
+            "tool observation must echo the handler output; got: {obs}"
+        );
+
+        // Current user turn.
+        assert_eq!(msgs[4]["role"], "user");
+        assert_eq!(msgs[4]["content"], "msg2");
+    }
+
+    /// When `run_turn_with_tools` is used across THREE turns, all prior
+    /// tool-call/result pairs from previous turns appear in the third turn's
+    /// LLM request.
+    #[tokio::test]
+    async fn run_turn_with_tools_accumulates_history_over_three_turns() {
+        let server = MockServer::start().await;
+
+        // Turns 1 and 2 each call test-reply; turn 3 calls end_turn.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["test-reply"])),
+            )
+            .up_to_n_times(2)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["end_turn"])),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        let ext: Vec<(SkillDef, Arc<dyn assistant_core::SkillHandler>)> =
+            vec![(test_reply_def(), Arc::new(NoopReplyHandler))];
+
+        orch.run_turn_with_tools("turn1", conv_id, Interface::Slack, ext.clone())
+            .await
+            .unwrap();
+        orch.run_turn_with_tools("turn2", conv_id, Interface::Slack, ext.clone())
+            .await
+            .unwrap();
+        orch.run_turn_with_tools("turn3", conv_id, Interface::Slack, ext)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 3);
+
+        // Third turn: [system,
+        //   user(turn1), assistant{tool_calls}, tool(test-reply),
+        //   user(turn2), assistant{tool_calls}, tool(test-reply),
+        //   user(turn3)]
+        let msgs = messages_in(&reqs[2]);
+        assert_eq!(
+            msgs.len(),
+            8,
+            "turn 3 should carry 8 messages; got {msgs:?}"
+        );
+
+        // Two assistant tool-call messages should be present (one per prior turn).
+        let tc_count = msgs
+            .iter()
+            .filter(|m| m["role"] == "assistant" && m["tool_calls"].is_array())
+            .count();
+        assert_eq!(
+            tc_count, 2,
+            "expected 2 assistant tool-call messages in turn-3 history; msgs: {msgs:?}"
+        );
+
+        // Two tool result messages should be present.
+        let tr_count = msgs.iter().filter(|m| m["role"] == "tool").count();
+        assert_eq!(
+            tr_count, 2,
+            "expected 2 tool-result messages in turn-3 history; msgs: {msgs:?}"
+        );
+
+        // The last message must be the current turn's user message.
+        assert_eq!(msgs.last().unwrap()["role"], "user");
+        assert_eq!(msgs.last().unwrap()["content"], "turn3");
+    }
+
+    // ── Memory-reload tests ───────────────────────────────────────────────────
+
+    /// Regression: the system prompt must be reloaded from disk at the start of
+    /// every turn so that memory-skill writes (soul-update, memory-patch, …) are
+    /// visible to the LLM in subsequent turns.
+    ///
+    /// Concretely: if USER.md changes between turn 1 and turn 2, the system
+    /// prompt sent for turn 2 must contain the new content.
+    #[tokio::test]
+    async fn system_prompt_reflects_memory_file_changes_between_turns() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        // Create an isolated temp directory with a single USER.md file.
+        let dir = std::env::temp_dir().join(format!("assistant-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let user_md = dir.join("USER.md");
+        std::fs::write(&user_md, "# User\n- **Name:** Alice\n").unwrap();
+
+        // Build an orchestrator with memory enabled and custom file paths.
+        // SOUL.md / IDENTITY.md / MEMORY.md are intentionally absent — they are
+        // skipped silently by load_system_prompt().
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = true;
+        config.memory.user_path = Some(user_md.to_str().unwrap().to_string());
+        config.memory.soul_path = Some(dir.join("SOUL.md").to_str().unwrap().to_string());
+        config.memory.identity_path = Some(dir.join("IDENTITY.md").to_str().unwrap().to_string());
+        config.memory.memory_path = Some(dir.join("MEMORY.md").to_str().unwrap().to_string());
+        config.memory.notes_dir = Some(dir.to_str().unwrap().to_string());
+
+        let (orch, _) = build_with_config(&server.uri(), config).await;
+        let conv_id = Uuid::new_v4();
+
+        // Turn 1 — USER.md still says "Alice".
+        orch.run_turn("hello", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        // Simulate a memory-skill write between turns.
+        std::fs::write(&user_md, "# User\n- **Name:** Bob\n").unwrap();
+
+        // Turn 2 — must pick up the updated USER.md.
+        orch.run_turn("hello again", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        // Clean up before assertions so a panic doesn't leave stale files.
+        std::fs::remove_dir_all(&dir).ok();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 2);
+
+        let prompt1 = messages_in(&reqs[0])[0]["content"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let prompt2 = messages_in(&reqs[1])[0]["content"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert!(
+            prompt1.contains("Alice"),
+            "turn 1 system prompt should contain 'Alice'; got:\n{prompt1}"
+        );
+        assert!(
+            prompt2.contains("Bob"),
+            "turn 2 system prompt should contain updated name 'Bob'; got:\n{prompt2}"
+        );
+        assert!(
+            !prompt2.contains("Alice"),
+            "turn 2 system prompt must not contain stale name 'Alice'; got:\n{prompt2}"
+        );
     }
 }

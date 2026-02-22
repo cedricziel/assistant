@@ -392,6 +392,7 @@ dependencies = [
  "assistant-llm",
  "assistant-skills-executor",
  "assistant-storage",
+ "async-trait",
  "chrono",
  "cron",
  "dirs",
