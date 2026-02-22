@@ -174,6 +174,16 @@ impl LlmClient {
         let messages = build_json_messages(system_prompt, history);
         let tools: Vec<Value> = skills.iter().map(|s| skill_to_tool_json(s)).collect();
 
+        let role_summary: Vec<&str> = messages
+            .iter()
+            .filter_map(|m| m.get("role").and_then(|r| r.as_str()))
+            .collect();
+        debug!(
+            messages = messages.len(),
+            roles = ?role_summary,
+            "Message history sent to Ollama"
+        );
+
         let body = json!({
             "model": self.config.model,
             "messages": messages,

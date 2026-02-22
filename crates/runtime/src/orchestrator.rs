@@ -440,6 +440,15 @@ impl Orchestrator {
                                             format!("Skill '{}' not found in registry.", name);
                                         warn!(%observation);
                                         self.append_tool_result(&mut history, &name, &observation);
+                                        let tr_msg = Self::make_tool_result_message(
+                                            conversation_id,
+                                            base_turn + iteration as i64 + 1,
+                                            &name,
+                                            &observation,
+                                        );
+                                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                            warn!("Failed to persist tool-result message: {e}");
+                                        }
                                         continue;
                                     }
                                 },
@@ -451,6 +460,15 @@ impl Orchestrator {
                                 let observation = format!("Skill blocked: {reason}");
                                 warn!(%observation);
                                 self.append_tool_result(&mut history, &name, &observation);
+                                let tr_msg = Self::make_tool_result_message(
+                                    conversation_id,
+                                    base_turn + iteration as i64 + 1,
+                                    &name,
+                                    &observation,
+                                );
+                                if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                    warn!("Failed to persist tool-result message: {e}");
+                                }
                                 continue;
                             }
 
@@ -462,6 +480,15 @@ impl Orchestrator {
                                             format!("User denied execution of '{name}'.");
                                         info!(%observation);
                                         self.append_tool_result(&mut history, &name, &observation);
+                                        let tr_msg = Self::make_tool_result_message(
+                                            conversation_id,
+                                            base_turn + iteration as i64 + 1,
+                                            &name,
+                                            &observation,
+                                        );
+                                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                            warn!("Failed to persist tool-result message: {e}");
+                                        }
                                         continue;
                                     }
                                 }
@@ -516,6 +543,15 @@ impl Orchestrator {
                                 }
                                 traces.push(trace);
                                 self.append_tool_result(&mut history, &name, &observation);
+                                let tr_msg = Self::make_tool_result_message(
+                                    conversation_id,
+                                    base_turn + iteration as i64 + 1,
+                                    &name,
+                                    &observation,
+                                );
+                                if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                    warn!("Failed to persist prompt-tier tool-result message: {e}");
+                                }
                                 continue;
                             }
 
@@ -708,6 +744,15 @@ impl Orchestrator {
                                         format!("Skill '{}' not found in registry.", name);
                                     warn!(%observation);
                                     self.append_tool_result(&mut history, &name, &observation);
+                                    let tr_msg = Self::make_tool_result_message(
+                                        conversation_id,
+                                        base_turn + iteration as i64 + 1,
+                                        &name,
+                                        &observation,
+                                    );
+                                    if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                        warn!("Failed to persist tool-result message: {e}");
+                                    }
                                     continue;
                                 }
                             },
@@ -720,6 +765,15 @@ impl Orchestrator {
                             let observation = format!("Skill blocked: {reason}");
                             warn!(%observation);
                             self.append_tool_result(&mut history, &name, &observation);
+                            let tr_msg = Self::make_tool_result_message(
+                                conversation_id,
+                                base_turn + iteration as i64 + 1,
+                                &name,
+                                &observation,
+                            );
+                            if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                warn!("Failed to persist tool-result message: {e}");
+                            }
                             continue;
                         }
 
@@ -730,6 +784,15 @@ impl Orchestrator {
                                     let observation = format!("User denied execution of '{name}'.");
                                     info!(%observation);
                                     self.append_tool_result(&mut history, &name, &observation);
+                                    let tr_msg = Self::make_tool_result_message(
+                                        conversation_id,
+                                        base_turn + iteration as i64 + 1,
+                                        &name,
+                                        &observation,
+                                    );
+                                    if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                        warn!("Failed to persist tool-result message: {e}");
+                                    }
                                     continue;
                                 }
                             }
@@ -788,6 +851,15 @@ impl Orchestrator {
                             traces.push(trace);
 
                             self.append_tool_result(&mut history, &name, &observation);
+                            let tr_msg = Self::make_tool_result_message(
+                                conversation_id,
+                                base_turn + iteration as i64 + 1,
+                                &name,
+                                &observation,
+                            );
+                            if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                warn!("Failed to persist prompt-tier tool-result message: {e}");
+                            }
                             continue;
                         }
 
@@ -979,6 +1051,15 @@ impl Orchestrator {
                                         format!("Skill '{}' not found in registry.", name);
                                     warn!(%observation);
                                     self.append_tool_result(&mut history, &name, &observation);
+                                    let tr_msg = Self::make_tool_result_message(
+                                        conversation_id,
+                                        base_turn + iteration as i64 + 1,
+                                        &name,
+                                        &observation,
+                                    );
+                                    if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                        warn!("Failed to persist tool-result message: {e}");
+                                    }
                                     continue;
                                 }
                             },
@@ -990,6 +1071,15 @@ impl Orchestrator {
                             let observation = format!("Skill blocked: {reason}");
                             warn!(%observation);
                             self.append_tool_result(&mut history, &name, &observation);
+                            let tr_msg = Self::make_tool_result_message(
+                                conversation_id,
+                                base_turn + iteration as i64 + 1,
+                                &name,
+                                &observation,
+                            );
+                            if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                warn!("Failed to persist tool-result message: {e}");
+                            }
                             continue;
                         }
 
@@ -999,6 +1089,15 @@ impl Orchestrator {
                                     let observation = format!("User denied execution of '{name}'.");
                                     info!(%observation);
                                     self.append_tool_result(&mut history, &name, &observation);
+                                    let tr_msg = Self::make_tool_result_message(
+                                        conversation_id,
+                                        base_turn + iteration as i64 + 1,
+                                        &name,
+                                        &observation,
+                                    );
+                                    if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                        warn!("Failed to persist tool-result message: {e}");
+                                    }
                                     continue;
                                 }
                             }
@@ -1053,6 +1152,15 @@ impl Orchestrator {
                             traces.push(trace);
 
                             self.append_tool_result(&mut history, &name, &observation);
+                            let tr_msg = Self::make_tool_result_message(
+                                conversation_id,
+                                base_turn + iteration as i64 + 1,
+                                &name,
+                                &observation,
+                            );
+                            if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                warn!("Failed to persist prompt-tier tool-result message: {e}");
+                            }
                             continue;
                         }
 
@@ -2038,6 +2146,163 @@ mod tests {
     }
 
     // ── Memory-reload tests ───────────────────────────────────────────────────
+
+    // ── Regression: early-exit tool results must be persisted ─────────────────
+
+    /// Regression: when `run_turn` encounters a skill that is not in the
+    /// registry, the "not found" tool result must be saved to the DB so the
+    /// next turn's LLM request contains a proper ToolResult row for that call.
+    ///
+    /// Before the fix the early-exit `continue` skipped `conv_store.save_message`,
+    /// leaving an orphaned `AssistantToolCalls` message with no matching
+    /// `ToolResult` in the DB.  On the next turn `prepare_history` then fed the
+    /// LLM a malformed sequence that caused context loss.
+    ///
+    /// Sequence verified:
+    ///   Turn 1 LLM call 1 : [system, user("go")]
+    ///   Turn 1 LLM response: tool_calls = [ghost-skill]   ← not registered
+    ///   Turn 1 LLM call 2 : [system, user("go"),
+    ///                         assistant{tool_calls:[ghost-skill]},
+    ///                         tool{content:"ghost-skill not found"}]
+    ///   Turn 1 LLM response: FinalAnswer("turn1-done")
+    ///   Turn 2 LLM call 3 : [system, user("go"),
+    ///                         assistant{tool_calls:[ghost-skill]},  ← from DB
+    ///                         tool{content:"…not found…"},          ← from DB (was missing)
+    ///                         user("again")]
+    #[tokio::test]
+    async fn unknown_skill_result_persisted_to_db_across_turns() {
+        let server = MockServer::start().await;
+
+        // Turn 1, call 1: LLM requests an unregistered skill.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["ghost-skill"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Turn 1, call 2: LLM gives final answer after seeing the "not found" result.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("turn1-done")))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Turn 2, call 3: final answer immediately.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("turn2-done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("go", conv_id, Interface::Cli).await.unwrap();
+        orch.run_turn("again", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 3, "expected 3 LLM calls total");
+
+        // Turn 2's request (3rd call) must include both the assistant tool-call
+        // message AND the tool result from turn 1.
+        let msgs = messages_in(&reqs[2]);
+
+        let has_assistant_tc = msgs
+            .iter()
+            .any(|m| m["role"] == "assistant" && m["tool_calls"].is_array());
+        assert!(
+            has_assistant_tc,
+            "turn-2 request must include the turn-1 AssistantToolCalls message; msgs: {msgs:?}"
+        );
+
+        let has_tool_result = msgs.iter().any(|m| {
+            m["role"] == "tool" && m["content"].as_str().unwrap_or("").contains("ghost-skill")
+        });
+        assert!(
+            has_tool_result,
+            "turn-2 request must include the 'ghost-skill not found' tool result; msgs: {msgs:?}"
+        );
+    }
+
+    /// Regression: when `run_turn_with_tools` encounters an unknown global
+    /// skill (not in the extension map and not in the registry), the "not found"
+    /// tool result must be persisted so the next turn carries complete history.
+    #[tokio::test]
+    async fn unknown_skill_result_persisted_across_turns_with_tools() {
+        let server = MockServer::start().await;
+
+        // Turn 1, call 1: LLM calls an unknown global skill.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["phantom-skill"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Turn 1, call 2: LLM calls end_turn after seeing the "not found" result.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["end_turn"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Turn 2, call 3: end_turn immediately.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["end_turn"])),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+        let ext: Vec<(SkillDef, Arc<dyn assistant_core::SkillHandler>)> = vec![];
+
+        orch.run_turn_with_tools("go", conv_id, Interface::Slack, ext.clone())
+            .await
+            .unwrap();
+        orch.run_turn_with_tools("again", conv_id, Interface::Slack, ext)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 3, "expected 3 LLM calls total");
+
+        // Turn 2's request must include both the tool-call and the tool result.
+        let msgs = messages_in(&reqs[2]);
+
+        let has_assistant_tc = msgs
+            .iter()
+            .any(|m| m["role"] == "assistant" && m["tool_calls"].is_array());
+        assert!(
+            has_assistant_tc,
+            "turn-2 request must include the turn-1 AssistantToolCalls message; msgs: {msgs:?}"
+        );
+
+        let has_tool_result = msgs.iter().any(|m| {
+            m["role"] == "tool"
+                && m["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("phantom-skill")
+        });
+        assert!(
+            has_tool_result,
+            "turn-2 request must include the 'phantom-skill not found' tool result; msgs: {msgs:?}"
+        );
+    }
 
     /// Regression: the system prompt must be reloaded from disk at the start of
     /// every turn so that memory-skill writes (soul-update, memory-patch, …) are
