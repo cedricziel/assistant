@@ -259,7 +259,10 @@ impl MemoryLoader {
             - Read a specific file → `memory-get` target=soul|identity|user|memory|notes/YYYY-MM-DD\n\
             - Search across all memory → `memory-search` query=\"natural language query\"\n\n\
             ## How to write memory\n\
-            Use `file-write` (full replace) or `file-edit` (search-and-replace) directly on the paths above.\n\
+            - `file-write` — full file replace. Use this when creating or rewriting a file from scratch, \
+or when the file contains unfilled template placeholders (e.g. `_(fill this in)_`).\n\
+            - `file-edit` — search-and-replace one occurrence. Use this only when you know the exact \
+current text to replace (read the file first with `memory-get` if unsure).\n\
             For daily notes: write to {}/YYYY-MM-DD.md",
             self.soul_path.display(),
             self.identity_path.display(),
