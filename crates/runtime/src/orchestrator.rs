@@ -459,7 +459,7 @@ impl Orchestrator {
                                 Ok(output) => {
                                     debug!(skill = %name, duration_ms, "Skill execution completed");
                                     trace = trace.with_success(output.content.clone(), duration_ms);
-                                    output.content
+                                    observation_text(&output.content, output.data.as_ref())
                                 }
                                 Err(err) => {
                                     warn!(skill = %name, %err, "Skill execution failed");
@@ -712,7 +712,7 @@ impl Orchestrator {
                                     "Skill execution completed"
                                 );
                                 trace = trace.with_success(output.content.clone(), duration_ms);
-                                output.content
+                                observation_text(&output.content, output.data.as_ref())
                             }
                             Err(err) => {
                                 warn!(skill = %name, %err, "Skill execution failed");
@@ -949,7 +949,7 @@ impl Orchestrator {
                         let observation = match exec_result {
                             Ok(output) => {
                                 trace = trace.with_success(output.content.clone(), duration_ms);
-                                output.content
+                                observation_text(&output.content, output.data.as_ref())
                             }
                             Err(err) => {
                                 warn!(skill = %name, %err, "Skill execution failed");
@@ -1082,6 +1082,20 @@ impl Orchestrator {
 }
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
+
+/// Build the observation text from a skill output.
+///
+/// When `data` is present (structured JSON from a `ToolHandler`), it is appended
+/// as a compact JSON block so the model can parse it. The raw `content` is always
+/// included first so the human-readable summary is still visible.
+fn observation_text(content: &str, data: Option<&serde_json::Value>) -> String {
+    if let Some(d) = data {
+        if let Ok(json) = serde_json::to_string(d) {
+            return format!("{}\n\nJSON: {}", content, json);
+        }
+    }
+    content.to_string()
+}
 
 /// Format skill params as a human-readable prompt for sub-LLM calls (prompt-tier skills).
 fn format_params_as_prompt(skill_name: &str, params: &serde_json::Value) -> String {

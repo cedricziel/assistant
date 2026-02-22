@@ -43,6 +43,24 @@ impl ToolHandler for FileGlobHandler {
         })
     }
 
+    fn output_schema(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Matched file/directory paths"
+                },
+                "truncated": {
+                    "type": "boolean",
+                    "description": "True if results were cut off at the limit"
+                }
+            },
+            "required": ["paths", "truncated"]
+        }))
+    }
+
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
@@ -95,10 +113,11 @@ impl ToolHandler for FileGlobHandler {
         }
 
         if results.is_empty() {
-            return Ok(ToolOutput::success(format!(
-                "No files matched pattern '{}'",
-                pattern
-            )));
+            let data = serde_json::json!({"paths": [], "truncated": false});
+            return Ok(
+                ToolOutput::success(format!("No files matched pattern '{}'", pattern))
+                    .with_data(data),
+            );
         }
 
         let mut output = results.join("\n");
@@ -106,7 +125,8 @@ impl ToolHandler for FileGlobHandler {
             output.push_str(&format!("\n\n[Results truncated at {} entries]", limit));
         }
 
-        Ok(ToolOutput::success(output))
+        let data = serde_json::json!({"paths": results, "truncated": truncated});
+        Ok(ToolOutput::success(output).with_data(data))
     }
 }
 

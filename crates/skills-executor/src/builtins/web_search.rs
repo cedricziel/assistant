@@ -51,6 +51,28 @@ impl ToolHandler for WebSearchHandler {
         })
     }
 
+    fn output_schema(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "description": "Search result items",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title":   {"type": "string"},
+                            "url":     {"type": "string"},
+                            "snippet": {"type": ["string", "null"]}
+                        },
+                        "required": ["title", "url"]
+                    }
+                }
+            },
+            "required": ["results"]
+        }))
+    }
+
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
@@ -99,22 +121,44 @@ impl ToolHandler for WebSearchHandler {
         let results = parse_ddg_results(&body, num_results);
 
         if results.is_empty() {
-            return Ok(ToolOutput::success(format!(
-                "No results found for query: {}",
-                query
-            )));
+            let data = serde_json::json!({"results": []});
+            return Ok(
+                ToolOutput::success(format!("No results found for query: {}", query))
+                    .with_data(data),
+            );
         }
 
-        let output = format!("Search results for: {}\n\n{}", query, results.join("\n\n"));
+        let formatted: Vec<String> = results
+            .iter()
+            .map(|(title, url, snippet)| {
+                if let Some(s) = snippet {
+                    format!("**{}**\n{}\n{}", title, url, s)
+                } else {
+                    format!("**{}**\n{}", title, url)
+                }
+            })
+            .collect();
 
-        Ok(ToolOutput::success(output))
+        let output = format!(
+            "Search results for: {}\n\n{}",
+            query,
+            formatted.join("\n\n")
+        );
+
+        let data = serde_json::json!({
+            "results": results.iter().map(|(title, url, snippet)| serde_json::json!({
+                "title":   title,
+                "url":     url,
+                "snippet": snippet
+            })).collect::<Vec<_>>()
+        });
+
+        Ok(ToolOutput::success(output).with_data(data))
     }
 }
 
-/// Parse DuckDuckGo HTML search results.
-///
-/// Exposed as `pub(crate)` so it can be tested directly.
-fn parse_ddg_results(html: &str, limit: usize) -> Vec<String> {
+/// Parse DuckDuckGo HTML search results into structured `(title, url, snippet)` tuples.
+fn parse_ddg_results(html: &str, limit: usize) -> Vec<(String, String, Option<String>)> {
     let document = Html::parse_document(html);
 
     // DuckDuckGo HTML endpoint result structure:
@@ -148,12 +192,7 @@ fn parse_ddg_results(html: &str, limit: usize) -> Vec<String> {
 
         // Only include results that have at least a title and URL.
         if let (Some(t), Some(u)) = (title, href) {
-            let entry = if let Some(s) = snippet {
-                format!("**{}**\n{}\n{}", t, u, s)
-            } else {
-                format!("**{}**\n{}", t, u)
-            };
-            results.push(entry);
+            results.push((t, u, snippet));
         }
     }
 
@@ -210,9 +249,9 @@ mod tests {
         let html = fake_ddg_html();
         let results = parse_ddg_results(&html, 10);
         assert_eq!(results.len(), 3);
-        assert!(results[0].contains("First Result Title"));
-        assert!(results[0].contains("https://example.com/page1"));
-        assert!(results[1].contains("Second Result Title"));
+        assert_eq!(results[0].0, "First Result Title");
+        assert_eq!(results[0].1, "https://example.com/page1");
+        assert_eq!(results[1].0, "Second Result Title");
     }
 
     #[test]
@@ -279,7 +318,7 @@ mod tests {
 
         let results = parse_ddg_results(html, 10);
         assert_eq!(results.len(), 1);
-        assert!(results[0].contains("Real Result"));
+        assert_eq!(results[0].0, "Real Result");
     }
 
     #[test]
