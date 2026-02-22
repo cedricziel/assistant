@@ -10,7 +10,7 @@ metadata:
   tier: builtin
   mutating: "true"
   confirmation-required: "false"
-  params: '{"note": {"type": "string", "description": "The note to append to today'\''s daily log"}, "category": {"type": "string", "description": "Optional category label (e.g. task, observation, user-preference)"}}'
+  params: '{"note": {"type": "string", "description": "The note to append to today''s daily log"}, "category": {"type": "string", "description": "Optional category label (e.g. task, observation, user-preference)"}}'
 ---
 
 ## Instructions

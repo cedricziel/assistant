@@ -68,6 +68,11 @@ async fn main() -> Result<()> {
         .map(|(p, s)| (p.as_path(), s.clone()))
         .collect();
     registry
+        .load_embedded()
+        .await
+        .context("Failed to load embedded builtin skills")?;
+
+    registry
         .load_from_dirs(&dirs_ref)
         .await
         .context("Failed to load skills")?;

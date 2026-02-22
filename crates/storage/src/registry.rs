@@ -76,6 +76,18 @@ impl SkillRegistry {
         Ok(())
     }
 
+    /// Register all skills produced by [`assistant_core::embedded_builtin_skills`].
+    ///
+    /// Call this during startup before [`load_from_dirs`] so that disk-based
+    /// skills can override the embedded defaults.
+    pub async fn load_embedded(&mut self) -> Result<()> {
+        for def in assistant_core::embedded_builtin_skills() {
+            info!("Registering embedded builtin skill '{}'", def.name);
+            self.register(def).await?;
+        }
+        Ok(())
+    }
+
     /// Look up a skill by name from the in-memory cache.
     pub async fn get(&self, name: &str) -> Option<SkillDef> {
         self.skills.read().await.get(name).cloned()

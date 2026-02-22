@@ -132,6 +132,59 @@ pub fn discover_skills(skills_root: &Path, source: SkillSource) -> Vec<SkillDef>
     skills
 }
 
+/// The bundled `skills/` directory embedded into the binary at compile time.
+static EMBEDDED_SKILLS: include_dir::Dir =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../skills");
+
+/// Parse and return all skills embedded in the binary via [`EMBEDDED_SKILLS`].
+///
+/// These are the `skills/` entries compiled into the binary at build time.
+/// Each sub-directory containing a `SKILL.md` file is parsed and returned as
+/// a [`SkillDef`] with [`SkillSource::Builtin`].  Skills that fail to parse
+/// are logged as warnings and skipped.
+pub fn embedded_builtin_skills() -> Vec<SkillDef> {
+    use std::path::PathBuf;
+
+    let mut skills = Vec::new();
+
+    for entry in EMBEDDED_SKILLS.dirs() {
+        // In include_dir 0.7, all file paths are relative to the embedded
+        // root, so a file inside bash/ is stored as "bash/SKILL.md".
+        // Search from the root using the full relative path.
+        let skill_md_path = entry.path().join("SKILL.md");
+        let Some(skill_md) = EMBEDDED_SKILLS.get_file(&skill_md_path) else {
+            continue;
+        };
+        let Some(content) = skill_md.contents_utf8() else {
+            tracing::warn!(
+                "Embedded SKILL.md for '{}' is not valid UTF-8, skipping",
+                entry.path().display()
+            );
+            continue;
+        };
+
+        // Use a synthetic dir based on the skill's directory name so that
+        // `derive_tier` can construct script/wasm entrypoint paths if needed.
+        let dir = PathBuf::from(entry.path());
+
+        match parse_skill_content(content, &dir, SkillSource::Builtin) {
+            Ok(def) => {
+                tracing::debug!("Embedded builtin skill loaded: {}", def.name);
+                skills.push(def);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse embedded SKILL.md for '{}': {}",
+                    entry.path().display(),
+                    e
+                );
+            }
+        }
+    }
+
+    skills
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +245,29 @@ Body text.
         let dir = PathBuf::from("/tmp/invalid");
         let result = parse_skill_content(INVALID_SKILL_MD, &dir, SkillSource::User);
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod embedded_tests {
+    use super::*;
+
+    #[test]
+    fn embedded_builtin_skills_are_non_empty() {
+        let skills = embedded_builtin_skills();
+        assert!(
+            !skills.is_empty(),
+            "embedded_builtin_skills() returned empty — include_dir path may be wrong"
+        );
+    }
+
+    #[test]
+    fn embedded_skills_include_bash() {
+        let skills = embedded_builtin_skills();
+        assert!(
+            skills.iter().any(|s| s.name == "bash"),
+            "bash skill not found in embedded skills: {:?}",
+            skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
+        );
     }
 }

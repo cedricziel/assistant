@@ -59,11 +59,14 @@ pub async fn load_config(config_path: &Path) -> Result<AssistantConfig> {
 
 // ── Skill directories ──────────────────────────────────────────────────────────
 
-/// Return the standard skill search directories.
+/// Return the runtime skill search directories.
 ///
-/// * The `skills/` subdirectory next to the current executable — builtin
-///   skills bundled with the binary.
-/// * `~/.assistant/skills/` — user-installed skills.
+/// Builtin skills are embedded into the binary via [`embedded_builtin_skills`]
+/// and do not require a filesystem path.  This function only returns directories
+/// for runtime-discovered skills:
+///
+/// * `<exe_dir>/skills/` — optional sidecar skills shipped alongside the binary
+/// * `~/.assistant/skills/` — user-installed skills
 pub fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
     let mut dirs: Vec<(PathBuf, SkillSource)> = Vec::new();
 
