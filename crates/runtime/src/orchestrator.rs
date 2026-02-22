@@ -220,20 +220,34 @@ impl Orchestrator {
                 .filter(|d| d.name.contains("reply") || d.name.contains("post"))
                 .map(|d| d.name.as_str())
                 .collect();
-            let reply_hint = if reply_tools.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "To send a response to the user, prefer calling `{}`. ",
+            let react_tools: Vec<&str> = ext_defs
+                .iter()
+                .filter(|d| d.name.contains("react"))
+                .map(|d| d.name.as_str())
+                .collect();
+            let ack_instruction = match (!reply_tools.is_empty(), !react_tools.is_empty()) {
+                (true, true) => format!(
+                    "Before calling `end_turn` you MUST always acknowledge the user's message: \
+                     use `{}` for text responses, or `{}` for brief emoji acknowledgements \
+                     (e.g. `thumbsup`, `white_check_mark`). ",
+                    reply_tools.join("` or `"),
+                    react_tools.join("` or `")
+                ),
+                (true, false) => format!(
+                    "Before calling `end_turn` you MUST always reply using `{}`. ",
                     reply_tools.join("` or `")
-                )
+                ),
+                (false, true) => format!(
+                    "Before calling `end_turn` you MUST always acknowledge using `{}`. ",
+                    react_tools.join("` or `")
+                ),
+                (false, false) => String::new(),
             };
             format!(
                 "{base_system_prompt}\n\n---\n\n\
                 You are operating inside a messaging interface. \
-                {reply_hint}\
-                When you have finished your turn — whether or not you sent a reply — \
-                call `end_turn` to signal completion."
+                {ack_instruction}\
+                When you have finished, call `end_turn` to signal completion."
             )
         };
 
