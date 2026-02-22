@@ -103,6 +103,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await?;
 
+    sqlx::query(include_str!("../../../migrations/005_tool_calls.sql"))
+        .execute(pool)
+        .await?;
+
     info!("Database migrations applied successfully");
     Ok(())
 }

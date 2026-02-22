@@ -150,8 +150,8 @@ impl ConversationStore {
 
         sqlx::query(
             "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, turn, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -159,6 +159,7 @@ impl ConversationStore {
         .bind(&role)
         .bind(&msg.content)
         .bind(&msg.skill_name)
+        .bind(&msg.tool_calls_json)
         .bind(msg.turn)
         .bind(msg.created_at)
         .execute(&self.pool)
@@ -180,7 +181,7 @@ impl ConversationStore {
         let conv_id_str = conversation_id.to_string();
 
         let rows = sqlx::query(
-            "SELECT id, conversation_id, role, content, skill_name, turn, created_at \
+            "SELECT id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at \
              FROM messages \
              WHERE conversation_id = ?1 \
              ORDER BY turn ASC, created_at ASC",
@@ -200,6 +201,7 @@ impl ConversationStore {
                     role: parse_role(&role_str)?,
                     content: r.get("content"),
                     skill_name: r.get("skill_name"),
+                    tool_calls_json: r.get("tool_calls_json"),
                     turn: r.get("turn"),
                     created_at: r.get("created_at"),
                 })
@@ -213,7 +215,7 @@ impl ConversationStore {
 
         // Fetch the newest rows first, then reverse to restore chronological order.
         let rows = sqlx::query(
-            "SELECT id, conversation_id, role, content, skill_name, turn, created_at \
+            "SELECT id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at \
              FROM messages \
              WHERE conversation_id = ?1 \
              ORDER BY turn DESC, created_at DESC \
@@ -236,6 +238,7 @@ impl ConversationStore {
                     role: parse_role(&role_str)?,
                     content: r.get("content"),
                     skill_name: r.get("skill_name"),
+                    tool_calls_json: r.get("tool_calls_json"),
                     turn: r.get("turn"),
                     created_at: r.get("created_at"),
                 })

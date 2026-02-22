@@ -1,6 +1,7 @@
 use anyhow::Context as _;
 use assistant_core::SkillDef;
 use futures::StreamExt as _;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -37,7 +38,7 @@ pub enum ChatRole {
 }
 
 /// A single tool call requested by the model.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallItem {
     pub name: String,
     pub params: serde_json::Value,

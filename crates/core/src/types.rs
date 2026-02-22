@@ -30,8 +30,12 @@ pub struct Message {
     pub conversation_id: Uuid,
     pub role: MessageRole,
     pub content: String,
-    /// For tool messages: which skill produced this
+    /// For tool messages: which skill produced this result.
     pub skill_name: Option<String>,
+    /// For assistant messages that contain tool calls: the serialised
+    /// `Vec<ToolCallItem>` JSON.  Populated when the LLM response was a
+    /// `ToolCalls` variant; `None` for plain text messages.
+    pub tool_calls_json: Option<String>,
     pub turn: i64,
     pub created_at: DateTime<Utc>,
 }
@@ -44,6 +48,7 @@ impl Message {
             role,
             content: content.into(),
             skill_name: None,
+            tool_calls_json: None,
             turn: 0,
             created_at: Utc::now(),
         }

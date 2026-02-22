@@ -351,6 +351,14 @@ impl Orchestrator {
                     history.push(ChatHistoryMessage::AssistantToolCalls(
                         tool_call_items.clone(),
                     ));
+                    let tc_msg = Self::make_tool_call_message(
+                        conversation_id,
+                        base_turn + iteration as i64 + 1,
+                        &tool_call_items,
+                    );
+                    if let Err(e) = conv_store.save_message(&tc_msg).await {
+                        warn!("Failed to persist tool-call message: {e}");
+                    }
 
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
@@ -566,6 +574,15 @@ impl Orchestrator {
                         }
                         traces.push(trace_result);
                         self.append_observation(&mut history, &observation, Some(&name));
+                        let tr_msg = Self::make_tool_result_message(
+                            conversation_id,
+                            base_turn + iteration as i64 + 1,
+                            &name,
+                            &observation,
+                        );
+                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                            warn!("Failed to persist tool-result message: {e}");
+                        }
                     }
 
                     // Exit the turn if either the LLM called `end_turn` explicitly
@@ -672,6 +689,14 @@ impl Orchestrator {
                     history.push(ChatHistoryMessage::AssistantToolCalls(
                         tool_call_items.clone(),
                     ));
+                    let tc_msg = Self::make_tool_call_message(
+                        conversation_id,
+                        base_turn + iteration as i64 + 1,
+                        &tool_call_items,
+                    );
+                    if let Err(e) = conv_store.save_message(&tc_msg).await {
+                        warn!("Failed to persist tool-call message: {e}");
+                    }
 
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
@@ -824,8 +849,17 @@ impl Orchestrator {
 
                         traces.push(trace);
 
-                        // Append OBSERVATION to history.
+                        // Append OBSERVATION to history and persist as a tool-result row.
                         self.append_observation(&mut history, &observation, Some(&name));
+                        let tr_msg = Self::make_tool_result_message(
+                            conversation_id,
+                            base_turn + iteration as i64 + 1,
+                            &name,
+                            &observation,
+                        );
+                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                            warn!("Failed to persist tool-result message: {e}");
+                        }
                     }
                 }
 
@@ -931,6 +965,14 @@ impl Orchestrator {
                     history.push(ChatHistoryMessage::AssistantToolCalls(
                         tool_call_items.clone(),
                     ));
+                    let tc_msg = Self::make_tool_call_message(
+                        conversation_id,
+                        base_turn + iteration as i64 + 1,
+                        &tool_call_items,
+                    );
+                    if let Err(e) = conv_store.save_message(&tc_msg).await {
+                        warn!("Failed to persist tool-call message: {e}");
+                    }
 
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
@@ -1066,6 +1108,15 @@ impl Orchestrator {
 
                         traces.push(trace);
                         self.append_observation(&mut history, &observation, Some(&name));
+                        let tr_msg = Self::make_tool_result_message(
+                            conversation_id,
+                            base_turn + iteration as i64 + 1,
+                            &name,
+                            &observation,
+                        );
+                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                            warn!("Failed to persist tool-result message: {e}");
+                        }
                     }
                 }
 
@@ -1125,8 +1176,26 @@ impl Orchestrator {
                     role: ChatRole::User,
                     content: m.content,
                 }),
-                MessageRole::Assistant => Some(ChatHistoryMessage::Text {
-                    role: ChatRole::Assistant,
+                MessageRole::Assistant => {
+                    // If this assistant message carried tool calls, reconstruct
+                    // the AssistantToolCalls variant so the LLM sees its own
+                    // decisions in subsequent turns.
+                    if let Some(tc_json) = m.tool_calls_json {
+                        if let Ok(items) =
+                            serde_json::from_str::<Vec<assistant_llm::ToolCallItem>>(&tc_json)
+                        {
+                            if !items.is_empty() {
+                                return Some(ChatHistoryMessage::AssistantToolCalls(items));
+                            }
+                        }
+                    }
+                    Some(ChatHistoryMessage::Text {
+                        role: ChatRole::Assistant,
+                        content: m.content,
+                    })
+                }
+                MessageRole::Tool => Some(ChatHistoryMessage::ToolResult {
+                    name: m.skill_name.unwrap_or_default(),
                     content: m.content,
                 }),
                 _ => None,
@@ -1160,6 +1229,34 @@ impl Orchestrator {
                 content: observation.to_string(),
             }),
         }
+    }
+
+    /// Build a `Message` row for a turn where the LLM requested tool calls.
+    ///
+    /// Persisting this row ensures `prepare_history` can reconstruct the
+    /// `AssistantToolCalls` variant on subsequent turns.
+    fn make_tool_call_message(
+        conversation_id: Uuid,
+        turn: i64,
+        items: &[assistant_llm::ToolCallItem],
+    ) -> Message {
+        let mut m = Message::assistant(conversation_id, "");
+        m.turn = turn;
+        m.tool_calls_json = serde_json::to_string(items).ok();
+        m
+    }
+
+    /// Build a `Message` row for a tool-result observation.
+    fn make_tool_result_message(
+        conversation_id: Uuid,
+        turn: i64,
+        skill_name: &str,
+        observation: &str,
+    ) -> Message {
+        let mut m = Message::new(conversation_id, MessageRole::Tool, observation);
+        m.turn = turn;
+        m.skill_name = Some(skill_name.to_string());
+        m
     }
 
     /// Merge registry skills with synthetic defs from self-describing handlers.
