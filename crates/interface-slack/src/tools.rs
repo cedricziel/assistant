@@ -658,4 +658,11 @@ mod tests {
         let input = "no special chars here";
         assert_eq!(markdown_to_mrkdwn(input), input);
     }
+
+    #[test]
+    fn slack_emoji_unchanged() {
+        // Slack emoji syntax :name: must pass through the converter untouched.
+        let input = "Hello! How can I assist you today? :wave:";
+        assert_eq!(markdown_to_mrkdwn(input), input);
+    }
 }
