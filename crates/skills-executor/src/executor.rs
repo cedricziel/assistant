@@ -40,6 +40,7 @@ impl SkillExecutor {
             Arc::new(MemoryReadHandler::new(storage.clone())),
             Arc::new(MemoryWriteHandler::new(storage.clone())),
             Arc::new(MemorySearchHandler::new(storage.clone())),
+            Arc::new(BashHandler::new()),
             Arc::new(WebFetchHandler::new()),
             Arc::new(ShellExecHandler::new()),
             Arc::new(ListSkillsHandler::new(registry.clone())),
