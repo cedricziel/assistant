@@ -20,7 +20,7 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 /// Spawn a background tokio task that:
 /// 1. Checks for due scheduled tasks every `poll_interval`.
-/// 2. Runs `~/.assistant/HEARTBEAT.md` as a ReAct prompt every 30 minutes
+/// 2. Runs `~/.assistant/HEARTBEAT.md` as a prompt through the orchestrator every 30 minutes
 ///    (if the file exists and is non-empty).
 pub fn spawn_scheduler(
     storage: Arc<StorageLayer>,
@@ -94,7 +94,7 @@ fn compute_next_run(cron_expr: &str) -> Option<chrono::DateTime<Utc>> {
     schedule.upcoming(Utc).next()
 }
 
-/// Read `~/.assistant/HEARTBEAT.md` and run its contents as a ReAct prompt.
+/// Read `~/.assistant/HEARTBEAT.md` and run its contents through the orchestrator.
 ///
 /// Does nothing (silently) if the file does not exist or is empty.
 async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {

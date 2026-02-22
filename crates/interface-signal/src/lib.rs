@@ -12,7 +12,7 @@
 //! - A background tokio task runs a presage listener loop (see
 //!   [`SignalInterface::run`]).
 //! - Each incoming Signal message is routed through
-//!   `ReactOrchestrator::run_turn_streaming`.
+//!   `Orchestrator::run_turn_streaming`.
 //! - The `shell-exec` skill is **disabled** for this interface via
 //!   `SafetyGate`.
 //!

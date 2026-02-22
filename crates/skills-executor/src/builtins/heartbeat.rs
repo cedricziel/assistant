@@ -3,7 +3,7 @@
 //! `~/.assistant/HEARTBEAT.md` is a plain Markdown file that the model edits to
 //! specify what the assistant should check or do every 30 minutes automatically.
 //! The scheduler reads it on every heartbeat tick and runs its contents as a
-//! ReAct prompt.
+//! prompt through the orchestrator.
 
 use std::collections::HashMap;
 use std::sync::Arc;

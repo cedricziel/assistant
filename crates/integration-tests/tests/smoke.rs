@@ -187,10 +187,10 @@ async fn test_list_skills() -> Result<()> {
     Ok(())
 }
 
-/// ReAct loop terminates within max_iterations on a simple factual question.
+/// Tool-calling loop terminates within max_iterations on a simple factual question.
 #[tokio::test]
 #[ignore = "requires Docker"]
-async fn test_react_terminates() -> Result<()> {
+async fn test_tool_loop_terminates() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
     let (_container, base_url) = start_ollama().await?;

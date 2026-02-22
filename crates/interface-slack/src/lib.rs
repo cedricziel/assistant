@@ -2,7 +2,7 @@
 //!
 //! Receives messages via Slack Socket Mode and replies through the same
 //! channel.  Each incoming message is routed through
-//! `ReactOrchestrator::run_turn_streaming`.
+//! `Orchestrator::run_turn_with_tools`.
 //!
 //! The `shell-exec` skill is **disabled** for this interface via `SafetyGate`.
 

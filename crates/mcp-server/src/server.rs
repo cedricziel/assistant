@@ -57,7 +57,7 @@ pub async fn handle_request(
             tools.push(McpTool {
                 name: "run_prompt".to_string(),
                 description:
-                    "Send a prompt through the full ReAct loop (may invoke multiple skills)."
+                    "Send a prompt through the orchestrator loop (may invoke multiple skills)."
                         .to_string(),
                 input_schema: json!({
                     "type": "object",
