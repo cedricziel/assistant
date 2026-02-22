@@ -1,6 +1,6 @@
 use anyhow::Context as _;
-use async_trait::async_trait;
 use assistant_core::SkillDef;
+use async_trait::async_trait;
 use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
