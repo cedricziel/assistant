@@ -2,10 +2,14 @@ use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig, Interface, MemoryLoader};
 use assistant_llm::{LlmClient, LlmClientConfig};
-use assistant_runtime::{orchestrator::ConfirmationCallback, Orchestrator};
+use assistant_runtime::{
+    orchestrator::ConfirmationCallback, scheduler::spawn_scheduler, Orchestrator,
+};
 use assistant_skills_executor::{install_skill_from_source, SkillExecutor};
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use clap::{Parser, Subcommand};
@@ -400,8 +404,17 @@ async fn main() -> Result<()> {
 
     // 10. Build orchestrator.
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(CliConfirmation);
-    let orchestrator = Orchestrator::new(llm, storage.clone(), registry.clone(), executor, &config)
-        .with_confirmation_callback(confirmation_cb);
+    let orchestrator = Arc::new(
+        Orchestrator::new(llm, storage.clone(), registry.clone(), executor, &config)
+            .with_confirmation_callback(confirmation_cb),
+    );
+
+    // 10a. Start the background scheduler (polls every 60 seconds).
+    let _scheduler = spawn_scheduler(
+        storage.clone(),
+        orchestrator.clone(),
+        Duration::from_secs(60),
+    );
 
     // 11. One conversation per session.
     let conversation_id = Uuid::new_v4();

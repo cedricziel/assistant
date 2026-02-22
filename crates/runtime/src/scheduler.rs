@@ -1,9 +1,9 @@
 //! Background scheduler — polls for due scheduled tasks and runs them via the
-//! orchestrator.
+//! orchestrator. Also drives the heartbeat loop (`~/.assistant/HEARTBEAT.md`).
 
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use assistant_core::Interface;
@@ -15,8 +15,13 @@ use uuid::Uuid;
 
 use crate::orchestrator::Orchestrator;
 
-/// Spawn a background tokio task that checks for due scheduled tasks every
-/// `poll_interval` and runs them through the orchestrator.
+/// How often the heartbeat prompt is run (30 minutes).
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30 * 60);
+
+/// Spawn a background tokio task that:
+/// 1. Checks for due scheduled tasks every `poll_interval`.
+/// 2. Runs `~/.assistant/HEARTBEAT.md` as a ReAct prompt every 30 minutes
+///    (if the file exists and is non-empty).
 pub fn spawn_scheduler(
     storage: Arc<StorageLayer>,
     orchestrator: Arc<Orchestrator>,
@@ -24,11 +29,23 @@ pub fn spawn_scheduler(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!("Scheduler started (poll interval: {:?})", poll_interval);
+        // Subtract the full interval so the heartbeat fires on the first tick.
+        let mut last_heartbeat = Instant::now()
+            .checked_sub(HEARTBEAT_INTERVAL)
+            .unwrap_or_else(Instant::now);
+
         loop {
             tokio::time::sleep(poll_interval).await;
 
             if let Err(e) = run_due_tasks(&storage, &orchestrator).await {
                 error!("Scheduler error: {e}");
+            }
+
+            if last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
+                if let Err(e) = run_heartbeat(&orchestrator).await {
+                    error!("Heartbeat error: {e}");
+                }
+                last_heartbeat = Instant::now();
             }
         }
     })
@@ -75,4 +92,42 @@ fn compute_next_run(cron_expr: &str) -> Option<chrono::DateTime<Utc>> {
         .or_else(|_| Schedule::from_str(&format!("0 {}", cron_expr)))
         .ok()?;
     schedule.upcoming(Utc).next()
+}
+
+/// Read `~/.assistant/HEARTBEAT.md` and run its contents as a ReAct prompt.
+///
+/// Does nothing (silently) if the file does not exist or is empty.
+async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
+    let heartbeat_path = match dirs::home_dir() {
+        Some(h) => h.join(".assistant").join("HEARTBEAT.md"),
+        None => return Ok(()),
+    };
+
+    if !heartbeat_path.exists() {
+        return Ok(());
+    }
+
+    let prompt = std::fs::read_to_string(&heartbeat_path)?;
+    let prompt = prompt.trim().to_string();
+
+    if prompt.is_empty() {
+        return Ok(());
+    }
+
+    info!("Running heartbeat from {}", heartbeat_path.display());
+
+    let conversation_id = Uuid::new_v4();
+    match orchestrator
+        .run_turn(&prompt, conversation_id, Interface::Cli)
+        .await
+    {
+        Ok(turn) => {
+            info!(answer_len = turn.answer.len(), "Heartbeat completed");
+        }
+        Err(e) => {
+            error!(error = %e, "Heartbeat failed");
+        }
+    }
+
+    Ok(())
 }
