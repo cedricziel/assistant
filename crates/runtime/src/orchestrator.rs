@@ -59,7 +59,9 @@ pub struct Orchestrator {
     disabled_skills: Vec<String>,
     trace_enabled: bool,
     confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
-    memory_loader: assistant_core::MemoryLoader,
+    /// System prompt cached once at session start; changes to memory files take
+    /// effect on the next session (same behaviour as OpenClaw).
+    cached_system_prompt: String,
 }
 
 impl Orchestrator {
@@ -82,6 +84,7 @@ impl Orchestrator {
     ) -> Self {
         let memory_loader = assistant_core::MemoryLoader::new(config);
         memory_loader.ensure_defaults();
+        let cached_system_prompt = memory_loader.load_system_prompt();
         Self {
             llm,
             storage,
@@ -91,7 +94,7 @@ impl Orchestrator {
             disabled_skills: config.skills.disabled.clone(),
             trace_enabled: config.mirror.trace_enabled,
             confirmation_callback: None,
-            memory_loader,
+            cached_system_prompt,
         }
     }
 
@@ -163,7 +166,7 @@ impl Orchestrator {
         let all_skill_refs: Vec<&assistant_core::SkillDef> =
             ext_defs.iter().chain(global_skills.iter()).collect();
 
-        let base_system_prompt = self.memory_loader.load_system_prompt();
+        let base_system_prompt = self.cached_system_prompt.clone();
         // When extension tools are present the LLM must use them to post replies;
         // returning a plain FinalAnswer will silently drop the response.  Append
         // an explicit instruction so the LLM knows it has to call a tool.
@@ -524,9 +527,9 @@ impl Orchestrator {
         let skill_defs = self.registry.list().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
-        // 5. Build the base system prompt.
+        // 5. Build the base system prompt from the session-cached copy.
         //    Skills are passed as a separate `tools` argument to the LLM client.
-        let system_prompt = self.memory_loader.load_system_prompt();
+        let system_prompt = self.cached_system_prompt.clone();
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -766,7 +769,7 @@ impl Orchestrator {
         let skill_defs = self.registry.list().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
-        let system_prompt = self.memory_loader.load_system_prompt();
+        let system_prompt = self.cached_system_prompt.clone();
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 

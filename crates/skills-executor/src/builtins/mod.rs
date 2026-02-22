@@ -1,6 +1,7 @@
 pub mod bash;
 pub mod list_skills;
 pub mod memory;
+pub mod memory_patch;
 pub mod schedule_task;
 pub mod self_analyze;
 pub mod shell_exec;
@@ -11,6 +12,7 @@ pub mod web_fetch;
 pub use bash::BashHandler;
 pub use list_skills::ListSkillsHandler;
 pub use memory::{MemoryReadHandler, MemorySearchHandler, MemoryWriteHandler};
+pub use memory_patch::MemoryPatchHandler;
 pub use schedule_task::ScheduleTaskHandler;
 pub use self_analyze::SelfAnalyzeHandler;
 pub use shell_exec::ShellExecHandler;

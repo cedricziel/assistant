@@ -48,7 +48,8 @@ impl SkillExecutor {
             Arc::new(SelfAnalyzeHandler::new(storage.clone(), llm, registry)),
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
             Arc::new(MemorySaveHandler::new(config.clone())),
-            Arc::new(SoulUpdateHandler::new(config)),
+            Arc::new(SoulUpdateHandler::new(config.clone())),
+            Arc::new(MemoryPatchHandler::new(config)),
         ];
         for h in handlers {
             self.builtin_handlers.insert(h.skill_name().to_string(), h);

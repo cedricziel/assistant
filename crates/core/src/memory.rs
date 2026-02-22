@@ -13,6 +13,11 @@ use tracing::{debug, warn};
 
 use crate::types::{AssistantConfig, MemoryConfig};
 
+/// Maximum characters per individual memory file included in the system prompt.
+const BOOTSTRAP_MAX_CHARS_PER_FILE: usize = 20_000;
+/// Maximum total characters across all memory sections in the system prompt.
+const BOOTSTRAP_MAX_CHARS_TOTAL: usize = 150_000;
+
 const DEFAULT_SOUL: &str = r#"# Soul
 
 ## Core Truths
@@ -109,7 +114,11 @@ impl MemoryLoader {
     /// Build the dynamic system prompt from the memory files.
     ///
     /// Reads SOUL.md -> IDENTITY.md -> USER.md -> MEMORY.md in that order,
-    /// and concatenates them separated by horizontal rules.
+    /// then injects today's and yesterday's daily notes, and appends a
+    /// "Memory file locations" footer so the model knows where to write.
+    ///
+    /// Each file is capped at [`BOOTSTRAP_MAX_CHARS_PER_FILE`] characters, and
+    /// the total assembled prompt is capped at [`BOOTSTRAP_MAX_CHARS_TOTAL`].
     /// Files that do not exist are skipped silently.
     pub fn load_system_prompt(&self) -> String {
         if !self.enabled {
@@ -117,6 +126,7 @@ impl MemoryLoader {
         }
 
         let mut parts: Vec<String> = Vec::new();
+        let mut total_chars: usize = 0;
 
         for (label, path) in [
             ("Soul", &self.soul_path),
@@ -124,10 +134,37 @@ impl MemoryLoader {
             ("User", &self.user_path),
             ("Memory", &self.memory_path),
         ] {
+            if total_chars >= BOOTSTRAP_MAX_CHARS_TOTAL {
+                debug!(label, "Total memory cap reached, skipping remaining files");
+                break;
+            }
             match fs::read_to_string(path) {
                 Ok(content) if !content.trim().is_empty() => {
                     debug!(file = %path.display(), label, "Loaded memory file");
-                    parts.push(content.trim().to_string());
+                    let trimmed = content.trim();
+                    let section = if trimmed.len() > BOOTSTRAP_MAX_CHARS_PER_FILE {
+                        warn!(
+                            file = %path.display(),
+                            chars = trimmed.len(),
+                            cap = BOOTSTRAP_MAX_CHARS_PER_FILE,
+                            "Memory file truncated"
+                        );
+                        format!(
+                            "{}\n[… truncated]",
+                            &trimmed[..BOOTSTRAP_MAX_CHARS_PER_FILE]
+                        )
+                    } else {
+                        trimmed.to_string()
+                    };
+                    // Enforce total cap: only include if it fits (possibly partially).
+                    let remaining = BOOTSTRAP_MAX_CHARS_TOTAL - total_chars;
+                    let section = if section.len() > remaining {
+                        format!("{}\n[… truncated]", &section[..remaining])
+                    } else {
+                        section
+                    };
+                    total_chars += section.len();
+                    parts.push(section);
                 }
                 Ok(_) => {
                     debug!(file = %path.display(), label, "Memory file is empty, skipping");
@@ -141,11 +178,93 @@ impl MemoryLoader {
             }
         }
 
+        // Inject today's and yesterday's daily notes (same size caps apply).
+        if total_chars < BOOTSTRAP_MAX_CHARS_TOTAL {
+            for note_section in self.load_daily_notes() {
+                if total_chars >= BOOTSTRAP_MAX_CHARS_TOTAL {
+                    break;
+                }
+                let remaining = BOOTSTRAP_MAX_CHARS_TOTAL - total_chars;
+                let section = if note_section.len() > remaining {
+                    format!("{}\n[… truncated]", &note_section[..remaining])
+                } else {
+                    note_section
+                };
+                total_chars += section.len();
+                parts.push(section);
+            }
+        }
+
+        // Append a "Memory file locations" footer so the model knows where to write.
+        let footer = format!(
+            "## Memory file locations\n\
+            - Soul: {}\n\
+            - Identity: {}\n\
+            - User: {}\n\
+            - Memory: {}\n\
+            - Daily notes dir: {}",
+            self.soul_path.display(),
+            self.identity_path.display(),
+            self.user_path.display(),
+            self.memory_path.display(),
+            self.notes_dir.display(),
+        );
+        parts.push(footer);
+
         if parts.is_empty() {
             "You are a helpful AI assistant.".to_string()
         } else {
             parts.join("\n\n---\n\n")
         }
+    }
+
+    /// Load today's and yesterday's daily notes files.
+    ///
+    /// Returns a list of formatted sections ready to include in the system prompt.
+    /// Files that do not exist are silently skipped.
+    fn load_daily_notes(&self) -> Vec<String> {
+        let today = Local::now();
+        let yesterday = today - chrono::Duration::days(1);
+
+        let mut sections = Vec::new();
+        for (label_date, dt) in [
+            (today.format("%Y-%m-%d").to_string(), today),
+            (yesterday.format("%Y-%m-%d").to_string(), yesterday),
+        ] {
+            let path = self.notes_dir.join(format!("{label_date}.md"));
+            match fs::read_to_string(&path) {
+                Ok(content) if !content.trim().is_empty() => {
+                    debug!(file = %path.display(), "Loaded daily notes");
+                    let trimmed = content.trim();
+                    let body = if trimmed.len() > BOOTSTRAP_MAX_CHARS_PER_FILE {
+                        warn!(
+                            file = %path.display(),
+                            chars = trimmed.len(),
+                            cap = BOOTSTRAP_MAX_CHARS_PER_FILE,
+                            "Daily notes truncated"
+                        );
+                        format!("{}\n[… truncated]", &trimmed[..BOOTSTRAP_MAX_CHARS_PER_FILE])
+                    } else {
+                        trimmed.to_string()
+                    };
+                    sections.push(format!(
+                        "## Daily notes: {}\n{}",
+                        dt.format("%Y-%m-%d"),
+                        body
+                    ));
+                }
+                Ok(_) => {
+                    debug!(file = %path.display(), "Daily notes file is empty, skipping");
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    debug!(file = %path.display(), "Daily notes file not found, skipping");
+                }
+                Err(e) => {
+                    warn!(file = %path.display(), error = %e, "Failed to read daily notes");
+                }
+            }
+        }
+        sections
     }
 
     /// Return the path to today's daily notes file (notes_dir/YYYY-MM-DD.md).
@@ -226,6 +345,34 @@ impl MemoryLoader {
                 anyhow::bail!("Unknown mode: {other} (expected \"replace\" or \"append\")");
             }
         }
+        Ok(path.clone())
+    }
+
+    /// Perform a surgical search-and-replace on a named memory file.
+    ///
+    /// Reads the file, replaces the first occurrence of `search` with `replace`,
+    /// and writes back.  Returns an error if `search` is not found (to prevent
+    /// silent corruption).
+    pub fn patch_file(&self, target: &str, search: &str, replace: &str) -> Result<PathBuf> {
+        let path = match target {
+            "soul" => &self.soul_path,
+            "identity" => &self.identity_path,
+            "user" => &self.user_path,
+            "memory" => &self.memory_path,
+            _ => anyhow::bail!("Unknown target: {target}"),
+        };
+        let content = fs::read_to_string(path).map_err(|e| {
+            anyhow::anyhow!("Failed to read {}: {e}", path.display())
+        })?;
+        if !content.contains(search) {
+            anyhow::bail!(
+                "Search text not found in '{}' ({}). No changes made.",
+                target,
+                path.display()
+            );
+        }
+        let patched = content.replacen(search, replace, 1);
+        fs::write(path, &patched)?;
         Ok(path.clone())
     }
 }
