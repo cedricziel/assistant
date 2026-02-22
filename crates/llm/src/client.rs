@@ -1,10 +1,13 @@
 use anyhow::Context as _;
+use async_trait::async_trait;
 use assistant_core::SkillDef;
 use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::debug;
+
+use crate::provider::{Capabilities, LlmProvider, ToolSupport};
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -380,6 +383,39 @@ impl LlmClient {
         }
 
         Ok(LlmResponse::FinalAnswer(content))
+    }
+}
+
+// ── LlmProvider impl ─────────────────────────────────────────────────────────
+
+#[async_trait]
+impl LlmProvider for LlmClient {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            tools: ToolSupport::Native,
+            streaming: true,
+            vision: false,
+        }
+    }
+
+    async fn chat(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        skills: &[&SkillDef],
+    ) -> anyhow::Result<LlmResponse> {
+        self.chat_native(system_prompt, history, skills).await
+    }
+
+    async fn chat_streaming(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        skills: &[&SkillDef],
+        token_sink: Option<mpsc::Sender<String>>,
+    ) -> anyhow::Result<LlmResponse> {
+        self.chat_native_streaming(system_prompt, history, skills, token_sink)
+            .await
     }
 }
 

@@ -12,6 +12,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+async-trait = { workspace = true }
 # HTTP client for native Ollama API calls
 reqwest = { workspace = true }
 # Async stream utilities (for streaming responses)

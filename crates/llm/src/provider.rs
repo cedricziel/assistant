@@ -1,0 +1,74 @@
+//! `LlmProvider` trait — the single abstraction point for all LLM backends.
+//!
+//! Implement this trait to plug in a new provider (Ollama, OpenAI, Anthropic, …).
+//! All orchestration and skill-execution code works against `Arc<dyn LlmProvider>`
+//! so no provider-specific code leaks into the core runtime.
+
+use async_trait::async_trait;
+use tokio::sync::mpsc;
+
+use assistant_core::SkillDef;
+
+use crate::{ChatHistoryMessage, LlmResponse};
+
+// ── Capabilities ─────────────────────────────────────────────────────────────
+
+/// Level of tool-calling support offered by a provider.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolSupport {
+    /// Provider understands the `tools` / `tool_calls` wire protocol natively.
+    Native,
+    /// Provider has no structured tool-calling support.
+    None,
+}
+
+/// Static metadata describing what a provider can do.
+#[derive(Debug, Clone)]
+pub struct Capabilities {
+    /// Whether and how the provider supports tool / function calling.
+    pub tools: ToolSupport,
+    /// Whether the provider supports streaming token output.
+    pub streaming: bool,
+    /// Whether the provider accepts image inputs.
+    pub vision: bool,
+}
+
+// ── LlmProvider trait ─────────────────────────────────────────────────────────
+
+/// Common interface for LLM backends.
+///
+/// All internal orchestration code works against `Arc<dyn LlmProvider>` so the
+/// concrete provider (Ollama, OpenAI, Anthropic, …) is swapped without touching
+/// the runtime or skill-executor.
+#[async_trait]
+pub trait LlmProvider: Send + Sync {
+    /// Return static metadata about this provider's capabilities.
+    fn capabilities(&self) -> Capabilities;
+
+    /// Send a chat turn and return the model's response.
+    ///
+    /// # Parameters
+    /// * `system_prompt` – base system instructions
+    /// * `history` – previous messages in the conversation
+    /// * `skills` – skills available for this turn (passed as native tools)
+    async fn chat(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        skills: &[&SkillDef],
+    ) -> anyhow::Result<LlmResponse>;
+
+    /// Like [`chat`] but streams final-answer tokens through `token_sink` as
+    /// they are generated.
+    ///
+    /// Tool-call steps are never streamed — only the tokens that form part of
+    /// a `FinalAnswer` are forwarded.  The method still returns the complete
+    /// [`LlmResponse`] once generation is finished.
+    async fn chat_streaming(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        skills: &[&SkillDef],
+        token_sink: Option<mpsc::Sender<String>>,
+    ) -> anyhow::Result<LlmResponse>;
+}

@@ -342,6 +342,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "assistant-core",
+ "async-trait",
  "futures",
  "reqwest",
  "serde",
