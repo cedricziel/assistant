@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{AssistantConfig, ExecutionContext, MemoryLoader, SkillDef, SkillHandler, SkillOutput};
+use assistant_core::{
+    AssistantConfig, ExecutionContext, MemoryLoader, SkillDef, SkillHandler, SkillOutput,
+};
 use async_trait::async_trait;
 
 pub struct MemoryPatchHandler {
@@ -55,9 +57,7 @@ impl SkillHandler for MemoryPatchHandler {
                 target,
                 path.display()
             ))),
-            Err(e) => Ok(SkillOutput::error(format!(
-                "Failed to patch {target}: {e}"
-            ))),
+            Err(e) => Ok(SkillOutput::error(format!("Failed to patch {target}: {e}"))),
         }
     }
 }

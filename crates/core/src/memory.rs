@@ -243,7 +243,10 @@ impl MemoryLoader {
                             cap = BOOTSTRAP_MAX_CHARS_PER_FILE,
                             "Daily notes truncated"
                         );
-                        format!("{}\n[… truncated]", &trimmed[..BOOTSTRAP_MAX_CHARS_PER_FILE])
+                        format!(
+                            "{}\n[… truncated]",
+                            &trimmed[..BOOTSTRAP_MAX_CHARS_PER_FILE]
+                        )
                     } else {
                         trimmed.to_string()
                     };
@@ -361,9 +364,8 @@ impl MemoryLoader {
             "memory" => &self.memory_path,
             _ => anyhow::bail!("Unknown target: {target}"),
         };
-        let content = fs::read_to_string(path).map_err(|e| {
-            anyhow::anyhow!("Failed to read {}: {e}", path.display())
-        })?;
+        let content = fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", path.display()))?;
         if !content.contains(search) {
             anyhow::bail!(
                 "Search text not found in '{}' ({}). No changes made.",
