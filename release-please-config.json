@@ -4,55 +4,46 @@
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,
   "linked-versions": true,
+  "changelog-path": "CHANGELOG.md",
   "packages": {
     "crates/core": {
       "component": "assistant-core",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/llm": {
       "component": "assistant-llm",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/storage": {
       "component": "assistant-storage",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/runtime": {
       "component": "assistant-runtime",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/skills-executor": {
       "component": "assistant-skills-executor",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/mcp-server": {
       "component": "assistant-mcp-server",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/interface-cli": {
       "component": "assistant-cli",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/interface-signal": {
       "component": "assistant-interface-signal",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/interface-slack": {
       "component": "assistant-interface-slack",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     },
     "crates/interface-mattermost": {
       "component": "assistant-interface-mattermost",
-      "changelog-path": "../../CHANGELOG.md",
       "release-type": "rust"
     }
   }
