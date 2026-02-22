@@ -5,4 +5,4 @@
 -- these rows are reconstructed as AssistantToolCalls variants so the model
 -- sees its own tool-call decisions in multi-turn context.
 
-ALTER TABLE messages ADD COLUMN tool_calls_json TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_calls_json TEXT;
