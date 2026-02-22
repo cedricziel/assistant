@@ -25,13 +25,11 @@ impl SafetyGate {
             ));
         }
 
-        // 2. Mutating or shell skills are not permitted over remote/automated
-        //    interfaces because they would allow arbitrary filesystem writes or
-        //    code execution triggered by external messages.
-        let blocked_on_remote = matches!(
-            skill.name.as_str(),
-            "shell-exec" | "file-write" | "file-edit"
-        );
+        // 2. Shell execution skills are not permitted over remote/automated
+        //    interfaces because they allow arbitrary code execution triggered by
+        //    external messages.  File I/O (file-write, file-edit) is intentionally
+        //    allowed so the agent can update its own memory files from any interface.
+        let blocked_on_remote = matches!(skill.name.as_str(), "shell-exec" | "bash");
         if blocked_on_remote {
             let blocked_iface = match interface {
                 Interface::Signal => Some("Signal"),
@@ -139,5 +137,32 @@ mod tests {
     fn non_shell_exec_allowed_on_mattermost() {
         let skill = make_skill("web-fetch");
         assert!(SafetyGate::check(&skill, &Interface::Mattermost, &[]).is_ok());
+    }
+
+    #[test]
+    fn file_write_allowed_on_slack() {
+        // file-write is needed for memory updates from remote interfaces.
+        let skill = make_skill("file-write");
+        assert!(SafetyGate::check(&skill, &Interface::Slack, &[]).is_ok());
+    }
+
+    #[test]
+    fn file_edit_allowed_on_slack() {
+        let skill = make_skill("file-edit");
+        assert!(SafetyGate::check(&skill, &Interface::Slack, &[]).is_ok());
+    }
+
+    #[test]
+    fn bash_blocked_on_slack() {
+        let skill = make_skill("bash");
+        let result = SafetyGate::check(&skill, &Interface::Slack, &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn bash_blocked_on_signal() {
+        let skill = make_skill("bash");
+        let result = SafetyGate::check(&skill, &Interface::Signal, &[]);
+        assert!(result.is_err());
     }
 }
