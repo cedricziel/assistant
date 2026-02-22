@@ -262,42 +262,40 @@ mod embedded_tests {
     }
 
     #[test]
-    fn embedded_skills_include_memory_read() {
+    fn embedded_skills_include_memory_get() {
         let skills = embedded_builtin_skills();
         assert!(
-            skills.iter().any(|s| s.name == "memory-read"),
-            "memory-read skill not found in embedded skills: {:?}",
+            skills.iter().any(|s| s.name == "memory-get"),
+            "memory-get skill not found in embedded skills: {:?}",
             skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
         );
     }
 
     #[test]
-    fn memory_patch_parses_as_builtin_tier() {
+    fn memory_get_parses_as_builtin_tier() {
         let skills = embedded_builtin_skills();
-        let patch = skills
+        let skill = skills
             .iter()
-            .find(|s| s.name == "memory-patch")
-            .expect("memory-patch skill not found in embedded skills");
+            .find(|s| s.name == "memory-get")
+            .expect("memory-get skill not found in embedded skills");
         assert!(
-            matches!(patch.tier, crate::skill::SkillTier::Builtin),
-            "memory-patch tier should be Builtin, got {:?}",
-            patch.tier
+            matches!(skill.tier, crate::skill::SkillTier::Builtin),
+            "memory-get tier should be Builtin, got {:?}",
+            skill.tier
         );
     }
 
     #[test]
-    fn memory_patch_exposes_params_schema() {
+    fn memory_search_parses_as_builtin_tier() {
         let skills = embedded_builtin_skills();
-        let patch = skills
+        let skill = skills
             .iter()
-            .find(|s| s.name == "memory-patch")
-            .expect("memory-patch skill not found in embedded skills");
-        let schema = patch
-            .params_schema()
-            .expect("memory-patch should have a params schema");
-        // Params are stored as a flat JSON object: { "param": { "type": ..., "description": ... } }
-        assert!(schema["target"].is_object(), "schema missing 'target'");
-        assert!(schema["search"].is_object(), "schema missing 'search'");
-        assert!(schema["replace"].is_object(), "schema missing 'replace'");
+            .find(|s| s.name == "memory-search")
+            .expect("memory-search skill not found in embedded skills");
+        assert!(
+            matches!(skill.tier, crate::skill::SkillTier::Builtin),
+            "memory-search tier should be Builtin, got {:?}",
+            skill.tier
+        );
     }
 }

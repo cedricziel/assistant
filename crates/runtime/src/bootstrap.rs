@@ -5,9 +5,14 @@
 //! skill directories, and providing an auto-deny confirmation callback.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use assistant_core::{skill::SkillSource, AssistantConfig};
+use assistant_llm::LlmProvider;
+use assistant_skills_executor::{spawn_memory_indexer, MemoryIndexer};
+use assistant_storage::StorageLayer;
 use tracing::info;
 
 use crate::orchestrator::ConfirmationCallback;
@@ -58,6 +63,25 @@ pub async fn load_config(config_path: &Path) -> Result<AssistantConfig> {
 }
 
 // ── Skill directories ──────────────────────────────────────────────────────────
+
+/// Construct and spawn a background memory indexer task.
+///
+/// The indexer scans all memory files every `interval` and updates the
+/// `memory_chunks` SQLite table.  Embeddings are generated lazily via the
+/// LLM provider's `embed()` endpoint.
+///
+/// Call this once after building the storage layer and LLM provider.
+/// The default interval is 5 minutes.
+pub fn start_memory_indexer(
+    config: Arc<AssistantConfig>,
+    storage: Arc<StorageLayer>,
+    llm: Arc<dyn LlmProvider>,
+    interval: Option<Duration>,
+) {
+    let indexer = Arc::new(MemoryIndexer::new(config, storage, llm));
+    let interval = interval.unwrap_or(Duration::from_secs(5 * 60));
+    spawn_memory_indexer(indexer, interval);
+}
 
 /// Return the runtime skill search directories.
 ///

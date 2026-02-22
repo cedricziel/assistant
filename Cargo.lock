@@ -384,6 +384,9 @@ dependencies = [
  "assistant-core",
  "assistant-llm",
  "async-trait",
+ "reqwest",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -426,6 +429,7 @@ dependencies = [
  "reqwest",
  "scraper",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tracing",

@@ -1,10 +1,12 @@
 pub mod conversations;
+pub mod memory_chunks;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
 pub mod traces;
 
 pub use conversations::{ConversationRecord, ConversationStore};
+pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
@@ -63,6 +65,11 @@ impl StorageLayer {
     pub fn scheduled_task_store(&self) -> ScheduledTaskStore {
         ScheduledTaskStore::new(self.pool.clone())
     }
+
+    /// Convenience: build a `MemoryChunkStore` backed by this pool.
+    pub fn memory_chunks_store(&self) -> MemoryChunkStore {
+        MemoryChunkStore::new(self.pool.clone())
+    }
 }
 
 /// Returns the default database path: `~/.assistant/assistant.db`.
@@ -117,6 +124,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "006_drop_memory_entries",
             include_str!("../../../migrations/006_drop_memory_entries.sql"),
+        ),
+        (
+            "007_memory_chunks",
+            include_str!("../../../migrations/007_memory_chunks.sql"),
         ),
     ];
 

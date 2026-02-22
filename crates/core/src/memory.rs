@@ -48,17 +48,11 @@ Be the assistant you'd actually want running on your own machine. Concise when t
 
 Each session, you wake up fresh. SOUL.md, IDENTITY.md, USER.md, and MEMORY.md are your memory — loaded fresh every turn.
 
-**When you learn something about the user** (name, language, timezone, preferences):
-→ use `memory-update` with `target: user`
+**To read a memory file**: use `memory-get` with `target: soul`, `identity`, `user`, `memory`, or `notes/YYYY-MM-DD`.
 
-**When you want to record a lasting fact or decision**:
-→ use `memory-update` with `target: memory`
+**To search across all memory**: use `memory-search` with a natural language query.
 
-**When you need to correct a single field without rewriting the whole file**:
-→ use `memory-patch`
-
-**For session observations and task logs**:
-→ use `memory-save` (appends to today's daily notes)
+**To write or update memory files**: use `file-write` (full replace) or `file-edit` (search-and-replace) directly on the file paths listed below.
 
 If you change this file, tell the user. It's your soul, and they should know.
 
@@ -261,15 +255,17 @@ impl MemoryLoader {
             - User: {}\n\
             - Memory: {}\n\
             - Daily notes dir: {}\n\n\
+            ## How to read memory\n\
+            - Read a specific file → `memory-get` target=soul|identity|user|memory|notes/YYYY-MM-DD\n\
+            - Search across all memory → `memory-search` query=\"natural language query\"\n\n\
             ## How to write memory\n\
-            - User profile (name, language, timezone, preferences) → `memory-update` target=user\n\
-            - Lasting facts and decisions → `memory-update` target=memory\n\
-            - Correct a single field without rewriting → `memory-patch`\n\
-            - Session observations and task logs → `memory-save`",
+            Use `file-write` (full replace) or `file-edit` (search-and-replace) directly on the paths above.\n\
+            For daily notes: write to {}/YYYY-MM-DD.md",
             self.soul_path.display(),
             self.identity_path.display(),
             self.user_path.display(),
             self.memory_path.display(),
+            self.notes_dir.display(),
             self.notes_dir.display(),
         );
         parts.push(footer);

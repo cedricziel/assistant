@@ -71,4 +71,13 @@ pub trait LlmProvider: Send + Sync {
         skills: &[&SkillDef],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse>;
+
+    /// Compute a dense vector embedding for `text`.
+    ///
+    /// Returns an error if the provider does not support embeddings.
+    /// The default implementation always returns an error so that existing
+    /// providers do not need to be updated until they are ready.
+    async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+        Err(anyhow::anyhow!("Embedding not supported by this provider"))
+    }
 }

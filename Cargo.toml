@@ -72,6 +72,8 @@ scraper = "0.25"
 glob = "0.3"
 # JSON Schema validation for tool param checking
 jsonschema = "0.26"
+# SHA-256 hashing for memory chunk change detection
+sha2 = "0.10"
 # WASM plugin execution
 extism = "1"
 # Integration testing
