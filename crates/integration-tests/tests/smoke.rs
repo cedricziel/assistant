@@ -112,7 +112,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/// memory-write → memory-read round-trip.
+/// memory-update persists a user preference to USER.md and it surfaces in a follow-up turn.
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn test_memory_round_trip() -> Result<()> {
@@ -121,7 +121,7 @@ async fn test_memory_round_trip() -> Result<()> {
     let (_container, base_url) = start_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
-    // Store a value.
+    // Ask the agent to remember a preference — should call memory-update target=user.
     f.orchestrator
         .run_turn(
             "Remember this: my favourite colour is indigo",
@@ -130,7 +130,7 @@ async fn test_memory_round_trip() -> Result<()> {
         )
         .await?;
 
-    // Retrieve it.
+    // In a fresh turn the preference should be in the system prompt (USER.md) and recallable.
     let read = f
         .orchestrator
         .run_turn(

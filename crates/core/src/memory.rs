@@ -46,9 +46,19 @@ Be the assistant you'd actually want running on your own machine. Concise when t
 
 ## Continuity
 
-Each session, you wake up fresh. SOUL.md, IDENTITY.md, USER.md, and MEMORY.md are your memory — read them at the start, update them as you learn.
+Each session, you wake up fresh. SOUL.md, IDENTITY.md, USER.md, and MEMORY.md are your memory — loaded fresh every turn.
 
-Write durable facts and preferences to MEMORY.md. Write per-session observations, what you worked on, and anything useful for tomorrow to today's daily notes (use the `memory-save` tool). At the end of a session, save a brief summary.
+**When you learn something about the user** (name, language, timezone, preferences):
+→ use `memory-update` with `target: user`
+
+**When you want to record a lasting fact or decision**:
+→ use `memory-update` with `target: memory`
+
+**When you need to correct a single field without rewriting the whole file**:
+→ use `memory-patch`
+
+**For session observations and task logs**:
+→ use `memory-save` (appends to today's daily notes)
 
 If you change this file, tell the user. It's your soul, and they should know.
 
@@ -252,9 +262,10 @@ impl MemoryLoader {
             - Memory: {}\n\
             - Daily notes dir: {}\n\n\
             ## How to write memory\n\
-            - Durable facts, preferences, decisions → use `soul-update` tool (target: soul/identity/user/memory, mode: append/replace/patch)\n\
-            - Per-session notes, observations, what you worked on → use `memory-save` tool (params: note, optional category)\n\
-            - Write a daily note summary at the end of each session or when something noteworthy happens",
+            - User profile (name, language, timezone, preferences) → `memory-update` target=user\n\
+            - Lasting facts and decisions → `memory-update` target=memory\n\
+            - Correct a single field without rewriting → `memory-patch`\n\
+            - Session observations and task logs → `memory-save`",
             self.soul_path.display(),
             self.identity_path.display(),
             self.user_path.display(),

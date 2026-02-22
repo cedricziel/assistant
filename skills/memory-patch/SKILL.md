@@ -2,7 +2,7 @@
 name: memory-patch
 description: >
   Surgically edit a section of a persistent memory file (SOUL.md, IDENTITY.md, USER.md,
-  or MEMORY.md) using search-and-replace. Unlike soul-update, this replaces only the first
+  or MEMORY.md) using search-and-replace. Unlike memory-update, this replaces only the first
   occurrence of the search text, leaving the rest of the file intact. Returns an error if
   the search text is not found — no silent corruption.
 license: Apache-2.0
@@ -31,7 +31,7 @@ Perform a targeted search-and-replace on one of the four persistent memory files
 - Updating a single bullet point or section in MEMORY.md
 - Fixing a preference in SOUL.md without touching the rest
 
-Prefer `memory-patch` over `soul-update` with `mode=replace` whenever you only need to change one part of a file.
+Prefer `memory-patch` over `memory-update` with `mode=replace` whenever you only need to change one part of a file.
 
 ### Error handling
 

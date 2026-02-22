@@ -1,12 +1,10 @@
 pub mod conversations;
-pub mod memory;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
 pub mod traces;
 
 pub use conversations::{ConversationRecord, ConversationStore};
-pub use memory::{MemoryEntry, MemoryStore};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
@@ -44,11 +42,6 @@ impl StorageLayer {
         let pool = SqlitePool::connect("sqlite::memory:").await?;
         run_migrations(&pool).await?;
         Ok(Self { pool })
-    }
-
-    /// Convenience: build a `MemoryStore` backed by this pool.
-    pub fn memory_store(&self) -> MemoryStore {
-        MemoryStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `TraceStore` backed by this pool.
@@ -120,6 +113,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "005_tool_calls",
             include_str!("../../../migrations/005_tool_calls.sql"),
+        ),
+        (
+            "006_drop_memory_entries",
+            include_str!("../../../migrations/006_drop_memory_entries.sql"),
         ),
     ];
 

@@ -64,11 +64,8 @@ impl SkillExecutor {
         // SKILL.md-backed builtin handlers — implement SkillHandler
         let handlers: Vec<Arc<dyn SkillHandler>> = vec![
             // Memory / soul
-            Arc::new(MemoryReadHandler::new(storage.clone())),
-            Arc::new(MemoryWriteHandler::new(storage.clone())),
-            Arc::new(MemorySearchHandler::new(storage.clone())),
             Arc::new(MemorySaveHandler::new(config.clone())),
-            Arc::new(SoulUpdateHandler::new(config.clone())),
+            Arc::new(MemoryUpdateHandler::new(config.clone())),
             Arc::new(MemoryPatchHandler::new(config.clone())),
             // Heartbeat
             Arc::new(HeartbeatReadHandler::new(config.clone())),

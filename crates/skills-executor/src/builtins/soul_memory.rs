@@ -1,9 +1,9 @@
-//! Builtin handlers for memory-save and soul-update skills.
+//! Builtin handlers for memory-save and memory-update skills.
 //!
 //! `memory-save` appends a timestamped note to today's daily log file
 //! (`~/.assistant/memory/YYYY-MM-DD.md`).
 //!
-//! `soul-update` updates one of the four persistent markdown identity files:
+//! `memory-update` updates one of the four persistent markdown identity files:
 //! SOUL.md, IDENTITY.md, USER.md, or MEMORY.md.
 
 use std::collections::HashMap;
@@ -65,23 +65,23 @@ impl SkillHandler for MemorySaveHandler {
 }
 
 // ---------------------------------------------------------------------------
-// SoulUpdateHandler
+// MemoryUpdateHandler
 // ---------------------------------------------------------------------------
 
-pub struct SoulUpdateHandler {
+pub struct MemoryUpdateHandler {
     config: Arc<AssistantConfig>,
 }
 
-impl SoulUpdateHandler {
+impl MemoryUpdateHandler {
     pub fn new(config: Arc<AssistantConfig>) -> Self {
         Self { config }
     }
 }
 
 #[async_trait]
-impl SkillHandler for SoulUpdateHandler {
+impl SkillHandler for MemoryUpdateHandler {
     fn skill_name(&self) -> &str {
-        "soul-update"
+        "memory-update"
     }
 
     async fn execute(
