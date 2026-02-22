@@ -9,12 +9,22 @@ use tracing::debug;
 
 /// A single message in the chat history as tracked by the caller.
 ///
-/// This is the crate's own message type so callers are not required to depend
-/// directly on `ollama_rs` internals.
+/// The enum reflects the three structurally distinct message kinds in the
+/// Ollama (and OpenAI-compatible) multi-turn tool-calling format:
+///
+/// * `Text` — a plain user, assistant, or system message.
+/// * `AssistantToolCalls` — the assistant's decision to invoke one or more
+///   tools.  Serialises to `{"role":"assistant","content":"","tool_calls":[…]}`.
+/// * `ToolResult` — the result returned for a single tool invocation.
+///   Serialises to `{"role":"tool","name":"…","content":"…"}`.
 #[derive(Debug, Clone)]
-pub struct ChatHistoryMessage {
-    pub role: ChatRole,
-    pub content: String,
+pub enum ChatHistoryMessage {
+    /// A plain text message (user / assistant / system).
+    Text { role: ChatRole, content: String },
+    /// The assistant requested one or more tool calls in a single turn.
+    AssistantToolCalls(Vec<ToolCallItem>),
+    /// The result of a single tool invocation.
+    ToolResult { name: String, content: String },
 }
 
 /// Chat participant role.
@@ -539,6 +549,13 @@ fn skill_to_tool_json(skill: &SkillDef) -> Value {
 }
 
 /// Build the JSON messages array for the native (reqwest) path.
+///
+/// Handles all three [`ChatHistoryMessage`] variants, producing the correct
+/// Ollama wire format for each:
+///
+/// * `Text` → `{"role": "…", "content": "…"}`
+/// * `AssistantToolCalls` → `{"role": "assistant", "content": "", "tool_calls": […]}`
+/// * `ToolResult` → `{"role": "tool", "name": "…", "content": "…"}`
 fn build_json_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Vec<Value> {
     let mut messages = Vec::with_capacity(history.len() + 1);
 
@@ -547,13 +564,42 @@ fn build_json_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> V
     }
 
     for msg in history {
-        let role = match msg.role {
-            ChatRole::System => "system",
-            ChatRole::User => "user",
-            ChatRole::Assistant => "assistant",
-            ChatRole::Tool => "tool",
-        };
-        messages.push(json!({ "role": role, "content": msg.content }));
+        match msg {
+            ChatHistoryMessage::Text { role, content } => {
+                let role_str = match role {
+                    ChatRole::System => "system",
+                    ChatRole::User => "user",
+                    ChatRole::Assistant => "assistant",
+                    ChatRole::Tool => "tool",
+                };
+                messages.push(json!({ "role": role_str, "content": content }));
+            }
+            ChatHistoryMessage::AssistantToolCalls(calls) => {
+                let tool_calls: Vec<Value> = calls
+                    .iter()
+                    .map(|c| {
+                        json!({
+                            "function": {
+                                "name": c.name,
+                                "arguments": c.params,
+                            }
+                        })
+                    })
+                    .collect();
+                messages.push(json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": tool_calls,
+                }));
+            }
+            ChatHistoryMessage::ToolResult { name, content } => {
+                messages.push(json!({
+                    "role": "tool",
+                    "name": name,
+                    "content": content,
+                }));
+            }
+        }
     }
 
     messages

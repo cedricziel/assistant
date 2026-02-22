@@ -147,7 +147,7 @@ impl SkillHandler for SelfAnalyzeHandler {
             current_body,
         );
 
-        let sub_history = vec![ChatHistoryMessage {
+        let sub_history = vec![ChatHistoryMessage::Text {
             role: ChatRole::User,
             content: user_prompt,
         }];

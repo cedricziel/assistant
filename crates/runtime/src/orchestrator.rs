@@ -344,6 +344,14 @@ impl Orchestrator {
                         iteration, "LLM requested skill execution(s)"
                     );
 
+                    // Record the assistant's tool-call message in history *before*
+                    // executing any tool.  This is required for correct Ollama
+                    // multi-turn format: the assistant message with `tool_calls`
+                    // must precede the corresponding `tool` result messages.
+                    history.push(ChatHistoryMessage::AssistantToolCalls(
+                        tool_call_items.clone(),
+                    ));
+
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
@@ -462,7 +470,7 @@ impl Orchestrator {
                                     system_prompt, skill_def.name, skill_def.body
                                 );
                                 let sub_input = format_params_as_prompt(&name, &params);
-                                let sub_history = vec![ChatHistoryMessage {
+                                let sub_history = vec![ChatHistoryMessage::Text {
                                     role: ChatRole::User,
                                     content: sub_input,
                                 }];
@@ -571,7 +579,7 @@ impl Orchestrator {
                 // ── Intermediate thinking step ────────────────────────────────
                 LlmResponse::Thinking(text) => {
                     debug!(iteration, "LLM emitted thinking step");
-                    history.push(ChatHistoryMessage {
+                    history.push(ChatHistoryMessage::Text {
                         role: ChatRole::Assistant,
                         content: text,
                     });
@@ -659,6 +667,12 @@ impl Orchestrator {
                         iteration, "LLM requested skill execution(s)"
                     );
 
+                    // Record the assistant's tool-call message in history *before*
+                    // executing any tool.  Required for correct Ollama multi-turn format.
+                    history.push(ChatHistoryMessage::AssistantToolCalls(
+                        tool_call_items.clone(),
+                    ));
+
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
@@ -714,7 +728,7 @@ impl Orchestrator {
                                 system_prompt, skill_def.name, skill_def.body
                             );
                             let sub_input = format_params_as_prompt(&name, &params);
-                            let sub_history = vec![assistant_llm::ChatHistoryMessage {
+                            let sub_history = vec![assistant_llm::ChatHistoryMessage::Text {
                                 role: assistant_llm::ChatRole::User,
                                 content: sub_input,
                             }];
@@ -818,7 +832,7 @@ impl Orchestrator {
                 // ── Intermediate thinking step ────────────────────────────────
                 LlmResponse::Thinking(text) => {
                     debug!(iteration, "LLM emitted thinking step");
-                    history.push(ChatHistoryMessage {
+                    history.push(ChatHistoryMessage::Text {
                         role: ChatRole::Assistant,
                         content: text,
                     });
@@ -912,6 +926,12 @@ impl Orchestrator {
                         iteration, "Streaming LLM requested skill execution(s)"
                     );
 
+                    // Record the assistant's tool-call message in history *before*
+                    // executing any tool.  Required for correct Ollama multi-turn format.
+                    history.push(ChatHistoryMessage::AssistantToolCalls(
+                        tool_call_items.clone(),
+                    ));
+
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
@@ -960,7 +980,7 @@ impl Orchestrator {
                                 system_prompt, skill_def.name, skill_def.body
                             );
                             let sub_input = format_params_as_prompt(&name, &params);
-                            let sub_history = vec![assistant_llm::ChatHistoryMessage {
+                            let sub_history = vec![assistant_llm::ChatHistoryMessage::Text {
                                 role: assistant_llm::ChatRole::User,
                                 content: sub_input,
                             }];
@@ -1051,7 +1071,7 @@ impl Orchestrator {
 
                 LlmResponse::Thinking(text) => {
                     debug!(iteration, "Streaming LLM emitted thinking step");
-                    history.push(ChatHistoryMessage {
+                    history.push(ChatHistoryMessage::Text {
                         role: ChatRole::Assistant,
                         content: text,
                     });
@@ -1101,18 +1121,18 @@ impl Orchestrator {
         let mut history: Vec<ChatHistoryMessage> = prior
             .into_iter()
             .filter_map(|m| match m.role {
-                MessageRole::User => Some(ChatHistoryMessage {
+                MessageRole::User => Some(ChatHistoryMessage::Text {
                     role: ChatRole::User,
                     content: m.content,
                 }),
-                MessageRole::Assistant => Some(ChatHistoryMessage {
+                MessageRole::Assistant => Some(ChatHistoryMessage::Text {
                     role: ChatRole::Assistant,
                     content: m.content,
                 }),
                 _ => None,
             })
             .collect();
-        history.push(ChatHistoryMessage {
+        history.push(ChatHistoryMessage::Text {
             role: ChatRole::User,
             content: user_message.to_string(),
         });
@@ -1130,16 +1150,16 @@ impl Orchestrator {
         observation: &str,
         skill_name: Option<&str>,
     ) {
-        let content = if let Some(name) = skill_name {
-            format!("[{name}]: {observation}")
-        } else {
-            observation.to_string()
-        };
-
-        history.push(ChatHistoryMessage {
-            role: ChatRole::Tool,
-            content,
-        });
+        match skill_name {
+            Some(name) => history.push(ChatHistoryMessage::ToolResult {
+                name: name.to_string(),
+                content: observation.to_string(),
+            }),
+            None => history.push(ChatHistoryMessage::Text {
+                role: ChatRole::Tool,
+                content: observation.to_string(),
+            }),
+        }
     }
 
     /// Merge registry skills with synthetic defs from self-describing handlers.
@@ -1655,5 +1675,51 @@ mod tests {
             tool_count, 3,
             "expected 3 tool observations; msgs: {msgs:?}"
         );
+    }
+
+    /// When tool calls are present, the second LLM request must contain an
+    /// assistant message with a `tool_calls` array — not a plain text message.
+    /// This validates the Ollama multi-turn tool-calling wire format.
+    #[tokio::test]
+    async fn tool_call_assistant_message_in_history() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["my-skill"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        orch.run_turn("go", Uuid::new_v4(), Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        let msgs = messages_in(&reqs[1]);
+
+        // There must be exactly one assistant message that carries `tool_calls`.
+        let assistant_with_calls: Vec<&Value> = msgs
+            .iter()
+            .filter(|m| m["role"] == "assistant" && m["tool_calls"].is_array())
+            .collect();
+        assert_eq!(
+            assistant_with_calls.len(),
+            1,
+            "expected one assistant/tool_calls message in second request; msgs: {msgs:?}"
+        );
+
+        // The tool_calls array must name the skill.
+        let tc = &assistant_with_calls[0]["tool_calls"][0]["function"]["name"];
+        assert_eq!(tc, "my-skill");
     }
 }
