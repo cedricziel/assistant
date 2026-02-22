@@ -266,7 +266,7 @@ fn markdown_to_mrkdwn(input: &str) -> String {
             let hash_count = i - hash_start;
             if hash_count <= 6 && i < n && chars[i] == ' ' {
                 i += 1; // skip the space after hashes
-                // Collect the rest of the line.
+                        // Collect the rest of the line.
                 let line_begin = i;
                 while i < n && chars[i] != '\n' {
                     i += 1;
@@ -297,10 +297,7 @@ fn markdown_to_mrkdwn(input: &str) -> String {
         line_start = false;
 
         // Fenced code block: ``` ... ``` — pass through unchanged.
-        if chars[i] == '`'
-            && chars.get(i + 1) == Some(&'`')
-            && chars.get(i + 2) == Some(&'`')
-        {
+        if chars[i] == '`' && chars.get(i + 1) == Some(&'`') && chars.get(i + 2) == Some(&'`') {
             let fence_end = find_closing_fence(&chars, i + 3);
             let end = fence_end.unwrap_or(n);
             for c in &chars[i..end] {
