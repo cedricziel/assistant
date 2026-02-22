@@ -440,7 +440,7 @@ impl Orchestrator {
                                         let observation =
                                             format!("Skill '{}' not found in registry.", name);
                                         warn!(%observation);
-                                        self.append_observation(&mut history, &observation, None);
+                                        self.append_tool_result(&mut history, &name, &observation);
                                         continue;
                                     }
                                 },
@@ -451,7 +451,7 @@ impl Orchestrator {
                             {
                                 let observation = format!("Skill blocked: {reason}");
                                 warn!(%observation);
-                                self.append_observation(&mut history, &observation, Some(&name));
+                                self.append_tool_result(&mut history, &name, &observation);
                                 continue;
                             }
 
@@ -462,11 +462,7 @@ impl Orchestrator {
                                         let observation =
                                             format!("User denied execution of '{name}'.");
                                         info!(%observation);
-                                        self.append_observation(
-                                            &mut history,
-                                            &observation,
-                                            Some(&name),
-                                        );
+                                        self.append_tool_result(&mut history, &name, &observation);
                                         continue;
                                     }
                                 }
@@ -520,7 +516,7 @@ impl Orchestrator {
                                     }
                                 }
                                 traces.push(trace);
-                                self.append_observation(&mut history, &observation, Some(&name));
+                                self.append_tool_result(&mut history, &name, &observation);
                                 continue;
                             }
 
@@ -546,7 +542,7 @@ impl Orchestrator {
                                 Ok(output) => {
                                     debug!(skill = %name, duration_ms, "Skill execution completed");
                                     trace = trace.with_success(output.content.clone(), duration_ms);
-                                    observation_text(&output.content, output.data.as_ref())
+                                    tool_result_content(&output.content, output.data.as_ref())
                                 }
                                 Err(err) => {
                                     warn!(skill = %name, %err, "Skill execution failed");
@@ -573,7 +569,7 @@ impl Orchestrator {
                             }
                         }
                         traces.push(trace_result);
-                        self.append_observation(&mut history, &observation, Some(&name));
+                        self.append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
                             base_turn + iteration as i64 + 1,
@@ -711,7 +707,7 @@ impl Orchestrator {
                                     let observation =
                                         format!("Skill '{}' not found in registry.", name);
                                     warn!(%observation);
-                                    self.append_observation(&mut history, &observation, None);
+                                    self.append_tool_result(&mut history, &name, &observation);
                                     continue;
                                 }
                             },
@@ -723,7 +719,7 @@ impl Orchestrator {
                         {
                             let observation = format!("Skill blocked: {reason}");
                             warn!(%observation);
-                            self.append_observation(&mut history, &observation, Some(&name));
+                            self.append_tool_result(&mut history, &name, &observation);
                             continue;
                         }
 
@@ -733,11 +729,7 @@ impl Orchestrator {
                                 if !cb.confirm(&name, &params) {
                                     let observation = format!("User denied execution of '{name}'.");
                                     info!(%observation);
-                                    self.append_observation(
-                                        &mut history,
-                                        &observation,
-                                        Some(&name),
-                                    );
+                                    self.append_tool_result(&mut history, &name, &observation);
                                     continue;
                                 }
                             }
@@ -795,7 +787,7 @@ impl Orchestrator {
                             }
                             traces.push(trace);
 
-                            self.append_observation(&mut history, &observation, Some(&name));
+                            self.append_tool_result(&mut history, &name, &observation);
                             continue;
                         }
 
@@ -829,7 +821,7 @@ impl Orchestrator {
                                     "Skill execution completed"
                                 );
                                 trace = trace.with_success(output.content.clone(), duration_ms);
-                                observation_text(&output.content, output.data.as_ref())
+                                tool_result_content(&output.content, output.data.as_ref())
                             }
                             Err(err) => {
                                 warn!(skill = %name, %err, "Skill execution failed");
@@ -850,7 +842,7 @@ impl Orchestrator {
                         traces.push(trace);
 
                         // Append OBSERVATION to history and persist as a tool-result row.
-                        self.append_observation(&mut history, &observation, Some(&name));
+                        self.append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
                             base_turn + iteration as i64 + 1,
@@ -986,7 +978,7 @@ impl Orchestrator {
                                     let observation =
                                         format!("Skill '{}' not found in registry.", name);
                                     warn!(%observation);
-                                    self.append_observation(&mut history, &observation, None);
+                                    self.append_tool_result(&mut history, &name, &observation);
                                     continue;
                                 }
                             },
@@ -997,7 +989,7 @@ impl Orchestrator {
                         {
                             let observation = format!("Skill blocked: {reason}");
                             warn!(%observation);
-                            self.append_observation(&mut history, &observation, Some(&name));
+                            self.append_tool_result(&mut history, &name, &observation);
                             continue;
                         }
 
@@ -1006,11 +998,7 @@ impl Orchestrator {
                                 if !cb.confirm(&name, &params) {
                                     let observation = format!("User denied execution of '{name}'.");
                                     info!(%observation);
-                                    self.append_observation(
-                                        &mut history,
-                                        &observation,
-                                        Some(&name),
-                                    );
+                                    self.append_tool_result(&mut history, &name, &observation);
                                     continue;
                                 }
                             }
@@ -1064,7 +1052,7 @@ impl Orchestrator {
                             }
                             traces.push(trace);
 
-                            self.append_observation(&mut history, &observation, Some(&name));
+                            self.append_tool_result(&mut history, &name, &observation);
                             continue;
                         }
 
@@ -1089,7 +1077,7 @@ impl Orchestrator {
                         let observation = match exec_result {
                             Ok(output) => {
                                 trace = trace.with_success(output.content.clone(), duration_ms);
-                                observation_text(&output.content, output.data.as_ref())
+                                tool_result_content(&output.content, output.data.as_ref())
                             }
                             Err(err) => {
                                 warn!(skill = %name, %err, "Skill execution failed");
@@ -1107,7 +1095,7 @@ impl Orchestrator {
                         }
 
                         traces.push(trace);
-                        self.append_observation(&mut history, &observation, Some(&name));
+                        self.append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
                             base_turn + iteration as i64 + 1,
@@ -1211,24 +1199,13 @@ impl Orchestrator {
 
     /// Append a tool result message to the chat history.
     ///
-    /// The result is added as a `tool` role message so the LLM can
+    /// The result is added as a `ToolResult` variant so the LLM can
     /// recognise it as skill output.
-    fn append_observation(
-        &self,
-        history: &mut Vec<ChatHistoryMessage>,
-        observation: &str,
-        skill_name: Option<&str>,
-    ) {
-        match skill_name {
-            Some(name) => history.push(ChatHistoryMessage::ToolResult {
-                name: name.to_string(),
-                content: observation.to_string(),
-            }),
-            None => history.push(ChatHistoryMessage::Text {
-                role: ChatRole::Tool,
-                content: observation.to_string(),
-            }),
-        }
+    fn append_tool_result(&self, history: &mut Vec<ChatHistoryMessage>, name: &str, content: &str) {
+        history.push(ChatHistoryMessage::ToolResult {
+            name: name.to_string(),
+            content: content.to_string(),
+        });
     }
 
     /// Build a `Message` row for a turn where the LLM requested tool calls.
@@ -1278,15 +1255,15 @@ impl Orchestrator {
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
 
-/// Build the observation text from a skill output.
+/// Build the tool result content from a skill output.
 ///
-/// When `data` is present (structured JSON from a `ToolHandler`), it is appended
-/// as a compact JSON block so the model can parse it. The raw `content` is always
-/// included first so the human-readable summary is still visible.
-fn observation_text(content: &str, data: Option<&serde_json::Value>) -> String {
+/// When `data` is present (structured JSON from a `ToolHandler`), the JSON is
+/// returned directly so the model can parse it. Models are trained to handle
+/// JSON tool results natively.
+fn tool_result_content(content: &str, data: Option<&serde_json::Value>) -> String {
     if let Some(d) = data {
         if let Ok(json) = serde_json::to_string(d) {
-            return format!("{}\n\nJSON: {}", content, json);
+            return json;
         }
     }
     content.to_string()
