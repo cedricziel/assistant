@@ -163,9 +163,41 @@ impl Orchestrator {
         let all_skill_refs: Vec<&assistant_core::SkillDef> =
             ext_defs.iter().chain(global_skills.iter()).collect();
 
-        let system_prompt = self.memory_loader.load_system_prompt();
+        let base_system_prompt = self.memory_loader.load_system_prompt();
+        // When extension tools are present the LLM must use them to post replies;
+        // returning a plain FinalAnswer will silently drop the response.  Append
+        // an explicit instruction so the LLM knows it has to call a tool.
+        let system_prompt = if ext_defs.is_empty() {
+            base_system_prompt
+        } else {
+            let reply_tools: Vec<&str> = ext_defs
+                .iter()
+                .filter(|d| d.name.contains("reply") || d.name.contains("post"))
+                .map(|d| d.name.as_str())
+                .collect();
+            let tool_list = if reply_tools.is_empty() {
+                ext_defs
+                    .iter()
+                    .map(|d| d.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                reply_tools.join(", ")
+            };
+            format!(
+                "{base_system_prompt}\n\n---\n\n\
+                IMPORTANT: You are operating inside a messaging interface. \
+                You MUST call one of the following tools to deliver your response \
+                to the user: {tool_list}. \
+                Do NOT return a plain-text final answer — the user will never see it. \
+                Always end every turn by calling a reply tool."
+            )
+        };
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
+        // Track whether a reply-capable extension tool has already been called
+        // this turn so the FinalAnswer auto-post fallback does not double-post.
+        let mut replied = false;
 
         // 6. Tool-calling loop.
         for iteration in 0..self.max_iterations {
@@ -186,8 +218,7 @@ impl Orchestrator {
             match response {
                 // ── Final answer ──────────────────────────────────────────────
                 LlmResponse::FinalAnswer(text) => {
-                    info!(iteration, "LLM returned final answer (no auto-post)");
-
+                    // Persist the assistant message regardless.
                     let assistant_msg = {
                         let mut m = assistant_core::Message::assistant(conversation_id, &text);
                         m.turn = base_turn + iteration as i64 + 1;
@@ -195,110 +226,98 @@ impl Orchestrator {
                     };
                     conv_store.save_message(&assistant_msg).await?;
 
-                    // Replies happen via extension tool calls — we do not post here.
+                    // If a reply tool was already called during this turn (via the
+                    // ToolCalls branch), the user has already received a message —
+                    // skip the fallback to avoid double-posting.
+                    if replied {
+                        return Ok(());
+                    }
+
+                    // If a reply-capable extension tool exists, use it to forward
+                    // the answer to the user.  This handles models that ignore the
+                    // "always call a reply tool" instruction and emit a FinalAnswer
+                    // instead.
+                    //
+                    // Prefer a plain "reply" tool (e.g. slack-reply) over structured
+                    // variants (e.g. slack-reply-blocks) so the plain-text fallback
+                    // reaches the user correctly.
+                    let reply_entry = ext_map
+                        .iter()
+                        .find(|(name, _)| name.contains("reply") && !name.contains("blocks"))
+                        .or_else(|| {
+                            ext_map
+                                .iter()
+                                .find(|(name, _)| name.contains("reply") || name.contains("post"))
+                        });
+
+                    if let Some((reply_name, (reply_def, reply_handler))) = reply_entry {
+                        info!(
+                            iteration,
+                            tool = %reply_name,
+                            "LLM returned final answer; auto-posting via extension reply tool"
+                        );
+                        let mut params_map = HashMap::new();
+                        // Use whichever parameter the reply tool expects for its text.
+                        let text_param = if reply_def
+                            .metadata
+                            .get("params")
+                            .map(|p| p.contains("\"text\""))
+                            .unwrap_or(false)
+                        {
+                            "text"
+                        } else {
+                            "content"
+                        };
+                        params_map.insert(
+                            text_param.to_string(),
+                            serde_json::Value::String(text.clone()),
+                        );
+                        let ctx = ExecutionContext {
+                            conversation_id,
+                            turn: iteration as i64,
+                            interface: interface.clone(),
+                            interactive: false,
+                        };
+                        if let Err(e) = reply_handler.execute(reply_def, params_map, &ctx).await {
+                            warn!(tool = %reply_name, %e, "Auto-post via reply tool failed");
+                        }
+                    } else {
+                        info!(
+                            iteration,
+                            "LLM returned final answer (no auto-post): no reply tool available"
+                        );
+                    }
+
                     return Ok(());
                 }
 
-                // ── Tool call ─────────────────────────────────────────────────
-                LlmResponse::ToolCall { name, params } => {
-                    info!(skill = %name, iteration, "LLM requested skill execution");
+                // ── Tool calls ────────────────────────────────────────────────
+                LlmResponse::ToolCalls(tool_call_items) => {
+                    info!(
+                        count = tool_call_items.len(),
+                        iteration, "LLM requested skill execution(s)"
+                    );
 
-                    // Extension tools take priority and bypass the safety gate.
-                    let (observation, trace_result) = if let Some((ext_def, handler)) =
-                        ext_map.get(&name)
-                    {
-                        debug!(skill = %name, "Dispatching to extension handler");
+                    for tool_call_item in tool_call_items {
+                        let name = tool_call_item.name;
+                        let params = tool_call_item.params;
 
-                        let params_map: HashMap<String, serde_json::Value> =
-                            if let serde_json::Value::Object(map) = &params {
-                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                            } else {
-                                HashMap::new()
-                            };
-
-                        let start = std::time::Instant::now();
-                        let exec_result = handler.execute(ext_def, params_map, &ctx).await;
-                        let duration_ms = start.elapsed().as_millis() as i64;
-
-                        let mut trace = ExecutionTrace::new(
-                            conversation_id,
-                            iteration as i64,
-                            &name,
-                            params.clone(),
-                        );
-                        let obs = match exec_result {
-                            Ok(output) => {
-                                trace = trace.with_success(output.content.clone(), duration_ms);
-                                output.content
-                            }
-                            Err(err) => {
-                                warn!(skill = %name, %err, "Extension skill execution failed");
-                                let msg = err.to_string();
-                                trace = trace.with_error(msg.clone(), duration_ms);
-                                format!("Error executing '{name}': {msg}")
-                            }
-                        };
-                        (obs, trace)
-                    } else {
-                        // Global registry path — look up def and apply safety gate.
-                        let Some(skill_def) = self.registry.get(&name).await else {
-                            let observation = format!("Skill '{}' not found in registry.", name);
-                            warn!(%observation);
-                            self.append_observation(&mut history, &observation, None);
-                            continue;
-                        };
-
-                        if let Err(reason) =
-                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
+                        // Extension tools take priority and bypass the safety gate.
+                        let (observation, trace_result) = if let Some((ext_def, handler)) =
+                            ext_map.get(&name)
                         {
-                            let observation = format!("Skill blocked: {reason}");
-                            warn!(%observation);
-                            self.append_observation(&mut history, &observation, Some(&name));
-                            continue;
-                        }
+                            debug!(skill = %name, "Dispatching to extension handler");
 
-                        // Confirmation gate — mirrors the gate in run_turn / run_turn_streaming.
-                        if skill_def.confirmation_required && ctx.interactive {
-                            if let Some(cb) = &self.confirmation_callback {
-                                if !cb.confirm(&name, &params) {
-                                    let observation = format!("User denied execution of '{name}'.");
-                                    info!(%observation);
-                                    self.append_observation(
-                                        &mut history,
-                                        &observation,
-                                        Some(&name),
-                                    );
-                                    continue;
-                                }
-                            }
-                        }
-
-                        if matches!(skill_def.tier, SkillTier::Prompt) {
-                            let sub_system = format!(
-                                "{}\n\n## Skill: {}\n\n{}",
-                                system_prompt, skill_def.name, skill_def.body
-                            );
-                            let sub_input = format_params_as_prompt(&name, &params);
-                            let sub_history = vec![ChatHistoryMessage {
-                                role: ChatRole::User,
-                                content: sub_input,
-                            }];
+                            let params_map: HashMap<String, serde_json::Value> =
+                                if let serde_json::Value::Object(map) = &params {
+                                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                                } else {
+                                    HashMap::new()
+                                };
 
                             let start = std::time::Instant::now();
-                            let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
+                            let exec_result = handler.execute(ext_def, params_map, &ctx).await;
                             let duration_ms = start.elapsed().as_millis() as i64;
-
-                            let observation = match sub_result {
-                                Ok(LlmResponse::FinalAnswer(text)) => text,
-                                Ok(LlmResponse::ToolCall { name: n, .. }) => format!(
-                                    "Prompt-skill sub-call returned unexpected tool call: {n}"
-                                ),
-                                Ok(LlmResponse::Thinking(text)) => text,
-                                Err(err) => {
-                                    warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
-                                    format!("Error running prompt skill '{name}': {err}")
-                                }
-                            };
 
                             let mut trace = ExecutionTrace::new(
                                 conversation_id,
@@ -306,60 +325,158 @@ impl Orchestrator {
                                 &name,
                                 params.clone(),
                             );
-                            trace = trace.with_success(observation.clone(), duration_ms);
-
-                            if self.trace_enabled {
-                                let trace_store = self.storage.trace_store();
-                                if let Err(e) = trace_store.insert(&trace).await {
-                                    warn!("Failed to persist prompt-tier trace: {e}");
+                            let obs = match exec_result {
+                                Ok(output) => {
+                                    trace = trace.with_success(output.content.clone(), duration_ms);
+                                    output.content
                                 }
-                            }
-                            traces.push(trace);
-                            self.append_observation(&mut history, &observation, Some(&name));
-                            continue;
-                        }
-
-                        let params_map: HashMap<String, serde_json::Value> =
-                            if let serde_json::Value::Object(map) = &params {
-                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                            } else {
-                                HashMap::new()
+                                Err(err) => {
+                                    warn!(skill = %name, %err, "Extension skill execution failed");
+                                    let msg = err.to_string();
+                                    trace = trace.with_error(msg.clone(), duration_ms);
+                                    format!("Error executing '{name}': {msg}")
+                                }
+                            };
+                            (obs, trace)
+                        } else {
+                            // Global registry path — look up def and apply safety gate.
+                            let Some(skill_def) = self.registry.get(&name).await else {
+                                let observation =
+                                    format!("Skill '{}' not found in registry.", name);
+                                warn!(%observation);
+                                self.append_observation(&mut history, &observation, None);
+                                continue;
                             };
 
-                        let start = std::time::Instant::now();
-                        let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
-                        let duration_ms = start.elapsed().as_millis() as i64;
+                            if let Err(reason) =
+                                SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
+                            {
+                                let observation = format!("Skill blocked: {reason}");
+                                warn!(%observation);
+                                self.append_observation(&mut history, &observation, Some(&name));
+                                continue;
+                            }
 
-                        let mut trace = ExecutionTrace::new(
-                            conversation_id,
-                            iteration as i64,
-                            &name,
-                            params.clone(),
-                        );
-                        let obs = match exec_result {
-                            Ok(output) => {
-                                debug!(skill = %name, duration_ms, "Skill execution completed");
-                                trace = trace.with_success(output.content.clone(), duration_ms);
-                                output.content
+                            // Confirmation gate — mirrors the gate in run_turn / run_turn_streaming.
+                            if skill_def.confirmation_required && ctx.interactive {
+                                if let Some(cb) = &self.confirmation_callback {
+                                    if !cb.confirm(&name, &params) {
+                                        let observation =
+                                            format!("User denied execution of '{name}'.");
+                                        info!(%observation);
+                                        self.append_observation(
+                                            &mut history,
+                                            &observation,
+                                            Some(&name),
+                                        );
+                                        continue;
+                                    }
+                                }
                             }
-                            Err(err) => {
-                                warn!(skill = %name, %err, "Skill execution failed");
-                                let msg = err.to_string();
-                                trace = trace.with_error(msg.clone(), duration_ms);
-                                format!("Error executing '{name}': {msg}")
+
+                            if matches!(skill_def.tier, SkillTier::Prompt) {
+                                let sub_system = format!(
+                                    "{}\n\n## Skill: {}\n\n{}",
+                                    system_prompt, skill_def.name, skill_def.body
+                                );
+                                let sub_input = format_params_as_prompt(&name, &params);
+                                let sub_history = vec![ChatHistoryMessage {
+                                    role: ChatRole::User,
+                                    content: sub_input,
+                                }];
+
+                                let start = std::time::Instant::now();
+                                let sub_result =
+                                    self.llm.chat(&sub_system, &sub_history, &[]).await;
+                                let duration_ms = start.elapsed().as_millis() as i64;
+
+                                let observation = match sub_result {
+                                    Ok(LlmResponse::FinalAnswer(text)) => text,
+                                    Ok(LlmResponse::ToolCalls(calls)) => format!(
+                                        "Prompt-skill sub-call returned unexpected tool calls: {}",
+                                        calls
+                                            .iter()
+                                            .map(|c| c.name.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    ),
+                                    Ok(LlmResponse::Thinking(text)) => text,
+                                    Err(err) => {
+                                        warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
+                                        format!("Error running prompt skill '{name}': {err}")
+                                    }
+                                };
+
+                                let mut trace = ExecutionTrace::new(
+                                    conversation_id,
+                                    iteration as i64,
+                                    &name,
+                                    params.clone(),
+                                );
+                                trace = trace.with_success(observation.clone(), duration_ms);
+
+                                if self.trace_enabled {
+                                    let trace_store = self.storage.trace_store();
+                                    if let Err(e) = trace_store.insert(&trace).await {
+                                        warn!("Failed to persist prompt-tier trace: {e}");
+                                    }
+                                }
+                                traces.push(trace);
+                                self.append_observation(&mut history, &observation, Some(&name));
+                                continue;
                             }
+
+                            let params_map: HashMap<String, serde_json::Value> =
+                                if let serde_json::Value::Object(map) = &params {
+                                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                                } else {
+                                    HashMap::new()
+                                };
+
+                            let start = std::time::Instant::now();
+                            let exec_result =
+                                self.executor.execute(&skill_def, params_map, &ctx).await;
+                            let duration_ms = start.elapsed().as_millis() as i64;
+
+                            let mut trace = ExecutionTrace::new(
+                                conversation_id,
+                                iteration as i64,
+                                &name,
+                                params.clone(),
+                            );
+                            let obs = match exec_result {
+                                Ok(output) => {
+                                    debug!(skill = %name, duration_ms, "Skill execution completed");
+                                    trace = trace.with_success(output.content.clone(), duration_ms);
+                                    output.content
+                                }
+                                Err(err) => {
+                                    warn!(skill = %name, %err, "Skill execution failed");
+                                    let msg = err.to_string();
+                                    trace = trace.with_error(msg.clone(), duration_ms);
+                                    format!("Error executing '{name}': {msg}")
+                                }
+                            };
+                            (obs, trace)
                         };
-                        (obs, trace)
-                    };
 
-                    if self.trace_enabled {
-                        let trace_store = self.storage.trace_store();
-                        if let Err(e) = trace_store.insert(&trace_result).await {
-                            warn!("Failed to persist execution trace: {e}");
+                        // Mark as replied if the dispatched tool is a reply/post
+                        // extension, so the FinalAnswer fallback does not fire again.
+                        if ext_map.contains_key(&name)
+                            && (name.contains("reply") || name.contains("post"))
+                        {
+                            replied = true;
                         }
+
+                        if self.trace_enabled {
+                            let trace_store = self.storage.trace_store();
+                            if let Err(e) = trace_store.insert(&trace_result).await {
+                                warn!("Failed to persist execution trace: {e}");
+                            }
+                        }
+                        traces.push(trace_result);
+                        self.append_observation(&mut history, &observation, Some(&name));
                     }
-                    traces.push(trace_result);
-                    self.append_observation(&mut history, &observation, Some(&name));
                 }
 
                 // ── Intermediate thinking step ────────────────────────────────
@@ -445,143 +562,160 @@ impl Orchestrator {
                     });
                 }
 
-                // ── Tool call ─────────────────────────────────────────────────
-                LlmResponse::ToolCall { name, params } => {
-                    info!(skill = %name, iteration, "LLM requested skill execution");
+                // ── Tool calls ────────────────────────────────────────────────
+                LlmResponse::ToolCalls(tool_call_items) => {
+                    info!(
+                        count = tool_call_items.len(),
+                        iteration, "LLM requested skill execution(s)"
+                    );
 
-                    // Look up the skill definition.
-                    let Some(skill_def) = self.registry.get(&name).await else {
-                        let observation = format!("Skill '{}' not found in registry.", name);
-                        warn!(%observation);
-                        self.append_observation(&mut history, &observation, None);
-                        continue;
-                    };
+                    for tool_call_item in tool_call_items {
+                        let name = tool_call_item.name;
+                        let params = tool_call_item.params;
 
-                    // Safety gate.
-                    if let Err(reason) =
-                        SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
-                    {
-                        let observation = format!("Skill blocked: {reason}");
-                        warn!(%observation);
-                        self.append_observation(&mut history, &observation, Some(&name));
-                        continue;
-                    }
-
-                    // Confirmation gate (for mutating / confirmation-required skills).
-                    if skill_def.confirmation_required && ctx.interactive {
-                        if let Some(cb) = &self.confirmation_callback {
-                            if !cb.confirm(&name, &params) {
-                                let observation = format!("User denied execution of '{name}'.");
-                                info!(%observation);
-                                self.append_observation(&mut history, &observation, Some(&name));
-                                continue;
-                            }
-                        }
-                    }
-
-                    // For prompt-tier skills, invoke a sub-LLM call instead of the executor.
-                    // The SKILL.md body becomes the system prompt; params are formatted as user input.
-                    if matches!(skill_def.tier, SkillTier::Prompt) {
-                        debug!(skill = %name, "Prompt-tier skill: running sub-LLM call");
-
-                        let sub_system = format!(
-                            "{}\n\n## Skill: {}\n\n{}",
-                            system_prompt, skill_def.name, skill_def.body
-                        );
-                        let sub_input = format_params_as_prompt(&name, &params);
-                        let sub_history = vec![assistant_llm::ChatHistoryMessage {
-                            role: assistant_llm::ChatRole::User,
-                            content: sub_input,
-                        }];
-
-                        let start = std::time::Instant::now();
-                        let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
-                        let duration_ms = start.elapsed().as_millis() as i64;
-
-                        let observation = match sub_result {
-                            Ok(LlmResponse::FinalAnswer(text)) => text,
-                            Ok(LlmResponse::ToolCall { name: n, .. }) => {
-                                format!("Prompt-skill sub-call returned unexpected tool call: {n}")
-                            }
-                            Ok(LlmResponse::Thinking(text)) => text,
-                            Err(err) => {
-                                warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
-                                format!("Error running prompt skill '{name}': {err}")
-                            }
+                        // Look up the skill definition.
+                        let Some(skill_def) = self.registry.get(&name).await else {
+                            let observation = format!("Skill '{}' not found in registry.", name);
+                            warn!(%observation);
+                            self.append_observation(&mut history, &observation, None);
+                            continue;
                         };
 
+                        // Safety gate.
+                        if let Err(reason) =
+                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
+                        {
+                            let observation = format!("Skill blocked: {reason}");
+                            warn!(%observation);
+                            self.append_observation(&mut history, &observation, Some(&name));
+                            continue;
+                        }
+
+                        // Confirmation gate (for mutating / confirmation-required skills).
+                        if skill_def.confirmation_required && ctx.interactive {
+                            if let Some(cb) = &self.confirmation_callback {
+                                if !cb.confirm(&name, &params) {
+                                    let observation = format!("User denied execution of '{name}'.");
+                                    info!(%observation);
+                                    self.append_observation(
+                                        &mut history,
+                                        &observation,
+                                        Some(&name),
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // For prompt-tier skills, invoke a sub-LLM call instead of the executor.
+                        // The SKILL.md body becomes the system prompt; params are formatted as user input.
+                        if matches!(skill_def.tier, SkillTier::Prompt) {
+                            debug!(skill = %name, "Prompt-tier skill: running sub-LLM call");
+
+                            let sub_system = format!(
+                                "{}\n\n## Skill: {}\n\n{}",
+                                system_prompt, skill_def.name, skill_def.body
+                            );
+                            let sub_input = format_params_as_prompt(&name, &params);
+                            let sub_history = vec![assistant_llm::ChatHistoryMessage {
+                                role: assistant_llm::ChatRole::User,
+                                content: sub_input,
+                            }];
+
+                            let start = std::time::Instant::now();
+                            let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
+                            let duration_ms = start.elapsed().as_millis() as i64;
+
+                            let observation = match sub_result {
+                                Ok(LlmResponse::FinalAnswer(text)) => text,
+                                Ok(LlmResponse::ToolCalls(calls)) => format!(
+                                    "Prompt-skill sub-call returned unexpected tool calls: {}",
+                                    calls
+                                        .iter()
+                                        .map(|c| c.name.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ),
+                                Ok(LlmResponse::Thinking(text)) => text,
+                                Err(err) => {
+                                    warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
+                                    format!("Error running prompt skill '{name}': {err}")
+                                }
+                            };
+
+                            let mut trace = ExecutionTrace::new(
+                                conversation_id,
+                                iteration as i64,
+                                &name,
+                                params.clone(),
+                            );
+                            trace = trace.with_success(observation.clone(), duration_ms);
+
+                            if self.trace_enabled {
+                                let trace_store = self.storage.trace_store();
+                                if let Err(e) = trace_store.insert(&trace).await {
+                                    warn!("Failed to persist prompt-tier trace: {e}");
+                                }
+                            }
+                            traces.push(trace);
+
+                            self.append_observation(&mut history, &observation, Some(&name));
+                            continue;
+                        }
+
+                        // Convert JSON params to the HashMap the executor expects.
+                        let params_map: HashMap<String, serde_json::Value> =
+                            if let serde_json::Value::Object(map) = &params {
+                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                            } else {
+                                HashMap::new()
+                            };
+
+                        // Execute the skill and measure duration.
+                        let start = std::time::Instant::now();
+                        let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
+                        let duration_ms = start.elapsed().as_millis() as i64;
+
+                        // Build execution trace.
                         let mut trace = ExecutionTrace::new(
                             conversation_id,
                             iteration as i64,
                             &name,
                             params.clone(),
                         );
-                        trace = trace.with_success(observation.clone(), duration_ms);
 
+                        let observation = match exec_result {
+                            Ok(output) => {
+                                debug!(
+                                    skill = %name,
+                                    duration_ms,
+                                    success = output.success,
+                                    "Skill execution completed"
+                                );
+                                trace = trace.with_success(output.content.clone(), duration_ms);
+                                output.content
+                            }
+                            Err(err) => {
+                                warn!(skill = %name, %err, "Skill execution failed");
+                                let msg = err.to_string();
+                                trace = trace.with_error(msg.clone(), duration_ms);
+                                format!("Error executing '{name}': {msg}")
+                            }
+                        };
+
+                        // Persist trace if enabled.
                         if self.trace_enabled {
                             let trace_store = self.storage.trace_store();
                             if let Err(e) = trace_store.insert(&trace).await {
-                                warn!("Failed to persist prompt-tier trace: {e}");
+                                warn!("Failed to persist execution trace: {e}");
                             }
                         }
+
                         traces.push(trace);
 
+                        // Append OBSERVATION to history.
                         self.append_observation(&mut history, &observation, Some(&name));
-                        continue;
                     }
-
-                    // Convert JSON params to the HashMap the executor expects.
-                    let params_map: HashMap<String, serde_json::Value> =
-                        if let serde_json::Value::Object(map) = &params {
-                            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                        } else {
-                            HashMap::new()
-                        };
-
-                    // Execute the skill and measure duration.
-                    let start = std::time::Instant::now();
-                    let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
-                    let duration_ms = start.elapsed().as_millis() as i64;
-
-                    // Build execution trace.
-                    let mut trace = ExecutionTrace::new(
-                        conversation_id,
-                        iteration as i64,
-                        &name,
-                        params.clone(),
-                    );
-
-                    let observation = match exec_result {
-                        Ok(output) => {
-                            debug!(
-                                skill = %name,
-                                duration_ms,
-                                success = output.success,
-                                "Skill execution completed"
-                            );
-                            trace = trace.with_success(output.content.clone(), duration_ms);
-                            output.content
-                        }
-                        Err(err) => {
-                            warn!(skill = %name, %err, "Skill execution failed");
-                            let msg = err.to_string();
-                            trace = trace.with_error(msg.clone(), duration_ms);
-                            format!("Error executing '{name}': {msg}")
-                        }
-                    };
-
-                    // Persist trace if enabled.
-                    if self.trace_enabled {
-                        let trace_store = self.storage.trace_store();
-                        if let Err(e) = trace_store.insert(&trace).await {
-                            warn!("Failed to persist execution trace: {e}");
-                        }
-                    }
-
-                    traces.push(trace);
-
-                    // Append OBSERVATION to history.
-                    self.append_observation(&mut history, &observation, Some(&name));
                 }
 
                 // ── Intermediate thinking step ────────────────────────────────
@@ -675,62 +809,109 @@ impl Orchestrator {
                     });
                 }
 
-                LlmResponse::ToolCall { name, params } => {
-                    info!(skill = %name, iteration, "Streaming LLM requested skill execution");
+                LlmResponse::ToolCalls(tool_call_items) => {
+                    info!(
+                        count = tool_call_items.len(),
+                        iteration, "Streaming LLM requested skill execution(s)"
+                    );
 
-                    let Some(skill_def) = self.registry.get(&name).await else {
-                        let observation = format!("Skill '{}' not found in registry.", name);
-                        warn!(%observation);
-                        self.append_observation(&mut history, &observation, None);
-                        continue;
-                    };
+                    for tool_call_item in tool_call_items {
+                        let name = tool_call_item.name;
+                        let params = tool_call_item.params;
 
-                    if let Err(reason) =
-                        SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
-                    {
-                        let observation = format!("Skill blocked: {reason}");
-                        warn!(%observation);
-                        self.append_observation(&mut history, &observation, Some(&name));
-                        continue;
-                    }
+                        let Some(skill_def) = self.registry.get(&name).await else {
+                            let observation = format!("Skill '{}' not found in registry.", name);
+                            warn!(%observation);
+                            self.append_observation(&mut history, &observation, None);
+                            continue;
+                        };
 
-                    if skill_def.confirmation_required && ctx.interactive {
-                        if let Some(cb) = &self.confirmation_callback {
-                            if !cb.confirm(&name, &params) {
-                                let observation = format!("User denied execution of '{name}'.");
-                                info!(%observation);
-                                self.append_observation(&mut history, &observation, Some(&name));
-                                continue;
+                        if let Err(reason) =
+                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
+                        {
+                            let observation = format!("Skill blocked: {reason}");
+                            warn!(%observation);
+                            self.append_observation(&mut history, &observation, Some(&name));
+                            continue;
+                        }
+
+                        if skill_def.confirmation_required && ctx.interactive {
+                            if let Some(cb) = &self.confirmation_callback {
+                                if !cb.confirm(&name, &params) {
+                                    let observation = format!("User denied execution of '{name}'.");
+                                    info!(%observation);
+                                    self.append_observation(
+                                        &mut history,
+                                        &observation,
+                                        Some(&name),
+                                    );
+                                    continue;
+                                }
                             }
                         }
-                    }
 
-                    if matches!(skill_def.tier, SkillTier::Prompt) {
-                        let sub_system = format!(
-                            "{}\n\n## Skill: {}\n\n{}",
-                            system_prompt, skill_def.name, skill_def.body
-                        );
-                        let sub_input = format_params_as_prompt(&name, &params);
-                        let sub_history = vec![assistant_llm::ChatHistoryMessage {
-                            role: assistant_llm::ChatRole::User,
-                            content: sub_input,
-                        }];
+                        if matches!(skill_def.tier, SkillTier::Prompt) {
+                            let sub_system = format!(
+                                "{}\n\n## Skill: {}\n\n{}",
+                                system_prompt, skill_def.name, skill_def.body
+                            );
+                            let sub_input = format_params_as_prompt(&name, &params);
+                            let sub_history = vec![assistant_llm::ChatHistoryMessage {
+                                role: assistant_llm::ChatRole::User,
+                                content: sub_input,
+                            }];
+
+                            let start = std::time::Instant::now();
+                            let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
+                            let duration_ms = start.elapsed().as_millis() as i64;
+
+                            let observation = match sub_result {
+                                Ok(LlmResponse::FinalAnswer(text)) => text,
+                                Ok(LlmResponse::ToolCalls(calls)) => format!(
+                                    "Prompt-skill sub-call returned unexpected tool calls: {}",
+                                    calls
+                                        .iter()
+                                        .map(|c| c.name.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ),
+                                Ok(LlmResponse::Thinking(text)) => text,
+                                Err(err) => {
+                                    warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
+                                    format!("Error running prompt skill '{name}': {err}")
+                                }
+                            };
+
+                            let mut trace = ExecutionTrace::new(
+                                conversation_id,
+                                iteration as i64,
+                                &name,
+                                params.clone(),
+                            );
+                            trace = trace.with_success(observation.clone(), duration_ms);
+
+                            if self.trace_enabled {
+                                let trace_store = self.storage.trace_store();
+                                if let Err(e) = trace_store.insert(&trace).await {
+                                    warn!("Failed to persist prompt-tier trace: {e}");
+                                }
+                            }
+                            traces.push(trace);
+
+                            self.append_observation(&mut history, &observation, Some(&name));
+                            continue;
+                        }
+
+                        let params_map: HashMap<String, serde_json::Value> =
+                            if let serde_json::Value::Object(map) = &params {
+                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                            } else {
+                                HashMap::new()
+                            };
 
                         let start = std::time::Instant::now();
-                        let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
+                        let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
                         let duration_ms = start.elapsed().as_millis() as i64;
-
-                        let observation = match sub_result {
-                            Ok(LlmResponse::FinalAnswer(text)) => text,
-                            Ok(LlmResponse::ToolCall { name: n, .. }) => {
-                                format!("Prompt-skill sub-call returned unexpected tool call: {n}")
-                            }
-                            Ok(LlmResponse::Thinking(text)) => text,
-                            Err(err) => {
-                                warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
-                                format!("Error running prompt skill '{name}': {err}")
-                            }
-                        };
 
                         let mut trace = ExecutionTrace::new(
                             conversation_id,
@@ -738,60 +919,30 @@ impl Orchestrator {
                             &name,
                             params.clone(),
                         );
-                        trace = trace.with_success(observation.clone(), duration_ms);
+
+                        let observation = match exec_result {
+                            Ok(output) => {
+                                trace = trace.with_success(output.content.clone(), duration_ms);
+                                output.content
+                            }
+                            Err(err) => {
+                                warn!(skill = %name, %err, "Skill execution failed");
+                                let msg = err.to_string();
+                                trace = trace.with_error(msg.clone(), duration_ms);
+                                format!("Error executing '{name}': {msg}")
+                            }
+                        };
 
                         if self.trace_enabled {
                             let trace_store = self.storage.trace_store();
                             if let Err(e) = trace_store.insert(&trace).await {
-                                warn!("Failed to persist prompt-tier trace: {e}");
+                                warn!("Failed to persist execution trace: {e}");
                             }
                         }
+
                         traces.push(trace);
-
                         self.append_observation(&mut history, &observation, Some(&name));
-                        continue;
                     }
-
-                    let params_map: HashMap<String, serde_json::Value> =
-                        if let serde_json::Value::Object(map) = &params {
-                            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                        } else {
-                            HashMap::new()
-                        };
-
-                    let start = std::time::Instant::now();
-                    let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
-                    let duration_ms = start.elapsed().as_millis() as i64;
-
-                    let mut trace = ExecutionTrace::new(
-                        conversation_id,
-                        iteration as i64,
-                        &name,
-                        params.clone(),
-                    );
-
-                    let observation = match exec_result {
-                        Ok(output) => {
-                            trace = trace.with_success(output.content.clone(), duration_ms);
-                            output.content
-                        }
-                        Err(err) => {
-                            warn!(skill = %name, %err, "Skill execution failed");
-                            let msg = err.to_string();
-                            trace = trace.with_error(msg.clone(), duration_ms);
-                            format!("Error executing '{name}': {msg}")
-                        }
-                    };
-
-                    if self.trace_enabled {
-                        let trace_store = self.storage.trace_store();
-                        if let Err(e) = trace_store.insert(&trace).await {
-                            warn!("Failed to persist execution trace: {e}");
-                        }
-                    }
-
-                    traces.push(trace);
-                    self.append_observation(&mut history, &observation, Some(&name));
                 }
 
                 LlmResponse::Thinking(text) => {
@@ -1177,6 +1328,198 @@ mod tests {
         assert!(
             !bleed,
             "conv-a history must not appear in conv-b's LLM call"
+        );
+    }
+
+    // ── Multiple tool-call tests ───────────────────────────────────────────────
+
+    /// Build an Ollama response that contains `tool_calls` for the given skill names.
+    fn ollama_tool_calls(names: &[&str]) -> Value {
+        let calls: Vec<Value> = names
+            .iter()
+            .map(|n| json!({ "function": { "name": n, "arguments": {} } }))
+            .collect();
+        json!({
+            "model": "test",
+            "message": { "role": "assistant", "content": null, "tool_calls": calls },
+            "done": true
+        })
+    }
+
+    /// A single unknown tool call causes one observation and then one more LLM
+    /// call that receives that observation in its messages.
+    #[tokio::test]
+    async fn single_tool_call_adds_observation_to_next_request() {
+        let server = MockServer::start().await;
+
+        // First call: one tool call for an unregistered skill.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["unknown-skill"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Second call: final answer.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let result = orch
+            .run_turn("go", Uuid::new_v4(), Interface::Cli)
+            .await
+            .unwrap();
+        assert_eq!(result.answer, "done");
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 2, "expected exactly 2 LLM calls");
+
+        // Second request must contain a tool observation mentioning the skill.
+        let msgs = messages_in(&reqs[1]);
+        let has_obs = msgs.iter().any(|m| {
+            m["role"] == "tool"
+                && m["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("unknown-skill")
+        });
+        assert!(
+            has_obs,
+            "second LLM call should contain the tool observation; msgs: {msgs:?}"
+        );
+    }
+
+    /// Two tool calls returned in a single LLM response are both executed
+    /// within the same iteration — exactly one additional LLM round-trip
+    /// follows (not two).
+    #[tokio::test]
+    async fn two_tool_calls_handled_in_single_iteration() {
+        let server = MockServer::start().await;
+
+        // First call: two tool calls for unregistered skills.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(ollama_tool_calls(&["skill-a", "skill-b"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Second call: final answer.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        orch.run_turn("go", Uuid::new_v4(), Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(
+            reqs.len(),
+            2,
+            "two tool calls must be handled in ONE iteration — expected 2 LLM calls, got {}",
+            reqs.len()
+        );
+    }
+
+    /// After two simultaneous tool calls the second LLM request contains
+    /// an observation for each call.
+    #[tokio::test]
+    async fn two_tool_calls_both_observations_sent_to_llm() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(ollama_tool_calls(&["skill-a", "skill-b"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        orch.run_turn("go", Uuid::new_v4(), Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        let msgs = messages_in(&reqs[1]);
+
+        let tool_msgs: Vec<&Value> = msgs.iter().filter(|m| m["role"] == "tool").collect();
+        assert_eq!(
+            tool_msgs.len(),
+            2,
+            "expected 2 tool observation messages in second LLM call, got {}: {msgs:?}",
+            tool_msgs.len()
+        );
+
+        let content_a = tool_msgs[0]["content"].as_str().unwrap_or("");
+        let content_b = tool_msgs[1]["content"].as_str().unwrap_or("");
+        assert!(
+            content_a.contains("skill-a"),
+            "first observation should mention skill-a; got: {content_a}"
+        );
+        assert!(
+            content_b.contains("skill-b"),
+            "second observation should mention skill-b; got: {content_b}"
+        );
+    }
+
+    /// Three simultaneous tool calls are all handled within one iteration.
+    #[tokio::test]
+    async fn three_tool_calls_handled_in_single_iteration() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["s1", "s2", "s3"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        orch.run_turn("go", Uuid::new_v4(), Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(
+            reqs.len(),
+            2,
+            "three tool calls must collapse into one iteration"
+        );
+
+        let msgs = messages_in(&reqs[1]);
+        let tool_count = msgs.iter().filter(|m| m["role"] == "tool").count();
+        assert_eq!(
+            tool_count, 3,
+            "expected 3 tool observations; msgs: {msgs:?}"
         );
     }
 }
