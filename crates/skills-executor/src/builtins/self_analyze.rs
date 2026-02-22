@@ -155,14 +155,15 @@ impl SkillHandler for SelfAnalyzeHandler {
         let proposed_skill_md = match self.llm.chat(system_prompt, &sub_history, &[]).await {
             Ok(LlmResponse::FinalAnswer(text)) => text,
             Ok(LlmResponse::Thinking(text)) => text,
-            Ok(LlmResponse::ToolCall { name, .. }) => {
+            Ok(LlmResponse::ToolCalls(calls)) => {
+                let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
                 warn!(
                     skill = %skill_name,
-                    tool = %name,
-                    "LLM returned tool call during self-analyze; using fallback"
+                    tools = %names.join(", "),
+                    "LLM returned tool calls during self-analyze; using fallback"
                 );
                 format!(
-                    "# {}\n\n(LLM returned a tool call instead of text. Run self-analyze again.)",
+                    "# {}\n\n(LLM returned tool calls instead of text. Run self-analyze again.)",
                     skill_name
                 )
             }

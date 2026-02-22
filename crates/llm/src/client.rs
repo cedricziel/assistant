@@ -26,14 +26,18 @@ pub enum ChatRole {
     Tool,
 }
 
+/// A single tool call requested by the model.
+#[derive(Debug, Clone)]
+pub struct ToolCallItem {
+    pub name: String,
+    pub params: serde_json::Value,
+}
+
 /// The outcome of a single `LlmClient::chat` invocation.
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
-    /// The model wants to call a skill.
-    ToolCall {
-        name: String,
-        params: serde_json::Value,
-    },
+    /// The model wants to call one or more skills.
+    ToolCalls(Vec<ToolCallItem>),
     /// The model has a definitive answer for the user.
     FinalAnswer(String),
     /// The model emitted only a reasoning step (no action yet).
@@ -186,26 +190,32 @@ impl LlmClient {
 
         debug!("Native tool-call response received");
 
-        // Check for tool_calls in the response message.
+        // Check for tool_calls in the response message — collect all of them.
         if let Some(tool_calls) = json
             .pointer("/message/tool_calls")
             .and_then(|v| v.as_array())
         {
-            if let Some(first) = tool_calls.first() {
-                let name = first
-                    .pointer("/function/name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let params = first
-                    .pointer("/function/arguments")
-                    .cloned()
-                    .unwrap_or(Value::Object(serde_json::Map::new()));
-
-                if !name.is_empty() {
-                    debug!(skill = %name, "Native tool call received");
-                    return Ok(LlmResponse::ToolCall { name, params });
-                }
+            let items: Vec<ToolCallItem> = tool_calls
+                .iter()
+                .filter_map(|tc| {
+                    let name = tc
+                        .pointer("/function/name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    let params = tc
+                        .pointer("/function/arguments")
+                        .cloned()
+                        .unwrap_or(Value::Object(serde_json::Map::new()));
+                    Some(ToolCallItem { name, params })
+                })
+                .collect();
+            if !items.is_empty() {
+                debug!(count = items.len(), "Native tool calls received");
+                return Ok(LlmResponse::ToolCalls(items));
             }
         }
 
@@ -330,22 +340,30 @@ impl LlmClient {
 
         debug!("Native streaming response complete");
 
-        // Tool calls take priority over any streamed content.
+        // Tool calls take priority over any streamed content — collect all of them.
         if let Some(tc) = tool_calls_json {
-            if let Some(first) = tc.as_array().and_then(|a| a.first()) {
-                let name = first
-                    .pointer("/function/name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let params = first
-                    .pointer("/function/arguments")
-                    .cloned()
-                    .unwrap_or(Value::Object(serde_json::Map::new()));
-
-                if !name.is_empty() {
-                    debug!(skill = %name, "Native streaming: tool call received");
-                    return Ok(LlmResponse::ToolCall { name, params });
+            if let Some(arr) = tc.as_array() {
+                let items: Vec<ToolCallItem> = arr
+                    .iter()
+                    .filter_map(|entry| {
+                        let name = entry
+                            .pointer("/function/name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if name.is_empty() {
+                            return None;
+                        }
+                        let params = entry
+                            .pointer("/function/arguments")
+                            .cloned()
+                            .unwrap_or(Value::Object(serde_json::Map::new()));
+                        Some(ToolCallItem { name, params })
+                    })
+                    .collect();
+                if !items.is_empty() {
+                    debug!(count = items.len(), "Native streaming: tool calls received");
+                    return Ok(LlmResponse::ToolCalls(items));
                 }
             }
         }
@@ -355,6 +373,145 @@ impl LlmClient {
 }
 
 // ── Free helpers ──────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    use super::*;
+
+    fn make_client(base_url: &str) -> LlmClient {
+        LlmClient::new(LlmClientConfig {
+            model: "test".to_string(),
+            base_url: base_url.to_string(),
+            timeout_secs: 5,
+        })
+        .unwrap()
+    }
+
+    /// Build an Ollama response body with the given `tool_calls` array.
+    fn tool_calls_body(calls: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "model": "test",
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": calls
+            },
+            "done": true
+        })
+    }
+
+    fn answer_body(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "model": "test",
+            "message": { "role": "assistant", "content": text },
+            "done": true
+        })
+    }
+
+    /// A single tool call is returned as `ToolCalls` with exactly one item.
+    #[tokio::test]
+    async fn parses_single_tool_call() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
+                serde_json::json!([
+                    { "function": { "name": "my-skill", "arguments": { "key": "val" } } }
+                ]),
+            )))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::ToolCalls(items) = resp else {
+            panic!("expected ToolCalls, got {resp:?}");
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "my-skill");
+        assert_eq!(items[0].params["key"], "val");
+    }
+
+    /// Multiple tool calls in one response are all parsed and returned together.
+    #[tokio::test]
+    async fn parses_multiple_tool_calls() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
+                serde_json::json!([
+                    { "function": { "name": "skill-a", "arguments": { "x": 1 } } },
+                    { "function": { "name": "skill-b", "arguments": { "y": 2 } } }
+                ]),
+            )))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::ToolCalls(items) = resp else {
+            panic!("expected ToolCalls, got {resp:?}");
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "skill-a");
+        assert_eq!(items[0].params["x"], 1);
+        assert_eq!(items[1].name, "skill-b");
+        assert_eq!(items[1].params["y"], 2);
+    }
+
+    /// An empty `tool_calls` array falls back to treating the content as a
+    /// `FinalAnswer`.
+    #[tokio::test]
+    async fn empty_tool_calls_falls_back_to_final_answer() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(answer_body("hello!")))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::FinalAnswer(text) = resp else {
+            panic!("expected FinalAnswer, got {resp:?}");
+        };
+        assert_eq!(text, "hello!");
+    }
+
+    /// An entry with an empty name in `tool_calls` is silently skipped; only
+    /// valid entries survive.
+    #[tokio::test]
+    async fn skips_tool_call_entries_with_empty_name() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
+                serde_json::json!([
+                    { "function": { "name": "", "arguments": {} } },
+                    { "function": { "name": "good-skill", "arguments": {} } }
+                ]),
+            )))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::ToolCalls(items) = resp else {
+            panic!("expected ToolCalls, got {resp:?}");
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "good-skill");
+    }
+}
 
 /// Convert a [`SkillDef`] to the JSON structure expected by the Ollama
 /// `tools` array in the `/api/chat` request body.
