@@ -1,6 +1,6 @@
 [package]
 name = "assistant-mcp-server"
-version.workspace = true
+version = "0.1.0"
 license.workspace = true
 edition.workspace = true
 description = "stdio MCP server exposing assistant skills to Claude Code and other clients"
