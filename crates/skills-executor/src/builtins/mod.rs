@@ -1,4 +1,8 @@
 pub mod bash;
+pub mod file_edit;
+pub mod file_glob;
+pub mod file_read;
+pub mod file_write;
 pub mod list_skills;
 pub mod memory;
 pub mod memory_patch;
@@ -8,8 +12,13 @@ pub mod shell_exec;
 pub mod skill_file_read;
 pub mod soul_memory;
 pub mod web_fetch;
+pub mod web_search;
 
 pub use bash::BashHandler;
+pub use file_edit::FileEditHandler;
+pub use file_glob::FileGlobHandler;
+pub use file_read::FileReadHandler;
+pub use file_write::FileWriteHandler;
 pub use list_skills::ListSkillsHandler;
 pub use memory::{MemoryReadHandler, MemorySearchHandler, MemoryWriteHandler};
 pub use memory_patch::MemoryPatchHandler;
@@ -19,3 +28,4 @@ pub use shell_exec::ShellExecHandler;
 pub use skill_file_read::SkillFileReadHandler;
 pub use soul_memory::{MemorySaveHandler, SoulUpdateHandler};
 pub use web_fetch::WebFetchHandler;
+pub use web_search::WebSearchHandler;

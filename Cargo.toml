@@ -59,6 +59,8 @@ sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate", "chr
 cron = "0.15"
 # HTML parsing for web-fetch builtin
 scraper = "0.25"
+# Glob pattern matching for file-glob builtin
+glob = "0.3"
 # WASM plugin execution
 extism = "1"
 # Integration testing

@@ -25,10 +25,14 @@ impl SafetyGate {
             ));
         }
 
-        // 2. Shell execution is not permitted over remote/automated interfaces
-        //    because it would allow arbitrary code execution triggered by external
-        //    messages.
-        if skill.name == "shell-exec" {
+        // 2. Mutating or shell skills are not permitted over remote/automated
+        //    interfaces because they would allow arbitrary filesystem writes or
+        //    code execution triggered by external messages.
+        let blocked_on_remote = matches!(
+            skill.name.as_str(),
+            "shell-exec" | "file-write" | "file-edit"
+        );
+        if blocked_on_remote {
             let blocked_iface = match interface {
                 Interface::Signal => Some("Signal"),
                 Interface::Slack => Some("Slack"),
@@ -37,7 +41,8 @@ impl SafetyGate {
             };
             if let Some(iface_name) = blocked_iface {
                 return Err(format!(
-                    "shell-exec is not available via the {iface_name} interface"
+                    "'{}' is not available via the {iface_name} interface",
+                    skill.name
                 ));
             }
         }

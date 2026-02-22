@@ -389,6 +389,7 @@ dependencies = [
  "cron",
  "dirs",
  "extism",
+ "glob",
  "reqwest",
  "scraper",
  "serde_json",

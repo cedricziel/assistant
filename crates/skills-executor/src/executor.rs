@@ -37,19 +37,29 @@ impl SkillExecutor {
         use crate::builtins::*;
         let storage = self.storage.clone();
         let handlers: Vec<Arc<dyn SkillHandler>> = vec![
+            // File I/O
+            Arc::new(FileReadHandler::new()),
+            Arc::new(FileWriteHandler::new()),
+            Arc::new(FileEditHandler::new()),
+            Arc::new(FileGlobHandler::new()),
+            // Memory / soul
             Arc::new(MemoryReadHandler::new(storage.clone())),
             Arc::new(MemoryWriteHandler::new(storage.clone())),
             Arc::new(MemorySearchHandler::new(storage.clone())),
+            Arc::new(MemorySaveHandler::new(config.clone())),
+            Arc::new(SoulUpdateHandler::new(config.clone())),
+            Arc::new(MemoryPatchHandler::new(config)),
+            // Shell
             Arc::new(BashHandler::new()),
-            Arc::new(WebFetchHandler::new()),
             Arc::new(ShellExecHandler::new()),
+            // Web
+            Arc::new(WebFetchHandler::new()),
+            Arc::new(WebSearchHandler::new()),
+            // Skills / meta
             Arc::new(ListSkillsHandler::new(registry.clone())),
             Arc::new(SkillFileReadHandler::new(registry.clone())),
             Arc::new(SelfAnalyzeHandler::new(storage.clone(), llm, registry)),
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
-            Arc::new(MemorySaveHandler::new(config.clone())),
-            Arc::new(SoulUpdateHandler::new(config.clone())),
-            Arc::new(MemoryPatchHandler::new(config)),
         ];
         for h in handlers {
             self.builtin_handlers.insert(h.skill_name().to_string(), h);

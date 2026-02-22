@@ -17,8 +17,10 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 # HTTP for web-fetch builtin
 reqwest = { workspace = true }
-# HTML stripping for web-fetch
+# HTML stripping for web-fetch / web-search
 scraper = { workspace = true }
+# Glob pattern matching for file-glob
+glob = { workspace = true }
 # cron expression parsing for schedule-task
 cron = { workspace = true }
 # home directory
