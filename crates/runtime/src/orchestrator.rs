@@ -488,6 +488,13 @@ impl Orchestrator {
                         traces.push(trace_result);
                         self.append_observation(&mut history, &observation, Some(&name));
                     }
+
+                    // A reply tool was called during this iteration — the user has
+                    // already received a message.  Return immediately so the LLM
+                    // does not get another turn and call the reply tool again.
+                    if replied {
+                        return Ok(());
+                    }
                 }
 
                 // ── Intermediate thinking step ────────────────────────────────
@@ -1042,9 +1049,9 @@ impl Orchestrator {
         Ok((conv_store, history, base_turn))
     }
 
-    /// Append an observation message to the chat history.
+    /// Append a tool result message to the chat history.
     ///
-    /// The observation is added as a `tool` role message so the LLM can
+    /// The result is added as a `tool` role message so the LLM can
     /// recognise it as skill output.
     fn append_observation(
         &self,
@@ -1053,9 +1060,9 @@ impl Orchestrator {
         skill_name: Option<&str>,
     ) {
         let content = if let Some(name) = skill_name {
-            format!("OBSERVATION ({name}): {observation}")
+            format!("[{name}]: {observation}")
         } else {
-            format!("OBSERVATION: {observation}")
+            observation.to_string()
         };
 
         history.push(ChatHistoryMessage {

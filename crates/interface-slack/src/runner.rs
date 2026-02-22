@@ -74,6 +74,13 @@ struct SlackCallbackState {
     started_at: f64,
     /// Storage layer used to seed thread history into the conversation store.
     storage: Arc<StorageLayer>,
+    /// Per-conversation serialisation mutex.
+    ///
+    /// Each conversation has a single `Mutex<()>` token; holding it means
+    /// a turn is currently running for that conversation.  New messages wait
+    /// for the current turn to finish before starting their own, ensuring
+    /// the LLM always sees a consistent, complete history.
+    conv_locks: Arc<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 // ── History-message helpers ───────────────────────────────────────────────────
@@ -115,7 +122,16 @@ async fn on_push_event(
     states: SlackClientEventsUserState,
 ) -> UserCallbackResult<()> {
     // Retrieve shared state; clone the Arcs before dropping the guard.
-    let (config, orchestrator, bot_token, conversations, processed_ts, started_at, storage) = {
+    let (
+        config,
+        orchestrator,
+        bot_token,
+        conversations,
+        processed_ts,
+        started_at,
+        storage,
+        conv_locks,
+    ) = {
         let guard = states.read().await;
         let s = guard
             .get_user_state::<SlackCallbackState>()
@@ -132,6 +148,7 @@ async fn on_push_event(
             s.processed_ts.clone(),
             s.started_at,
             s.storage.clone(),
+            s.conv_locks.clone(),
         )
     };
 
@@ -378,6 +395,19 @@ async fn on_push_event(
         bot_token.clone(),
     );
 
+    // Acquire (or create) the per-conversation mutex so that if two messages
+    // arrive for the same thread while a turn is in-flight, the second one
+    // waits until the first turn finishes.  This prevents interleaved history
+    // and duplicate replies caused by concurrent orchestrator runs.
+    let conv_lock = {
+        let mut locks = conv_locks.lock().await;
+        locks
+            .entry(conversation_id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    let _conv_guard = conv_lock.lock().await;
+
     let orchestrator_start = std::time::Instant::now();
     debug!(
         conversation_id = %conversation_id,
@@ -404,7 +434,10 @@ async fn on_push_event(
         String::new(),
         thread_ts.clone(),
     );
-    if let Err(e) = session.assistant_threads_set_status(&clear_status_req).await {
+    if let Err(e) = session
+        .assistant_threads_set_status(&clear_status_req)
+        .await
+    {
         debug!(error = %e, "assistant.threads.setStatus clear failed");
     }
 
@@ -506,6 +539,10 @@ impl SlackInterface {
         // Dedup set persists across reconnects so a message delivered on one
         // connection is not reprocessed when the other connection reconnects.
         let processed_ts: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        // Per-conversation serialisation mutexes — persists across reconnects
+        // so a turn in progress is not interrupted by a reconnect event.
+        let conv_locks: Arc<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
         // ── Graceful shutdown ─────────────────────────────────────────────────
         // A watch channel delivers the shutdown signal across all select! points
@@ -553,6 +590,7 @@ impl SlackInterface {
                 processed_ts: processed_ts.clone(),
                 started_at,
                 storage: self.storage.clone(),
+                conv_locks: conv_locks.clone(),
             };
 
             let listener_environment = Arc::new(
