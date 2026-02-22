@@ -57,7 +57,10 @@ impl SkillHandler for BashHandler {
             .and_then(|v| v.as_u64())
             .unwrap_or(DEFAULT_TIMEOUT_SECS);
 
-        debug!("bash: running command: {} (timeout: {}s)", command, timeout_secs);
+        debug!(
+            "bash: running command: {} (timeout: {}s)",
+            command, timeout_secs
+        );
 
         let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-c").arg(&command);
