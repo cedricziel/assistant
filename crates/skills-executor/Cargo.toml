@@ -33,3 +33,4 @@ tempfile = "3"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 assistant-storage = { path = "../storage" }
 uuid = { workspace = true }
+wiremock = { workspace = true }

@@ -262,11 +262,11 @@ mod embedded_tests {
     }
 
     #[test]
-    fn embedded_skills_include_bash() {
+    fn embedded_skills_include_memory_read() {
         let skills = embedded_builtin_skills();
         assert!(
-            skills.iter().any(|s| s.name == "bash"),
-            "bash skill not found in embedded skills: {:?}",
+            skills.iter().any(|s| s.name == "memory-read"),
+            "memory-read skill not found in embedded skills: {:?}",
             skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
         );
     }

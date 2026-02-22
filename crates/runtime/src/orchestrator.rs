@@ -160,9 +160,10 @@ impl Orchestrator {
         let (conv_store, mut history, base_turn) =
             self.prepare_history(user_message, conversation_id).await?;
 
-        // 4. Load global skills and merge with extensions for LLM tool listing.
+        // 4. Load global skills (including synthetic defs from self-describing
+        //    handlers) and merge with extensions for LLM tool listing.
         //    Extension defs come first so the LLM sees them prominently.
-        let global_skills = self.registry.list().await;
+        let global_skills = self.merge_skill_defs().await;
         let all_skill_refs: Vec<&assistant_core::SkillDef> =
             ext_defs.iter().chain(global_skills.iter()).collect();
 
@@ -342,13 +343,20 @@ impl Orchestrator {
                             };
                             (obs, trace)
                         } else {
-                            // Global registry path — look up def and apply safety gate.
-                            let Some(skill_def) = self.registry.get(&name).await else {
-                                let observation =
-                                    format!("Skill '{}' not found in registry.", name);
-                                warn!(%observation);
-                                self.append_observation(&mut history, &observation, None);
-                                continue;
+                            // Global registry path — look up def (registry first,
+                            // then synthetic) and apply safety gate.
+                            let skill_def = match self.registry.get(&name).await {
+                                Some(def) => def,
+                                None => match self.executor.get_synthetic_def(&name) {
+                                    Some(def) => def,
+                                    None => {
+                                        let observation =
+                                            format!("Skill '{}' not found in registry.", name);
+                                        warn!(%observation);
+                                        self.append_observation(&mut history, &observation, None);
+                                        continue;
+                                    }
+                                },
                             };
 
                             if let Err(reason) =
@@ -523,8 +531,9 @@ impl Orchestrator {
         let (conv_store, mut history, base_turn) =
             self.prepare_history(user_message, conversation_id).await?;
 
-        // 4. Load all registered skills.
-        let skill_defs = self.registry.list().await;
+        // 4. Load all registered skills, merging synthetic defs from
+        //    self-describing handlers.  Registry skills take precedence.
+        let skill_defs = self.merge_skill_defs().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
         // 5. Build the base system prompt from the session-cached copy.
@@ -576,12 +585,19 @@ impl Orchestrator {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
 
-                        // Look up the skill definition.
-                        let Some(skill_def) = self.registry.get(&name).await else {
-                            let observation = format!("Skill '{}' not found in registry.", name);
-                            warn!(%observation);
-                            self.append_observation(&mut history, &observation, None);
-                            continue;
+                        // Look up the skill definition (registry first, then synthetic).
+                        let skill_def = match self.registry.get(&name).await {
+                            Some(def) => def,
+                            None => match self.executor.get_synthetic_def(&name) {
+                                Some(def) => def,
+                                None => {
+                                    let observation =
+                                        format!("Skill '{}' not found in registry.", name);
+                                    warn!(%observation);
+                                    self.append_observation(&mut history, &observation, None);
+                                    continue;
+                                }
+                            },
                         };
 
                         // Safety gate.
@@ -766,7 +782,7 @@ impl Orchestrator {
         let (conv_store, mut history, base_turn) =
             self.prepare_history(user_message, conversation_id).await?;
 
-        let skill_defs = self.registry.list().await;
+        let skill_defs = self.merge_skill_defs().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
         let system_prompt = self.cached_system_prompt.clone();
@@ -822,11 +838,18 @@ impl Orchestrator {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
 
-                        let Some(skill_def) = self.registry.get(&name).await else {
-                            let observation = format!("Skill '{}' not found in registry.", name);
-                            warn!(%observation);
-                            self.append_observation(&mut history, &observation, None);
-                            continue;
+                        let skill_def = match self.registry.get(&name).await {
+                            Some(def) => def,
+                            None => match self.executor.get_synthetic_def(&name) {
+                                Some(def) => def,
+                                None => {
+                                    let observation =
+                                        format!("Skill '{}' not found in registry.", name);
+                                    warn!(%observation);
+                                    self.append_observation(&mut history, &observation, None);
+                                    continue;
+                                }
+                            },
                         };
 
                         if let Err(reason) =
@@ -1039,6 +1062,22 @@ impl Orchestrator {
             role: ChatRole::Tool,
             content,
         });
+    }
+
+    /// Merge registry skills with synthetic defs from self-describing handlers.
+    /// Registry/SKILL.md skills take precedence on name collision.
+    async fn merge_skill_defs(&self) -> Vec<assistant_core::SkillDef> {
+        let mut merged = self.registry.list().await;
+        let registry_names: std::collections::HashSet<String> =
+            merged.iter().map(|s| s.name.clone()).collect();
+
+        for def in self.executor.synthetic_skill_defs() {
+            if !registry_names.contains(&def.name) {
+                merged.push(def);
+            }
+        }
+        merged.sort_by(|a, b| a.name.cmp(&b.name));
+        merged
     }
 }
 

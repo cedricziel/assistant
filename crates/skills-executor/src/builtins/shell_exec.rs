@@ -1,9 +1,9 @@
-//! Builtin handler for shell-exec skill — runs a shell command as a subprocess.
+//! Builtin handler for shell-exec tool — runs a shell command as a subprocess.
 
 use std::collections::HashMap;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput};
+use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
 use tokio::time::Duration;
 use tracing::debug;
@@ -25,20 +25,38 @@ impl Default for ShellExecHandler {
 }
 
 #[async_trait]
-impl SkillHandler for ShellExecHandler {
-    fn skill_name(&self) -> &str {
+impl ToolHandler for ShellExecHandler {
+    fn name(&self) -> &str {
         "shell-exec"
     }
 
-    async fn execute(
+    fn description(&self) -> &str {
+        "Execute a shell command with user confirmation required. Blocked on remote interfaces (Signal, Slack, Mattermost)."
+    }
+
+    fn params_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "command": {"type": "string", "description": "The shell command to execute"},
+            "working_dir": {"type": "string", "description": "Optional working directory for the command"}
+        })
+    }
+
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
+    fn requires_confirmation(&self) -> bool {
+        true
+    }
+
+    async fn run(
         &self,
-        _def: &SkillDef,
         params: HashMap<String, serde_json::Value>,
         ctx: &ExecutionContext,
-    ) -> Result<SkillOutput> {
+    ) -> Result<ToolOutput> {
         // Only available in interactive mode
         if !ctx.interactive {
-            return Ok(SkillOutput::error(
+            return Ok(ToolOutput::error(
                 "shell-exec is not available in non-interactive mode",
             ));
         }
@@ -46,7 +64,7 @@ impl SkillHandler for ShellExecHandler {
         let command = match params.get("command").and_then(|v| v.as_str()) {
             Some(c) => c.to_string(),
             None => {
-                return Ok(SkillOutput::error("Missing required parameter 'command'"));
+                return Ok(ToolOutput::error("Missing required parameter 'command'"));
             }
         };
 
@@ -75,11 +93,11 @@ impl SkillHandler for ShellExecHandler {
         .await;
 
         match result {
-            Err(_elapsed) => Ok(SkillOutput::error(format!(
+            Err(_elapsed) => Ok(ToolOutput::error(format!(
                 "Command timed out after {} seconds: {}",
                 TIMEOUT_SECS, command
             ))),
-            Ok(Err(e)) => Ok(SkillOutput::error(format!(
+            Ok(Err(e)) => Ok(ToolOutput::error(format!(
                 "Failed to spawn command '{}': {}",
                 command, e
             ))),
@@ -104,10 +122,10 @@ impl SkillHandler for ShellExecHandler {
                 let content = parts.join("\n\n");
 
                 if output.status.success() {
-                    Ok(SkillOutput::success(content))
+                    Ok(ToolOutput::success(content))
                 } else {
                     // Non-zero exit is still a valid result — mark it but don't fail
-                    Ok(SkillOutput::success(content))
+                    Ok(ToolOutput::success(content))
                 }
             }
         }

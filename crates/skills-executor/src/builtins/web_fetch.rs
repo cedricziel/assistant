@@ -1,9 +1,9 @@
-//! Builtin handler for web-fetch skill — fetches a URL and returns stripped text.
+//! Builtin handler for web-fetch tool — fetches a URL and returns stripped text.
 
 use std::collections::HashMap;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput};
+use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
 use scraper::Html;
 
@@ -31,27 +31,37 @@ impl Default for WebFetchHandler {
 }
 
 #[async_trait]
-impl SkillHandler for WebFetchHandler {
-    fn skill_name(&self) -> &str {
+impl ToolHandler for WebFetchHandler {
+    fn name(&self) -> &str {
         "web-fetch"
     }
 
-    async fn execute(
+    fn description(&self) -> &str {
+        "Fetch the content of a URL and return it as plain text (HTML stripped)."
+    }
+
+    fn params_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "url": {"type": "string", "description": "HTTP or HTTPS URL to fetch"},
+            "max_chars": {"type": "number", "description": "Max characters to return (default: 8000)"}
+        })
+    }
+
+    async fn run(
         &self,
-        _def: &SkillDef,
         params: HashMap<String, serde_json::Value>,
         _ctx: &ExecutionContext,
-    ) -> Result<SkillOutput> {
+    ) -> Result<ToolOutput> {
         let url = match params.get("url").and_then(|v| v.as_str()) {
             Some(u) => u.to_string(),
             None => {
-                return Ok(SkillOutput::error("Missing required parameter 'url'"));
+                return Ok(ToolOutput::error("Missing required parameter 'url'"));
             }
         };
 
         // Validate URL scheme
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Ok(SkillOutput::error(format!(
+            return Ok(ToolOutput::error(format!(
                 "Invalid URL '{}': must start with http:// or https://",
                 url
             )));
@@ -67,7 +77,7 @@ impl SkillHandler for WebFetchHandler {
         let response = match self.client.get(&url).send().await {
             Ok(r) => r,
             Err(e) => {
-                return Ok(SkillOutput::error(format!(
+                return Ok(ToolOutput::error(format!(
                     "Failed to fetch '{}': {}",
                     url, e
                 )));
@@ -76,7 +86,7 @@ impl SkillHandler for WebFetchHandler {
 
         let status = response.status();
         if !status.is_success() {
-            return Ok(SkillOutput::error(format!(
+            return Ok(ToolOutput::error(format!(
                 "HTTP {} fetching '{}'",
                 status, url
             )));
@@ -85,7 +95,7 @@ impl SkillHandler for WebFetchHandler {
         let html_body = match response.text().await {
             Ok(t) => t,
             Err(e) => {
-                return Ok(SkillOutput::error(format!(
+                return Ok(ToolOutput::error(format!(
                     "Failed to read response body from '{}': {}",
                     url, e
                 )));
@@ -123,7 +133,7 @@ impl SkillHandler for WebFetchHandler {
             format!("URL: {}\n\n{}", url, truncated)
         };
 
-        Ok(SkillOutput::success(output))
+        Ok(ToolOutput::success(output))
     }
 }
 
@@ -180,4 +190,162 @@ fn extract_text(document: &Html) -> String {
     }
 
     text_parts.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_core::Interface;
+    use uuid::Uuid;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_ctx() -> ExecutionContext {
+        ExecutionContext {
+            conversation_id: Uuid::new_v4(),
+            turn: 1,
+            interface: Interface::Cli,
+            interactive: false,
+        }
+    }
+
+    fn params(pairs: &[(&str, serde_json::Value)]) -> HashMap<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn fetches_url_and_strips_html() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("<html><body>Hello world</body></html>"),
+            )
+            .mount(&server)
+            .await;
+
+        let handler = WebFetchHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[("url", serde_json::Value::String(server.uri()))]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(result.success, "Expected success, got: {}", result.content);
+        assert!(
+            result.content.contains("Hello world"),
+            "Expected 'Hello world', got: {}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_error_for_404() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let handler = WebFetchHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[("url", serde_json::Value::String(server.uri()))]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(!result.success, "Expected error for 404");
+        assert!(
+            result.content.contains("404"),
+            "Expected '404' in error, got: {}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn truncates_at_max_chars() {
+        let server = MockServer::start().await;
+        let long_text = "a".repeat(500);
+        let body = format!("<html><body>{}</body></html>", long_text);
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+
+        let handler = WebFetchHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[
+            ("url", serde_json::Value::String(server.uri())),
+            ("max_chars", serde_json::json!(100)),
+        ]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(result.success);
+        assert!(
+            result.content.contains("[Content truncated"),
+            "Expected truncation marker, got: {}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_url_scheme() {
+        let handler = WebFetchHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[(
+            "url",
+            serde_json::Value::String("ftp://example.com".to_string()),
+        )]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(!result.success);
+        assert!(
+            result.content.contains("must start with http"),
+            "Got: {}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_url_param() {
+        let handler = WebFetchHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(!result.success);
+        assert!(result.content.contains("url"), "Got: {}", result.content);
+    }
+
+    #[tokio::test]
+    async fn extracts_title_from_html() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "<html><head><title>My Page Title</title></head><body>Content here</body></html>",
+            ))
+            .mount(&server)
+            .await;
+
+        let handler = WebFetchHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[("url", serde_json::Value::String(server.uri()))]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(result.success);
+        assert!(
+            result.content.contains("Title: My Page Title"),
+            "Expected title, got: {}",
+            result.content
+        );
+    }
+
+    #[test]
+    fn self_describing() {
+        let handler = WebFetchHandler::new();
+        assert!(!handler.description().is_empty());
+        assert!(handler.params_schema().is_object());
+        assert!(
+            !handler.is_mutating(),
+            "WebFetchHandler should not be mutating"
+        );
+    }
 }

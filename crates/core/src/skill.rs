@@ -214,7 +214,11 @@ impl SkillOutput {
     }
 }
 
-/// The trait every skill handler must implement
+/// The trait for SKILL.md-based builtin handlers.
+///
+/// These handlers work alongside a `SkillDef` parsed from a `SKILL.md` file.
+/// For primitive, self-describing tools (file-read, bash, etc.), see
+/// [`ToolHandler`](crate::tool::ToolHandler) instead.
 #[async_trait]
 pub trait SkillHandler: Send + Sync {
     /// The skill name this handler handles (must match SkillDef.name)

@@ -1,13 +1,13 @@
-//! Builtin handler for the `bash` skill — runs a bash command as a subprocess.
+//! Builtin handler for the `bash` tool — runs a bash command as a subprocess.
 //!
-//! Unlike `shell-exec`, this skill works in both interactive and non-interactive
+//! Unlike `shell-exec`, this tool works in both interactive and non-interactive
 //! contexts and does not require user confirmation, making it suitable for
 //! autonomous agent use.
 
 use std::collections::HashMap;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput};
+use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
 use tokio::time::Duration;
 use tracing::debug;
@@ -29,21 +29,36 @@ impl Default for BashHandler {
 }
 
 #[async_trait]
-impl SkillHandler for BashHandler {
-    fn skill_name(&self) -> &str {
+impl ToolHandler for BashHandler {
+    fn name(&self) -> &str {
         "bash"
     }
 
-    async fn execute(
+    fn description(&self) -> &str {
+        "Run a bash command and return its stdout/stderr. Use for automation tasks that do not require user confirmation."
+    }
+
+    fn params_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "command": {"type": "string", "description": "The bash command to execute"},
+            "working_dir": {"type": "string", "description": "Optional working directory for the command"},
+            "timeout_secs": {"type": "number", "description": "Timeout in seconds (default: 120)"}
+        })
+    }
+
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
+    async fn run(
         &self,
-        _def: &SkillDef,
         params: HashMap<String, serde_json::Value>,
         _ctx: &ExecutionContext,
-    ) -> Result<SkillOutput> {
+    ) -> Result<ToolOutput> {
         let command = match params.get("command").and_then(|v| v.as_str()) {
             Some(c) => c.to_string(),
             None => {
-                return Ok(SkillOutput::error("Missing required parameter 'command'"));
+                return Ok(ToolOutput::error("Missing required parameter 'command'"));
             }
         };
 
@@ -80,11 +95,11 @@ impl SkillHandler for BashHandler {
         .await;
 
         match result {
-            Err(_elapsed) => Ok(SkillOutput::error(format!(
+            Err(_elapsed) => Ok(ToolOutput::error(format!(
                 "Command timed out after {} seconds: {}",
                 timeout_secs, command
             ))),
-            Ok(Err(e)) => Ok(SkillOutput::error(format!(
+            Ok(Err(e)) => Ok(ToolOutput::error(format!(
                 "Failed to spawn command '{}': {}",
                 command, e
             ))),
@@ -106,8 +121,109 @@ impl SkillHandler for BashHandler {
                     parts.push("(no output)".to_string());
                 }
 
-                Ok(SkillOutput::success(parts.join("\n\n")))
+                Ok(ToolOutput::success(parts.join("\n\n")))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_core::Interface;
+    use uuid::Uuid;
+
+    fn make_ctx() -> ExecutionContext {
+        ExecutionContext {
+            conversation_id: Uuid::new_v4(),
+            turn: 1,
+            interface: Interface::Cli,
+            interactive: false,
+        }
+    }
+
+    fn params(pairs: &[(&str, serde_json::Value)]) -> HashMap<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn runs_echo() {
+        let handler = BashHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[(
+            "command",
+            serde_json::Value::String("echo hello".to_string()),
+        )]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(result.success, "Expected success, got: {}", result.content);
+        assert!(
+            result.content.contains("hello"),
+            "Expected 'hello' in output, got: {}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn captures_stderr() {
+        let handler = BashHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[(
+            "command",
+            serde_json::Value::String("echo err >&2".to_string()),
+        )]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(result.success);
+        assert!(
+            result.content.contains("stderr:"),
+            "Expected stderr output, got: {}",
+            result.content
+        );
+        assert!(
+            result.content.contains("err"),
+            "Expected 'err' in stderr, got: {}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn reports_exit_code() {
+        let handler = BashHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[("command", serde_json::Value::String("exit 42".to_string()))]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(
+            result.content.contains("Exit code: 42"),
+            "Expected exit code 42, got: {}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_command_param() {
+        let handler = BashHandler::new();
+        let ctx = make_ctx();
+        let p = params(&[]);
+
+        let result = handler.run(p, &ctx).await.unwrap();
+        assert!(!result.success);
+        assert!(
+            result.content.contains("command"),
+            "Got: {}",
+            result.content
+        );
+    }
+
+    #[test]
+    fn self_describing() {
+        let handler = BashHandler::new();
+        assert!(!handler.description().is_empty());
+        assert!(handler.params_schema().is_object());
+        assert!(handler.is_mutating(), "BashHandler should be mutating");
     }
 }
