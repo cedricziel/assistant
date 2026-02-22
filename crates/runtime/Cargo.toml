@@ -1,6 +1,6 @@
 [package]
 name = "assistant-runtime"
-version.workspace = true
+version = "0.1.1"
 license.workspace = true
 edition.workspace = true
 description = "ReAct orchestrator and safety gate for the assistant runtime"
