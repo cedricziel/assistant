@@ -1,6 +1,6 @@
 [package]
 name = "assistant-interface-signal"
-version = "0.1.1"
+version.workspace = true
 license.workspace = true
 edition.workspace = true
 description = "Signal messenger interface for the assistant (feature-gated)"
