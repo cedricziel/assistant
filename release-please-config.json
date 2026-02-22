@@ -4,12 +4,12 @@
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,
   "packages": {
-    "crates/interface-cli": {
+    ".": {
       "component": "assistant",
       "release-type": "rust",
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
-      "include-paths": ["."],
+      "version-file": "crates/interface-cli/Cargo.toml",
       "extra-files": [
         {
           "type": "toml",
