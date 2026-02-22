@@ -357,6 +357,17 @@ async fn on_push_event(
         }
     }
 
+    // Show a typing/processing status in the thread via the Assistant API.
+    debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → is thinking…");
+    let set_status_req = SlackApiAssistantThreadsSetStatusRequest::new(
+        channel_id.clone().into(),
+        "is thinking\u{2026}".to_string(),
+        thread_ts.clone(),
+    );
+    if let Err(e) = session.assistant_threads_set_status(&set_status_req).await {
+        debug!(error = %e, "assistant.threads.setStatus failed");
+    }
+
     // Build per-turn Slack extension tools.  The LLM calls these to post
     // replies, react, or upload files.  No auto-reply after the turn.
     let extensions = build_slack_tools(
@@ -378,13 +389,23 @@ async fn on_push_event(
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
-    // Remove 👀 regardless of outcome.
+    // Remove 👀 and clear the typing status — regardless of outcome.
     debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.remove eyes");
     let remove_req = SlackApiReactionsRemoveRequest::new(SlackReactionName("eyes".to_string()))
         .with_channel(channel_id.clone().into())
         .with_timestamp(msg_ts.clone());
     if let Err(e) = session.reactions_remove(&remove_req).await {
         warn!(error = %e, "reactions.remove eyes failed");
+    }
+
+    debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → clear");
+    let clear_status_req = SlackApiAssistantThreadsSetStatusRequest::new(
+        channel_id.clone().into(),
+        String::new(),
+        thread_ts.clone(),
+    );
+    if let Err(e) = session.assistant_threads_set_status(&clear_status_req).await {
+        debug!(error = %e, "assistant.threads.setStatus clear failed");
     }
 
     if let Err(e) = turn_result {
@@ -465,6 +486,20 @@ impl SlackInterface {
         let client = Arc::new(SlackClient::new(SlackClientHyperHttpsConnector::new()?));
         let bot_token = SlackApiToken::new(bot_token_str.into());
         let app_token = SlackApiToken::new(app_token_str.into());
+
+        // Mark the bot as active. This may silently fail for some bot token
+        // configurations; that is acceptable.
+        {
+            let session = client.open_session(&bot_token);
+            if let Err(e) = session
+                .users_set_presence(&SlackApiUsersSetPresenceRequest::new("auto".to_string()))
+                .await
+            {
+                warn!(error = %e, "users.setPresence(auto) failed");
+            } else {
+                info!("Presence set to auto");
+            }
+        }
 
         // Conversation map persists across reconnects so in-flight context is not lost.
         let conversations = Arc::new(Mutex::new(HashMap::new()));

@@ -14,6 +14,7 @@ use assistant_core::skill::SkillSource;
 use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput, SkillTier};
 use async_trait::async_trait;
 use slack_morphism::prelude::*;
+use tracing::{debug, warn};
 
 // ── SlackReplyHandler ─────────────────────────────────────────────────────────
 
@@ -49,8 +50,14 @@ impl SkillHandler for SlackReplyHandler {
         }
 
         match session.chat_post_message(&req).await {
-            Ok(_) => Ok(SkillOutput::success("Message posted successfully")),
-            Err(e) => Ok(SkillOutput::error(format!("Failed to post message: {e}"))),
+            Ok(resp) => {
+                debug!(channel = %resp.channel, ts = %resp.ts.0, "chat.postMessage ok");
+                Ok(SkillOutput::success("Message posted successfully"))
+            }
+            Err(e) => {
+                warn!(error = %e, "chat.postMessage failed");
+                Ok(SkillOutput::error(format!("Failed to post message: {e}")))
+            }
         }
     }
 }
