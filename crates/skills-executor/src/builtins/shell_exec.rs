@@ -36,8 +36,12 @@ impl ToolHandler for ShellExecHandler {
 
     fn params_schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "command": {"type": "string", "description": "The shell command to execute"},
-            "working_dir": {"type": "string", "description": "Optional working directory for the command"}
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The shell command to execute"},
+                "working_dir": {"type": "string", "description": "Optional working directory for the command"}
+            },
+            "required": ["command"]
         })
     }
 

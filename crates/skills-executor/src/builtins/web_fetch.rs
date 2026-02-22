@@ -42,8 +42,12 @@ impl ToolHandler for WebFetchHandler {
 
     fn params_schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "url": {"type": "string", "description": "HTTP or HTTPS URL to fetch"},
-            "max_chars": {"type": "number", "description": "Max characters to return (default: 8000)"}
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "HTTP or HTTPS URL to fetch"},
+                "max_chars": {"type": "number", "description": "Max characters to return (default: 8000)"}
+            },
+            "required": ["url"]
         })
     }
 

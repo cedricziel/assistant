@@ -34,8 +34,12 @@ impl ToolHandler for FileGlobHandler {
 
     fn params_schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "pattern": {"type": "string", "description": "Glob pattern, e.g. **/*.rs or ~/notes/*.md"},
-            "limit": {"type": "number", "description": "Max results (default: 200)"}
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Glob pattern, e.g. **/*.rs or ~/notes/*.md"},
+                "limit": {"type": "number", "description": "Max results (default: 200)"}
+            },
+            "required": ["pattern"]
         })
     }
 

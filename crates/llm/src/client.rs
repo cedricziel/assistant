@@ -516,13 +516,17 @@ mod tests {
 /// Convert a [`SkillDef`] to the JSON structure expected by the Ollama
 /// `tools` array in the `/api/chat` request body.
 fn skill_to_tool_json(skill: &SkillDef) -> Value {
-    let parameters = skill.params_schema().unwrap_or_else(|| {
-        json!({
-            "type": "object",
-            "properties": {},
-            "required": []
-        })
-    });
+    let raw = skill.params_schema();
+
+    // Normalise to a proper JSON Schema object.
+    // - ToolHandler schemas are already `{"type":"object","properties":{...},"required":[...]}`.
+    // - SKILL.md schemas are flat property maps `{"param":{"type":..., "description":...}}`.
+    //   Wrap them so the LLM always receives a valid JSON Schema.
+    let parameters = match raw {
+        None => json!({"type": "object", "properties": {}, "required": []}),
+        Some(schema) if schema.get("type").and_then(|t| t.as_str()) == Some("object") => schema,
+        Some(flat) => json!({"type": "object", "properties": flat}),
+    };
 
     json!({
         "type": "function",

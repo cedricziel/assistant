@@ -27,7 +27,15 @@ pub trait ToolHandler: Send + Sync {
     /// Short description of what this tool does (1-2 sentences).
     fn description(&self) -> &str;
 
-    /// JSON params schema (flat object: param_name -> {type, description}).
+    /// Full JSON Schema object for the tool's parameters.
+    ///
+    /// Must return a proper JSON Schema with `type: "object"`, `properties`,
+    /// and `required` (listing mandatory parameters). Example:
+    /// ```json
+    /// { "type": "object",
+    ///   "properties": { "path": {"type":"string","description":"..."} },
+    ///   "required": ["path"] }
+    /// ```
     fn params_schema(&self) -> Value;
 
     /// Whether this tool mutates state (used for SafetyGate).

@@ -35,9 +35,13 @@ impl ToolHandler for FileEditHandler {
 
     fn params_schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "path": {"type": "string", "description": "Absolute or ~-relative path to edit"},
-            "old_string": {"type": "string", "description": "Exact text to find (returns error if not found)"},
-            "new_string": {"type": "string", "description": "Replacement text"}
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute or ~-relative path to edit"},
+                "old_string": {"type": "string", "description": "Exact text to find (returns error if not found)"},
+                "new_string": {"type": "string", "description": "Replacement text"}
+            },
+            "required": ["path", "old_string", "new_string"]
         })
     }
 

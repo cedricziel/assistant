@@ -303,11 +303,12 @@ pub async fn handle_request(
 
 /// Convert a [`SkillDef`] into an [`McpTool`] for the `tools/list` response.
 ///
-/// `params_schema()` returns the raw *properties map* stored in SKILL.md metadata,
-/// so we wrap it in the full JSON Schema object envelope that MCP's `inputSchema` expects.
+/// ToolHandler schemas are already proper JSON Schema (`{"type":"object","properties":{...}}`).
+/// SKILL.md schemas are flat property maps — wrapped here to form a valid inputSchema.
 fn skill_to_mcp_tool(skill: &assistant_core::SkillDef) -> McpTool {
     let input_schema = match skill.params_schema() {
-        Some(properties) => json!({ "type": "object", "properties": properties }),
+        Some(schema) if schema.get("type").and_then(|t| t.as_str()) == Some("object") => schema,
+        Some(flat) => json!({ "type": "object", "properties": flat }),
         None => json!({ "type": "object", "properties": {} }),
     };
     McpTool {

@@ -35,8 +35,12 @@ impl ToolHandler for FileWriteHandler {
 
     fn params_schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "path": {"type": "string", "description": "Absolute or ~-relative path to write"},
-            "content": {"type": "string", "description": "Content to write"}
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute or ~-relative path to write"},
+                "content": {"type": "string", "description": "Content to write"}
+            },
+            "required": ["path", "content"]
         })
     }
 

@@ -40,9 +40,13 @@ impl ToolHandler for BashHandler {
 
     fn params_schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "command": {"type": "string", "description": "The bash command to execute"},
-            "working_dir": {"type": "string", "description": "Optional working directory for the command"},
-            "timeout_secs": {"type": "number", "description": "Timeout in seconds (default: 120)"}
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The bash command to execute"},
+                "working_dir": {"type": "string", "description": "Optional working directory for the command"},
+                "timeout_secs": {"type": "number", "description": "Timeout in seconds (default: 120)"}
+            },
+            "required": ["command"]
         })
     }
 

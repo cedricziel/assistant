@@ -42,8 +42,12 @@ impl ToolHandler for WebSearchHandler {
 
     fn params_schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "query": {"type": "string", "description": "Search query"},
-            "num_results": {"type": "number", "description": "Max results to return (default: 10)"}
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "num_results": {"type": "number", "description": "Max results to return (default: 10)"}
+            },
+            "required": ["query"]
         })
     }
 
