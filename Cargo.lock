@@ -344,6 +344,7 @@ dependencies = [
  "assistant-core",
  "futures",
  "reqwest",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",
