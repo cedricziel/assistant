@@ -1,53 +1,60 @@
 ---
 name: memory-patch
-description: Surgically edit a section of a persistent memory file (SOUL.md, IDENTITY.md, USER.md, or MEMORY.md) using search-and-replace. Unlike soul-update, this replaces only the first occurrence of the search text, leaving the rest of the file intact.
-version: "1.0"
-author: assistant
-tier: builtin
-params:
-  target:
-    description: Which memory file to patch — "soul", "identity", "user", or "memory"
-    type: string
-    required: true
-  search:
-    description: Exact text to find in the file (must match verbatim; if not found, returns an error without modifying the file)
-    type: string
-    required: true
-  replace:
-    description: Replacement text that overwrites the first occurrence of the search text
-    type: string
-    required: true
+description: >
+  Surgically edit a section of a persistent memory file (SOUL.md, IDENTITY.md, USER.md,
+  or MEMORY.md) using search-and-replace. Unlike soul-update, this replaces only the first
+  occurrence of the search text, leaving the rest of the file intact. Returns an error if
+  the search text is not found — no silent corruption.
+license: Apache-2.0
+compatibility: Requires filesystem access
+metadata:
+  tier: builtin
+  mutating: "true"
+  confirmation-required: "false"
+  params: '{"target": {"type": "string", "description": "File to patch: soul, identity, user, or memory"}, "search": {"type": "string", "description": "Exact text to find in the file (verbatim match; returns error if not found)"}, "replace": {"type": "string", "description": "Text to substitute in place of the first occurrence of search"}}'
 ---
 
-# memory-patch
+## Instructions
 
-Perform a targeted search-and-replace on one of the four persistent memory files:
-`SOUL.md`, `IDENTITY.md`, `USER.md`, or `MEMORY.md`.
+Perform a targeted search-and-replace on one of the four persistent memory files.
 
-## When to use
+### Parameters
 
-- Correcting a specific fact or preference without rewriting the whole file
-- Updating a section heading or dated entry in place
-- Appending to a specific bullet list within a file
+- `target` (string, required): Which file to patch — one of: `soul`, `identity`, `user`, `memory`
+- `search` (string, required): Exact text to locate (verbatim, first occurrence)
+- `replace` (string, required): Text to substitute in place of the found text
 
-## Error handling
+### When to use
 
-If `search` is not found in the target file, the skill returns an error and **leaves the file unchanged** — no silent corruption.
+- Filling in a blank field in IDENTITY.md (e.g. replacing `_(pick something)_` with an actual name)
+- Correcting a specific fact in USER.md without rewriting the whole file
+- Updating a single bullet point or section in MEMORY.md
+- Fixing a preference in SOUL.md without touching the rest
 
-## Parameters
+Prefer `memory-patch` over `soul-update` with `mode=replace` whenever you only need to change one part of a file.
 
-| Parameter | Type   | Required | Description                                   |
-| --------- | ------ | -------- | --------------------------------------------- |
-| target    | string | yes      | `soul` / `identity` / `user` / `memory`       |
-| search    | string | yes      | Exact text to locate (first occurrence)       |
-| replace   | string | yes      | Text to substitute in place of the found text |
+### Error handling
 
-## Example
+If `search` is not found, the skill returns an error and leaves the file unchanged.
+
+### Example
+
+Filling in the Name field in IDENTITY.md:
+
+```json
+{
+  "target": "identity",
+  "search": "- **Name:** _(pick something — doesn't have to be \"Assistant\")_",
+  "replace": "- **Name:** Aria"
+}
+```
+
+Updating a timezone in USER.md:
 
 ```json
 {
   "target": "user",
-  "search": "Timezone: UTC",
-  "replace": "Timezone: Europe/Berlin"
+  "search": "- **Timezone:**",
+  "replace": "- **Timezone:** Europe/Berlin"
 }
 ```

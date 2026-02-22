@@ -270,4 +270,34 @@ mod embedded_tests {
             skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
         );
     }
+
+    #[test]
+    fn memory_patch_parses_as_builtin_tier() {
+        let skills = embedded_builtin_skills();
+        let patch = skills
+            .iter()
+            .find(|s| s.name == "memory-patch")
+            .expect("memory-patch skill not found in embedded skills");
+        assert!(
+            matches!(patch.tier, crate::skill::SkillTier::Builtin),
+            "memory-patch tier should be Builtin, got {:?}",
+            patch.tier
+        );
+    }
+
+    #[test]
+    fn memory_patch_exposes_params_schema() {
+        let skills = embedded_builtin_skills();
+        let patch = skills
+            .iter()
+            .find(|s| s.name == "memory-patch")
+            .expect("memory-patch skill not found in embedded skills");
+        let schema = patch
+            .params_schema()
+            .expect("memory-patch should have a params schema");
+        // Params are stored as a flat JSON object: { "param": { "type": ..., "description": ... } }
+        assert!(schema["target"].is_object(), "schema missing 'target'");
+        assert!(schema["search"].is_object(), "schema missing 'search'");
+        assert!(schema["replace"].is_object(), "schema missing 'replace'");
+    }
 }

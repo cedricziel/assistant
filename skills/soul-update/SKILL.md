@@ -40,12 +40,16 @@ Update one of the assistant's persistent memory markdown files.
 
 ### When to use
 
-- When the user updates their profile (name, timezone, preferences) → update `user`
+- **First session**: if IDENTITY.md still contains blank placeholder fields, fill them in (use `replace` mode with the completed form)
+- When the user tells you their name, timezone, or preferences → update `user`
 - When you learn something important to remember permanently → update `memory`
 - When the user adjusts your personality or behavior → update `soul`
 - After a significant project completes and context should persist → update `memory`
+- When MEMORY.md grows stale or cluttered → use `replace` to prune and tidy it
+
+For changing a single field within a file, prefer `memory-patch` (surgical search-and-replace) over `replace` mode here.
 
 ### Example interactions
 
-- "My name is Alice and I'm in Berlin timezone" → target: "user", mode: "append", content: "## User\n- Name: Alice\n- Timezone: Europe/Berlin"
+- "My name is Alice and I'm in Berlin timezone" → target: "user", mode: "append", content: "- Name: Alice\n- Timezone: Europe/Berlin"
 - "Always use metric units" → target: "soul", mode: "append", content: "\n- Use metric units in all responses"
