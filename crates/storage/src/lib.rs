@@ -77,35 +77,68 @@ pub fn default_db_path() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join(".assistant").join("assistant.db"))
 }
 
-/// Run all embedded migrations in order.
+/// Run all embedded migrations in order, tracking applied migrations so each
+/// runs exactly once.
+///
+/// A `_migrations` table records which migrations have been applied.
+/// Each migration is only executed if it has not yet been recorded, preventing
+/// non-idempotent statements (e.g. `ALTER TABLE ADD COLUMN`) from failing on
+/// subsequent launches.
 async fn run_migrations(pool: &SqlitePool) -> Result<()> {
-    // Enable WAL mode for better concurrency
     sqlx::query("PRAGMA journal_mode=WAL;")
         .execute(pool)
         .await?;
     sqlx::query("PRAGMA foreign_keys=ON;").execute(pool).await?;
 
-    // Run each migration as a plain SQL string so we avoid compile-time path resolution issues.
-    // The migrations directory lives at the workspace root; we embed them inline.
-    sqlx::query(include_str!("../../../migrations/001_conversations.sql"))
-        .execute(pool)
-        .await?;
+    // Migration tracking table — created once, never dropped.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS _migrations (
+            name        TEXT PRIMARY KEY,
+            applied_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
 
-    sqlx::query(include_str!("../../../migrations/002_skills.sql"))
-        .execute(pool)
-        .await?;
+    let migrations: &[(&str, &str)] = &[
+        (
+            "001_conversations",
+            include_str!("../../../migrations/001_conversations.sql"),
+        ),
+        (
+            "002_skills",
+            include_str!("../../../migrations/002_skills.sql"),
+        ),
+        (
+            "003_execution_traces",
+            include_str!("../../../migrations/003_execution_traces.sql"),
+        ),
+        (
+            "004_memory",
+            include_str!("../../../migrations/004_memory.sql"),
+        ),
+        (
+            "005_tool_calls",
+            include_str!("../../../migrations/005_tool_calls.sql"),
+        ),
+    ];
 
-    sqlx::query(include_str!("../../../migrations/003_execution_traces.sql"))
-        .execute(pool)
-        .await?;
+    for (name, sql) in migrations {
+        let already_applied: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM _migrations WHERE name = ?")
+                .bind(name)
+                .fetch_one(pool)
+                .await?;
 
-    sqlx::query(include_str!("../../../migrations/004_memory.sql"))
-        .execute(pool)
-        .await?;
-
-    sqlx::query(include_str!("../../../migrations/005_tool_calls.sql"))
-        .execute(pool)
-        .await?;
+        if already_applied == 0 {
+            sqlx::query(sql).execute(pool).await?;
+            sqlx::query("INSERT INTO _migrations (name) VALUES (?)")
+                .bind(name)
+                .execute(pool)
+                .await?;
+            info!(migration = %name, "Applied migration");
+        }
+    }
 
     info!("Database migrations applied successfully");
     Ok(())
