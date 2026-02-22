@@ -9,7 +9,7 @@ pub use parser::embedded_builtin_skills;
 pub use skill::{SkillDef, SkillHandler, SkillOutput, SkillSource, SkillTier};
 pub use tool::{ToolHandler, ToolOutput};
 pub use types::{
-    AssistantConfig, ExecutionContext, ExecutionTrace, Interface, LlmConfig, MattermostConfig,
-    McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, SignalConfig, SkillsConfig,
-    SlackConfig, StorageConfig,
+    AssistantConfig, ExecutionContext, ExecutionTrace, Interface, LlmConfig, LlmProviderKind,
+    MattermostConfig, McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, SignalConfig,
+    SkillsConfig, SlackConfig, StorageConfig,
 };

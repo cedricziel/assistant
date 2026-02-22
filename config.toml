@@ -2,6 +2,9 @@
 # Copy to ~/.assistant/config.toml and customize
 
 [llm]
+# LLM backend provider.  Currently only "ollama" is supported; additional
+# providers (openai, anthropic, …) will be added in future crates.
+provider = "ollama"
 # Ollama model to use for inference.
 # Requires native tool-calling support. Recommended choices (2026):
 #

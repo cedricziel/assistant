@@ -216,10 +216,29 @@ fn default_llm_max_iterations() -> usize {
 fn default_llm_timeout_secs() -> u64 {
     120
 }
+fn default_llm_provider() -> LlmProviderKind {
+    LlmProviderKind::Ollama
+}
+
+/// Which LLM backend to use.
+///
+/// Set via `[llm] provider = "ollama"` in `config.toml`.
+/// Currently only `"ollama"` is implemented; this field exists so future
+/// providers (OpenAI, Anthropic, …) can be wired in without breaking existing
+/// config files.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmProviderKind {
+    #[default]
+    Ollama,
+}
 
 /// LLM / Ollama configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
+    /// Which backend to use (default: `ollama`).
+    #[serde(default = "default_llm_provider")]
+    pub provider: LlmProviderKind,
     #[serde(default = "default_llm_model")]
     pub model: String,
     #[serde(default = "default_llm_base_url")]
@@ -233,6 +252,7 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
+            provider: default_llm_provider(),
             model: default_llm_model(),
             base_url: default_llm_base_url(),
             max_iterations: default_llm_max_iterations(),
