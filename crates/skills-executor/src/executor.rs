@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput, SkillTier};
+use assistant_core::{
+    AssistantConfig, ExecutionContext, SkillDef, SkillHandler, SkillOutput, SkillTier,
+};
 use assistant_llm::LlmClient;
 use assistant_storage::{SkillRegistry, StorageLayer};
 
@@ -16,16 +18,22 @@ impl SkillExecutor {
         storage: Arc<StorageLayer>,
         llm: Arc<LlmClient>,
         registry: Arc<SkillRegistry>,
+        config: Arc<AssistantConfig>,
     ) -> Self {
         let mut executor = Self {
             storage: storage.clone(),
             builtin_handlers: HashMap::new(),
         };
-        executor.register_builtins(llm, registry);
+        executor.register_builtins(llm, registry, config);
         executor
     }
 
-    fn register_builtins(&mut self, llm: Arc<LlmClient>, registry: Arc<SkillRegistry>) {
+    fn register_builtins(
+        &mut self,
+        llm: Arc<LlmClient>,
+        registry: Arc<SkillRegistry>,
+        config: Arc<AssistantConfig>,
+    ) {
         use crate::builtins::*;
         let storage = self.storage.clone();
         let handlers: Vec<Arc<dyn SkillHandler>> = vec![
@@ -38,6 +46,8 @@ impl SkillExecutor {
             Arc::new(SkillFileReadHandler::new(registry.clone())),
             Arc::new(SelfAnalyzeHandler::new(storage.clone(), llm, registry)),
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
+            Arc::new(MemorySaveHandler::new(config.clone())),
+            Arc::new(SoulUpdateHandler::new(config)),
         ];
         for h in handlers {
             self.builtin_handlers.insert(h.skill_name().to_string(), h);

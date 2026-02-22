@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+FROM rust:1.84-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    protobuf-compiler \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+
+RUN cargo build --release -p assistant-interface-slack
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/assistant-slack /usr/local/bin/assistant-slack
+
+# Run as a non-root user.
+RUN useradd -r -s /bin/false assistant
+USER assistant
+
+# Mount a real config at runtime:
+#   -v /host/config.toml:/etc/assistant/config.toml
+ENTRYPOINT ["assistant-slack"]

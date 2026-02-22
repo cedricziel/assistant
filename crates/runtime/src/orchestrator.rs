@@ -5,10 +5,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, ExecutionTrace, Interface, Message, SkillTier};
+use assistant_core::{
+    ExecutionContext, ExecutionTrace, Interface, Message, MessageRole, SkillTier,
+};
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
 use assistant_skills_executor::SkillExecutor;
-use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use assistant_storage::{conversations::ConversationStore, registry::SkillRegistry, StorageLayer};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -57,6 +59,7 @@ pub struct Orchestrator {
     disabled_skills: Vec<String>,
     trace_enabled: bool,
     confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
+    memory_loader: assistant_core::MemoryLoader,
 }
 
 impl Orchestrator {
@@ -77,6 +80,8 @@ impl Orchestrator {
         executor: Arc<SkillExecutor>,
         config: &assistant_core::AssistantConfig,
     ) -> Self {
+        let memory_loader = assistant_core::MemoryLoader::new(config);
+        memory_loader.ensure_defaults();
         Self {
             llm,
             storage,
@@ -86,6 +91,7 @@ impl Orchestrator {
             disabled_skills: config.skills.disabled.clone(),
             trace_enabled: config.mirror.trace_enabled,
             confirmation_callback: None,
+            memory_loader,
         }
     }
 
@@ -96,6 +102,282 @@ impl Orchestrator {
     }
 
     // ── Main entry point ──────────────────────────────────────────────────────
+
+    /// Process one turn of the conversation with per-turn extension skills.
+    ///
+    /// Extension skills are injected by the calling interface (e.g. Slack,
+    /// Mattermost) and are checked before the global skill registry.  They
+    /// bypass the [`SafetyGate`] — the interface is responsible for vetting
+    /// them before passing them in.
+    ///
+    /// Unlike [`run_turn`] / [`run_turn_streaming`], this method does **not**
+    /// return the final answer; replies are expected to happen as side-effects
+    /// of the extension tool calls (e.g. `slack-reply`).  If the LLM emits a
+    /// `FinalAnswer` without calling a reply tool, it is persisted to the DB
+    /// but not forwarded anywhere.
+    ///
+    /// # Parameters
+    /// * `user_message` — the raw user input
+    /// * `conversation_id` — the UUID of the conversation
+    /// * `interface` — the originating interface
+    /// * `extensions` — per-turn `(SkillDef, handler)` pairs; names must be
+    ///   unique and must not collide with global skill names
+    pub async fn run_turn_with_tools(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        extensions: Vec<(
+            assistant_core::SkillDef,
+            Arc<dyn assistant_core::SkillHandler>,
+        )>,
+    ) -> Result<()> {
+        info!(
+            conversation_id = %conversation_id,
+            interface = ?interface,
+            extension_count = extensions.len(),
+            "Starting turn with extension tools"
+        );
+
+        // Build extension lookup: name → (def, handler).
+        let ext_map: HashMap<
+            String,
+            (
+                assistant_core::SkillDef,
+                Arc<dyn assistant_core::SkillHandler>,
+            ),
+        > = extensions
+            .iter()
+            .map(|(def, h)| (def.name.clone(), (def.clone(), h.clone())))
+            .collect();
+        let ext_defs: Vec<assistant_core::SkillDef> =
+            extensions.into_iter().map(|(def, _)| def).collect();
+
+        // 1-3. Set up conversation, load prior history, persist user message.
+        let (conv_store, mut history, base_turn) =
+            self.prepare_history(user_message, conversation_id).await?;
+
+        // 4. Load global skills and merge with extensions for LLM tool listing.
+        //    Extension defs come first so the LLM sees them prominently.
+        let global_skills = self.registry.list().await;
+        let all_skill_refs: Vec<&assistant_core::SkillDef> =
+            ext_defs.iter().chain(global_skills.iter()).collect();
+
+        let system_prompt = self.memory_loader.load_system_prompt();
+
+        let mut traces: Vec<ExecutionTrace> = Vec::new();
+
+        // 6. Tool-calling loop.
+        for iteration in 0..self.max_iterations {
+            debug!(iteration, "Extension-tools loop iteration");
+
+            let ctx = ExecutionContext {
+                conversation_id,
+                turn: iteration as i64,
+                interface: interface.clone(),
+                interactive: false,
+            };
+
+            let response = self
+                .llm
+                .chat(&system_prompt, &history, &all_skill_refs)
+                .await?;
+
+            match response {
+                // ── Final answer ──────────────────────────────────────────────
+                LlmResponse::FinalAnswer(text) => {
+                    info!(iteration, "LLM returned final answer (no auto-post)");
+
+                    let assistant_msg = {
+                        let mut m = assistant_core::Message::assistant(conversation_id, &text);
+                        m.turn = base_turn + iteration as i64 + 1;
+                        m
+                    };
+                    conv_store.save_message(&assistant_msg).await?;
+
+                    // Replies happen via extension tool calls — we do not post here.
+                    return Ok(());
+                }
+
+                // ── Tool call ─────────────────────────────────────────────────
+                LlmResponse::ToolCall { name, params } => {
+                    info!(skill = %name, iteration, "LLM requested skill execution");
+
+                    // Extension tools take priority and bypass the safety gate.
+                    let (observation, trace_result) = if let Some((ext_def, handler)) =
+                        ext_map.get(&name)
+                    {
+                        debug!(skill = %name, "Dispatching to extension handler");
+
+                        let params_map: HashMap<String, serde_json::Value> =
+                            if let serde_json::Value::Object(map) = &params {
+                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                            } else {
+                                HashMap::new()
+                            };
+
+                        let start = std::time::Instant::now();
+                        let exec_result = handler.execute(ext_def, params_map, &ctx).await;
+                        let duration_ms = start.elapsed().as_millis() as i64;
+
+                        let mut trace = ExecutionTrace::new(
+                            conversation_id,
+                            iteration as i64,
+                            &name,
+                            params.clone(),
+                        );
+                        let obs = match exec_result {
+                            Ok(output) => {
+                                trace = trace.with_success(output.content.clone(), duration_ms);
+                                output.content
+                            }
+                            Err(err) => {
+                                warn!(skill = %name, %err, "Extension skill execution failed");
+                                let msg = err.to_string();
+                                trace = trace.with_error(msg.clone(), duration_ms);
+                                format!("Error executing '{name}': {msg}")
+                            }
+                        };
+                        (obs, trace)
+                    } else {
+                        // Global registry path — look up def and apply safety gate.
+                        let Some(skill_def) = self.registry.get(&name).await else {
+                            let observation = format!("Skill '{}' not found in registry.", name);
+                            warn!(%observation);
+                            self.append_observation(&mut history, &observation, None);
+                            continue;
+                        };
+
+                        if let Err(reason) =
+                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
+                        {
+                            let observation = format!("Skill blocked: {reason}");
+                            warn!(%observation);
+                            self.append_observation(&mut history, &observation, Some(&name));
+                            continue;
+                        }
+
+                        // Confirmation gate — mirrors the gate in run_turn / run_turn_streaming.
+                        if skill_def.confirmation_required && ctx.interactive {
+                            if let Some(cb) = &self.confirmation_callback {
+                                if !cb.confirm(&name, &params) {
+                                    let observation = format!("User denied execution of '{name}'.");
+                                    info!(%observation);
+                                    self.append_observation(
+                                        &mut history,
+                                        &observation,
+                                        Some(&name),
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+
+                        if matches!(skill_def.tier, SkillTier::Prompt) {
+                            let sub_system = format!(
+                                "{}\n\n## Skill: {}\n\n{}",
+                                system_prompt, skill_def.name, skill_def.body
+                            );
+                            let sub_input = format_params_as_prompt(&name, &params);
+                            let sub_history = vec![ChatHistoryMessage {
+                                role: ChatRole::User,
+                                content: sub_input,
+                            }];
+
+                            let start = std::time::Instant::now();
+                            let sub_result = self.llm.chat(&sub_system, &sub_history, &[]).await;
+                            let duration_ms = start.elapsed().as_millis() as i64;
+
+                            let observation = match sub_result {
+                                Ok(LlmResponse::FinalAnswer(text)) => text,
+                                Ok(LlmResponse::ToolCall { name: n, .. }) => format!(
+                                    "Prompt-skill sub-call returned unexpected tool call: {n}"
+                                ),
+                                Ok(LlmResponse::Thinking(text)) => text,
+                                Err(err) => {
+                                    warn!(skill = %name, %err, "Prompt-tier sub-LLM call failed");
+                                    format!("Error running prompt skill '{name}': {err}")
+                                }
+                            };
+
+                            let mut trace = ExecutionTrace::new(
+                                conversation_id,
+                                iteration as i64,
+                                &name,
+                                params.clone(),
+                            );
+                            trace = trace.with_success(observation.clone(), duration_ms);
+
+                            if self.trace_enabled {
+                                let trace_store = self.storage.trace_store();
+                                if let Err(e) = trace_store.insert(&trace).await {
+                                    warn!("Failed to persist prompt-tier trace: {e}");
+                                }
+                            }
+                            traces.push(trace);
+                            self.append_observation(&mut history, &observation, Some(&name));
+                            continue;
+                        }
+
+                        let params_map: HashMap<String, serde_json::Value> =
+                            if let serde_json::Value::Object(map) = &params {
+                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                            } else {
+                                HashMap::new()
+                            };
+
+                        let start = std::time::Instant::now();
+                        let exec_result = self.executor.execute(&skill_def, params_map, &ctx).await;
+                        let duration_ms = start.elapsed().as_millis() as i64;
+
+                        let mut trace = ExecutionTrace::new(
+                            conversation_id,
+                            iteration as i64,
+                            &name,
+                            params.clone(),
+                        );
+                        let obs = match exec_result {
+                            Ok(output) => {
+                                debug!(skill = %name, duration_ms, "Skill execution completed");
+                                trace = trace.with_success(output.content.clone(), duration_ms);
+                                output.content
+                            }
+                            Err(err) => {
+                                warn!(skill = %name, %err, "Skill execution failed");
+                                let msg = err.to_string();
+                                trace = trace.with_error(msg.clone(), duration_ms);
+                                format!("Error executing '{name}': {msg}")
+                            }
+                        };
+                        (obs, trace)
+                    };
+
+                    if self.trace_enabled {
+                        let trace_store = self.storage.trace_store();
+                        if let Err(e) = trace_store.insert(&trace_result).await {
+                            warn!("Failed to persist execution trace: {e}");
+                        }
+                    }
+                    traces.push(trace_result);
+                    self.append_observation(&mut history, &observation, Some(&name));
+                }
+
+                // ── Intermediate thinking step ────────────────────────────────
+                LlmResponse::Thinking(text) => {
+                    debug!(iteration, "LLM emitted thinking step");
+                    history.push(ChatHistoryMessage {
+                        role: ChatRole::Assistant,
+                        content: text,
+                    });
+                }
+            }
+        }
+
+        anyhow::bail!(
+            "Max iterations ({}) reached without a final answer",
+            self.max_iterations
+        );
+    }
 
     /// Process one turn of the conversation.
     ///
@@ -117,38 +399,21 @@ impl Orchestrator {
             "Starting turn"
         );
 
-        // 1. Ensure conversation exists in SQLite.
-        let conv_store = self.storage.conversation_store();
-        conv_store
-            .create_conversation_with_id(conversation_id, None)
-            .await?;
+        // 1-3. Set up conversation, load prior history, persist user message.
+        let (conv_store, mut history, base_turn) =
+            self.prepare_history(user_message, conversation_id).await?;
 
-        // 2. Persist the user message.
-        let user_msg = {
-            let mut m = Message::user(conversation_id, user_message);
-            m.turn = 0;
-            m
-        };
-        conv_store.save_message(&user_msg).await?;
-
-        // 3. Load all registered skills.
+        // 4. Load all registered skills.
         let skill_defs = self.registry.list().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
-        // 4. Build the base system prompt.
-        //    The LLM client's `chat()` method handles injecting skill info in
+        // 5. Build the base system prompt.
         //    Skills are passed as a separate `tools` argument to the LLM client.
-        let system_prompt = "You are a helpful AI assistant.";
-
-        // 5. Bootstrap history with the current user message.
-        let mut history: Vec<ChatHistoryMessage> = vec![ChatHistoryMessage {
-            role: ChatRole::User,
-            content: user_message.to_string(),
-        }];
+        let system_prompt = self.memory_loader.load_system_prompt();
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
-        // 6. Tool-calling loop.
+        // 7. Tool-calling loop.
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Tool-calling loop iteration");
 
@@ -159,7 +424,7 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
-            let response = self.llm.chat(system_prompt, &history, &skill_refs).await?;
+            let response = self.llm.chat(&system_prompt, &history, &skill_refs).await?;
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
@@ -169,7 +434,7 @@ impl Orchestrator {
                     // Persist assistant message.
                     let assistant_msg = {
                         let mut m = Message::assistant(conversation_id, &text);
-                        m.turn = iteration as i64 + 1;
+                        m.turn = base_turn + iteration as i64 + 1;
                         m
                     };
                     conv_store.save_message(&assistant_msg).await?;
@@ -220,8 +485,8 @@ impl Orchestrator {
                         debug!(skill = %name, "Prompt-tier skill: running sub-LLM call");
 
                         let sub_system = format!(
-                            "You are a helpful AI assistant.\n\n## Skill: {}\n\n{}",
-                            skill_def.name, skill_def.body
+                            "{}\n\n## Skill: {}\n\n{}",
+                            system_prompt, skill_def.name, skill_def.body
                         );
                         let sub_input = format_params_as_prompt(&name, &params);
                         let sub_history = vec![assistant_llm::ChatHistoryMessage {
@@ -360,27 +625,14 @@ impl Orchestrator {
             "Starting streaming turn"
         );
 
-        let conv_store = self.storage.conversation_store();
-        conv_store
-            .create_conversation_with_id(conversation_id, None)
-            .await?;
-
-        let user_msg = {
-            let mut m = Message::user(conversation_id, user_message);
-            m.turn = 0;
-            m
-        };
-        conv_store.save_message(&user_msg).await?;
+        // Set up conversation, load prior history, persist user message.
+        let (conv_store, mut history, base_turn) =
+            self.prepare_history(user_message, conversation_id).await?;
 
         let skill_defs = self.registry.list().await;
         let skill_refs: Vec<&assistant_core::SkillDef> = skill_defs.iter().collect();
 
-        let system_prompt = "You are a helpful AI assistant.";
-
-        let mut history: Vec<ChatHistoryMessage> = vec![ChatHistoryMessage {
-            role: ChatRole::User,
-            content: user_message.to_string(),
-        }];
+        let system_prompt = self.memory_loader.load_system_prompt();
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -399,7 +651,7 @@ impl Orchestrator {
             let response = self
                 .llm
                 .chat_streaming(
-                    system_prompt,
+                    &system_prompt,
                     &history,
                     &skill_refs,
                     Some(token_sink.clone()),
@@ -412,7 +664,7 @@ impl Orchestrator {
 
                     let assistant_msg = {
                         let mut m = Message::assistant(conversation_id, &text);
-                        m.turn = iteration as i64 + 1;
+                        m.turn = base_turn + iteration as i64 + 1;
                         m
                     };
                     conv_store.save_message(&assistant_msg).await?;
@@ -455,8 +707,8 @@ impl Orchestrator {
 
                     if matches!(skill_def.tier, SkillTier::Prompt) {
                         let sub_system = format!(
-                            "You are a helpful AI assistant.\n\n## Skill: {}\n\n{}",
-                            skill_def.name, skill_def.body
+                            "{}\n\n## Skill: {}\n\n{}",
+                            system_prompt, skill_def.name, skill_def.body
                         );
                         let sub_input = format_params_as_prompt(&name, &params);
                         let sub_history = vec![assistant_llm::ChatHistoryMessage {
@@ -560,6 +812,59 @@ impl Orchestrator {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /// Prepare conversation history for a new turn.
+    ///
+    /// 1. Creates the conversation row if it does not exist.
+    /// 2. Loads all prior messages.
+    /// 3. Persists the incoming user message.
+    /// 4. Builds an LLM-ready [`ChatHistoryMessage`] list (user + assistant)
+    ///    with the new user message appended.
+    ///
+    /// Returns `(conv_store, history, base_turn)` where `base_turn` is the
+    /// turn index of the user message just saved (used to assign monotonically
+    /// increasing turn numbers to later assistant messages).
+    async fn prepare_history(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+    ) -> Result<(ConversationStore, Vec<ChatHistoryMessage>, i64)> {
+        let conv_store = self.storage.conversation_store();
+        conv_store
+            .create_conversation_with_id(conversation_id, None)
+            .await?;
+
+        let prior = conv_store.load_history(conversation_id).await?;
+        let base_turn = prior.len() as i64;
+
+        let user_msg = {
+            let mut m = Message::user(conversation_id, user_message);
+            m.turn = base_turn;
+            m
+        };
+        conv_store.save_message(&user_msg).await?;
+
+        let mut history: Vec<ChatHistoryMessage> = prior
+            .into_iter()
+            .filter_map(|m| match m.role {
+                MessageRole::User => Some(ChatHistoryMessage {
+                    role: ChatRole::User,
+                    content: m.content,
+                }),
+                MessageRole::Assistant => Some(ChatHistoryMessage {
+                    role: ChatRole::Assistant,
+                    content: m.content,
+                }),
+                _ => None,
+            })
+            .collect();
+        history.push(ChatHistoryMessage {
+            role: ChatRole::User,
+            content: user_message.to_string(),
+        });
+
+        Ok((conv_store, history, base_turn))
+    }
+
     /// Append an observation message to the chat history.
     ///
     /// The observation is added as a `tool` role message so the LLM can
@@ -607,5 +912,271 @@ fn format_params_as_prompt(skill_name: &str, params: &serde_json::Value) -> Stri
         )
     } else {
         format!("Execute the '{skill_name}' skill.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use assistant_core::{types::Interface, AssistantConfig, Message};
+    use assistant_llm::{LlmClient, LlmClientConfig};
+    use assistant_skills_executor::SkillExecutor;
+    use assistant_storage::{registry::SkillRegistry, StorageLayer};
+    use serde_json::{json, Value};
+    use uuid::Uuid;
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    use super::Orchestrator;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// Minimal Ollama final-answer response.
+    fn ollama_answer(text: &str) -> Value {
+        json!({
+            "model": "test",
+            "message": { "role": "assistant", "content": text },
+            "done": true
+        })
+    }
+
+    /// Mount a mock that returns a final answer for every POST /api/chat.
+    async fn mount_answer(server: &MockServer, text: &str) {
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer(text)))
+            .mount(server)
+            .await;
+    }
+
+    /// Build an [`Orchestrator`] wired to `base_url` with a fresh in-memory DB.
+    /// Returns the orchestrator and a handle to the storage so tests can seed data.
+    async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: base_url.to_string(),
+                timeout_secs: 10,
+            })
+            .unwrap(),
+        );
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false; // disable FS writes in unit tests
+        let executor = Arc::new(SkillExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let orch = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            registry,
+            executor,
+            &config,
+        ));
+        (orch, storage)
+    }
+
+    /// Extract the `messages` array from an intercepted Ollama request body.
+    fn messages_in(req: &wiremock::Request) -> Vec<Value> {
+        let body: Value = serde_json::from_slice(&req.body).unwrap();
+        body["messages"].as_array().cloned().unwrap_or_default()
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
+
+    /// First turn: the LLM receives only the system prompt + current user message.
+    #[tokio::test]
+    async fn first_turn_sends_only_current_message() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("hello", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 1);
+
+        let msgs = messages_in(&reqs[0]);
+        // [system, user(hello)]
+        assert_eq!(msgs.len(), 2, "expected [system, user], got {msgs:?}");
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "hello");
+    }
+
+    /// Second turn: prior user + assistant messages are prepended before the
+    /// current user message.
+    #[tokio::test]
+    async fn second_turn_includes_prior_history() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("first message", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("second message", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 2);
+
+        let msgs = messages_in(&reqs[1]);
+        // [system, user(first), assistant(pong), user(second)]
+        assert_eq!(msgs.len(), 4, "expected 4 messages on turn 2, got {msgs:?}");
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "first message");
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert_eq!(msgs[2]["content"], "pong");
+        assert_eq!(msgs[3]["role"], "user");
+        assert_eq!(msgs[3]["content"], "second message");
+    }
+
+    /// The current user message must appear exactly once — not duplicated by
+    /// load_history returning the already-saved message.
+    #[tokio::test]
+    async fn current_message_not_duplicated() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("turn one", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("turn two", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        let msgs = messages_in(reqs.last().unwrap());
+
+        let count = msgs
+            .iter()
+            .filter(|m| m["role"] == "user" && m["content"] == "turn two")
+            .count();
+        assert_eq!(
+            count, 1,
+            "current message must appear exactly once; found {count}"
+        );
+    }
+
+    /// Manually seeded history (e.g. from Slack thread hydration) is included
+    /// in the LLM payload on the first bot turn in that conversation.
+    #[tokio::test]
+    async fn seeded_history_included_in_llm_call() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, storage) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        // Seed the conversation store directly (simulates Slack thread hydration).
+        let conv_store = storage.conversation_store();
+        conv_store
+            .create_conversation_with_id(conv_id, Some("slack:C001:1234"))
+            .await
+            .unwrap();
+
+        let mut seed_user = Message::user(conv_id, "seeded user message");
+        seed_user.turn = 0;
+        conv_store.save_message(&seed_user).await.unwrap();
+
+        let mut seed_bot = Message::assistant(conv_id, "seeded bot reply");
+        seed_bot.turn = 1;
+        conv_store.save_message(&seed_bot).await.unwrap();
+
+        orch.run_turn("follow-up", conv_id, Interface::Slack)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 1);
+
+        let msgs = messages_in(&reqs[0]);
+        // [system, seeded_user, seeded_bot, follow_up]
+        assert_eq!(msgs.len(), 4, "expected 4 messages, got {msgs:?}");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "seeded user message");
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert_eq!(msgs[2]["content"], "seeded bot reply");
+        assert_eq!(msgs[3]["role"], "user");
+        assert_eq!(msgs[3]["content"], "follow-up");
+    }
+
+    /// Three-turn conversation accumulates history correctly across all turns.
+    #[tokio::test]
+    async fn three_turns_accumulate_history() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "reply").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        orch.run_turn("turn 1", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("turn 2", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("turn 3", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 3);
+
+        // Third request: [system, u1, a1, u2, a2, u3]
+        let msgs = messages_in(&reqs[2]);
+        assert_eq!(msgs.len(), 6, "expected 6 messages on turn 3, got {msgs:?}");
+        assert_eq!(msgs[1]["content"], "turn 1");
+        assert_eq!(msgs[2]["content"], "reply");
+        assert_eq!(msgs[3]["content"], "turn 2");
+        assert_eq!(msgs[4]["content"], "reply");
+        assert_eq!(msgs[5]["content"], "turn 3");
+    }
+
+    /// Different conversation IDs are fully isolated — no history bleed.
+    #[tokio::test]
+    async fn different_conversations_are_isolated() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let conv_a = Uuid::new_v4();
+        let conv_b = Uuid::new_v4();
+
+        orch.run_turn("conv-a message", conv_a, Interface::Cli)
+            .await
+            .unwrap();
+        orch.run_turn("conv-b message", conv_b, Interface::Cli)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+
+        // conv-b's request must not contain conv-a's message.
+        let msgs_b = messages_in(&reqs[1]);
+        let bleed = msgs_b.iter().any(|m| m["content"] == "conv-a message");
+        assert!(
+            !bleed,
+            "conv-a history must not appear in conv-b's LLM call"
+        );
     }
 }

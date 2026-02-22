@@ -86,6 +86,7 @@ async fn main() -> Result<()> {
         storage.clone(),
         llm.clone(),
         registry.clone(),
+        Arc::new(config.clone()),
     ));
 
     // ── Orchestrator ──────────────────────────────────────────────────────────

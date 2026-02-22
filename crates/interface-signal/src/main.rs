@@ -165,6 +165,7 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
         storage.clone(),
         llm.clone(),
         registry.clone(),
+        Arc::new(config.clone()),
     ));
 
     // Build orchestrator with auto-deny confirmation.

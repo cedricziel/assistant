@@ -293,6 +293,7 @@ async fn main() -> Result<()> {
         storage.clone(),
         llm.clone(),
         registry.clone(),
+        Arc::new(config.clone()),
     ));
 
     // 8. Build orchestrator.

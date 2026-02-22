@@ -1,0 +1,35 @@
+[package]
+name = "assistant-interface-slack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Slack Socket Mode interface for the AI assistant"
+
+[dependencies]
+assistant-core = { path = "../core" }
+assistant-runtime = { path = "../runtime" }
+assistant-storage = { path = "../storage" }
+assistant-llm = { path = "../llm" }
+assistant-skills-executor = { path = "../skills-executor" }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+clap = { workspace = true }
+dirs = { workspace = true }
+toml = { workspace = true }
+slack-morphism = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+# tokio-tungstenite is not used directly — it forces rustls-tls-native-roots
+# onto the transitive dep pulled in by slack-morphism (which only enables the
+# cert-store feature, leaving wss:// connections broken without this override).
+[package.metadata.cargo-machete]
+ignored = ["tokio-tungstenite"]
+
+[[bin]]
+name = "assistant-slack"
+path = "src/main.rs"

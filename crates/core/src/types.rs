@@ -122,6 +122,8 @@ pub enum Interface {
     Cli,
     Signal,
     Mcp,
+    Slack,
+    Mattermost,
 }
 
 /// Top-level assistant configuration
@@ -137,9 +139,17 @@ pub struct AssistantConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub mirror: MirrorConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
     /// Signal messenger interface configuration (optional).
     /// Populated from the `[signal]` section of `config.toml`.
     pub signal: Option<SignalConfig>,
+    /// Slack interface configuration (optional).
+    /// Populated from the `[slack]` section of `config.toml`.
+    pub slack: Option<SlackConfig>,
+    /// Mattermost interface configuration (optional).
+    /// Populated from the `[mattermost]` section of `config.toml`.
+    pub mattermost: Option<MattermostConfig>,
 }
 
 /// Configuration for the Signal messenger interface.
@@ -157,6 +167,36 @@ pub struct SignalConfig {
     /// `~/.assistant/signal-store` (resolved at runtime by the interface
     /// crate, which has access to the `dirs` crate).
     pub store_path: Option<String>,
+}
+
+/// Configuration for the Slack interface.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SlackConfig {
+    /// Bot OAuth token (`xoxb-…`) for sending messages via the Web API.
+    pub bot_token: Option<String>,
+    /// App-level token (`xapp-…`) for Socket Mode connections.
+    pub app_token: Option<String>,
+    /// If non-empty, only dispatch messages from these channel IDs.
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+    /// If non-empty, only dispatch messages from these Slack user IDs.
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+}
+
+/// Configuration for the Mattermost interface.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MattermostConfig {
+    /// Base URL of the Mattermost server (e.g. `"https://mattermost.example.com"`).
+    pub server_url: Option<String>,
+    /// Personal access token or bot token for authentication.
+    pub token: Option<String>,
+    /// If non-empty, only dispatch messages from these channel IDs.
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+    /// If non-empty, only dispatch messages from these Mattermost user IDs.
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
 }
 
 fn default_llm_model() -> String {
@@ -237,6 +277,41 @@ impl Default for MirrorConfig {
         Self {
             trace_enabled: true,
             analysis_window: 50,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Configuration for the agent's persistent markdown memory files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    /// Whether memory loading is enabled (default: true)
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Path to SOUL.md — personality, values, core truths
+    pub soul_path: Option<String>,
+    /// Path to IDENTITY.md — name, role, structured identity profile
+    pub identity_path: Option<String>,
+    /// Path to USER.md — user profile, preferences, timezone
+    pub user_path: Option<String>,
+    /// Path to MEMORY.md — curated long-term memory
+    pub memory_path: Option<String>,
+    /// Directory for daily append-only notes (YYYY-MM-DD.md)
+    pub notes_dir: Option<String>,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            soul_path: None,
+            identity_path: None,
+            user_path: None,
+            memory_path: None,
+            notes_dir: None,
         }
     }
 }

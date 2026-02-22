@@ -1,33 +1,30 @@
 [package]
-name = "assistant-cli"
+name = "assistant-interface-mattermost"
 version.workspace = true
-license.workspace = true
 edition.workspace = true
-description = "Interactive CLI REPL for the local AI assistant"
-
-[[bin]]
-name = "assistant"
-path = "src/main.rs"
-
-[lib]
-name = "assistant_interface_cli"
-path = "src/lib.rs"
+license.workspace = true
+description = "Mattermost WebSocket interface for the AI assistant"
 
 [dependencies]
 assistant-core = { path = "../core" }
+assistant-runtime = { path = "../runtime" }
 assistant-storage = { path = "../storage" }
 assistant-llm = { path = "../llm" }
 assistant-skills-executor = { path = "../skills-executor" }
-assistant-runtime = { path = "../runtime" }
 tokio = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
-# Terminal line editor
-reedline = { workspace = true }
-# Config file parsing
-toml = { workspace = true }
-# Home directory
+clap = { workspace = true }
 dirs = { workspace = true }
+toml = { workspace = true }
+mattermost_api = { workspace = true }
+lru = { workspace = true }
+async-trait = { workspace = true }
+
+[[bin]]
+name = "assistant-mattermost"
+path = "src/main.rs"

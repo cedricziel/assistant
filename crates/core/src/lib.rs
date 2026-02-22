@@ -1,9 +1,12 @@
+pub mod memory;
 pub mod parser;
 pub mod skill;
 pub mod types;
 
+pub use memory::MemoryLoader;
 pub use skill::{SkillDef, SkillHandler, SkillOutput, SkillTier};
 pub use types::{
-    AssistantConfig, ExecutionContext, ExecutionTrace, Interface, LlmConfig, McpConfig, Message,
-    MessageRole, MirrorConfig, SignalConfig, SkillsConfig, StorageConfig,
+    AssistantConfig, ExecutionContext, ExecutionTrace, Interface, LlmConfig, MattermostConfig,
+    McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, SignalConfig, SkillsConfig,
+    SlackConfig, StorageConfig,
 };

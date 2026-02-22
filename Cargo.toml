@@ -8,6 +8,8 @@ members = [
     "crates/mcp-server",
     "crates/interface-cli",
     "crates/interface-signal",
+    "crates/interface-slack",
+    "crates/interface-mattermost",
     "crates/integration-tests",
 ]
 resolver = "2"
@@ -37,6 +39,37 @@ reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], defau
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# CLI / config
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+toml = "1.0"
+# Async streams
+futures = "0.3"
+# Terminal line editor
+reedline = "0.45"
+# QR code terminal rendering
+qr2term = "0.3"
+# YAML frontmatter parser (serde_yaml is deprecated)
+gray_matter = "0.3"
+# SQL persistence
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }
+# cron expression parsing
+cron = "0.15"
+# HTML parsing for web-fetch builtin
+scraper = "0.25"
+# WASM plugin execution
+extism = "1"
+# Integration testing
+testcontainers = "0.27"
+wiremock = "0.6"
+# LRU cache (bounded conversation map in Mattermost/Slack runners)
+lru = "0.12"
+# Slack / Mattermost interfaces
+slack-morphism = { version = "2", features = ["hyper"] }
+# Force rustls TLS on the tokio-tungstenite transitive dep (slack-morphism only
+# enables the cert-store feature, not the actual TLS impl, causing wss:// to fail)
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+mattermost_api = "0.8"
 # Internal crates
 core = { path = "crates/core" }
 llm = { path = "crates/llm" }
