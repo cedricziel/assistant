@@ -528,7 +528,7 @@ impl SlackInterface {
                 .users_set_presence(&SlackApiUsersSetPresenceRequest::new("auto".to_string()))
                 .await
             {
-                warn!(error = %e, "users.setPresence(auto) failed");
+                debug!(error = %e, "users.setPresence(auto) failed (missing_scope is expected for most bot tokens)");
             } else {
                 info!("Presence set to auto");
             }
