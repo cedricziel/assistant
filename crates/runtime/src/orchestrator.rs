@@ -9,7 +9,7 @@ use assistant_core::{
     ExecutionContext, ExecutionTrace, Interface, Message, MessageRole, SkillDef, SkillSource,
     SkillTier,
 };
-use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
+use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{conversations::ConversationStore, registry::SkillRegistry, StorageLayer};
 use tokio::sync::mpsc;
@@ -86,7 +86,7 @@ fn end_turn_def() -> SkillDef {
 ///    and append an `OBSERVATION` to the conversation history.
 /// 6. Persist the final assistant message and return [`TurnResult`].
 pub struct Orchestrator {
-    llm: Arc<LlmClient>,
+    llm: Arc<dyn LlmProvider>,
     storage: Arc<StorageLayer>,
     registry: Arc<SkillRegistry>,
     executor: Arc<SkillExecutor>,
@@ -111,7 +111,7 @@ impl Orchestrator {
     /// * `config` — assistant configuration (controls iteration limit, disabled
     ///   skills, and trace logging)
     pub fn new(
-        llm: Arc<LlmClient>,
+        llm: Arc<dyn LlmProvider>,
         storage: Arc<StorageLayer>,
         registry: Arc<SkillRegistry>,
         executor: Arc<SkillExecutor>,
@@ -1299,7 +1299,7 @@ mod tests {
     use std::sync::Arc;
 
     use assistant_core::{types::Interface, AssistantConfig, Message};
-    use assistant_llm::{LlmClient, LlmClientConfig};
+    use assistant_llm::{LlmClient, LlmClientConfig, LlmProvider};
     use assistant_skills_executor::SkillExecutor;
     use assistant_storage::{registry::SkillRegistry, StorageLayer};
     use serde_json::{json, Value};
@@ -1336,7 +1336,7 @@ mod tests {
     async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
-        let llm = Arc::new(
+        let llm: Arc<dyn LlmProvider> = Arc::new(
             LlmClient::new(LlmClientConfig {
                 model: "test".to_string(),
                 base_url: base_url.to_string(),

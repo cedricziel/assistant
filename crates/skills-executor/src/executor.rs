@@ -6,7 +6,7 @@ use assistant_core::{
     AssistantConfig, ExecutionContext, SkillDef, SkillHandler, SkillOutput, SkillSource, SkillTier,
     ToolHandler,
 };
-use assistant_llm::LlmClient;
+use assistant_llm::LlmProvider;
 use assistant_storage::{SkillRegistry, StorageLayer};
 use tracing::warn;
 
@@ -21,7 +21,7 @@ pub struct SkillExecutor {
 impl SkillExecutor {
     pub fn new(
         storage: Arc<StorageLayer>,
-        llm: Arc<LlmClient>,
+        llm: Arc<dyn LlmProvider>,
         registry: Arc<SkillRegistry>,
         config: Arc<AssistantConfig>,
     ) -> Self {
@@ -36,7 +36,7 @@ impl SkillExecutor {
 
     fn register_builtins(
         &mut self,
-        llm: Arc<LlmClient>,
+        llm: Arc<dyn LlmProvider>,
         registry: Arc<SkillRegistry>,
         config: Arc<AssistantConfig>,
     ) {

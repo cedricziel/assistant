@@ -9,21 +9,21 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput};
-use assistant_llm::{ChatHistoryMessage, ChatRole, LlmClient, LlmResponse};
+use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
 use assistant_storage::{SkillRegistry, StorageLayer};
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
 pub struct SelfAnalyzeHandler {
     storage: Arc<StorageLayer>,
-    llm: Arc<LlmClient>,
+    llm: Arc<dyn LlmProvider>,
     registry: Arc<SkillRegistry>,
 }
 
 impl SelfAnalyzeHandler {
     pub fn new(
         storage: Arc<StorageLayer>,
-        llm: Arc<LlmClient>,
+        llm: Arc<dyn LlmProvider>,
         registry: Arc<SkillRegistry>,
     ) -> Self {
         Self {
