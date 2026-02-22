@@ -12,52 +12,52 @@
       "extra-files": [
         {
           "type": "toml",
-          "path": "crates/core/Cargo.toml",
+          "path": "/crates/core/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "crates/llm/Cargo.toml",
+          "path": "/crates/llm/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "crates/storage/Cargo.toml",
+          "path": "/crates/storage/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "crates/runtime/Cargo.toml",
+          "path": "/crates/runtime/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "crates/skills-executor/Cargo.toml",
+          "path": "/crates/skills-executor/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "crates/mcp-server/Cargo.toml",
+          "path": "/crates/mcp-server/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "crates/interface-signal/Cargo.toml",
+          "path": "/crates/interface-signal/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "crates/interface-slack/Cargo.toml",
+          "path": "/crates/interface-slack/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "crates/interface-mattermost/Cargo.toml",
+          "path": "/crates/interface-mattermost/Cargo.toml",
           "jsonpath": "$.package.version"
         },
         {
           "type": "toml",
-          "path": "Cargo.toml",
+          "path": "/Cargo.toml",
           "jsonpath": "$.workspace.package.version"
         }
       ]
