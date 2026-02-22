@@ -1,3 +1,11 @@
+[package]
+name = "assistant"
+version = "0.1.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
 [workspace]
 members = [
     "crates/core",

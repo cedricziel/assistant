@@ -1,0 +1,1 @@
+//! Assistant workspace root.

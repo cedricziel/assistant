@@ -9,7 +9,6 @@
       "release-type": "rust",
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
-      "version-file": "crates/interface-cli/Cargo.toml",
       "extra-files": [
         {
           "type": "toml",
