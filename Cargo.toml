@@ -2,6 +2,7 @@
 members = [
     "crates/core",
     "crates/llm",
+    "crates/provider-ollama",
     "crates/storage",
     "crates/runtime",
     "crates/skills-executor",

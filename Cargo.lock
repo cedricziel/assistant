@@ -373,6 +373,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant-provider-ollama"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "assistant-llm",
+ "async-trait",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "assistant-runtime"
 version = "0.1.1"
 dependencies = [
