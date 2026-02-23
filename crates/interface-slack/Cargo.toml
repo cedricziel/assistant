@@ -26,5 +26,8 @@ tokio-tungstenite = { workspace = true }
 # tokio-tungstenite is not used directly — it forces rustls-tls-native-roots
 # onto the transitive dep pulled in by slack-morphism (which only enables the
 # cert-store feature, leaving wss:// connections broken without this override).
+[dev-dependencies]
+toml = { workspace = true }
+
 [package.metadata.cargo-machete]
 ignored = ["tokio-tungstenite"]
