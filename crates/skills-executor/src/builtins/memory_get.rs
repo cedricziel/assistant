@@ -4,7 +4,6 @@
 //! Accepted targets: `soul`, `identity`, `user`, `memory`, `notes/YYYY-MM-DD`.
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -94,7 +93,7 @@ impl SkillHandler for MemoryGetHandler {
             }
         };
 
-        match fs::read_to_string(&path) {
+        match tokio::fs::read_to_string(&path).await {
             Ok(content) => Ok(SkillOutput::success(format!(
                 "File: {}\n\n{}",
                 path.display(),

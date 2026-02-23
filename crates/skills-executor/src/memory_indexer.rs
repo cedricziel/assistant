@@ -141,7 +141,13 @@ impl MemoryIndexer {
 }
 
 /// Spawn a background task that re-indexes memory files every `interval`.
-pub fn spawn_memory_indexer(indexer: Arc<MemoryIndexer>, interval: std::time::Duration) {
+///
+/// Returns a [`tokio::task::JoinHandle`] so the caller can abort or await the
+/// task during graceful shutdown.
+pub fn spawn_memory_indexer(
+    indexer: Arc<MemoryIndexer>,
+    interval: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             if let Err(e) = indexer.index_all().await {
@@ -149,7 +155,7 @@ pub fn spawn_memory_indexer(indexer: Arc<MemoryIndexer>, interval: std::time::Du
             }
             tokio::time::sleep(interval).await;
         }
-    });
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +208,6 @@ fn chunk_text(text: &str) -> impl Iterator<Item = String> {
                     }
                     // If a single sentence is too long, split by characters.
                     let mut start = 0;
-                    let bytes = sentence.as_bytes();
                     while start < sentence.len() {
                         let end = (start + MAX_CHUNK_CHARS).min(sentence.len());
                         // Walk back to char boundary.
@@ -212,7 +217,6 @@ fn chunk_text(text: &str) -> impl Iterator<Item = String> {
                         }
                         chunks.push(sentence[start..end].to_string());
                         start = end;
-                        let _ = bytes; // suppress unused warning
                     }
                     current = String::new();
                 }

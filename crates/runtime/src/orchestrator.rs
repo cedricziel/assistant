@@ -498,20 +498,16 @@ impl Orchestrator {
                                 },
                             };
 
-                            if self.disabled_skills.iter().any(|s| s == &name) {
-                                let observation =
-                                    format!("Skill '{name}' is disabled by configuration.");
-                                warn!(%observation);
-                                self.append_tool_result(&mut history, &name, &observation);
-                                let tr_msg = Self::make_tool_result_message(
+                            if self
+                                .reject_if_disabled(
+                                    &name,
+                                    &mut history,
+                                    &conv_store,
                                     conversation_id,
                                     base_turn + iteration as i64 + 1,
-                                    &name,
-                                    &observation,
-                                );
-                                if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                    warn!("Failed to persist tool-result message: {e}");
-                                }
+                                )
+                                .await
+                            {
                                 continue;
                             }
 
@@ -802,20 +798,16 @@ impl Orchestrator {
                         };
 
                         // Disabled-skills gate.
-                        if self.disabled_skills.iter().any(|s| s == &name) {
-                            let observation =
-                                format!("Skill '{name}' is disabled by configuration.");
-                            warn!(%observation);
-                            self.append_tool_result(&mut history, &name, &observation);
-                            let tr_msg = Self::make_tool_result_message(
+                        if self
+                            .reject_if_disabled(
+                                &name,
+                                &mut history,
+                                &conv_store,
                                 conversation_id,
                                 base_turn + iteration as i64 + 1,
-                                &name,
-                                &observation,
-                            );
-                            if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                warn!("Failed to persist tool-result message: {e}");
-                            }
+                            )
+                            .await
+                        {
                             continue;
                         }
 
@@ -1107,20 +1099,16 @@ impl Orchestrator {
                             },
                         };
 
-                        if self.disabled_skills.iter().any(|s| s == &name) {
-                            let observation =
-                                format!("Skill '{name}' is disabled by configuration.");
-                            warn!(%observation);
-                            self.append_tool_result(&mut history, &name, &observation);
-                            let tr_msg = Self::make_tool_result_message(
+                        if self
+                            .reject_if_disabled(
+                                &name,
+                                &mut history,
+                                &conv_store,
                                 conversation_id,
                                 base_turn + iteration as i64 + 1,
-                                &name,
-                                &observation,
-                            );
-                            if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                warn!("Failed to persist tool-result message: {e}");
-                            }
+                            )
+                            .await
+                        {
                             continue;
                         }
 
@@ -1355,6 +1343,33 @@ impl Orchestrator {
             name: name.to_string(),
             content: content.to_string(),
         });
+    }
+
+    /// Check whether `name` is in the disabled-skills list.
+    ///
+    /// If disabled, appends a tool-result observation to `history`, persists
+    /// the result row via `conv_store`, and returns `true` so the caller can
+    /// `continue` to the next tool.  Returns `false` when the skill is
+    /// allowed to proceed.
+    async fn reject_if_disabled(
+        &self,
+        name: &str,
+        history: &mut Vec<ChatHistoryMessage>,
+        conv_store: &ConversationStore,
+        conversation_id: Uuid,
+        turn_idx: i64,
+    ) -> bool {
+        if !self.disabled_skills.iter().any(|s| s == name) {
+            return false;
+        }
+        let observation = format!("Skill '{name}' is disabled by configuration.");
+        warn!(%observation);
+        self.append_tool_result(history, name, &observation);
+        let tr_msg = Self::make_tool_result_message(conversation_id, turn_idx, name, &observation);
+        if let Err(e) = conv_store.save_message(&tr_msg).await {
+            warn!("Failed to persist tool-result message: {e}");
+        }
+        true
     }
 
     /// Build a `Message` row for a turn where the LLM requested tool calls.

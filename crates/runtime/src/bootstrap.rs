@@ -71,15 +71,18 @@ pub async fn load_config(config_path: &Path) -> Result<AssistantConfig> {
 ///
 /// Call this once after building the storage layer and LLM provider.
 /// The default interval is 5 minutes.
+///
+/// Returns a [`tokio::task::JoinHandle`] that can be used to abort or await
+/// the background task during graceful shutdown.
 pub fn start_memory_indexer(
     config: Arc<AssistantConfig>,
     storage: Arc<StorageLayer>,
     llm: Arc<dyn LlmProvider>,
     interval: Option<Duration>,
-) {
+) -> tokio::task::JoinHandle<()> {
     let indexer = Arc::new(MemoryIndexer::new(config, storage, llm));
     let interval = interval.unwrap_or(Duration::from_secs(5 * 60));
-    spawn_memory_indexer(indexer, interval);
+    spawn_memory_indexer(indexer, interval)
 }
 
 /// Return the runtime skill search directories.
