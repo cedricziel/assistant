@@ -14,7 +14,7 @@ pub struct SkillExecutor {
     storage: Arc<StorageLayer>,
     /// Primitive, self-describing tools (file-read, bash, etc.)
     tool_handlers: HashMap<String, Arc<dyn ToolHandler>>,
-    /// SKILL.md-backed builtin handlers (memory-read, self-analyze, etc.)
+    /// SKILL.md-backed builtin handlers (memory-get, self-analyze, etc.)
     builtin_handlers: HashMap<String, Arc<dyn SkillHandler>>,
 }
 

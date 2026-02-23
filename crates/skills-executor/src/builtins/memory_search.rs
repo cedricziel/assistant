@@ -85,7 +85,12 @@ impl SkillHandler for MemorySearchHandler {
         // Step 3: Score and rank results.
         let ranked = if let Some(qvec) = query_embedding {
             // Hybrid: 50% FTS rank + 50% cosine similarity.
-            let embedded = store.get_all_embedded().await.unwrap_or_default();
+            // Only fetch embeddings for the FTS hits — avoids a full table scan.
+            let hit_ids: Vec<i64> = fts_hits.iter().map(|h| h.chunk_id).collect();
+            let embedded = store
+                .get_embeddings_by_ids(&hit_ids)
+                .await
+                .unwrap_or_default();
 
             // Build chunk_id -> cosine_sim lookup.
             let mut cos_map: HashMap<i64, f32> = HashMap::new();

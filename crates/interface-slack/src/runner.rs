@@ -13,9 +13,9 @@
 //!
 //! # Safety
 //!
-//! [`SafetyGate`][assistant_runtime::safety::SafetyGate] blocks `shell-exec`
-//! for [`Interface::Slack`].  Additionally, `allowed_channels` and
-//! `allowed_users` allowlists are checked before dispatching.
+//! Skills listed in `disabled_skills` are blocked before dispatch.
+//! Additionally, `allowed_channels` and `allowed_users` allowlists are
+//! checked before dispatching.
 //!
 //! # Thread conversation context
 //!

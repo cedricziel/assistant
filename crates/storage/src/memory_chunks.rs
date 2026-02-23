@@ -125,6 +125,28 @@ impl MemoryChunkStore {
         Ok(rows.into_iter().map(decode_chunk).collect())
     }
 
+    /// Return embedded chunks whose IDs are in `ids`.
+    ///
+    /// More efficient than [`get_all_embedded`] when you only need the embeddings
+    /// for a known set of FTS hits.
+    pub async fn get_embeddings_by_ids(&self, ids: &[i64]) -> Result<Vec<StoredChunk>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT id, file_path, chunk_index, content, embedding, file_hash
+             FROM memory_chunks
+             WHERE id IN ({placeholders}) AND embedding IS NOT NULL"
+        );
+        let mut q = sqlx::query_as::<_, ChunkRow>(&sql);
+        for id in ids {
+            q = q.bind(*id);
+        }
+        let rows = q.fetch_all(&self.0).await?;
+        Ok(rows.into_iter().map(decode_chunk).collect())
+    }
+
     /// Full-text search using the FTS5 virtual table.
     ///
     /// Results are ranked by FTS5's built-in BM25 rank (lower rank = better).
