@@ -5,7 +5,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{skill::SkillSource, AssistantConfig, Interface, MemoryLoader};
+use assistant_core::{
+    skill::SkillSource, AssistantConfig, Interface, LlmProviderKind, MemoryLoader,
+};
+use assistant_llm::LlmProvider;
+use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{
     orchestrator::ConfirmationCallback, scheduler::spawn_scheduler, Orchestrator,
@@ -397,10 +401,17 @@ async fn bootstrap(
 
     let registry = Arc::new(registry);
 
-    // Build LLM client.
-    let llm = Arc::new(
-        OllamaProvider::from_llm_config(&config.llm).context("Failed to create LLM client")?,
-    );
+    // Build LLM client — dispatch on configured provider.
+    let llm: Arc<dyn LlmProvider> = match config.llm.provider {
+        LlmProviderKind::Ollama => Arc::new(
+            OllamaProvider::from_llm_config(&config.llm)
+                .context("Failed to create Ollama LLM client")?,
+        ),
+        LlmProviderKind::Anthropic => Arc::new(
+            AnthropicProvider::from_llm_config(&config.llm)
+                .context("Failed to create Anthropic LLM client")?,
+        ),
+    };
 
     // Build skill executor.
     let executor = Arc::new(SkillExecutor::new(

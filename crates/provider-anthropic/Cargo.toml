@@ -1,0 +1,18 @@
+[package]
+name = "assistant-provider-anthropic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+assistant-core = { path = "../core" }
+assistant-llm  = { path = "../llm" }
+async-trait    = { workspace = true }
+anyhow         = { workspace = true }
+tokio          = { workspace = true }
+reqwest        = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+tracing        = { workspace = true }
+futures        = { workspace = true }

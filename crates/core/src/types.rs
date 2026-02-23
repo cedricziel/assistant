@@ -226,17 +226,15 @@ fn default_embedding_model() -> String {
 /// Which LLM backend to use.
 ///
 /// Set via `[llm] provider = "ollama"` in `config.toml`.
-/// Currently only `"ollama"` is implemented; this field exists so future
-/// providers (OpenAI, Anthropic, …) can be wired in without breaking existing
-/// config files.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmProviderKind {
     #[default]
     Ollama,
+    Anthropic,
 }
 
-/// LLM / Ollama configuration
+/// LLM / provider configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
     /// Which backend to use (default: `ollama`).
@@ -253,6 +251,10 @@ pub struct LlmConfig {
     /// Embedding model for vector search (default: `nomic-embed-text`).
     #[serde(default = "default_embedding_model")]
     pub embedding_model: String,
+    /// API key for cloud providers (Anthropic, OpenAI, …).
+    /// For Anthropic, also checked via `ANTHROPIC_API_KEY` env var.
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 impl Default for LlmConfig {
@@ -264,6 +266,7 @@ impl Default for LlmConfig {
             max_iterations: default_llm_max_iterations(),
             timeout_secs: default_llm_timeout_secs(),
             embedding_model: default_embedding_model(),
+            api_key: None,
         }
     }
 }

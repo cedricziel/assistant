@@ -45,6 +45,10 @@ pub enum ChatRole {
 pub struct ToolCallItem {
     pub name: String,
     pub params: serde_json::Value,
+    /// Provider-assigned call ID (e.g. Anthropic `tool_use_id`).
+    /// `None` for providers that do not use IDs (Ollama).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 /// The outcome of a single `LlmClient::chat` invocation.
@@ -234,7 +238,11 @@ impl LlmClient {
                         .pointer("/function/arguments")
                         .cloned()
                         .unwrap_or(Value::Object(serde_json::Map::new()));
-                    Some(ToolCallItem { name, params })
+                    Some(ToolCallItem {
+                        name,
+                        params,
+                        id: None,
+                    })
                 })
                 .collect();
             if !items.is_empty() {
@@ -382,7 +390,11 @@ impl LlmClient {
                             .pointer("/function/arguments")
                             .cloned()
                             .unwrap_or(Value::Object(serde_json::Map::new()));
-                        Some(ToolCallItem { name, params })
+                        Some(ToolCallItem {
+                            name,
+                            params,
+                            id: None,
+                        })
                     })
                     .collect();
                 if !items.is_empty() {

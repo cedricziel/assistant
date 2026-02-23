@@ -11,6 +11,7 @@ members = [
     "crates/core",
     "crates/llm",
     "crates/provider-ollama",
+    "crates/provider-anthropic",
     "crates/storage",
     "crates/runtime",
     "crates/skills-executor",

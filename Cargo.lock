@@ -221,7 +221,9 @@ dependencies = [
  "assistant-core",
  "assistant-interface-mattermost",
  "assistant-interface-slack",
+ "assistant-llm",
  "assistant-mcp-server",
+ "assistant-provider-anthropic",
  "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
@@ -365,6 +367,22 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "assistant-provider-anthropic"
+version = "0.1.5"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "assistant-llm",
+ "async-trait",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -21,8 +21,10 @@ path = "src/lib.rs"
 
 [dependencies]
 assistant-core = { path = "../core" }
+assistant-llm = { path = "../llm" }
 assistant-storage = { path = "../storage" }
 assistant-provider-ollama = { path = "../provider-ollama" }
+assistant-provider-anthropic = { path = "../provider-anthropic" }
 assistant-skills-executor = { path = "../skills-executor" }
 assistant-runtime = { path = "../runtime" }
 # Optional interface crates (activated by features)

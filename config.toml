@@ -2,11 +2,10 @@
 # Copy to ~/.assistant/config.toml and customize
 
 [llm]
-# LLM backend provider.  Currently only "ollama" is supported; additional
-# providers (openai, anthropic, …) will be added in future crates.
+# LLM backend provider.  Options: "ollama" (default, local), "anthropic" (cloud).
 provider = "ollama"
-# Ollama model to use for inference.
-# Requires native tool-calling support. Recommended choices (2026):
+# Model to use for inference.
+# Ollama models — requires native tool-calling support. Recommended choices (2026):
 #
 #   ≤ 8 GB VRAM  — qwen2.5:7b (default), llama3.1:8b, mistral:7b-instruct-v0.3
 #   ≤ 12 GB VRAM — qwen2.5:14b (recommended upgrade), deepseek-r1:14b, phi4:14b
@@ -20,6 +19,17 @@ base_url = "http://localhost:11434"
 max_iterations = 10
 # Timeout for LLM calls (seconds)
 timeout_secs = 120
+
+# ── Anthropic cloud provider ──────────────────────────────────────────────────
+# To use Claude instead of a local Ollama model, replace the [llm] block above
+# with (or uncomment) the following:
+#
+# [llm]
+# provider  = "anthropic"
+# model     = "claude-opus-4-6"     # or claude-sonnet-4-6, claude-haiku-4-5-20251001
+# api_key   = "sk-ant-..."          # or set ANTHROPIC_API_KEY env var
+# max_iterations = 10
+# timeout_secs   = 120
 
 [storage]
 # Path to SQLite database (~/.assistant/assistant.db by default)
