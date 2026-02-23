@@ -133,7 +133,7 @@ jobs:
         run: gh release upload ${{ needs.release-please.outputs.tag_name }} ${{ env.ARCHIVE }}
 
   build-packages:
-    name: Build OS packages (Linux x86_64)
+    name: Build OS packages (Linux x86_64 + aarch64)
     runs-on: ubuntu-latest
     needs: [release-please, build-binaries]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
@@ -145,15 +145,25 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: binary-linux-x86_64
-          path: ./dist
+          path: ./dist/x86_64
+
+      - name: Download Linux aarch64 binary
+        uses: actions/download-artifact@v7
+        with:
+          name: binary-linux-aarch64
+          path: ./dist/aarch64
 
       - name: Extract binaries
         run: |
-          cd dist
+          cd dist/x86_64
           ARCHIVE=$(ls *.tar.gz | head -1)
           tar xzf "${ARCHIVE}"
-          ARCHIVE_DIR="${ARCHIVE%.tar.gz}"
-          echo "BIN_DIR=dist/${ARCHIVE_DIR}" >> $GITHUB_ENV
+          echo "BIN_DIR_X86=dist/x86_64/${ARCHIVE%.tar.gz}" >> $GITHUB_ENV
+
+          cd ../aarch64
+          ARCHIVE=$(ls *.tar.gz | head -1)
+          tar xzf "${ARCHIVE}"
+          echo "BIN_DIR_ARM64=dist/aarch64/${ARCHIVE%.tar.gz}" >> $GITHUB_ENV
 
       - name: Install nfpm
         run: |
@@ -161,24 +171,154 @@ jobs:
           sudo apt update
           sudo apt install -y nfpm
 
-      - name: Create nfpm config for assistant
+      - name: Build x86_64 packages
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
           VERSION="${TAG#v}"
           sed \
             -e "s|VERSION_PLACEHOLDER|${VERSION}|g" \
-            -e "s|BIN_DIR_PLACEHOLDER|${BIN_DIR}|g" \
-            packaging/nfpm-assistant.yaml.tpl > nfpm-assistant.yaml
+            -e "s|BIN_DIR_PLACEHOLDER|${BIN_DIR_X86}|g" \
+            -e "s|ARCH_PLACEHOLDER|amd64|g" \
+            packaging/nfpm-assistant.yaml.tpl > nfpm-amd64.yaml
+          nfpm package --config nfpm-amd64.yaml --packager deb --target ./dist/
+          nfpm package --config nfpm-amd64.yaml --packager rpm --target ./dist/
 
-      - name: Build .deb packages
+      - name: Build arm64 packages
         run: |
-          nfpm package --config nfpm-assistant.yaml --packager deb --target ./dist/
-
-      - name: Build .rpm packages
-        run: |
-          nfpm package --config nfpm-assistant.yaml --packager rpm --target ./dist/
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#v}"
+          sed \
+            -e "s|VERSION_PLACEHOLDER|${VERSION}|g" \
+            -e "s|BIN_DIR_PLACEHOLDER|${BIN_DIR_ARM64}|g" \
+            -e "s|ARCH_PLACEHOLDER|arm64|g" \
+            packaging/nfpm-assistant.yaml.tpl > nfpm-arm64.yaml
+          nfpm package --config nfpm-arm64.yaml --packager deb --target ./dist/
+          nfpm package --config nfpm-arm64.yaml --packager rpm --target ./dist/
 
       - name: Upload packages to GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ needs.release-please.outputs.tag_name }} dist/*.deb dist/*.rpm
+
+      - name: Upload packages artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: packages-linux
+          path: |
+            dist/*.deb
+            dist/*.rpm
+          retention-days: 1
+
+  publish-repo:
+    name: Publish APT/YUM repo to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [release-please, build-packages]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install repo tools
+        run: sudo apt-get update -y && sudo apt-get install -y dpkg-dev createrepo-c
+
+      - name: Download packages artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: packages-linux
+          path: ./new-packages
+
+      - name: Bootstrap gh-pages branch (first run only)
+        run: |
+          if ! git ls-remote --exit-code --heads origin gh-pages; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git switch --orphan gh-pages
+            touch .nojekyll
+            git add .nojekyll
+            git commit -m "chore: initialise package repository"
+            git push origin gh-pages
+            git switch -
+          fi
+
+      - name: Check out gh-pages
+        uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+          path: repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add .deb packages and regenerate APT index
+        run: |
+          mkdir -p repo/apt
+          cp new-packages/*.deb repo/apt/
+          cd repo/apt
+          dpkg-scanpackages --multiversion . > Packages
+          gzip -k -f Packages
+
+      - name: Add .rpm packages and regenerate YUM index
+        run: |
+          mkdir -p repo/rpm
+          cp new-packages/*.rpm repo/rpm/
+          createrepo_c --update repo/rpm/
+
+      - name: Ensure .nojekyll
+        run: touch repo/.nojekyll
+
+      - name: Write install-instructions page
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          cat > repo/index.html << 'HTMLDOC'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>assistant – package repository</title>
+            <style>
+              body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+              pre  { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: .9rem; }
+              h2   { margin-top: 2rem; border-bottom: 1px solid #e0e0e0; padding-bottom: .4rem; }
+              a    { color: #0066cc; }
+            </style>
+          </head>
+          <body>
+            <h1>assistant</h1>
+            <p>Local self-improving AI assistant. Latest: <strong>TAG_PLACEHOLDER</strong></p>
+
+            <h2>APT &ndash; Debian / Ubuntu</h2>
+            <pre>echo "deb [trusted=yes] https://cedricziel.github.io/assistant/apt ./" | sudo tee /etc/apt/sources.list.d/assistant.list
+          sudo apt update &amp;&amp; sudo apt install assistant</pre>
+
+            <h2>YUM / DNF &ndash; Fedora / RHEL / Rocky</h2>
+            <pre>sudo tee /etc/yum.repos.d/assistant.repo &lt;&lt; 'EOF'
+          [assistant]
+          name=assistant
+          baseurl=https://cedricziel.github.io/assistant/rpm/
+          enabled=1
+          gpgcheck=0
+          EOF
+          sudo dnf install assistant</pre>
+
+            <h2>Tarball</h2>
+            <p>Pre-built tarballs for Linux (x86_64, aarch64) and macOS (arm64, x86_64) are available on the
+              <a href="https://github.com/cedricziel/assistant/releases">GitHub Releases</a> page.</p>
+          </body>
+          </html>
+          HTMLDOC
+          sed -i "s/TAG_PLACEHOLDER/${TAG}/" repo/index.html
+
+      - name: Commit and push
+        run: |
+          cd repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || \
+            git commit -m "chore: update package repo for ${{ needs.release-please.outputs.tag_name }}"
+          git push origin gh-pages
