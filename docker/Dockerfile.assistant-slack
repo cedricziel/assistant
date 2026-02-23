@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# Slack-only mode — builds the unified assistant binary and runs it with the
+# `slack` subcommand (no interactive REPL; Slack bot only).
 FROM rust:1.93-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -10,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY . .
 
-RUN cargo build --release -p assistant-interface-slack
+RUN cargo build --release -p assistant-cli
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -20,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/assistant-slack /usr/local/bin/assistant-slack
+COPY --from=builder /app/target/release/assistant /usr/local/bin/assistant
 
 # Run as a non-root user.
 RUN useradd -r -s /bin/false assistant
@@ -28,4 +30,4 @@ USER assistant
 
 # Mount a real config at runtime:
 #   -v /host/config.toml:/etc/assistant/config.toml
-ENTRYPOINT ["assistant-slack"]
+ENTRYPOINT ["assistant", "slack"]
