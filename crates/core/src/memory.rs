@@ -63,16 +63,14 @@ _This file is yours to evolve. Update it as you figure out who you are._
 
 const DEFAULT_IDENTITY: &str = r#"# Identity
 
-_Fill this in. Make it yours._
-
-- **Name:** _(pick something — doesn't have to be "Assistant")_
-- **Vibe:** _(how do you come across? Sharp? Calm? Dry? Curious?)_
-- **Specialty:** _(what are you particularly good at for this user?)_
-- **Running on:** _(hardware/model, e.g. "M3 Max, qwen2.5:14b")_
+- **Name:** (not set)
+- **Vibe:** (not set)
+- **Specialty:** (not set)
+- **Running on:** (not set)
 
 ---
 
-_This isn't metadata. It's the start of knowing who you are in this context._
+Update this with file-write to describe who you are in this context.
 "#;
 
 const DEFAULT_USER: &str = r#"# User Profile
@@ -259,10 +257,11 @@ impl MemoryLoader {
             - Read a specific file → `memory-get` target=soul|identity|user|memory|notes/YYYY-MM-DD\n\
             - Search across all memory → `memory-search` query=\"natural language query\"\n\n\
             ## How to write memory\n\
-            - `file-write` — full file replace. Use this when creating or rewriting a file from scratch, \
-or when the file contains unfilled template placeholders (e.g. `_(fill this in)_`).\n\
-            - `file-edit` — search-and-replace one occurrence. Use this only when you know the exact \
-current text to replace (read the file first with `memory-get` if unsure).\n\
+            - `file-write` — full file replace. Use for IDENTITY.md (its fields start as `(not set)`), \
+for USER.md sections marked with `_(optional)_`, or any time you are rewriting a file from scratch.\n\
+            - `file-edit` — exact search-and-replace. Use only when you know the precise existing text. \
+Read the file first with `memory-get` if unsure what text is there.\n\
+            **IDENTITY.md tip:** its fields default to `(not set)` — use `file-write` to set them all at once.\n\
             For daily notes: write to {}/YYYY-MM-DD.md",
             self.soul_path.display(),
             self.identity_path.display(),

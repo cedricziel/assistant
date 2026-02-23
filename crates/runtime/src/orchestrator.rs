@@ -371,12 +371,29 @@ impl Orchestrator {
                         warn!("Failed to persist tool-call message: {e}");
                     }
 
+                    // If the LLM calls end_turn alongside other tools in the same
+                    // batch, defer end_turn so the real tools run first and the LLM
+                    // can see their results before the turn ends.  This prevents the
+                    // agent from stopping a turn without ever sending a reply.
+                    let has_real_calls = tool_call_items.iter().any(|t| t.name != "end_turn");
+
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
 
                         // `end_turn` is handled directly — no real executor.
                         if name == "end_turn" {
+                            if has_real_calls {
+                                // Defer: other tool calls were batched alongside
+                                // end_turn.  Skip it here; the loop continues so the
+                                // LLM receives tool results and can send a reply.
+                                info!(
+                                    iteration,
+                                    "end_turn deferred (called alongside other tools)"
+                                );
+                                continue;
+                            }
+
                             let reason = params
                                 .get("reason")
                                 .and_then(|v| v.as_str())
