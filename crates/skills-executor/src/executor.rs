@@ -172,11 +172,23 @@ impl SkillExecutor {
     /// Look up a single synthetic skill def by name. Returns `None` if the
     /// tool handler does not exist.
     pub fn get_synthetic_def(&self, name: &str) -> Option<SkillDef> {
-        self.tool_handlers
+        // Check primitive tool handlers first.
+        if let Some(def) = self
+            .tool_handlers
             .read()
             .unwrap()
             .get(name)
             .map(|tool| skill_def_from_tool(tool.as_ref()))
+        {
+            return Some(def);
+        }
+        // Fall back to ambient defs contributed by interfaces (e.g. slack-post).
+        self.ambient_defs
+            .read()
+            .unwrap()
+            .iter()
+            .find(|d| d.name == name)
+            .cloned()
     }
 }
 

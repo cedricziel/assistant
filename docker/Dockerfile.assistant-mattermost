@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY . .
 
-RUN cargo build --release -p assistant-cli
+RUN cargo build --release -p assistant-cli --features mattermost
 
 # Runtime stage
 FROM debian:bookworm-slim

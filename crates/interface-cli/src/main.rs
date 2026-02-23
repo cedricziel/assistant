@@ -515,7 +515,9 @@ async fn main() -> Result<()> {
     #[cfg(feature = "slack")]
     if let Some(Command::Slack) = &cli.command {
         use assistant_interface_slack::SlackInterface;
-        let slack_cfg = bs.config.slack.clone().unwrap_or_default();
+        let slack_cfg = bs.config.slack.clone().context(
+            "Slack is not configured. Add a [slack] section to ~/.assistant/config.toml",
+        )?;
         let iface = SlackInterface::new(slack_cfg, bs.orchestrator, bs.storage);
         info!("Starting Slack-only mode");
         return iface.run().await;
@@ -525,7 +527,9 @@ async fn main() -> Result<()> {
     #[cfg(feature = "mattermost")]
     if let Some(Command::Mattermost) = &cli.command {
         use assistant_interface_mattermost::MattermostInterface;
-        let mm_cfg = bs.config.mattermost.clone().unwrap_or_default();
+        let mm_cfg = bs.config.mattermost.clone().context(
+            "Mattermost is not configured. Add a [mattermost] section to ~/.assistant/config.toml",
+        )?;
         let iface = MattermostInterface::new(mm_cfg, bs.orchestrator);
         info!("Starting Mattermost-only mode");
         return iface.run().await;
@@ -545,8 +549,9 @@ async fn main() -> Result<()> {
 
         // Register proactive Slack posting skill.
         for (def, handler) in iface.ambient_skills() {
+            let skill_name = def.name.clone();
             bs.executor.register_ambient_skill(def, handler);
-            info!("Registered ambient skill: slack-post");
+            info!("Registered ambient skill: {skill_name}");
         }
 
         // Spawn the Slack listener in the background.

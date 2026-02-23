@@ -1,8 +1,7 @@
-// MCP server library — main binary is in main.rs
+// MCP server library — consumed by the unified `assistant-cli` crate.
 pub mod protocol;
 pub mod server;
 
-use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,6 +9,7 @@ use anyhow::Result;
 use assistant_runtime::Orchestrator;
 use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{info, warn};
 
 use crate::protocol::JsonRpcRequest;
@@ -36,17 +36,21 @@ pub async fn run(
 ) -> Result<()> {
     info!("MCP server ready — reading JSON-RPC from stdin");
 
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
+    let stdin = tokio::io::stdin();
+    let mut stdout = tokio::io::stdout();
+    let mut reader = BufReader::new(stdin);
+    let mut line = String::new();
 
-    for line in stdin.lock().lines() {
-        let line = match line {
-            Ok(l) => l,
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
             Err(e) => {
                 warn!("stdin read error: {e}");
                 break;
             }
-        };
+        }
 
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -58,10 +62,10 @@ pub async fn run(
             Err(e) => {
                 warn!("Failed to parse JSON-RPC request: {e}");
                 let err = crate::protocol::JsonRpcResponse::err(None, -32700, "Parse error");
-                let mut out = stdout.lock();
-                serde_json::to_writer(&mut out, &err).ok();
-                out.write_all(b"\n").ok();
-                out.flush().ok();
+                let mut json = serde_json::to_vec(&err).unwrap_or_default();
+                json.push(b'\n');
+                stdout.write_all(&json).await.ok();
+                stdout.flush().await.ok();
                 continue;
             }
         };
@@ -75,10 +79,10 @@ pub async fn run(
         )
         .await;
 
-        let mut out = stdout.lock();
-        serde_json::to_writer(&mut out, &response).ok();
-        out.write_all(b"\n").ok();
-        out.flush().ok();
+        let mut json = serde_json::to_vec(&response).unwrap_or_default();
+        json.push(b'\n');
+        stdout.write_all(&json).await.ok();
+        stdout.flush().await.ok();
     }
 
     info!("MCP server shutting down");

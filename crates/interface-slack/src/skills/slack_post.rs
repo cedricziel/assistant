@@ -84,16 +84,23 @@ pub fn slack_post_def() -> SkillDef {
     SkillDef {
         name: "slack-post".to_string(),
         description: "Post a message to a Slack channel. Use this to proactively notify users, \
-                       share results, or start conversations on Slack."
+                       share results, or start conversations on Slack. \
+                       Required parameters: `channel` (Slack channel ID or name, e.g. C01234567 \
+                       or `#general`), `message` (text to post). \
+                       Optional: `thread_ts` (timestamp of parent message to reply in-thread)."
             .to_string(),
         license: None,
         compatibility: None,
         allowed_tools: vec![],
         metadata,
-        body: String::new(),
+        body: "Parameters:\n\
+               - channel (string, required): Slack channel ID or name (e.g. C01234567 or #general)\n\
+               - message (string, required): Message text to post (Slack mrkdwn formatting supported)\n\
+               - thread_ts (string, optional): Timestamp of parent message to reply in-thread"
+            .to_string(),
         dir: PathBuf::new(),
         tier: SkillTier::Builtin,
-        mutating: false,
+        mutating: true,
         confirmation_required: false,
         source: SkillSource::Builtin,
     }
