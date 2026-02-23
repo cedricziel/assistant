@@ -35,9 +35,10 @@ impl MemoryGetHandler {
             "memory" => resolve_path(&mem.memory_path, &base, "MEMORY.md"),
             notes if notes.starts_with("notes/") => {
                 let date = &notes["notes/".len()..];
-                // Reject anything that isn't a simple YYYY-MM-DD date to
-                // prevent path traversal via e.g. "notes/../../etc/passwd".
-                if !date.chars().all(|c| c.is_ascii_digit() || c == '-') || date.contains("..") {
+                // Reject anything that isn't a strict YYYY-MM-DD date (exactly
+                // 10 chars: 4 digits, dash, 2 digits, dash, 2 digits) to prevent
+                // path traversal and empty/overlong inputs.
+                if date.len() != 10 || !date.chars().all(|c| c.is_ascii_digit() || c == '-') {
                     return None;
                 }
                 let notes_dir = resolve_dir(&mem.notes_dir, &base, "memory");

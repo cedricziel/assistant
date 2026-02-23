@@ -6,7 +6,7 @@
 //! are skipped.  After chunking, unembedded chunks are submitted to the LLM
 //! provider's `embed()` endpoint.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -16,8 +16,8 @@ use assistant_storage::{MemoryChunkStore, StorageLayer};
 use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
-/// Maximum characters per text chunk.
-const MAX_CHUNK_CHARS: usize = 400;
+/// Maximum bytes per text chunk.
+const MAX_CHUNK_BYTES: usize = 400;
 /// Maximum chunks to embed per indexing run (avoids long blocking on first run).
 const EMBED_BATCH_SIZE: i64 = 100;
 
@@ -71,9 +71,11 @@ impl MemoryIndexer {
             resolve_path(&mem.memory_path, &base, "MEMORY.md"),
         ];
 
-        // Add daily notes from the notes directory (blocking read_dir wrapped).
+        // Scan the notes directory and filter all paths in the blocking context
+        // so that no synchronous filesystem calls (read_dir, exists) run on the
+        // async thread.
         let notes_dir = resolve_dir(&mem.notes_dir, &base, "memory");
-        let note_files = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let mut notes = Vec::new();
             if let Ok(entries) = std::fs::read_dir(&notes_dir) {
                 for entry in entries.flatten() {
@@ -83,21 +85,19 @@ impl MemoryIndexer {
                     }
                 }
             }
-            notes
+            // Combine core files + notes and filter existence in one blocking pass.
+            core_files
+                .into_iter()
+                .chain(notes)
+                .filter(|p| p.exists())
+                .collect()
         })
         .await
-        .unwrap_or_default();
-
-        // Only include files that actually exist.
-        core_files
-            .into_iter()
-            .chain(note_files)
-            .filter(|p| p.exists())
-            .collect()
+        .unwrap_or_default()
     }
 
     /// Index a single file: compute hash, skip if unchanged, else re-chunk.
-    async fn index_file(&self, store: &MemoryChunkStore, path: &PathBuf) -> Result<()> {
+    async fn index_file(&self, store: &MemoryChunkStore, path: &Path) -> Result<()> {
         let content = tokio::fs::read_to_string(path).await?;
         let hash = sha256_hex(&content);
         let path_str = path.to_string_lossy().to_string();
@@ -162,7 +162,7 @@ pub fn spawn_memory_indexer(
 // Text chunking
 // ---------------------------------------------------------------------------
 
-/// Split `text` into chunks of at most `MAX_CHUNK_CHARS` characters.
+/// Split `text` into chunks of at most `MAX_CHUNK_BYTES` bytes.
 ///
 /// Strategy: split on double-newline (paragraph boundaries), then further
 /// split large paragraphs, and merge tiny fragments into the previous chunk.
@@ -175,11 +175,11 @@ fn chunk_text(text: &str) -> impl Iterator<Item = String> {
             continue;
         }
 
-        if para.len() <= MAX_CHUNK_CHARS {
+        if para.len() <= MAX_CHUNK_BYTES {
             // Merge tiny fragment into the last chunk if it fits.
             if para.len() < 50 {
                 if let Some(last) = chunks.last_mut() {
-                    if last.len() + 1 + para.len() <= MAX_CHUNK_CHARS {
+                    if last.len() + 1 + para.len() <= MAX_CHUNK_BYTES {
                         last.push('\n');
                         last.push_str(para);
                         continue;
@@ -200,7 +200,7 @@ fn chunk_text(text: &str) -> impl Iterator<Item = String> {
                 } else {
                     format!("{}. {}", current, sentence)
                 };
-                if candidate.len() <= MAX_CHUNK_CHARS {
+                if candidate.len() <= MAX_CHUNK_BYTES {
                     current = candidate;
                 } else {
                     if !current.is_empty() {
@@ -209,7 +209,7 @@ fn chunk_text(text: &str) -> impl Iterator<Item = String> {
                     // If a single sentence is too long, split by characters.
                     let mut start = 0;
                     while start < sentence.len() {
-                        let end = (start + MAX_CHUNK_CHARS).min(sentence.len());
+                        let end = (start + MAX_CHUNK_BYTES).min(sentence.len());
                         // Walk back to char boundary.
                         let mut end = end;
                         while end > start && !sentence.is_char_boundary(end) {
@@ -250,7 +250,7 @@ mod tests {
         let chunks: Vec<_> = chunk_text(text).collect();
         assert!(!chunks.is_empty());
         for c in &chunks {
-            assert!(c.len() <= MAX_CHUNK_CHARS, "chunk too long: {}", c.len());
+            assert!(c.len() <= MAX_CHUNK_BYTES, "chunk too long: {}", c.len());
         }
     }
 
@@ -259,7 +259,7 @@ mod tests {
         let long = "word ".repeat(200);
         let chunks: Vec<_> = chunk_text(&long).collect();
         for c in &chunks {
-            assert!(c.len() <= MAX_CHUNK_CHARS, "chunk too long: {}", c.len());
+            assert!(c.len() <= MAX_CHUNK_BYTES, "chunk too long: {}", c.len());
         }
     }
 
@@ -269,5 +269,61 @@ mod tests {
         let h2 = sha256_hex("hello");
         assert_eq!(h1, h2);
         assert_ne!(sha256_hex("hello"), sha256_hex("world"));
+    }
+
+    #[test]
+    fn chunk_text_empty_input() {
+        // Empty string and whitespace-only double-newlines must yield no chunks.
+        assert!(chunk_text("").collect::<Vec<_>>().is_empty());
+        assert!(chunk_text("\n\n").collect::<Vec<_>>().is_empty());
+        assert!(chunk_text("\n\n\n\n").collect::<Vec<_>>().is_empty());
+    }
+
+    #[test]
+    fn chunk_text_tiny_fragments_are_merged() {
+        // Build input made entirely of short (<50 char) segments separated by
+        // double newlines.  All segments should be merged into larger chunks
+        // (not one chunk per segment) and each chunk must stay within bounds.
+        let segments: Vec<String> = (0..20).map(|i| format!("seg{i}")).collect();
+        let text = segments.join("\n\n");
+        let chunks: Vec<_> = chunk_text(&text).collect();
+        // With 20 segments of ~5 bytes each, they should be merged into far
+        // fewer chunks than 20.
+        assert!(
+            chunks.len() < segments.len(),
+            "tiny fragments should be merged; got {} chunks for {} segments",
+            chunks.len(),
+            segments.len()
+        );
+        for c in &chunks {
+            assert!(c.len() <= MAX_CHUNK_BYTES, "chunk too long: {}", c.len());
+        }
+    }
+
+    #[test]
+    fn chunk_text_multibyte_utf8() {
+        // Emoji and non-Latin characters — verify no panics and byte bounds hold.
+        let emoji_para = "🦀".repeat(80); // 80 × 4 bytes = 320 bytes, fits in one chunk
+        let long_emoji = "🦀".repeat(200); // 800 bytes — must be split
+        let text = format!("{emoji_para}\n\n{long_emoji}");
+        let chunks: Vec<_> = chunk_text(&text).collect();
+        assert!(!chunks.is_empty());
+        for c in &chunks {
+            assert!(
+                c.len() <= MAX_CHUNK_BYTES,
+                "chunk too long ({} bytes): starts with {:?}",
+                c.len(),
+                &c[..c.len().min(20)]
+            );
+        }
+    }
+
+    #[test]
+    fn sha256_stable_on_multibyte() {
+        let input = "日本語テスト🦀";
+        let h1 = sha256_hex(input);
+        let h2 = sha256_hex(input);
+        assert_eq!(h1, h2);
+        assert_ne!(sha256_hex(input), sha256_hex("different"));
     }
 }
