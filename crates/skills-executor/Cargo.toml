@@ -1,6 +1,6 @@
 [package]
 name = "assistant-skills-executor"
-version = "0.1.4"
+version = "0.1.5"
 license.workspace = true
 edition.workspace = true
 description = "Skill executor dispatching builtin, prompt, script, and WASM skill tiers"
