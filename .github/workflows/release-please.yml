@@ -165,24 +165,10 @@ jobs:
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
           VERSION="${TAG#v}"
-          cat > nfpm-assistant.yaml << EOF
-          name: "assistant"
-          arch: "amd64"
-          platform: "linux"
-          version: "${VERSION}"
-          maintainer: "Cedric Ziel <cedric@cedric-ziel.com>"
-          description: "Local self-improving AI assistant (unified: REPL + MCP + Slack + Mattermost)"
-          homepage: "https://github.com/cedricziel/assistant"
-          license: "MIT"
-          contents:
-            - src: ${{ env.BIN_DIR }}/assistant
-              dst: /usr/local/bin/assistant
-              file_info:
-                mode: 0755
-            - src: ${{ env.BIN_DIR }}/config.toml.example
-              dst: /etc/assistant/config.toml.example
-              type: config|noreplace
-          EOF
+          sed \
+            -e "s|VERSION_PLACEHOLDER|${VERSION}|g" \
+            -e "s|BIN_DIR_PLACEHOLDER|${BIN_DIR}|g" \
+            packaging/nfpm-assistant.yaml.tpl > nfpm-assistant.yaml
 
       - name: Build .deb packages
         run: |

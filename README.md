@@ -229,6 +229,56 @@ The pre-commit hook runs `cargo fmt --check`, `cargo clippy`, and `cargo machete
 cargo install cargo-machete
 ```
 
+## Running as a user service (Linux)
+
+The `.deb` and `.rpm` packages ship systemd **user** unit files so the Slack
+and Mattermost bots run in the background under your own account — with full
+access to your desktop session (`$DISPLAY`, `$WAYLAND_DISPLAY`, D-Bus) for
+future desktop integration.
+
+### Quick start
+
+```sh
+# 1. Install the package (sets up unit files in /usr/lib/systemd/user/)
+sudo apt install ./assistant_*.deb    # or rpm -i assistant_*.rpm
+
+# 2. Edit your config
+cp /etc/assistant/config.toml.example ~/.assistant/config.toml
+$EDITOR ~/.assistant/config.toml      # add Slack/Mattermost credentials
+
+# 3. Enable and start whichever bots you need
+systemctl --user enable --now assistant-slack
+systemctl --user enable --now assistant-mattermost
+
+# 4. (Once) persist across reboots without staying logged in
+loginctl enable-linger $USER
+```
+
+### Upgrade path
+
+```sh
+sudo apt upgrade assistant
+# Restart=on-failure in the unit file brings the service back up automatically
+# after the binary is replaced.  No manual restart needed.
+```
+
+### View logs
+
+```sh
+journalctl --user -u assistant-slack -f
+journalctl --user -u assistant-mattermost -f
+```
+
+### Stop / disable
+
+```sh
+systemctl --user disable --now assistant-slack
+```
+
+> **Note:** The interactive REPL (`assistant` with no subcommand) is not
+> suited for running as a service — use `assistant slack` or
+> `assistant mattermost` subcommands which handle `SIGTERM` gracefully.
+
 ## Docker
 
 All interfaces are baked into the same `assistant` binary. The Dockerfiles in

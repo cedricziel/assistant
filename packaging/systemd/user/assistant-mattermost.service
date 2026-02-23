@@ -1,0 +1,23 @@
+[Unit]
+Description=AI Assistant – Mattermost bot
+Documentation=https://github.com/cedricziel/assistant
+# Wait for a network route to be available before starting.
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/assistant mattermost
+Restart=on-failure
+RestartSec=5
+
+# All log output goes to the user journal.
+# View with: journalctl --user -u assistant-mattermost -f
+StandardOutput=journal
+StandardError=journal
+
+# Allow up to 10 seconds for a clean shutdown before systemd kills the process.
+TimeoutStopSec=10
+
+[Install]
+# Start automatically when the user's session target is reached.
+WantedBy=default.target
