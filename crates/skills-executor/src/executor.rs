@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use assistant_core::{
@@ -13,9 +13,11 @@ use tracing::warn;
 pub struct SkillExecutor {
     storage: Arc<StorageLayer>,
     /// Primitive, self-describing tools (file-read, bash, etc.)
-    tool_handlers: HashMap<String, Arc<dyn ToolHandler>>,
+    tool_handlers: RwLock<HashMap<String, Arc<dyn ToolHandler>>>,
     /// SKILL.md-backed builtin handlers (memory-get, self-analyze, etc.)
-    builtin_handlers: HashMap<String, Arc<dyn SkillHandler>>,
+    builtin_handlers: RwLock<HashMap<String, Arc<dyn SkillHandler>>>,
+    /// Ambient skill definitions contributed by interfaces (e.g. slack-post).
+    ambient_defs: RwLock<Vec<SkillDef>>,
 }
 
 impl SkillExecutor {
@@ -25,17 +27,18 @@ impl SkillExecutor {
         registry: Arc<SkillRegistry>,
         config: Arc<AssistantConfig>,
     ) -> Self {
-        let mut executor = Self {
+        let executor = Self {
             storage: storage.clone(),
-            tool_handlers: HashMap::new(),
-            builtin_handlers: HashMap::new(),
+            tool_handlers: RwLock::new(HashMap::new()),
+            builtin_handlers: RwLock::new(HashMap::new()),
+            ambient_defs: RwLock::new(Vec::new()),
         };
         executor.register_builtins(llm, registry, config);
         executor
     }
 
     fn register_builtins(
-        &mut self,
+        &self,
         llm: Arc<dyn LlmProvider>,
         registry: Arc<SkillRegistry>,
         config: Arc<AssistantConfig>,
@@ -57,8 +60,11 @@ impl SkillExecutor {
             Arc::new(WebFetchHandler::new()),
             Arc::new(WebSearchHandler::new()),
         ];
-        for t in tools {
-            self.tool_handlers.insert(t.name().to_string(), t);
+        {
+            let mut tool_handlers = self.tool_handlers.write().unwrap();
+            for t in tools {
+                tool_handlers.insert(t.name().to_string(), t);
+            }
         }
 
         // SKILL.md-backed builtin handlers — implement SkillHandler
@@ -75,9 +81,23 @@ impl SkillExecutor {
             Arc::new(SelfAnalyzeHandler::new(storage.clone(), llm, registry)),
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
         ];
-        for h in handlers {
-            self.builtin_handlers.insert(h.skill_name().to_string(), h);
+        {
+            let mut builtin_handlers = self.builtin_handlers.write().unwrap();
+            for h in handlers {
+                builtin_handlers.insert(h.skill_name().to_string(), h);
+            }
         }
+    }
+
+    /// Register an ambient skill contributed by an interface (e.g. `slack-post`).
+    ///
+    /// The skill definition is added to [`synthetic_skill_defs`] so it appears
+    /// in the orchestrator's LLM prompt. The handler is registered alongside
+    /// the builtin handlers so it can be dispatched normally.
+    pub fn register_ambient_skill(&self, def: SkillDef, handler: Arc<dyn SkillHandler>) {
+        let name = def.name.clone();
+        self.builtin_handlers.write().unwrap().insert(name, handler);
+        self.ambient_defs.write().unwrap().push(def);
     }
 
     pub async fn execute(
@@ -107,8 +127,10 @@ impl SkillExecutor {
         params: HashMap<String, serde_json::Value>,
         ctx: &ExecutionContext,
     ) -> Result<SkillOutput> {
-        // Check tool handlers first (primitive tools)
-        if let Some(tool) = self.tool_handlers.get(&def.name) {
+        // Clone the Arc before releasing the read lock to avoid holding the
+        // lock guard across an await point.
+        let tool = self.tool_handlers.read().unwrap().get(&def.name).cloned();
+        if let Some(tool) = tool {
             // Validate params against the declared JSON Schema before dispatch.
             if let Some(err) = validate_params(&def.name, &tool.params_schema(), &params) {
                 return Ok(err);
@@ -116,7 +138,13 @@ impl SkillExecutor {
             return tool.run(params, ctx).await;
         }
         // Then check SKILL.md-backed handlers
-        if let Some(handler) = self.builtin_handlers.get(&def.name) {
+        let handler = self
+            .builtin_handlers
+            .read()
+            .unwrap()
+            .get(&def.name)
+            .cloned();
+        if let Some(handler) = handler {
             return handler.execute(def, params, ctx).await;
         }
         Ok(SkillOutput::error(format!(
@@ -125,13 +153,18 @@ impl SkillExecutor {
         )))
     }
 
-    /// Returns `SkillDef` objects synthesised from self-describing tool handlers.
+    /// Returns `SkillDef` objects synthesised from self-describing tool handlers
+    /// and registered ambient skills.
     pub fn synthetic_skill_defs(&self) -> Vec<SkillDef> {
         let mut defs: Vec<SkillDef> = self
             .tool_handlers
+            .read()
+            .unwrap()
             .values()
             .map(|tool| skill_def_from_tool(tool.as_ref()))
             .collect();
+        // Include ambient defs contributed by interfaces (e.g. slack-post).
+        defs.extend(self.ambient_defs.read().unwrap().iter().cloned());
         defs.sort_by(|a, b| a.name.cmp(&b.name));
         defs
     }
@@ -140,30 +173,24 @@ impl SkillExecutor {
     /// tool handler does not exist.
     pub fn get_synthetic_def(&self, name: &str) -> Option<SkillDef> {
         self.tool_handlers
+            .read()
+            .unwrap()
             .get(name)
             .map(|tool| skill_def_from_tool(tool.as_ref()))
     }
 }
 
-/// Build a [`SkillDef`] from a [`ToolHandler`], including both `params` and
-/// `output_schema` in the metadata map.
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+/// Build a synthetic `SkillDef` from a `ToolHandler`'s self-description.
 fn skill_def_from_tool(tool: &dyn ToolHandler) -> SkillDef {
-    let mut metadata = HashMap::new();
-    if let Ok(s) = serde_json::to_string(&tool.params_schema()) {
-        metadata.insert("params".to_string(), s);
-    }
-    if let Some(out) = tool.output_schema() {
-        if let Ok(s) = serde_json::to_string(&out) {
-            metadata.insert("output_schema".to_string(), s);
-        }
-    }
     SkillDef {
         name: tool.name().to_string(),
         description: tool.description().to_string(),
         license: None,
         compatibility: None,
         allowed_tools: vec![],
-        metadata,
+        metadata: HashMap::new(),
         body: String::new(),
         dir: std::path::PathBuf::new(),
         tier: SkillTier::Builtin,
@@ -173,37 +200,23 @@ fn skill_def_from_tool(tool: &dyn ToolHandler) -> SkillDef {
     }
 }
 
-/// Validate `params` against the tool's JSON Schema.
-///
-/// Returns `Some(SkillOutput::error(...))` if validation fails so the caller
-/// can short-circuit immediately. Returns `None` if params are valid or the
-/// schema cannot be compiled (non-fatal — we proceed and let the handler
-/// catch any issues itself).
+/// Validate `params` against the JSON Schema declared by `schema_json`.
+/// Returns `Some(SkillOutput::error(...))` if validation fails, `None` if OK.
 fn validate_params(
-    tool_name: &str,
-    schema: &serde_json::Value,
+    name: &str,
+    schema_json: &serde_json::Value,
     params: &HashMap<String, serde_json::Value>,
 ) -> Option<SkillOutput> {
-    let instance =
+    let params_val =
         serde_json::Value::Object(params.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-    match jsonschema::validator_for(schema) {
+
+    match jsonschema::validate(schema_json, &params_val) {
+        Ok(()) => None,
         Err(e) => {
-            warn!("Failed to compile params schema for '{tool_name}': {e}");
-            None
-        }
-        Ok(validator) => {
-            let errors: Vec<String> = validator
-                .iter_errors(&instance)
-                .map(|e| e.to_string())
-                .collect();
-            if errors.is_empty() {
-                None
-            } else {
-                Some(SkillOutput::error(format!(
-                    "Invalid parameters for '{tool_name}': {}",
-                    errors.join("; ")
-                )))
-            }
+            warn!(skill = %name, error = %e, "Parameter validation failed");
+            Some(SkillOutput::error(format!(
+                "Invalid parameters for skill '{name}': {e}"
+            )))
         }
     }
 }

@@ -35,13 +35,21 @@ clean:
 install-hooks:
 	git config core.hooksPath .githooks
 
-# Run the CLI interface
+# Run the interactive REPL (Slack/Mattermost start in background if configured)
 run:
 	cargo run -p assistant-cli
 
-# Run only the MCP server
+# Run the MCP server over stdio (replaces the standalone mcp-server binary)
 run-mcp:
-	cargo run -p mcp-server
+	cargo run -p assistant-cli -- mcp
+
+# Run only the Slack interface (no interactive REPL)
+run-slack:
+	cargo run -p assistant-cli --features slack -- slack
+
+# Run only the Mattermost interface (no interactive REPL)
+run-mattermost:
+	cargo run -p assistant-cli --features mattermost -- mattermost
 
 # Build the Signal interface binary with the presage integration.
 # Requires presage git deps to be resolvable (see crates/interface-signal/README.md).

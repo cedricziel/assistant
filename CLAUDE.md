@@ -34,10 +34,10 @@ A Rust workspace implementing a local, self-improving AI assistant. Key properti
 | `assistant-storage`              | `crates/storage`              | `StorageLayer` (SQLite pool + migrations), `SkillRegistry`, `TraceStore`, `MemoryStore`, `RefinementsStore`, `ScheduledTaskStore` |
 | `assistant-runtime`              | `crates/runtime`              | `Orchestrator` (main ReAct loop), `SafetyGate`, background `Scheduler`                                                            |
 | `assistant-skills-executor`      | `crates/skills-executor`      | `SkillExecutor` dispatches by tier; all builtin handlers; `install_skill_from_source`                                             |
-| `assistant-mcp-server`           | `crates/mcp-server`           | stdio MCP server — `tools/list`, `tools/call`, `resources/list`, `resources/read`                                                 |
-| `assistant-cli`                  | `crates/interface-cli`        | reedline REPL binary; `/skills`, `/review`, `/install`, `/model`, `/help`                                                         |
-| `assistant-interface-slack`      | `crates/interface-slack`      | Slack bot via Socket Mode (no public URL); see `docs/slack.md`                                                                    |
-| `assistant-interface-mattermost` | `crates/interface-mattermost` | Mattermost bot interface                                                                                                          |
+| `assistant-mcp-server`           | `crates/mcp-server`           | stdio MCP server library — `tools/list`, `tools/call`, `resources/list`, `resources/read`; run via `assistant mcp`                |
+| `assistant-cli`                  | `crates/interface-cli`        | **Unified binary** (`assistant`): reedline REPL + background Slack/Mattermost + `mcp`/`slack`/`mattermost` subcommands            |
+| `assistant-interface-slack`      | `crates/interface-slack`      | Slack bot **library** (no binary); `SlackInterface::ambient_skills()` contributes `slack-post`; used by `assistant-cli`           |
+| `assistant-interface-mattermost` | `crates/interface-mattermost` | Mattermost bot **library** (no binary); used by `assistant-cli`                                                                   |
 | `assistant-interface-signal`     | `crates/interface-signal`     | Signal interface stub (feature-gated, no active deps)                                                                             |
 | `assistant-integration-tests`    | `crates/integration-tests`    | End-to-end smoke tests (run with `make test-integration`)                                                                         |
 
@@ -47,30 +47,31 @@ Dependency order (no cycles):
 interface-cli ──► runtime ──► llm ──► core
                       │         └──► provider-ollama
                       ├──► storage ──► core
-                      └──► skills-executor ──► llm, storage, core
-mcp-server ──► runtime, skills-executor, storage, core
-interface-slack / interface-mattermost ──► runtime, storage, core
+                      ├──► skills-executor ──► llm, storage, core
+                      ├──► mcp-server (optional, feature=mcp) ──► runtime, skills-executor, storage, core
+                      ├──► interface-slack (optional, feature=slack) ──► runtime, storage, core
+                      └──► interface-mattermost (optional, feature=mattermost) ──► runtime, storage, core
 ```
 
 ## Key files
 
-| File                                      | Role                                                                                                    |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `crates/core/src/skill.rs`                | `SkillDef`, `SkillTier`, `SkillHandler` trait, `SkillOutput`, `SkillSource`                             |
-| `crates/core/src/types.rs`                | `Message`, `ExecutionContext`, `ExecutionTrace`, `AssistantConfig`, `Interface`                         |
-| `crates/core/src/parser.rs`               | `parse_skill_dir()`, `parse_skill_content()`, `discover_skills()`                                       |
-| `crates/core/src/memory.rs`               | `MemoryLoader` — loads/bootstraps `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md` from `~/.assistant/` |
-| `crates/llm/src/provider.rs`              | `LlmProvider` trait — implement to add a new backend (OpenAI, Anthropic, …)                             |
-| `crates/llm/src/client.rs`                | `LlmClient::chat()` — wraps `Arc<dyn LlmProvider>`; routes to provider                                  |
-| `crates/provider-ollama/src/provider.rs`  | `OllamaProvider` — concrete Ollama impl of `LlmProvider`                                                |
-| `crates/storage/src/registry.rs`          | `SkillRegistry` — in-memory + SQLite skill map                                                          |
-| `crates/runtime/src/orchestrator.rs`      | `Orchestrator::run_turn()` — the main loop                                                              |
-| `crates/runtime/src/safety.rs`            | `SafetyGate::check()` — blocks shell-exec on Signal, honours disabled list                              |
-| `crates/skills-executor/src/executor.rs`  | `SkillExecutor::new(storage, llm, registry)`                                                            |
-| `crates/skills-executor/src/installer.rs` | `install_skill_from_source()` — local path or GitHub                                                    |
-| `migrations/`                             | `001_conversations.sql` → `004_memory.sql` (embedded via `include_str!`)                                |
-| `skills/*/SKILL.md`                       | Built-in skill definitions (13 skills)                                                                  |
-| `config.toml`                             | Config template — copy to `~/.assistant/config.toml`                                                    |
+| File                                      | Role                                                                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `crates/core/src/skill.rs`                | `SkillDef`, `SkillTier`, `SkillHandler` trait, `SkillOutput`, `SkillSource`                                  |
+| `crates/core/src/types.rs`                | `Message`, `ExecutionContext`, `ExecutionTrace`, `AssistantConfig`, `Interface`                              |
+| `crates/core/src/parser.rs`               | `parse_skill_dir()`, `parse_skill_content()`, `discover_skills()`                                            |
+| `crates/core/src/memory.rs`               | `MemoryLoader` — loads/bootstraps `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md` from `~/.assistant/`      |
+| `crates/llm/src/provider.rs`              | `LlmProvider` trait — implement to add a new backend (OpenAI, Anthropic, …)                                  |
+| `crates/llm/src/client.rs`                | `LlmClient::chat()` — wraps `Arc<dyn LlmProvider>`; routes to provider                                       |
+| `crates/provider-ollama/src/provider.rs`  | `OllamaProvider` — concrete Ollama impl of `LlmProvider`                                                     |
+| `crates/storage/src/registry.rs`          | `SkillRegistry` — in-memory + SQLite skill map                                                               |
+| `crates/runtime/src/orchestrator.rs`      | `Orchestrator::run_turn()` — the main loop                                                                   |
+| `crates/runtime/src/safety.rs`            | `SafetyGate::check()` — blocks shell-exec on Signal, honours disabled list                                   |
+| `crates/skills-executor/src/executor.rs`  | `SkillExecutor::new(storage, llm, registry)` + `register_ambient_skill()` (interior mutability via `RwLock`) |
+| `crates/skills-executor/src/installer.rs` | `install_skill_from_source()` — local path or GitHub                                                         |
+| `migrations/`                             | `001_conversations.sql` → `004_memory.sql` (embedded via `include_str!`)                                     |
+| `skills/*/SKILL.md`                       | Built-in skill definitions (13 skills)                                                                       |
+| `config.toml`                             | Config template — copy to `~/.assistant/config.toml`                                                         |
 
 ## Skill tiers
 
@@ -92,6 +93,7 @@ Determined by `metadata.tier` in a `SKILL.md` frontmatter:
 - **Skill names**: kebab-case, match directory name exactly
 - **No `serde_yaml`**: use `gray_matter` for SKILL.md frontmatter parsing (serde_yaml is deprecated)
 - **`SkillExecutor::new`** takes `(storage, llm, registry)` — all three are required; no lazy registration
+- **`SkillExecutor::register_ambient_skill`** — call after construction (before `Arc` wrap is irrelevant; uses interior `RwLock`) to add interface-contributed skills like `slack-post`
 
 ## Make targets
 
@@ -105,12 +107,10 @@ make lint             # cargo clippy --workspace -D warnings   ← run before co
 make lint-signal      # clippy for the signal interface crate (separate due to dep conflicts)
 make format           # cargo fmt --all                        ← run before committing
 make run              # cargo run -p assistant-cli
-make run-mcp          # cargo run -p mcp-server
+make run-mcp          # cargo run -p assistant-cli -- mcp
+make run-slack        # cargo run -p assistant-cli -- slack
+make run-mattermost   # cargo run -p assistant-cli -- mattermost
 make build-signal     # cargo build -p assistant-interface-signal --features signal
-
-# Chat interfaces (no Makefile shorthand — run directly):
-cargo run -p assistant-interface-slack        # Slack bot (Socket Mode)
-cargo run -p assistant-interface-mattermost   # Mattermost bot
 ```
 
 Always run `make lint` and `make format` before committing.
@@ -128,6 +128,16 @@ Include the affected crate/area in parens: `feat(runtime): …`, `fix(storage): 
 2. Add a handler struct in `crates/skills-executor/src/builtins/<name>.rs` implementing `SkillHandler`
 3. Export it from `crates/skills-executor/src/builtins/mod.rs`
 4. Register it in `SkillExecutor::register_builtins()` in `executor.rs`
+
+## Adding an ambient skill from an interface
+
+Interface crates can contribute skills that are always available to the agent regardless
+of which interface is active. The `slack-post` skill is an example.
+
+1. Create `skills/<name>/SKILL.md` with `metadata.tier: builtin`
+2. Add a handler in `crates/interface-<X>/src/skills/<name>.rs` implementing `SkillHandler`
+3. Implement `pub fn ambient_skills(&self) -> Vec<(SkillDef, Arc<dyn SkillHandler>)>` on the interface struct
+4. In `interface-cli/src/main.rs`, call `executor.register_ambient_skill(def, handler)` for each ambient skill after bootstrapping
 
 ## Database schema summary
 
