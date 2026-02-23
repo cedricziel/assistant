@@ -5,6 +5,12 @@ license.workspace = true
 edition.workspace = true
 description = "Interactive CLI REPL for the local AI assistant"
 
+[features]
+slack = ["dep:assistant-interface-slack"]
+mattermost = ["dep:assistant-interface-mattermost"]
+mcp = ["dep:assistant-mcp-server"]
+default = ["slack", "mattermost", "mcp"]
+
 [[bin]]
 name = "assistant"
 path = "src/main.rs"
@@ -19,6 +25,10 @@ assistant-storage = { path = "../storage" }
 assistant-provider-ollama = { path = "../provider-ollama" }
 assistant-skills-executor = { path = "../skills-executor" }
 assistant-runtime = { path = "../runtime" }
+# Optional interface crates (activated by features)
+assistant-interface-slack = { path = "../interface-slack", optional = true }
+assistant-interface-mattermost = { path = "../interface-mattermost", optional = true }
+assistant-mcp-server = { path = "../mcp-server", optional = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

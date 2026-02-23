@@ -3,28 +3,26 @@ name = "assistant-interface-mattermost"
 version = "0.1.3"
 edition.workspace = true
 license.workspace = true
-description = "Mattermost WebSocket interface for the AI assistant"
+description = "Mattermost WebSocket interface for the AI assistant (library)"
+
+[lib]
+name = "assistant_interface_mattermost"
+path = "src/lib.rs"
 
 [dependencies]
 assistant-core = { path = "../core" }
 assistant-runtime = { path = "../runtime" }
 assistant-storage = { path = "../storage" }
-assistant-provider-ollama = { path = "../provider-ollama" }
 assistant-skills-executor = { path = "../skills-executor" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
-clap = { workspace = true }
-dirs = { workspace = true }
-toml = { workspace = true }
 mattermost_api = { workspace = true }
 lru = { workspace = true }
 async-trait = { workspace = true }
 
-[[bin]]
-name = "assistant-mattermost"
-path = "src/main.rs"
+[dev-dependencies]
+toml = { workspace = true }

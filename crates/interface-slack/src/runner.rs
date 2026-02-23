@@ -46,6 +46,7 @@ fn preview(s: &str, max: usize) -> &str {
 }
 
 use crate::config::{SlackConfig, SlackConfigExt};
+use crate::skills::{slack_post_def, SlackPostSkill};
 use crate::tools::build_slack_tools;
 
 // ── Shared callback state ─────────────────────────────────────────────────────
@@ -496,6 +497,34 @@ impl SlackInterface {
             orchestrator,
             storage,
         }
+    }
+
+    /// Return ambient skills contributed by this interface.
+    ///
+    /// Currently returns a single `slack-post` skill that allows the agent to
+    /// proactively post messages to any Slack channel.  Returns an empty vec
+    /// if the bot token is not configured or the HTTP client cannot be created.
+    pub fn ambient_skills(
+        &self,
+    ) -> Vec<(
+        assistant_core::SkillDef,
+        std::sync::Arc<dyn assistant_core::SkillHandler>,
+    )> {
+        let Some(bot_token_str) = self.config.resolved_bot_token() else {
+            return vec![];
+        };
+        let client = match SlackClientHyperHttpsConnector::new() {
+            Ok(connector) => std::sync::Arc::new(SlackClient::new(connector)),
+            Err(e) => {
+                warn!(error = %e, "slack-post: failed to create HTTP client");
+                return vec![];
+            }
+        };
+        let token = SlackApiToken::new(bot_token_str.into());
+        let def = slack_post_def();
+        let handler: std::sync::Arc<dyn assistant_core::SkillHandler> =
+            std::sync::Arc::new(SlackPostSkill { client, token });
+        vec![(def, handler)]
     }
 
     /// Start the Slack Socket Mode listener loop, reconnecting on disconnect.

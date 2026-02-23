@@ -6,7 +6,8 @@ A minimalist, self-improving personal AI assistant written in Rust.
 - **Agent Skills native** — skills are portable `SKILL.md` directories following the [agentskills.io](https://agentskills.io) open standard
 - **Self-improving** — passively logs execution traces and proposes SKILL.md refinements for human review
 - **MCP server** — exposes skills via the [Model Context Protocol](https://modelcontextprotocol.io) so Claude Code and other tools can discover and invoke them
-- **Multi-interface** — CLI REPL (default) and Signal messenger (feature-gated)
+- **Multi-interface** — single `assistant` binary runs the CLI REPL, Slack bot, Mattermost bot, and MCP server concurrently via subcommands and background tasks
+- **Ambient skills** — active interfaces register their capabilities (e.g. `slack-post`) into the skill executor so the agent can use them from any context
 
 ## Quick start
 
@@ -14,7 +15,7 @@ A minimalist, self-improving personal AI assistant written in Rust.
 # 1. Install Ollama and pull the default model
 ollama pull qwen2.5:7b
 
-# 2. Build the CLI
+# 2. Build the unified binary
 cargo build -p assistant-cli --release
 
 # 3. Copy the default config
@@ -37,6 +38,20 @@ assistant> /review
 assistant> /install anthropics/skills/web-search
 assistant> /quit
 ```
+
+### Running specific modes
+
+The single binary supports several subcommands:
+
+```sh
+assistant          # Interactive REPL + all configured interfaces in background
+assistant mcp      # stdio MCP server (for Claude Code, Cursor, etc.)
+assistant slack    # Slack bot only (no REPL)
+assistant mattermost  # Mattermost bot only (no REPL)
+```
+
+If Slack and/or Mattermost credentials are present in `~/.assistant/config.toml`,
+those bots start automatically in the background when running the interactive REPL.
 
 ## Model recommendations (2026)
 
@@ -62,16 +77,17 @@ ollama pull qwen2.5:14b
 
 ## Built-in skills
 
-| Skill           | Description                                                | Tier    |
-| --------------- | ---------------------------------------------------------- | ------- |
-| `memory-read`   | Read a persistent key/value entry                          | builtin |
-| `memory-write`  | Write a persistent key/value entry                         | builtin |
-| `memory-search` | Substring-search across memory entries                     | builtin |
-| `web-fetch`     | Fetch a URL and return page text                           | builtin |
-| `shell-exec`    | Run a shell command (requires confirmation)                | builtin |
-| `list-skills`   | List all registered skills                                 | builtin |
-| `self-analyze`  | Analyse execution traces and propose SKILL.md improvements | builtin |
-| `schedule-task` | Register a recurring cron-style prompt                     | builtin |
+| Skill           | Description                                                        | Tier    |
+| --------------- | ------------------------------------------------------------------ | ------- |
+| `memory-read`   | Read a persistent key/value entry                                  | builtin |
+| `memory-write`  | Write a persistent key/value entry                                 | builtin |
+| `memory-search` | Substring-search across memory entries                             | builtin |
+| `web-fetch`     | Fetch a URL and return page text                                   | builtin |
+| `shell-exec`    | Run a shell command (requires confirmation)                        | builtin |
+| `list-skills`   | List all registered skills                                         | builtin |
+| `self-analyze`  | Analyse execution traces and propose SKILL.md improvements         | builtin |
+| `schedule-task` | Register a recurring cron-style prompt                             | builtin |
+| `slack-post`    | Post a message to a Slack channel (ambient; requires Slack config) | builtin |
 
 ## Skill discovery order
 
@@ -112,7 +128,11 @@ assistant> /review
 Run the MCP server to expose skills to Claude Code, Cursor, or any other MCP client:
 
 ```sh
-cargo run -p mcp-server
+# From source
+cargo run -p assistant-cli -- mcp
+
+# From release binary
+assistant mcp
 ```
 
 Configure in Claude Code's `settings.json`:
@@ -121,7 +141,8 @@ Configure in Claude Code's `settings.json`:
 {
   "mcpServers": {
     "assistant": {
-      "command": "/path/to/mcp-server"
+      "command": "/path/to/assistant",
+      "args": ["mcp"]
     }
   }
 }
@@ -164,28 +185,34 @@ disabled = ["shell-exec"]      # disable specific skills
 ```
 assistant/
 ├── crates/
-│   ├── core/              # SkillDef, parser, shared types
-│   ├── llm/               # Ollama client (native tool-call + ReAct fallback)
-│   ├── storage/           # SQLite, SkillRegistry, trace store, memory store
-│   ├── runtime/           # ReAct orchestrator, safety gate, scheduler
-│   ├── skills-executor/   # Dispatches by tier (builtin / script / WASM)
-│   ├── mcp-server/        # MCP stdio server
-│   ├── interface-cli/     # reedline REPL binary
-│   └── interface-signal/  # Signal interface (feature-gated)
-├── migrations/            # SQLite migration files
-├── skills/                # Built-in SKILL.md definitions
-└── config.toml            # Default configuration template
+│   ├── core/                  # SkillDef, parser, shared types
+│   ├── llm/                   # LlmProvider trait + LlmClient
+│   ├── provider-ollama/       # Ollama backend (native tool-call + ReAct)
+│   ├── storage/               # SQLite, SkillRegistry, trace store, memory store
+│   ├── runtime/               # ReAct orchestrator, scheduler
+│   ├── skills-executor/       # Dispatches by tier (builtin / script / WASM)
+│   ├── mcp-server/            # MCP stdio server library (used by `assistant mcp`)
+│   ├── interface-cli/         # Unified binary: REPL + background interfaces
+│   ├── interface-slack/       # Slack Socket Mode library + slack-post skill
+│   ├── interface-mattermost/  # Mattermost WebSocket library
+│   └── interface-signal/      # Signal interface (feature-gated, separate binary)
+├── docker/                    # Dockerfiles (all build the unified assistant binary)
+├── migrations/                # SQLite migration files
+├── skills/                    # Built-in SKILL.md definitions
+└── config.toml                # Default configuration template
 ```
 
 ## Development
 
 ```sh
-make build      # cargo build --workspace
-make test       # cargo test --workspace
-make lint       # cargo clippy --workspace -D warnings
-make format     # cargo fmt --all
-make run        # cargo run -p assistant-cli
-make run-mcp    # cargo run -p mcp-server
+make build          # cargo build --workspace
+make test           # cargo test --workspace
+make lint           # cargo clippy --workspace -D warnings
+make format         # cargo fmt --all
+make run            # cargo run -p assistant-cli  (REPL + background interfaces)
+make run-mcp        # cargo run -p assistant-cli -- mcp
+make run-slack      # cargo run -p assistant-cli -- slack
+make run-mattermost # cargo run -p assistant-cli -- mattermost
 ```
 
 ### Pre-commit hooks
@@ -202,15 +229,92 @@ The pre-commit hook runs `cargo fmt --check`, `cargo clippy`, and `cargo machete
 cargo install cargo-machete
 ```
 
-## Signal interface
+## Running as a user service (Linux)
 
-The Signal interface is feature-gated and not enabled by default:
+The `.deb` and `.rpm` packages ship systemd **user** unit files so the Slack
+and Mattermost bots run in the background under your own account — with full
+access to your desktop session (`$DISPLAY`, `$WAYLAND_DISPLAY`, D-Bus) for
+future desktop integration.
+
+### Quick start
 
 ```sh
-cargo build --workspace --features signal
+# 1. Install the package (sets up unit files in /usr/lib/systemd/user/)
+sudo apt install ./assistant_*.deb    # or rpm -i assistant_*.rpm
+
+# 2. Edit your config
+cp /etc/assistant/config.toml.example ~/.assistant/config.toml
+$EDITOR ~/.assistant/config.toml      # add Slack/Mattermost credentials
+
+# 3. Enable and start whichever bots you need
+systemctl --user enable --now assistant-slack
+systemctl --user enable --now assistant-mattermost
+
+# 4. (Once) persist across reboots without staying logged in
+loginctl enable-linger $USER
 ```
 
-See `crates/interface-signal/` for setup instructions.
+### Upgrade path
+
+```sh
+sudo apt upgrade assistant
+# Restart=on-failure in the unit file brings the service back up automatically
+# after the binary is replaced.  No manual restart needed.
+```
+
+### View logs
+
+```sh
+journalctl --user -u assistant-slack -f
+journalctl --user -u assistant-mattermost -f
+```
+
+### Stop / disable
+
+```sh
+systemctl --user disable --now assistant-slack
+```
+
+> **Note:** The interactive REPL (`assistant` with no subcommand) is not
+> suited for running as a service — use `assistant slack` or
+> `assistant mattermost` subcommands which handle `SIGTERM` gracefully.
+
+## Docker
+
+All interfaces are baked into the same `assistant` binary. The Dockerfiles in
+`docker/` use the unified binary with a different entrypoint per mode:
+
+```sh
+# Interactive REPL (default)
+docker run ghcr.io/cedricziel/assistant/assistant
+
+# MCP server
+docker run ghcr.io/cedricziel/assistant/assistant assistant mcp
+
+# Slack bot
+docker run ghcr.io/cedricziel/assistant/assistant assistant slack
+
+# Mattermost bot
+docker run ghcr.io/cedricziel/assistant/assistant assistant mattermost
+```
+
+Mount your config at runtime:
+
+```sh
+docker run -v ~/.assistant/config.toml:/etc/assistant/config.toml \
+  ghcr.io/cedricziel/assistant/assistant
+```
+
+## Signal interface
+
+The Signal interface is feature-gated and ships as a separate binary due to
+dependency conflicts with other workspace crates:
+
+```sh
+cargo build -p assistant-interface-signal --features signal
+```
+
+See `crates/interface-signal/README.md` for setup instructions.
 
 ## License
 

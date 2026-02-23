@@ -219,6 +219,9 @@ version = "0.1.3"
 dependencies = [
  "anyhow",
  "assistant-core",
+ "assistant-interface-mattermost",
+ "assistant-interface-slack",
+ "assistant-mcp-server",
  "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
@@ -275,13 +278,10 @@ version = "0.1.3"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
  "assistant-storage",
  "async-trait",
- "clap",
- "dirs",
  "lru",
  "mattermost_api",
  "serde",
@@ -289,7 +289,6 @@ dependencies = [
  "tokio",
  "toml 1.0.3+spec-1.1.0",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -323,20 +322,16 @@ version = "0.1.3"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
  "assistant-storage",
  "async-trait",
- "clap",
- "dirs",
  "serde_json",
  "slack-morphism",
  "tokio",
  "tokio-tungstenite",
  "toml 1.0.3+spec-1.1.0",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -362,17 +357,13 @@ version = "0.1.3"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills-executor",
  "assistant-storage",
- "dirs",
  "serde",
  "serde_json",
  "tokio",
- "toml 1.0.3+spec-1.1.0",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 

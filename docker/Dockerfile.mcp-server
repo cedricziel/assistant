@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+# MCP server mode — builds the unified assistant binary and runs it with the
+# `mcp` subcommand.  All interfaces (Slack, Mattermost, MCP) are now part of
+# the single `assistant-cli` crate.
 FROM rust:1.93-slim AS builder
 
 RUN apt-get update && apt-get install -y \
@@ -10,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY . .
 
-RUN cargo build --release -p assistant-mcp-server
+RUN cargo build --release -p assistant-cli
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -20,7 +23,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/mcp-server /usr/local/bin/mcp-server
+COPY --from=builder /app/target/release/assistant /usr/local/bin/assistant
 COPY config.toml /etc/assistant/config.toml.example
 
-ENTRYPOINT ["mcp-server"]
+ENTRYPOINT ["assistant", "mcp"]

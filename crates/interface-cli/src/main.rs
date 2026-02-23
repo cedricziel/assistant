@@ -36,6 +36,22 @@ enum Command {
         #[arg(short, long)]
         yes: bool,
     },
+    /// Run the MCP (Model Context Protocol) server over stdio.
+    ///
+    /// Exposes assistant skills as JSON-RPC 2.0 tools to Claude Code and other
+    /// MCP clients. All logging goes to stderr; stdout is reserved for JSON-RPC.
+    #[cfg(feature = "mcp")]
+    Mcp,
+    /// Run only the Slack interface (no interactive REPL).
+    ///
+    /// Requires Slack bot_token and app_token configured in ~/.assistant/config.toml.
+    #[cfg(feature = "slack")]
+    Slack,
+    /// Run only the Mattermost interface (no interactive REPL).
+    ///
+    /// Requires Mattermost server_url and token configured in ~/.assistant/config.toml.
+    #[cfg(feature = "mattermost")]
+    Mattermost,
 }
 
 // ── CLI confirmation callback ─────────────────────────────────────────────────
@@ -322,29 +338,27 @@ fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Re
     Ok(())
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Common bootstrap ──────────────────────────────────────────────────────────
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // 1. Initialize tracing.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .init();
+struct Bootstrap {
+    config: AssistantConfig,
+    storage: Arc<StorageLayer>,
+    registry: Arc<SkillRegistry>,
+    executor: Arc<SkillExecutor>,
+    orchestrator: Arc<Orchestrator>,
+    user_skills_dir: PathBuf,
+}
 
-    // 2. Parse CLI arguments.
-    let cli = Cli::parse();
-
-    // 3. Resolve config path and load config.
-    let home = dirs::home_dir().context("Cannot determine home directory")?;
+async fn bootstrap(
+    home: &Path,
+    confirmation_cb: Arc<dyn ConfirmationCallback>,
+) -> Result<Bootstrap> {
     let assistant_dir = home.join(".assistant");
     let user_skills_dir = assistant_dir.join("skills");
     let config_path = assistant_dir.join("config.toml");
     let config = load_config(&config_path);
 
-    // 4. Resolve database path.
+    // Resolve database path.
     let db_path: PathBuf = config
         .storage
         .db_path
@@ -353,21 +367,14 @@ async fn main() -> Result<()> {
         .or_else(|| Some(assistant_dir.join("assistant.db")))
         .unwrap();
 
-    // 5. Dispatch subcommands before opening heavy resources.
-    if let Some(command) = cli.command {
-        match command {
-            Command::Reset { yes } => return cmd_reset(&db_path, &config, yes),
-        }
-    }
-
-    // 6. Open storage layer (creates the DB and runs migrations).
+    // Open storage layer.
     let storage = Arc::new(
         StorageLayer::new(&db_path)
             .await
             .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
     );
 
-    // 7. Create skill registry and load skills from disk.
+    // Build skill registry.
     let mut registry = SkillRegistry::new(storage.pool.clone())
         .await
         .context("Failed to create skill registry")?;
@@ -390,12 +397,12 @@ async fn main() -> Result<()> {
 
     let registry = Arc::new(registry);
 
-    // 8. Build LLM client.
+    // Build LLM client.
     let llm = Arc::new(
         OllamaProvider::from_llm_config(&config.llm).context("Failed to create LLM client")?,
     );
 
-    // 9. Build skill executor.
+    // Build skill executor.
     let executor = Arc::new(SkillExecutor::new(
         storage.clone(),
         llm.clone(),
@@ -403,17 +410,175 @@ async fn main() -> Result<()> {
         Arc::new(config.clone()),
     ));
 
-    // 10. Build orchestrator.
-    let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(CliConfirmation);
+    // Build orchestrator.
     let orchestrator = Arc::new(
-        Orchestrator::new(llm, storage.clone(), registry.clone(), executor, &config)
-            .with_confirmation_callback(confirmation_cb),
+        Orchestrator::new(
+            llm,
+            storage.clone(),
+            registry.clone(),
+            executor.clone(),
+            &config,
+        )
+        .with_confirmation_callback(confirmation_cb),
     );
 
-    // 10a. Start the background scheduler (polls every 60 seconds).
+    Ok(Bootstrap {
+        config,
+        storage,
+        registry,
+        executor,
+        orchestrator,
+        user_skills_dir,
+    })
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // 1. Parse CLI arguments first so we can configure tracing appropriately.
+    let cli = Cli::parse();
+
+    // 2. For MCP mode, all output on stdout is JSON-RPC — route logs to stderr.
+    //    For all other modes the default (stderr) writer is also fine.
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .init();
+
+    // 3. Resolve home directory (needed for both early and late subcommands).
+    let home = dirs::home_dir().context("Cannot determine home directory")?;
+    let assistant_dir = home.join(".assistant");
+    let config_path = assistant_dir.join("config.toml");
+
+    // 4. Handle Reset early — does not need heavy resources.
+    if let Some(Command::Reset { yes }) = &cli.command {
+        let config = load_config(&config_path);
+        let db_path: PathBuf = config
+            .storage
+            .db_path
+            .as_ref()
+            .map(PathBuf::from)
+            .or_else(|| Some(assistant_dir.join("assistant.db")))
+            .unwrap();
+        return cmd_reset(&db_path, &config, *yes);
+    }
+
+    // 5. Bootstrap all heavy resources.
+    //
+    //    MCP and Slack/Mattermost modes use auto-deny confirmation (no terminal
+    //    interaction). REPL mode uses the interactive CLI confirmation.
+    #[cfg(feature = "mcp")]
+    let is_mcp = matches!(cli.command, Some(Command::Mcp));
+    #[cfg(not(feature = "mcp"))]
+    let is_mcp = false;
+
+    #[cfg(feature = "slack")]
+    let is_slack_only = matches!(cli.command, Some(Command::Slack));
+    #[cfg(not(feature = "slack"))]
+    let is_slack_only = false;
+
+    #[cfg(feature = "mattermost")]
+    let is_mattermost_only = matches!(cli.command, Some(Command::Mattermost));
+    #[cfg(not(feature = "mattermost"))]
+    let is_mattermost_only = false;
+
+    let confirmation_cb: Arc<dyn ConfirmationCallback> =
+        if is_mcp || is_slack_only || is_mattermost_only {
+            Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
+                interface_name: "background",
+            })
+        } else {
+            Arc::new(CliConfirmation)
+        };
+
+    let bs = bootstrap(&home, confirmation_cb).await?;
+
+    // 6. MCP mode — run the stdio JSON-RPC server and exit.
+    #[cfg(feature = "mcp")]
+    if let Some(Command::Mcp) = &cli.command {
+        info!("Starting MCP server mode");
+        return assistant_mcp_server::run(
+            bs.orchestrator,
+            bs.executor,
+            bs.registry,
+            bs.storage,
+            bs.user_skills_dir,
+        )
+        .await;
+    }
+
+    // 7. Slack-only mode.
+    #[cfg(feature = "slack")]
+    if let Some(Command::Slack) = &cli.command {
+        use assistant_interface_slack::SlackInterface;
+        let slack_cfg = bs.config.slack.clone().context(
+            "Slack is not configured. Add a [slack] section to ~/.assistant/config.toml",
+        )?;
+        let iface = SlackInterface::new(slack_cfg, bs.orchestrator, bs.storage);
+        info!("Starting Slack-only mode");
+        return iface.run().await;
+    }
+
+    // 8. Mattermost-only mode.
+    #[cfg(feature = "mattermost")]
+    if let Some(Command::Mattermost) = &cli.command {
+        use assistant_interface_mattermost::MattermostInterface;
+        let mm_cfg = bs.config.mattermost.clone().context(
+            "Mattermost is not configured. Add a [mattermost] section to ~/.assistant/config.toml",
+        )?;
+        let iface = MattermostInterface::new(mm_cfg, bs.orchestrator);
+        info!("Starting Mattermost-only mode");
+        return iface.run().await;
+    }
+
+    // 9. Default mode: interactive REPL + background interfaces.
+    //
+    //    Register ambient skills from configured interfaces first, then spawn
+    //    background tasks for those interfaces.
+
+    // 9a. Slack — register slack-post as an ambient skill and start in background.
+    #[cfg(feature = "slack")]
+    if bs.config.slack.is_some() {
+        use assistant_interface_slack::SlackInterface;
+        let slack_cfg = bs.config.slack.clone().unwrap_or_default();
+        let iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
+
+        // Register proactive Slack posting skill.
+        for (def, handler) in iface.ambient_skills() {
+            let skill_name = def.name.clone();
+            bs.executor.register_ambient_skill(def, handler);
+            info!("Registered ambient skill: {skill_name}");
+        }
+
+        // Spawn the Slack listener in the background.
+        tokio::spawn(async move {
+            if let Err(e) = iface.run().await {
+                tracing::error!("Slack interface error: {e}");
+            }
+        });
+    }
+
+    // 9b. Mattermost — start in background if configured.
+    #[cfg(feature = "mattermost")]
+    if bs.config.mattermost.is_some() {
+        use assistant_interface_mattermost::MattermostInterface;
+        let mm_cfg = bs.config.mattermost.clone().unwrap_or_default();
+        let iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
+        tokio::spawn(async move {
+            if let Err(e) = iface.run().await {
+                tracing::error!("Mattermost interface error: {e}");
+            }
+        });
+    }
+
+    // 10. Start the background scheduler (polls every 60 seconds).
     let _scheduler = spawn_scheduler(
-        storage.clone(),
-        orchestrator.clone(),
+        bs.storage.clone(),
+        bs.orchestrator.clone(),
         Duration::from_secs(60),
     );
 
@@ -423,7 +588,7 @@ async fn main() -> Result<()> {
 
     println!(
         "Assistant ready. Model: {}  (type /help for commands)\n",
-        config.llm.model
+        bs.config.llm.model
     );
 
     // 12. Build the reedline editor and prompt.
@@ -454,7 +619,7 @@ async fn main() -> Result<()> {
                     match cmd {
                         "skills" => {
                             if arg.is_empty() {
-                                let skills = registry.list().await;
+                                let skills = bs.registry.list().await;
                                 if skills.is_empty() {
                                     println!("No skills registered.");
                                 } else {
@@ -470,7 +635,7 @@ async fn main() -> Result<()> {
                                     }
                                     println!();
                                 }
-                            } else if let Some(skill) = registry.get(arg).await {
+                            } else if let Some(skill) = bs.registry.get(arg).await {
                                 println!("\nSkill: {}", skill.name);
                                 println!("  Tier:        {}", skill.tier.label());
                                 println!("  Source:      {}", skill.source);
@@ -491,14 +656,14 @@ async fn main() -> Result<()> {
                         }
 
                         "review" => {
-                            if let Err(e) = cmd_review(&storage, &registry).await {
+                            if let Err(e) = cmd_review(&bs.storage, &bs.registry).await {
                                 eprintln!("Error during review: {e}");
                             }
                         }
 
                         "model" => {
                             if arg.is_empty() {
-                                println!("Current model: {}", config.llm.model);
+                                println!("Current model: {}", bs.config.llm.model);
                                 println!(
                                     "To switch models, update ~/.assistant/config.toml \
                                      and restart."
@@ -519,8 +684,8 @@ async fn main() -> Result<()> {
                                 println!("Installing skill from '{arg}'...");
                                 match install_skill_from_source(
                                     arg,
-                                    &user_skills_dir,
-                                    registry.clone(),
+                                    &bs.user_skills_dir,
+                                    bs.registry.clone(),
                                 )
                                 .await
                                 {
@@ -558,7 +723,8 @@ async fn main() -> Result<()> {
                 let (tx, rx) = mpsc::channel::<String>(64);
                 let printer = start_token_printer(rx);
 
-                let turn_result = orchestrator
+                let turn_result = bs
+                    .orchestrator
                     .run_turn_streaming(input, conversation_id, Interface::Cli, tx)
                     .await;
 
