@@ -1,5 +1,5 @@
 name: "assistant"
-arch: "amd64"
+arch: "ARCH_PLACEHOLDER"
 platform: "linux"
 version: "VERSION_PLACEHOLDER"
 maintainer: "Cedric Ziel <cedric@cedric-ziel.com>"
