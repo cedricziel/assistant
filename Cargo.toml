@@ -71,7 +71,7 @@ scraper = "0.25"
 # Glob pattern matching for file-glob builtin
 glob = "0.3"
 # JSON Schema validation for tool param checking
-jsonschema = "0.26"
+jsonschema = "0.42"
 # SHA-256 hashing for memory chunk change detection
 sha2 = "0.10"
 # WASM plugin execution
