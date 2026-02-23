@@ -391,6 +391,21 @@ impl Orchestrator {
                                     iteration,
                                     "end_turn deferred (called alongside other tools)"
                                 );
+                                // Emit a synthetic tool result so every tool call in
+                                // the batch has a matching result in conversation
+                                // history (required by Ollama's multi-turn format).
+                                let deferred_msg =
+                                    "end_turn deferred: processing other tool calls first";
+                                self.append_tool_result(&mut history, "end_turn", deferred_msg);
+                                let tr_msg = Self::make_tool_result_message(
+                                    conversation_id,
+                                    base_turn + iteration as i64 + 1,
+                                    "end_turn",
+                                    deferred_msg,
+                                );
+                                if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                    warn!("Failed to persist deferred end_turn tool-result: {e}");
+                                }
                                 continue;
                             }
 

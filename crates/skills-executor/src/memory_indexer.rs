@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::AssistantConfig;
+use assistant_core::{base_dir, resolve_dir, resolve_path, AssistantConfig};
 use assistant_llm::LlmProvider;
 use assistant_storage::{MemoryChunkStore, StorageLayer};
 use sha2::{Digest, Sha256};
@@ -46,7 +46,7 @@ impl MemoryIndexer {
     /// This method is designed to be called from a background task.
     pub async fn index_all(&self) -> Result<()> {
         let store = self.storage.memory_chunks_store();
-        for file in self.memory_files() {
+        for file in self.memory_files().await {
             if let Err(e) = self.index_file(&store, &file).await {
                 warn!(file = %file.display(), error = %e, "Failed to index memory file");
             }
@@ -57,35 +57,48 @@ impl MemoryIndexer {
     // ── Private helpers ──────────────────────────────────────────────────────
 
     /// Collect all memory file paths that should be indexed.
-    fn memory_files(&self) -> Vec<PathBuf> {
-        let mem = &self.config.memory;
+    ///
+    /// Uses `spawn_blocking` so that directory scanning does not block the
+    /// tokio worker thread.
+    async fn memory_files(&self) -> Vec<PathBuf> {
+        let mem = self.config.memory.clone();
         let base = base_dir();
 
-        let mut files = vec![
+        let core_files = vec![
             resolve_path(&mem.soul_path, &base, "SOUL.md"),
             resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
             resolve_path(&mem.user_path, &base, "USER.md"),
             resolve_path(&mem.memory_path, &base, "MEMORY.md"),
         ];
 
-        // Add daily notes from the notes directory.
+        // Add daily notes from the notes directory (blocking read_dir wrapped).
         let notes_dir = resolve_dir(&mem.notes_dir, &base, "memory");
-        if let Ok(entries) = std::fs::read_dir(&notes_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    files.push(path);
+        let note_files = tokio::task::spawn_blocking(move || {
+            let mut notes = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&notes_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map(|e| e == "md").unwrap_or(false) {
+                        notes.push(path);
+                    }
                 }
             }
-        }
+            notes
+        })
+        .await
+        .unwrap_or_default();
 
         // Only include files that actually exist.
-        files.into_iter().filter(|p| p.exists()).collect()
+        core_files
+            .into_iter()
+            .chain(note_files)
+            .filter(|p| p.exists())
+            .collect()
     }
 
     /// Index a single file: compute hash, skip if unchanged, else re-chunk.
     async fn index_file(&self, store: &MemoryChunkStore, path: &PathBuf) -> Result<()> {
-        let content = std::fs::read_to_string(path)?;
+        let content = tokio::fs::read_to_string(path).await?;
         let hash = sha256_hex(&content);
         let path_str = path.to_string_lossy().to_string();
 
@@ -221,39 +234,6 @@ fn sha256_hex(input: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
     format!("{:x}", hasher.finalize())
-}
-
-// ---------------------------------------------------------------------------
-// Path helpers (mirrors crates/core/src/memory.rs)
-// ---------------------------------------------------------------------------
-
-fn base_dir() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".assistant"))
-        .unwrap_or_else(|| PathBuf::from(".assistant"))
-}
-
-fn resolve_path(opt: &Option<String>, base: &std::path::Path, filename: &str) -> PathBuf {
-    match opt {
-        Some(p) => expand_tilde(p),
-        None => base.join(filename),
-    }
-}
-
-fn resolve_dir(opt: &Option<String>, base: &std::path::Path, dirname: &str) -> PathBuf {
-    match opt {
-        Some(p) => expand_tilde(p),
-        None => base.join(dirname),
-    }
-}
-
-fn expand_tilde(s: &str) -> PathBuf {
-    if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(s)
 }
 
 #[cfg(test)]

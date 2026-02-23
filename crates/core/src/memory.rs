@@ -442,27 +442,33 @@ Read the file first with `memory-get` if unsure what text is there.\n\
 
 // -- Helpers -----------------------------------------------------------------
 
-fn base_dir() -> PathBuf {
+/// Return the default `~/.assistant/` base directory.
+pub fn base_dir() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(".assistant"))
         .unwrap_or_else(|| PathBuf::from(".assistant"))
 }
 
-fn resolve_path(opt: &Option<String>, base: &Path, filename: &str) -> PathBuf {
+/// Resolve a memory file path from an optional config override, falling back
+/// to `base / filename`.
+pub fn resolve_path(opt: &Option<String>, base: &Path, filename: &str) -> PathBuf {
     match opt {
         Some(p) => expand_tilde(p),
         None => base.join(filename),
     }
 }
 
-fn resolve_dir(opt: &Option<String>, base: &Path, dirname: &str) -> PathBuf {
+/// Resolve a memory directory path from an optional config override, falling
+/// back to `base / dirname`.
+pub fn resolve_dir(opt: &Option<String>, base: &Path, dirname: &str) -> PathBuf {
     match opt {
         Some(p) => expand_tilde(p),
         None => base.join(dirname),
     }
 }
 
-fn expand_tilde(s: &str) -> PathBuf {
+/// Expand a leading `~/` to the current user's home directory.
+pub fn expand_tilde(s: &str) -> PathBuf {
     if let Some(rest) = s.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
             return home.join(rest);

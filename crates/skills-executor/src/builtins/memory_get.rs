@@ -9,10 +9,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{AssistantConfig, ExecutionContext, SkillDef, SkillHandler, SkillOutput};
+use assistant_core::{
+    base_dir, resolve_dir, resolve_path, AssistantConfig, ExecutionContext, SkillDef, SkillHandler,
+    SkillOutput,
+};
 use async_trait::async_trait;
-
-use crate::builtins::file_read::expand_tilde;
 
 pub struct MemoryGetHandler {
     config: Arc<AssistantConfig>,
@@ -35,6 +36,11 @@ impl MemoryGetHandler {
             "memory" => resolve_path(&mem.memory_path, &base, "MEMORY.md"),
             notes if notes.starts_with("notes/") => {
                 let date = &notes["notes/".len()..];
+                // Reject anything that isn't a simple YYYY-MM-DD date to
+                // prevent path traversal via e.g. "notes/../../etc/passwd".
+                if !date.chars().all(|c| c.is_ascii_digit() || c == '-') || date.contains("..") {
+                    return None;
+                }
                 let notes_dir = resolve_dir(&mem.notes_dir, &base, "memory");
                 notes_dir.join(format!("{date}.md"))
             }
@@ -42,9 +48,19 @@ impl MemoryGetHandler {
         };
 
         // Security: verify the resolved path stays within ~/.assistant/.
+        // For existing files, use the fully-resolved canonical path.
+        // For not-yet-created files, canonicalize the parent directory and
+        // join the filename — this avoids falling back to a raw starts_with
+        // check that can be bypassed by unresolved `..` segments.
         let canonical_base = base.canonicalize().unwrap_or(base.clone());
-        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
-        if !canonical_path.starts_with(&canonical_base) && !path.starts_with(&base) {
+        let canonical_path = if path.exists() {
+            path.canonicalize().ok()?
+        } else if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+            parent.canonicalize().ok()?.join(name)
+        } else {
+            return None;
+        };
+        if !canonical_path.starts_with(&canonical_base) {
             return None;
         }
 
@@ -94,29 +110,5 @@ impl SkillHandler for MemoryGetHandler {
                 path.display()
             ))),
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Path helpers
-// ---------------------------------------------------------------------------
-
-fn base_dir() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".assistant"))
-        .unwrap_or_else(|| PathBuf::from(".assistant"))
-}
-
-fn resolve_path(opt: &Option<String>, base: &std::path::Path, filename: &str) -> PathBuf {
-    match opt {
-        Some(p) => expand_tilde(p),
-        None => base.join(filename),
-    }
-}
-
-fn resolve_dir(opt: &Option<String>, base: &std::path::Path, dirname: &str) -> PathBuf {
-    match opt {
-        Some(p) => expand_tilde(p),
-        None => base.join(dirname),
     }
 }
