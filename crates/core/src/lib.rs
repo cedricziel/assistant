@@ -4,7 +4,7 @@ pub mod skill;
 pub mod tool;
 pub mod types;
 
-pub use memory::MemoryLoader;
+pub use memory::{base_dir, expand_tilde, resolve_dir, resolve_path, MemoryLoader};
 pub use parser::embedded_builtin_skills;
 pub use skill::{SkillDef, SkillHandler, SkillOutput, SkillSource, SkillTier};
 pub use tool::{ToolHandler, ToolOutput};

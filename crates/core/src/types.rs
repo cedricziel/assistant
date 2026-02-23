@@ -219,6 +219,9 @@ fn default_llm_timeout_secs() -> u64 {
 fn default_llm_provider() -> LlmProviderKind {
     LlmProviderKind::Ollama
 }
+fn default_embedding_model() -> String {
+    "nomic-embed-text".to_string()
+}
 
 /// Which LLM backend to use.
 ///
@@ -247,6 +250,9 @@ pub struct LlmConfig {
     pub max_iterations: usize,
     #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
+    /// Embedding model for vector search (default: `nomic-embed-text`).
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
 }
 
 impl Default for LlmConfig {
@@ -257,6 +263,7 @@ impl Default for LlmConfig {
             base_url: default_llm_base_url(),
             max_iterations: default_llm_max_iterations(),
             timeout_secs: default_llm_timeout_secs(),
+            embedding_model: default_embedding_model(),
         }
     }
 }

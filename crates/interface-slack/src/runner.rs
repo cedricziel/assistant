@@ -13,9 +13,9 @@
 //!
 //! # Safety
 //!
-//! [`SafetyGate`][assistant_runtime::safety::SafetyGate] blocks `shell-exec`
-//! for [`Interface::Slack`].  Additionally, `allowed_channels` and
-//! `allowed_users` allowlists are checked before dispatching.
+//! Skills listed in `disabled_skills` are blocked before dispatch.
+//! Additionally, `allowed_channels` and `allowed_users` allowlists are
+//! checked before dispatching.
 //!
 //! # Thread conversation context
 //!
@@ -528,7 +528,7 @@ impl SlackInterface {
                 .users_set_presence(&SlackApiUsersSetPresenceRequest::new("auto".to_string()))
                 .await
             {
-                warn!(error = %e, "users.setPresence(auto) failed");
+                debug!(error = %e, "users.setPresence(auto) failed (missing_scope is expected for most bot tokens)");
             } else {
                 info!("Presence set to auto");
             }

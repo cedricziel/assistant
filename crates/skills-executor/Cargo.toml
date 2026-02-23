@@ -29,6 +29,8 @@ dirs = { workspace = true }
 extism = { workspace = true }
 # JSON Schema validation for tool param checking
 jsonschema = { workspace = true }
+# SHA-256 hashing for memory chunk change detection
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -16,8 +16,6 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::safety::SafetyGate;
-
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// Callback trait for requesting user confirmation before executing a skill.
@@ -81,7 +79,7 @@ fn end_turn_def() -> SkillDef {
 /// 3. Load all registered skills from the registry.
 /// 4. Repeatedly call the LLM until it returns a `FinalAnswer` or the
 ///    iteration limit is reached.
-/// 5. For each `ToolCall` response: gate through [`SafetyGate`], optionally
+/// 5. For each `ToolCall` response: check disabled-skills list, optionally
 ///    confirm with the user, execute the skill, record an [`ExecutionTrace`],
 ///    and append an `OBSERVATION` to the conversation history.
 /// 6. Persist the final assistant message and return [`TurnResult`].
@@ -144,7 +142,7 @@ impl Orchestrator {
     ///
     /// Extension skills are injected by the calling interface (e.g. Slack,
     /// Mattermost) and are checked before the global skill registry.  They
-    /// bypass the [`SafetyGate`] — the interface is responsible for vetting
+    /// bypass the disabled-skills list — the interface is responsible for vetting
     /// them before passing them in.
     ///
     /// Unlike [`run_turn`] / [`run_turn_streaming`], this method does **not**
@@ -373,12 +371,44 @@ impl Orchestrator {
                         warn!("Failed to persist tool-call message: {e}");
                     }
 
+                    // If the LLM calls end_turn alongside other tools in the same
+                    // batch, defer end_turn so the real tools run first and the LLM
+                    // can see their results before the turn ends.  This prevents the
+                    // agent from stopping a turn without ever sending a reply.
+                    let has_real_calls = tool_call_items.iter().any(|t| t.name != "end_turn");
+
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
 
                         // `end_turn` is handled directly — no real executor.
                         if name == "end_turn" {
+                            if has_real_calls {
+                                // Defer: other tool calls were batched alongside
+                                // end_turn.  Skip it here; the loop continues so the
+                                // LLM receives tool results and can send a reply.
+                                info!(
+                                    iteration,
+                                    "end_turn deferred (called alongside other tools)"
+                                );
+                                // Emit a synthetic tool result so every tool call in
+                                // the batch has a matching result in conversation
+                                // history (required by Ollama's multi-turn format).
+                                let deferred_msg =
+                                    "end_turn deferred: processing other tool calls first";
+                                self.append_tool_result(&mut history, "end_turn", deferred_msg);
+                                let tr_msg = Self::make_tool_result_message(
+                                    conversation_id,
+                                    base_turn + iteration as i64 + 1,
+                                    "end_turn",
+                                    deferred_msg,
+                                );
+                                if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                    warn!("Failed to persist deferred end_turn tool-result: {e}");
+                                }
+                                continue;
+                            }
+
                             let reason = params
                                 .get("reason")
                                 .and_then(|v| v.as_str())
@@ -468,21 +498,16 @@ impl Orchestrator {
                                 },
                             };
 
-                            if let Err(reason) =
-                                SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
-                            {
-                                let observation = format!("Skill blocked: {reason}");
-                                warn!(%observation);
-                                self.append_tool_result(&mut history, &name, &observation);
-                                let tr_msg = Self::make_tool_result_message(
+                            if self
+                                .reject_if_disabled(
+                                    &name,
+                                    &mut history,
+                                    &conv_store,
                                     conversation_id,
                                     base_turn + iteration as i64 + 1,
-                                    &name,
-                                    &observation,
-                                );
-                                if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                    warn!("Failed to persist tool-result message: {e}");
-                                }
+                                )
+                                .await
+                            {
                                 continue;
                             }
 
@@ -772,22 +797,17 @@ impl Orchestrator {
                             },
                         };
 
-                        // Safety gate.
-                        if let Err(reason) =
-                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
-                        {
-                            let observation = format!("Skill blocked: {reason}");
-                            warn!(%observation);
-                            self.append_tool_result(&mut history, &name, &observation);
-                            let tr_msg = Self::make_tool_result_message(
+                        // Disabled-skills gate.
+                        if self
+                            .reject_if_disabled(
+                                &name,
+                                &mut history,
+                                &conv_store,
                                 conversation_id,
                                 base_turn + iteration as i64 + 1,
-                                &name,
-                                &observation,
-                            );
-                            if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                warn!("Failed to persist tool-result message: {e}");
-                            }
+                            )
+                            .await
+                        {
                             continue;
                         }
 
@@ -1079,21 +1099,16 @@ impl Orchestrator {
                             },
                         };
 
-                        if let Err(reason) =
-                            SafetyGate::check(&skill_def, &interface, &self.disabled_skills)
-                        {
-                            let observation = format!("Skill blocked: {reason}");
-                            warn!(%observation);
-                            self.append_tool_result(&mut history, &name, &observation);
-                            let tr_msg = Self::make_tool_result_message(
+                        if self
+                            .reject_if_disabled(
+                                &name,
+                                &mut history,
+                                &conv_store,
                                 conversation_id,
                                 base_turn + iteration as i64 + 1,
-                                &name,
-                                &observation,
-                            );
-                            if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                warn!("Failed to persist tool-result message: {e}");
-                            }
+                            )
+                            .await
+                        {
                             continue;
                         }
 
@@ -1328,6 +1343,33 @@ impl Orchestrator {
             name: name.to_string(),
             content: content.to_string(),
         });
+    }
+
+    /// Check whether `name` is in the disabled-skills list.
+    ///
+    /// If disabled, appends a tool-result observation to `history`, persists
+    /// the result row via `conv_store`, and returns `true` so the caller can
+    /// `continue` to the next tool.  Returns `false` when the skill is
+    /// allowed to proceed.
+    async fn reject_if_disabled(
+        &self,
+        name: &str,
+        history: &mut Vec<ChatHistoryMessage>,
+        conv_store: &ConversationStore,
+        conversation_id: Uuid,
+        turn_idx: i64,
+    ) -> bool {
+        if !self.disabled_skills.iter().any(|s| s == name) {
+            return false;
+        }
+        let observation = format!("Skill '{name}' is disabled by configuration.");
+        warn!(%observation);
+        self.append_tool_result(history, name, &observation);
+        let tr_msg = Self::make_tool_result_message(conversation_id, turn_idx, name, &observation);
+        if let Err(e) = conv_store.save_message(&tr_msg).await {
+            warn!("Failed to persist tool-result message: {e}");
+        }
+        true
     }
 
     /// Build a `Message` row for a turn where the LLM requested tool calls.

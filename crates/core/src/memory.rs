@@ -48,17 +48,11 @@ Be the assistant you'd actually want running on your own machine. Concise when t
 
 Each session, you wake up fresh. SOUL.md, IDENTITY.md, USER.md, and MEMORY.md are your memory — loaded fresh every turn.
 
-**When you learn something about the user** (name, language, timezone, preferences):
-→ use `memory-update` with `target: user`
+**To read a memory file**: use `memory-get` with `target: soul`, `identity`, `user`, `memory`, or `notes/YYYY-MM-DD`.
 
-**When you want to record a lasting fact or decision**:
-→ use `memory-update` with `target: memory`
+**To search across all memory**: use `memory-search` with a natural language query.
 
-**When you need to correct a single field without rewriting the whole file**:
-→ use `memory-patch`
-
-**For session observations and task logs**:
-→ use `memory-save` (appends to today's daily notes)
+**To write or update memory files**: use `file-write` (full replace) or `file-edit` (search-and-replace) directly on the file paths listed below.
 
 If you change this file, tell the user. It's your soul, and they should know.
 
@@ -67,19 +61,22 @@ If you change this file, tell the user. It's your soul, and they should know.
 _This file is yours to evolve. Update it as you figure out who you are._
 "#;
 
-const DEFAULT_IDENTITY: &str = r#"# Identity
+/// Placeholder used in `DEFAULT_IDENTITY` for unfilled fields and referenced
+/// in the system-prompt footer so both stay in sync.
+const IDENTITY_PLACEHOLDER: &str = "(not set)";
 
-_Fill this in. Make it yours._
-
-- **Name:** _(pick something — doesn't have to be "Assistant")_
-- **Vibe:** _(how do you come across? Sharp? Calm? Dry? Curious?)_
-- **Specialty:** _(what are you particularly good at for this user?)_
-- **Running on:** _(hardware/model, e.g. "M3 Max, qwen2.5:14b")_
-
----
-
-_This isn't metadata. It's the start of knowing who you are in this context._
-"#;
+static DEFAULT_IDENTITY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let p = IDENTITY_PLACEHOLDER;
+    format!(
+        "# Identity\n\n\
+        - **Name:** {p}\n\
+        - **Vibe:** {p}\n\
+        - **Specialty:** {p}\n\
+        - **Running on:** {p}\n\n\
+        ---\n\n\
+        Update this with file-write to describe who you are in this context.\n"
+    )
+});
 
 const DEFAULT_USER: &str = r#"# User Profile
 
@@ -164,7 +161,7 @@ impl MemoryLoader {
             return;
         }
         write_default(&self.soul_path, DEFAULT_SOUL);
-        write_default(&self.identity_path, DEFAULT_IDENTITY);
+        write_default(&self.identity_path, &DEFAULT_IDENTITY);
         write_default(&self.user_path, DEFAULT_USER);
         write_default(&self.memory_path, DEFAULT_MEMORY);
     }
@@ -254,6 +251,8 @@ impl MemoryLoader {
         }
 
         // Append a "Memory file locations" footer so the model knows where to write.
+        // Use a local binding so Rust 2021 implicit capture picks up IDENTITY_PLACEHOLDER.
+        let placeholder = IDENTITY_PLACEHOLDER;
         let footer = format!(
             "## Memory file locations\n\
             - Soul: {}\n\
@@ -261,15 +260,21 @@ impl MemoryLoader {
             - User: {}\n\
             - Memory: {}\n\
             - Daily notes dir: {}\n\n\
+            ## How to read memory\n\
+            - Read a specific file → `memory-get` target=soul|identity|user|memory|notes/YYYY-MM-DD\n\
+            - Search across all memory → `memory-search` query=\"natural language query\"\n\n\
             ## How to write memory\n\
-            - User profile (name, language, timezone, preferences) → `memory-update` target=user\n\
-            - Lasting facts and decisions → `memory-update` target=memory\n\
-            - Correct a single field without rewriting → `memory-patch`\n\
-            - Session observations and task logs → `memory-save`",
+            - `file-write` — full file replace. Use for IDENTITY.md (its fields start as `{placeholder}`), \
+for USER.md sections marked with `_(optional)_`, or any time you are rewriting a file from scratch.\n\
+            - `file-edit` — exact search-and-replace. Use only when you know the precise existing text. \
+Read the file first with `memory-get` if unsure what text is there.\n\
+            **IDENTITY.md tip:** its fields default to `{placeholder}` — use `file-write` to set them all at once.\n\
+            For daily notes: write to {}/YYYY-MM-DD.md",
             self.soul_path.display(),
             self.identity_path.display(),
             self.user_path.display(),
             self.memory_path.display(),
+            self.notes_dir.display(),
             self.notes_dir.display(),
         );
         parts.push(footer);
@@ -444,27 +449,33 @@ impl MemoryLoader {
 
 // -- Helpers -----------------------------------------------------------------
 
-fn base_dir() -> PathBuf {
+/// Return the default `~/.assistant/` base directory.
+pub fn base_dir() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(".assistant"))
         .unwrap_or_else(|| PathBuf::from(".assistant"))
 }
 
-fn resolve_path(opt: &Option<String>, base: &Path, filename: &str) -> PathBuf {
+/// Resolve a memory file path from an optional config override, falling back
+/// to `base / filename`.
+pub fn resolve_path(opt: &Option<String>, base: &Path, filename: &str) -> PathBuf {
     match opt {
         Some(p) => expand_tilde(p),
         None => base.join(filename),
     }
 }
 
-fn resolve_dir(opt: &Option<String>, base: &Path, dirname: &str) -> PathBuf {
+/// Resolve a memory directory path from an optional config override, falling
+/// back to `base / dirname`.
+pub fn resolve_dir(opt: &Option<String>, base: &Path, dirname: &str) -> PathBuf {
     match opt {
         Some(p) => expand_tilde(p),
         None => base.join(dirname),
     }
 }
 
-fn expand_tilde(s: &str) -> PathBuf {
+/// Expand a leading `~/` to the current user's home directory.
+pub fn expand_tilde(s: &str) -> PathBuf {
     if let Some(rest) = s.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
             return home.join(rest);
