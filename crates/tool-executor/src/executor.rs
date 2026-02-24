@@ -53,9 +53,6 @@ impl ToolExecutor {
             // Memory
             Arc::new(MemoryGetHandler::new(config.clone())),
             Arc::new(MemorySearchHandler::new(storage.clone(), llm.clone())),
-            // Heartbeat
-            Arc::new(HeartbeatReadHandler::new(config.clone())),
-            Arc::new(HeartbeatUpdateHandler::new(config.clone())),
             // Skills / meta
             Arc::new(ListSkillsHandler::new(registry.clone())),
             Arc::new(LoadSkillHandler::new(registry.clone())),

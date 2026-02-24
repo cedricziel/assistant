@@ -72,9 +72,6 @@ impl SkillExecutor {
             // Memory read
             Arc::new(MemoryGetHandler::new(config.clone())),
             Arc::new(MemorySearchHandler::new(storage.clone(), llm.clone())),
-            // Heartbeat
-            Arc::new(HeartbeatReadHandler::new(config.clone())),
-            Arc::new(HeartbeatUpdateHandler::new(config.clone())),
             // Skills / meta
             Arc::new(ListSkillsHandler::new(registry.clone())),
             Arc::new(SkillFileReadHandler::new(registry.clone())),
