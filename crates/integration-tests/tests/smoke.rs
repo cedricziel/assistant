@@ -73,7 +73,7 @@ struct Fixture {
 async fn build_fixture(base_url: &str) -> Result<Fixture> {
     let storage = Arc::new(StorageLayer::new_in_memory().await?);
 
-    let mut registry = SkillRegistry::new(storage.pool.clone()).await?;
+    let registry = SkillRegistry::new(storage.pool.clone()).await?;
 
     // Load built-in skills from the repo `skills/` directory.
     let skills_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

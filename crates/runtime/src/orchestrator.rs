@@ -1083,14 +1083,12 @@ fn tool_result_content(content: &str, _data: Option<&serde_json::Value>) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::sync::Arc;
 
-    use assistant_core::{types::Interface, AssistantConfig, ExecutionContext, ToolOutput};
+    use assistant_core::{types::Interface, AssistantConfig};
     use assistant_llm::{LlmClient, LlmClientConfig, LlmProvider};
     use assistant_storage::{registry::SkillRegistry, StorageLayer};
     use assistant_tool_executor::ToolExecutor;
-    use async_trait::async_trait;
     use serde_json::{json, Value};
     use uuid::Uuid;
     use wiremock::{
