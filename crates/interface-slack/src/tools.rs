@@ -27,7 +27,7 @@ struct SlackReplyHandler {
 #[async_trait]
 impl ToolHandler for SlackReplyHandler {
     fn name(&self) -> &str {
-        "slack-reply"
+        "reply"
     }
 
     fn description(&self) -> &str {
@@ -109,7 +109,7 @@ struct SlackReactHandler {
 #[async_trait]
 impl ToolHandler for SlackReactHandler {
     fn name(&self) -> &str {
-        "slack-react"
+        "react"
     }
 
     fn description(&self) -> &str {
@@ -176,7 +176,7 @@ struct SlackReplyBlocksHandler {
 #[async_trait]
 impl ToolHandler for SlackReplyBlocksHandler {
     fn name(&self) -> &str {
-        "slack-reply-blocks"
+        "reply-blocks"
     }
 
     fn description(&self) -> &str {
@@ -244,7 +244,7 @@ struct SlackUploadHandler {
 #[async_trait]
 impl ToolHandler for SlackUploadHandler {
     fn name(&self) -> &str {
-        "slack-upload"
+        "upload"
     }
 
     fn description(&self) -> &str {

@@ -139,7 +139,7 @@ impl Orchestrator {
     ///
     /// Unlike [`run_turn`] / [`run_turn_streaming`], this method does **not**
     /// return the final answer; replies are expected to happen as side-effects
-    /// of the extension tool calls (e.g. `slack-reply`).  If the LLM emits a
+    /// of the extension tool calls (e.g. `reply`).  If the LLM emits a
     /// `FinalAnswer` without calling a reply tool, it is persisted to the DB
     /// but not forwarded anywhere.
     ///
@@ -192,11 +192,21 @@ impl Orchestrator {
 
         // 4. Load global tool specs and merge with extensions for LLM tool listing.
         //    Extension specs come first so the LLM sees them prominently.
+        //
+        //    When a `reply` extension tool is present, suppress any global tools
+        //    whose name contains "post" — those tools (e.g. `slack-post`) post to
+        //    arbitrary channels without thread context and reliably confuse the LLM
+        //    into replying to the channel root instead of the active thread.
+        let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
         let global_specs = self.executor.to_specs();
         let all_specs: Vec<ToolSpec> = ext_specs
             .iter()
             .cloned()
-            .chain(global_specs.into_iter())
+            .chain(
+                global_specs
+                    .into_iter()
+                    .filter(|s| !has_reply_ext || !s.name.contains("post")),
+            )
             .collect();
 
         let base_system_prompt = self.compose_system_prompt().await;
@@ -269,36 +279,10 @@ impl Orchestrator {
                 String::new()
             };
 
-            // Collect global (non-extension) posting tools so the prompt can warn
-            // the LLM not to use them instead of the extension reply tools.
-            let ext_names: std::collections::HashSet<&str> =
-                ext_specs.iter().map(|s| s.name.as_str()).collect();
-            let global_post_tools: Vec<String> = self
-                .executor
-                .to_specs()
-                .into_iter()
-                .filter(|s| {
-                    !ext_names.contains(s.name.as_str())
-                        && (s.name.contains("post") || s.name.contains("reply"))
-                })
-                .map(|s| format!("`{}`", s.name))
-                .collect();
-            let global_post_warning = if !global_post_tools.is_empty() {
-                format!(
-                    "Do NOT use {} to reply here — those tools post outside this \
-                     conversation and have no thread context. Use the reply tools \
-                     listed above instead.\n",
-                    global_post_tools.join(", ")
-                )
-            } else {
-                String::new()
-            };
-
             format!(
                 "{base_system_prompt}\n\n---\n\n\
                 You are operating inside a messaging interface. \
                 {ack_instruction}\
-                {global_post_warning}\
                 When you have finished all work, call `end_turn` to signal completion."
             )
         };
