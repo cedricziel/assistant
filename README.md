@@ -191,7 +191,7 @@ assistant/
 │   ├── provider-ollama/       # Ollama backend (native tool-call + ReAct)
 │   ├── storage/               # SQLite, SkillRegistry, trace store, memory store
 │   ├── runtime/               # ReAct orchestrator, scheduler
-│   ├── skills-executor/       # Dispatches by tier (builtin / script / WASM)
+│   ├── tool-executor/         # Builtin tool registry + skill installer
 │   ├── mcp-server/            # MCP stdio server library (used by `assistant mcp`)
 │   ├── interface-cli/         # Unified binary: REPL + background interfaces
 │   ├── interface-slack/       # Slack Socket Mode library + slack-post skill

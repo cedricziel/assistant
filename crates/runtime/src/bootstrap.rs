@@ -116,7 +116,7 @@ pub fn skill_dirs(
     dirs
 }
 
-/// Placeholder — previously started a memory indexer from skills-executor.
+/// Placeholder — previously started a memory indexer from the legacy skills executor.
 /// This function is kept for API compatibility but does nothing.
 #[allow(dead_code)]
 pub fn start_memory_indexer_noop() {}

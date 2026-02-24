@@ -34,7 +34,7 @@ A Rust workspace implementing a local, self-improving AI assistant. Key properti
 | `assistant-provider-ollama`      | `crates/provider-ollama`      | Concrete `LlmProvider` impl for Ollama — native tool-call + ReAct fallback                                                        |
 | `assistant-storage`              | `crates/storage`              | `StorageLayer` (SQLite pool + migrations), `SkillRegistry`, `TraceStore`, `MemoryStore`, `RefinementsStore`, `ScheduledTaskStore` |
 | `assistant-runtime`              | `crates/runtime`              | `Orchestrator` (main ReAct loop), `SafetyGate`, background `Scheduler`                                                            |
-| `assistant-skills-executor`      | `crates/skills-executor`      | `SkillExecutor` dispatches by tier; all builtin handlers; `install_skill_from_source`                                             |
+| `assistant-tool-executor`        | `crates/tool-executor`        | Registry of `ToolHandler`s (file/web/memory/etc.), ambient tool wiring, and `install_skill_from_source`                            |
 | `assistant-mcp-server`           | `crates/mcp-server`           | stdio MCP server library — `tools/list`, `tools/call`, `resources/list`, `resources/read`; run via `assistant mcp`                |
 | `assistant-cli`                  | `crates/interface-cli`        | **Unified binary** (`assistant`): reedline REPL + background Slack/Mattermost + `mcp`/`slack`/`mattermost` subcommands            |
 | `assistant-interface-slack`      | `crates/interface-slack`      | Slack bot **library** (no binary); `SlackInterface::ambient_skills()` contributes `slack-post`; used by `assistant-cli`           |
@@ -48,8 +48,8 @@ Dependency order (no cycles):
 interface-cli ──► runtime ──► llm ──► core
                       │         └──► provider-ollama
                       ├──► storage ──► core
-                      ├──► skills-executor ──► llm, storage, core
-                      ├──► mcp-server (optional, feature=mcp) ──► runtime, skills-executor, storage, core
+                      ├──► tool-executor ──► core, storage, llm
+                      ├──► mcp-server (optional, feature=mcp) ──► runtime, tool-executor, storage, core
                       ├──► interface-slack (optional, feature=slack) ──► runtime, storage, core
                       └──► interface-mattermost (optional, feature=mattermost) ──► runtime, storage, core
 ```
@@ -68,8 +68,8 @@ interface-cli ──► runtime ──► llm ──► core
 | `crates/storage/src/registry.rs`          | `SkillRegistry` — in-memory + SQLite skill map                                                               |
 | `crates/runtime/src/orchestrator.rs`      | `Orchestrator::run_turn()` — the main loop                                                                   |
 | `crates/runtime/src/safety.rs`            | `SafetyGate::check()` — blocks shell-exec on Signal, honours disabled list                                   |
-| `crates/skills-executor/src/executor.rs`  | `SkillExecutor::new(storage, llm, registry)` + `register_ambient_skill()` (interior mutability via `RwLock`) |
-| `crates/skills-executor/src/installer.rs` | `install_skill_from_source()` — local path or GitHub                                                         |
+| `crates/tool-executor/src/executor.rs`    | `ToolExecutor::new(storage, llm, registry)` + `register_ambient_tool()` (interior mutability via `RwLock`)   |
+| `crates/tool-executor/src/installer.rs`   | `install_skill_from_source()` — local path or GitHub                                                         |
 | `migrations/`                             | `001_conversations.sql` → `004_memory.sql` (embedded via `include_str!`)                                     |
 | `skills/*/SKILL.md`                       | Built-in skill definitions (13 skills)                                                                       |
 | `config.toml`                             | Config template — copy to `~/.assistant/config.toml`                                                         |
@@ -92,7 +92,7 @@ Determined by `metadata.tier` in a `SKILL.md` frontmatter:
 | `Prompt`                | Orchestrator makes a sub-LLM call with SKILL.md body as system prompt |
 | `Script { entrypoint }` | Subprocess via `script_executor::run_script()`                        |
 | `Wasm { plugin }`       | extism (not yet implemented — returns error)                          |
-| `Builtin`               | Rust handler registered in `SkillExecutor`                            |
+| `Builtin`               | Rust `ToolHandler` registered in `ToolExecutor`                        |
 
 ## Conventions
 
@@ -102,8 +102,8 @@ Determined by `metadata.tier` in a `SKILL.md` frontmatter:
 - **Config**: all config flows through `AssistantConfig` from `crates/core/src/types.rs`
 - **Skill names**: kebab-case, match directory name exactly
 - **No `serde_yaml`**: use `gray_matter` for SKILL.md frontmatter parsing (serde_yaml is deprecated)
-- **`SkillExecutor::new`** takes `(storage, llm, registry)` — all three are required; no lazy registration
-- **`SkillExecutor::register_ambient_skill`** — call after construction (before `Arc` wrap is irrelevant; uses interior `RwLock`) to add interface-contributed skills like `slack-post`
+- **`ToolExecutor::new`** takes `(storage, llm, registry, config)` — register all builtins up front
+- **`ToolExecutor::register_ambient_tool`** — call after bootstrapping to inject interface tools like `slack-post`
 
 ## Make targets
 
@@ -140,12 +140,12 @@ Always run `make lint` and `make format` before committing.
 Semantic commits: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.
 Include the affected crate/area in parens: `feat(runtime): …`, `fix(storage): …`.
 
-## Adding a new builtin skill
+## Adding a new builtin tool
 
-1. Create `skills/<name>/SKILL.md` with `metadata.tier: builtin`
-2. Add a handler struct in `crates/skills-executor/src/builtins/<name>.rs` implementing `SkillHandler`
-3. Export it from `crates/skills-executor/src/builtins/mod.rs`
-4. Register it in `SkillExecutor::register_builtins()` in `executor.rs`
+1. Add a handler struct in `crates/tool-executor/src/builtins/<name>.rs` implementing `ToolHandler`
+2. Export it from `crates/tool-executor/src/builtins/mod.rs`
+3. Register it inside `ToolExecutor::register_builtins()` in `executor.rs`
+4. (Optional) If you also want a SKILL.md for documentation, place it under `skills/<name>/` with the desired tier
 
 ## Adding an ambient skill from an interface
 
@@ -153,9 +153,9 @@ Interface crates can contribute skills that are always available to the agent re
 of which interface is active. The `slack-post` skill is an example.
 
 1. Create `skills/<name>/SKILL.md` with `metadata.tier: builtin`
-2. Add a handler in `crates/interface-<X>/src/skills/<name>.rs` implementing `SkillHandler`
-3. Implement `pub fn ambient_skills(&self) -> Vec<(SkillDef, Arc<dyn SkillHandler>)>` on the interface struct
-4. In `interface-cli/src/main.rs`, call `executor.register_ambient_skill(def, handler)` for each ambient skill after bootstrapping
+2. Add a handler in `crates/interface-<X>/src/tools/<name>.rs` (or inline) implementing `ToolHandler`
+3. Implement `pub fn ambient_tools(&self) -> Vec<Arc<dyn ToolHandler>>` on the interface struct
+4. In `interface-cli/src/main.rs`, call `executor.register_ambient_tool(handler)` for each ambient tool after bootstrapping
 
 ## Database schema summary
 
