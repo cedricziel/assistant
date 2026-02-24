@@ -237,6 +237,23 @@ impl LlmClient {
             .unwrap_or("")
             .to_string();
 
+        // Thinking models (e.g. qwen3) emit reasoning in a separate `/message/thinking`
+        // field and may leave `/message/content` empty when no visible text follows the
+        // think block.  Returning an empty FinalAnswer causes downstream callers (e.g.
+        // the Slack auto-post path) to send an empty message.  Instead, if content is
+        // empty but thinking is present, surface it as a Thinking step so the
+        // orchestrator adds it to history and re-prompts the model for a visible reply.
+        if content.trim().is_empty() {
+            if let Some(thinking) = json
+                .pointer("/message/thinking")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+            {
+                debug!("Model returned empty content with non-empty thinking; surfacing as Thinking step");
+                return Ok(LlmResponse::Thinking(thinking.to_string()));
+            }
+        }
+
         debug!("Native request returned no tool_calls; treating as final answer");
         Ok(LlmResponse::FinalAnswer(content))
     }

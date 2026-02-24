@@ -267,6 +267,18 @@ impl Orchestrator {
                         return Ok(());
                     }
 
+                    // Don't attempt to auto-post an empty answer — this causes
+                    // messaging APIs (e.g. Slack) to reject with "no_text".
+                    // This can happen with thinking models (e.g. qwen3) when the
+                    // model produces a reasoning block but no visible reply text.
+                    if text.trim().is_empty() {
+                        warn!(
+                            iteration,
+                            "LLM returned empty final answer; skipping auto-post"
+                        );
+                        return Ok(());
+                    }
+
                     // If a reply-capable extension tool exists, use it to forward
                     // the answer to the user.
                     let reply_entry = ext_map
