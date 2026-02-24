@@ -108,6 +108,7 @@ pub fn discover_skills(skills_root: &Path, source: SkillSource) -> Vec<SkillDef>
 /// lowercase ASCII letters, digits, and interior hyphens only.
 fn is_kebab_case(name: &str) -> bool {
     !name.is_empty()
+        && name.len() <= 64
         && !name.starts_with('-')
         && !name.ends_with('-')
         && name
@@ -126,8 +127,6 @@ static EMBEDDED_SKILLS: include_dir::Dir =
 /// a [`SkillDef`] with [`SkillSource::Builtin`].  Skills that fail to parse
 /// are logged as warnings and skipped.
 pub fn embedded_builtin_skills() -> Vec<SkillDef> {
-    use std::path::PathBuf;
-
     let mut skills = Vec::new();
 
     for entry in EMBEDDED_SKILLS.dirs() {
@@ -143,9 +142,7 @@ pub fn embedded_builtin_skills() -> Vec<SkillDef> {
             continue;
         };
 
-        let dir = PathBuf::from(entry.path());
-
-        match parse_skill_content(content, &dir, SkillSource::Builtin) {
+        match parse_skill_content(content, entry.path(), SkillSource::Builtin) {
             Ok(def) => {
                 tracing::debug!("Embedded builtin skill loaded: {}", def.name);
                 skills.push(def);

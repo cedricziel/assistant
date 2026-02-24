@@ -83,13 +83,14 @@ impl ToolHandler for ScheduleTaskHandler {
         };
 
         // Validate and compute next run time from the cron expression.
-        let schedule = match Schedule::from_str(&cron_expr) {
-            Ok(s) => s,
+        // Normalise 5-field standard cron to 7-field (prefix seconds=0).
+        let (schedule, effective_expr) = match Schedule::from_str(&cron_expr) {
+            Ok(s) => (s, cron_expr.clone()),
             Err(e) => {
                 // Try prefixing with "0 " (seconds=0) to handle standard 5-field cron
                 let extended = format!("0 {}", cron_expr);
                 match Schedule::from_str(&extended) {
-                    Ok(s) => s,
+                    Ok(s) => (s, extended),
                     Err(_) => {
                         return Ok(ToolOutput::error(format!(
                             "Invalid cron expression '{}': {}",
@@ -105,7 +106,7 @@ impl ToolHandler for ScheduleTaskHandler {
         let id = self
             .storage
             .scheduled_task_store()
-            .insert(&name, &cron_expr, &prompt, next_run)
+            .insert(&name, &effective_expr, &prompt, next_run)
             .await?;
 
         let next_run_str = match next_run {
@@ -115,7 +116,7 @@ impl ToolHandler for ScheduleTaskHandler {
 
         Ok(ToolOutput::success(format!(
             "Scheduled task '{}' created (id: {}).\nCron expression: {}\nNext run: {}\nPrompt: {}",
-            name, id, cron_expr, next_run_str, prompt
+            name, id, effective_expr, next_run_str, prompt
         )))
     }
 }

@@ -34,7 +34,7 @@ impl SkillRegistry {
     /// `SkillDef` values (upsert to memory + SQLite).
     ///
     /// Each element is `(root_directory, source_kind)`.
-    pub async fn load_from_dirs(&mut self, dirs: &[(&Path, SkillSource)]) -> Result<()> {
+    pub async fn load_from_dirs(&self, dirs: &[(&Path, SkillSource)]) -> Result<()> {
         use assistant_skills::parse_skill_dir;
 
         for item in dirs {
@@ -80,7 +80,7 @@ impl SkillRegistry {
     ///
     /// Call this during startup before [`load_from_dirs`] so that disk-based
     /// skills can override the embedded defaults.
-    pub async fn load_embedded(&mut self) -> Result<()> {
+    pub async fn load_embedded(&self) -> Result<()> {
         for def in assistant_skills::embedded_builtin_skills() {
             info!("Registering embedded builtin skill '{}'", def.name);
             self.register(def).await?;

@@ -39,7 +39,7 @@ impl ToolHandler for FileReadHandler {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Absolute or ~-relative path to the file"},
-                "limit": {"type": "number", "description": "Max chars to return (default: 8000)"}
+                "limit": {"type": "integer", "minimum": 1, "description": "Max chars to return (default: 8000)"}
             },
             "required": ["path"]
         })

@@ -37,7 +37,7 @@ impl ToolHandler for FileGlobHandler {
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "Glob pattern, e.g. **/*.rs or ~/notes/*.md"},
-                "limit": {"type": "number", "description": "Max results (default: 200)"}
+                "limit": {"type": "integer", "minimum": 1, "description": "Max results (default: 200)"}
             },
             "required": ["pattern"]
         })

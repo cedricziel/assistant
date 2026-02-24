@@ -21,7 +21,7 @@ impl LoadSkillHandler {
 #[async_trait]
 impl ToolHandler for LoadSkillHandler {
     fn name(&self) -> &str {
-        "load_skill"
+        "load-skill"
     }
 
     fn description(&self) -> &str {

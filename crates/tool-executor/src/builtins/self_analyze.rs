@@ -53,7 +53,8 @@ impl ToolHandler for SelfAnalyzeHandler {
                     "description": "Name of the skill to analyze"
                 },
                 "window": {
-                    "type": "number",
+                    "type": "integer",
+                    "minimum": 1,
                     "description": "Number of most-recent executions to analyze (default: 50)"
                 }
             },

@@ -140,7 +140,7 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
     );
 
     // Create skill registry.
-    let mut registry = SkillRegistry::new(storage.pool.clone())
+    let registry = SkillRegistry::new(storage.pool.clone())
         .await
         .context("Failed to create skill registry")?;
 

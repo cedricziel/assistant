@@ -19,7 +19,7 @@ impl WebFetchHandler {
             .user_agent("Mozilla/5.0 (compatible; AssistantBot/1.0)")
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .expect("Failed to build HTTP client");
+            .unwrap_or_default();
         Self { client }
     }
 }
@@ -45,7 +45,7 @@ impl ToolHandler for WebFetchHandler {
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "HTTP or HTTPS URL to fetch"},
-                "max_chars": {"type": "number", "description": "Max characters to return (default: 8000)"}
+                "max_chars": {"type": "integer", "minimum": 1, "description": "Max characters to return (default: 8000)"}
             },
             "required": ["url"]
         })
@@ -154,8 +154,9 @@ fn extract_title(document: &Html) -> Option<String> {
 fn extract_text(document: &Html) -> String {
     use scraper::Selector;
 
-    let body_selector = Selector::parse("body").unwrap();
-    let skip_selector = Selector::parse("script, style, noscript, head").unwrap();
+    let body_selector = Selector::parse("body").expect("valid static selector");
+    let skip_selector =
+        Selector::parse("script, style, noscript, head").expect("valid static selector");
 
     let root = if let Some(body) = document.select(&body_selector).next() {
         body

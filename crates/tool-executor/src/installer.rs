@@ -60,14 +60,20 @@ async fn install_from_local(
         .with_context(|| format!("Failed to parse SKILL.md in '{}'", src_path.display()))?;
 
     let dest = skills_dir.join(&def.name);
-    if dest != src_path {
-        // Copy the skill directory into the user skills dir
-        copy_dir_all(&src_path, &dest)
-            .with_context(|| format!("Failed to copy skill to '{}'", dest.display()))?;
-        info!(name = %def.name, dest = %dest.display(), "Copied skill directory");
+    if dest == src_path {
+        // Already inside skills_dir — register directly without copying.
+        let name = def.name.clone();
+        registry.register(def).await?;
+        info!(name = %name, "Installed skill from local path (already in skills dir)");
+        return Ok(name);
     }
 
-    // Parse from the destination (canonical path)
+    // Copy the skill directory into the user skills dir
+    copy_dir_all(&src_path, &dest)
+        .with_context(|| format!("Failed to copy skill to '{}'", dest.display()))?;
+    info!(name = %def.name, dest = %dest.display(), "Copied skill directory");
+
+    // Re-parse from the destination to get the canonical dir path
     let installed_def = parse_skill_dir(&dest, SkillSource::User)
         .with_context(|| format!("Failed to parse installed skill at '{}'", dest.display()))?;
 
