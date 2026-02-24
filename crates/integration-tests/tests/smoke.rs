@@ -180,7 +180,7 @@ async fn test_list_skills() -> Result<()> {
         "memory-write",
         "memory-search",
         "web-fetch",
-        "shell-exec",
+        "bash",
         "list-skills",
         "self-analyze",
         "schedule-task",

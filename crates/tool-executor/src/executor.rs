@@ -46,7 +46,6 @@ impl ToolExecutor {
             Arc::new(FileGlobHandler::new()),
             // Shell
             Arc::new(BashHandler::new()),
-            Arc::new(ShellExecHandler::new()),
             // Web
             Arc::new(WebFetchHandler::new()),
             Arc::new(WebSearchHandler::new()),

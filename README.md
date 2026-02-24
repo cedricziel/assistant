@@ -83,7 +83,7 @@ ollama pull qwen2.5:14b
 | `memory-write`  | Write a persistent key/value entry                                 | builtin |
 | `memory-search` | Substring-search across memory entries                             | builtin |
 | `web-fetch`     | Fetch a URL and return page text                                   | builtin |
-| `shell-exec`    | Run a shell command (requires confirmation)                        | builtin |
+| `bash`          | Run a bash command (mutating; ask for confirmation on risky turns)  | builtin |
 | `list-skills`   | List all registered skills                                         | builtin |
 | `self-analyze`  | Analyse execution traces and propose SKILL.md improvements         | builtin |
 | `schedule-task` | Register a recurring cron-style prompt                             | builtin |
@@ -178,7 +178,7 @@ tool_call_mode = "auto"        # "auto" | "native" | "react"
 max_iterations = 10
 
 [skills]
-disabled = ["shell-exec"]      # disable specific skills
+disabled = []                   # optional list of tool names to disable
 ```
 
 ## Workspace layout

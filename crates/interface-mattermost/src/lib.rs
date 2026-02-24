@@ -4,7 +4,8 @@
 //! same channel.  Each incoming message is routed through
 //! `Orchestrator::run_turn_with_tools`.
 //!
-//! The `shell-exec` skill is **disabled** for this interface via `SafetyGate`.
+//! All tools remain available; rely on allowlists and confirmation callbacks
+//! to keep risky operations under control.
 
 pub mod config;
 pub mod runner;

@@ -17,9 +17,9 @@
 //!
 //! # Safety
 //!
-//! [`SafetyGate`][assistant_runtime::safety::SafetyGate] already blocks
-//! `shell-exec` when the interface is [`Interface::Signal`].  Additionally,
-//! `SignalConfig::allowed_senders` is checked before dispatching.
+//! `SignalConfig::allowed_senders` is checked before dispatching. Tools that
+//! require explicit confirmation are auto-denied because Signal turns cannot
+//! prompt interactively.
 
 use std::sync::Arc;
 

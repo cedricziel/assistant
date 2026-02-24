@@ -64,8 +64,8 @@ enum Cmd {
 /// A confirmation callback that always denies, suitable for an automated
 /// interface where interactive prompts are not possible.
 ///
-/// `SafetyGate` already blocks `shell-exec` on Signal; this callback provides
-/// a second layer for skills marked `confirmation_required`.
+/// Signal runs without interactive prompts, so this callback auto-denies
+/// any tool that explicitly requires confirmation.
 struct AutoDenyConfirmation;
 
 impl ConfirmationCallback for AutoDenyConfirmation {

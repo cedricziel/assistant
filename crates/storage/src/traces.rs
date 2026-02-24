@@ -220,15 +220,14 @@ mod tests {
 
         // 2 successes, 1 failure
         for i in 0..2_i64 {
-            let t =
-                ExecutionTrace::new(conv_id, i, "shell-exec", json!({})).with_success("ok", 100);
+            let t = ExecutionTrace::new(conv_id, i, "bash", json!({})).with_success("ok", 100);
             store.insert(&t).await.unwrap();
         }
-        let failed = ExecutionTrace::new(conv_id, 3, "shell-exec", json!({}))
+        let failed = ExecutionTrace::new(conv_id, 3, "bash", json!({}))
             .with_error("permission denied", 50);
         store.insert(&failed).await.unwrap();
 
-        let stats = store.stats_for_skill("shell-exec", 100).await.unwrap();
+        let stats = store.stats_for_skill("bash", 100).await.unwrap();
         assert_eq!(stats.total, 3);
         assert_eq!(stats.success_count, 2);
         assert_eq!(stats.error_count, 1);

@@ -100,8 +100,7 @@ When Slack is configured the assistant automatically gains these tools (availabl
 
 ## Security
 
-- `shell-exec` is blocked for all messages arriving via Slack — the safety gate enforces this regardless of config.
-- `allowed_channels` and `allowed_users` allowlists restrict which channels/users the bot responds to. Empty lists mean all are accepted.
+- Use `allowed_channels` and `allowed_users` allowlists to restrict which channels/users the bot responds to. Empty lists mean all are accepted.
 
 ## Conversation continuity
 

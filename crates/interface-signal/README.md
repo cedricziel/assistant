@@ -98,8 +98,6 @@ allowed_senders = []
 
 ## Safety
 
-- The `shell-exec` skill is **blocked** on the Signal interface by
-  `SafetyGate` — it cannot be invoked via incoming messages.
 - Any skill marked `confirmation_required` is **auto-denied** (the
   `AutoDenyConfirmation` callback always returns `false`).
 - `allowed_senders` provides an additional layer of access control.

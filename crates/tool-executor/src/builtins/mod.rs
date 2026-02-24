@@ -9,7 +9,6 @@ pub mod memory_get;
 pub mod memory_search;
 pub mod schedule_task;
 pub mod self_analyze;
-pub mod shell_exec;
 pub mod web_fetch;
 pub mod web_search;
 
@@ -24,6 +23,5 @@ pub use memory_get::MemoryGetHandler;
 pub use memory_search::MemorySearchHandler;
 pub use schedule_task::ScheduleTaskHandler;
 pub use self_analyze::SelfAnalyzeHandler;
-pub use shell_exec::ShellExecHandler;
 pub use web_fetch::WebFetchHandler;
 pub use web_search::WebSearchHandler;

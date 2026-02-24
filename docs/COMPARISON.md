@@ -94,7 +94,7 @@ OpenClaw's hybrid vector+BM25 search is something we lack entirely — our `Memo
 |---|---|---|---|
 | **Sandboxing** | Optional Docker containers for tool execution | **Mandatory OS-level container isolation** (Apple Container / Docker), one VM per container | **SafetyGate**: application-level per-interface rules |
 | **Isolation level** | Application + optional Docker | **Hypervisor/kernel** (strongest possible) | Process-level (no container isolation) |
-| **Per-interface security** | Separate agents per channel, per-agent credential isolation | Per-group container isolation | **Interface enum gates skills** (e.g., `shell-exec` blocked on Signal) |
+| **Per-interface security** | Separate agents per channel, per-agent credential isolation | Per-group container isolation | **Interface enum annotates context** (e.g., Signal turns auto-deny confirmation-required tools) |
 | **Confirmation workflow** | Not described | Not present | **`ConfirmationCallback` trait** — interactive approval for mutating skills |
 | **Supply chain risk** | High (ClawHub had ~12-20% malicious skills; VirusTotal partnership added) | Minimal (no marketplace; skills transform source at dev time) | None (no marketplace) |
 

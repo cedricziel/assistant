@@ -67,7 +67,6 @@ interface-cli ──► runtime ──► llm ──► core
 | `crates/provider-ollama/src/provider.rs`  | `OllamaProvider` — concrete Ollama impl of `LlmProvider`                                                     |
 | `crates/storage/src/registry.rs`          | `SkillRegistry` — in-memory + SQLite skill map                                                               |
 | `crates/runtime/src/orchestrator.rs`      | `Orchestrator::run_turn()` — the main loop                                                                   |
-| `crates/runtime/src/safety.rs`            | `SafetyGate::check()` — blocks shell-exec on Signal, honours disabled list                                   |
 | `crates/tool-executor/src/executor.rs`    | `ToolExecutor::new(storage, llm, registry)` + `register_ambient_tool()` (interior mutability via `RwLock`)   |
 | `crates/tool-executor/src/installer.rs`   | `install_skill_from_source()` — local path or GitHub                                                         |
 | `migrations/`                             | `001_conversations.sql` → `004_memory.sql` (embedded via `include_str!`)                                     |

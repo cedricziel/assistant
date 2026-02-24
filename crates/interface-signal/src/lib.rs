@@ -13,8 +13,8 @@
 //!   [`SignalInterface::run`]).
 //! - Each incoming Signal message is routed through
 //!   `Orchestrator::run_turn_streaming`.
-//! - The `shell-exec` skill is **disabled** for this interface via
-//!   `SafetyGate`.
+//! - All tools remain available; commands that require confirmation are
+//!   auto-denied by the non-interactive confirmation callback.
 //!
 //! # Feature-gating
 //!

@@ -12,9 +12,10 @@
 //!
 //! # Safety
 //!
-//! [`SafetyGate`][assistant_runtime::safety::SafetyGate] blocks `shell-exec`
-//! for [`Interface::Mattermost`].  Additionally, `allowed_channels` and
-//! `allowed_users` allowlists are checked before dispatching.
+//! `allowed_channels` and `allowed_users` allowlists are checked before
+//! dispatching.  Remote Mattermost turns share the same confirmation callback
+//! behavior as the CLI, so mutating tools can still be reviewed before they
+//! execute.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
