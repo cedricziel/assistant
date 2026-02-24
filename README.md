@@ -91,11 +91,12 @@ ollama pull qwen2.5:14b
 
 ## Skill discovery order
 
-At startup the assistant scans three locations (highest priority first):
+At startup the assistant scans several locations (highest priority first):
 
-1. `~/.assistant/skills/` — personal skills
-2. `<project>/.assistant/skills/` — project-scoped skills
-3. `<binary dir>/skills/` — built-in skills shipped with the binary
+1. Entries from `[skills] extra_dirs` — defaults include `~/.claude/skills` and `./.claude/skills` so Claude Code / NanoClaw skills are auto-loaded
+2. `~/.assistant/skills/` — personal skills
+3. `<project>/.assistant/skills/` — project-scoped skills
+4. `<binary dir>/skills/` — built-in skills shipped with the binary
 
 ## Installing new skills
 

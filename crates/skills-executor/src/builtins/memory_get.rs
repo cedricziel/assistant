@@ -29,6 +29,7 @@ impl MemoryGetHandler {
         let base = base_dir();
 
         let path = match target {
+            "agents" => resolve_path(&mem.agents_path, &base, "AGENTS.md"),
             "soul" => resolve_path(&mem.soul_path, &base, "SOUL.md"),
             "identity" => resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
             "user" => resolve_path(&mem.user_path, &base, "USER.md"),
@@ -89,7 +90,7 @@ impl SkillHandler for MemoryGetHandler {
             Some(p) => p,
             None => {
                 return Ok(SkillOutput::error(format!(
-                "Unknown target '{target}'. Use: soul, identity, user, memory, or notes/YYYY-MM-DD"
+                "Unknown target '{target}'. Use: agents, soul, identity, user, memory, or notes/YYYY-MM-DD"
             )))
             }
         };

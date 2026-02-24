@@ -36,13 +36,17 @@ timeout_secs = 120
 # db_path = "~/.assistant/assistant.db"
 
 [skills]
-# Directories to scan for skills (in priority order):
-# 1. ~/.assistant/skills/ (user personal)
-# 2. <project>/.assistant/skills/ (project-scoped, auto-detected)
-# 3. <binary dir>/skills/ (built-in, always included)
+# Directories to scan for skills (highest priority first):
+# 1. entries from extra_dirs (defaults target Claude Code/NanoClaw folders)
+# 2. ~/.assistant/skills/ (user personal)
+# 3. <project>/.assistant/skills/ (project-scoped, auto-detected)
+# 4. <binary dir>/skills/ (built-in sidecar, optional)
 
-# Extra skill directories to include
-# extra_dirs = []
+# Extra skill directories to include.  Paths may be absolute, use ~/ for home,
+# or be relative to the current project directory.  By default the assistant
+# also scans ~/.claude/skills and ./.claude/skills so Claude Code / NanoClaw
+# skills are picked up automatically.
+# extra_dirs = ["~/.claude/skills", "./.claude/skills"]
 
 # Skills to disable (by name)
 # disabled = []

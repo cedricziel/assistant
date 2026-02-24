@@ -95,24 +95,6 @@ fn load_config(config_path: &Path) -> Result<AssistantConfig> {
     Ok(cfg)
 }
 
-// ── Skill directories ─────────────────────────────────────────────────────────
-
-fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
-    let mut dirs: Vec<(PathBuf, SkillSource)> = Vec::new();
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            dirs.push((exe_dir.join("skills"), SkillSource::Builtin));
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        dirs.push((home.join(".assistant").join("skills"), SkillSource::User));
-    }
-
-    dirs
-}
-
 // ── Stack bootstrap ───────────────────────────────────────────────────────────
 
 /// Bootstrap the common stack shared by both subcommands.
@@ -144,7 +126,8 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
         .await
         .context("Failed to create skill registry")?;
 
-    let dirs_to_scan = skill_dirs();
+    let project_root = std::env::current_dir().ok();
+    let dirs_to_scan = assistant_runtime::bootstrap::skill_dirs(&config, project_root.as_deref());
     let dirs_ref: Vec<(&Path, SkillSource)> = dirs_to_scan
         .iter()
         .map(|(p, s)| (p.as_path(), s.clone()))

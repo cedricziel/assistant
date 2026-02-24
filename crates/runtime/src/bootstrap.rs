@@ -4,10 +4,11 @@
 //! reduce code duplication for common startup tasks: loading config, finding
 //! skill directories, and providing an auto-deny confirmation callback.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use assistant_core::AssistantConfig;
+use assistant_core::{expand_tilde, AssistantConfig};
 use assistant_skills::SkillSource;
 use tracing::info;
 
@@ -65,19 +66,51 @@ pub async fn load_config(config_path: &Path) -> Result<AssistantConfig> {
 /// and do not require a filesystem path.  This function only returns directories
 /// for runtime-discovered skills:
 ///
-/// * `<exe_dir>/skills/` — optional sidecar skills shipped alongside the binary
+/// * Entries from `skills.extra_dirs` (home-relative, absolute, or project-relative)
 /// * `~/.assistant/skills/` — user-installed skills
-pub fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
+/// * `<project>/.assistant/skills/` — project-scoped skills (if available)
+/// * `<exe_dir>/skills/` — optional sidecar skills shipped alongside the binary
+pub fn skill_dirs(
+    config: &AssistantConfig,
+    project_root: Option<&Path>,
+) -> Vec<(PathBuf, SkillSource)> {
     let mut dirs: Vec<(PathBuf, SkillSource)> = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            dirs.push((exe_dir.join("skills"), SkillSource::Builtin));
+    let resolved_project_root = project_root
+        .map(|p| p.to_path_buf())
+        .or_else(|| std::env::current_dir().ok());
+
+    let mut push_dir = |path: PathBuf, source: SkillSource| {
+        if path.is_dir() && seen.insert(path.clone()) {
+            dirs.push((path, source));
         }
+    };
+
+    for raw in &config.skills.extra_dirs {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let resolved = resolve_extra_dir(trimmed, resolved_project_root.as_deref());
+        push_dir(resolved, SkillSource::Installed);
     }
 
     if let Some(home) = dirs::home_dir() {
-        dirs.push((home.join(".assistant").join("skills"), SkillSource::User));
+        push_dir(home.join(".assistant").join("skills"), SkillSource::User);
+    }
+
+    if let Some(project) = resolved_project_root.as_ref() {
+        push_dir(
+            project.join(".assistant").join("skills"),
+            SkillSource::Project,
+        );
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            push_dir(exe_dir.join("skills"), SkillSource::Builtin);
+        }
     }
 
     dirs
@@ -87,3 +120,13 @@ pub fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
 /// This function is kept for API compatibility but does nothing.
 #[allow(dead_code)]
 pub fn start_memory_indexer_noop() {}
+
+fn resolve_extra_dir(raw: &str, project_root: Option<&Path>) -> PathBuf {
+    if raw.starts_with("./") || raw.starts_with("../") {
+        if let Some(root) = project_root {
+            return root.join(raw);
+        }
+        return PathBuf::from(raw);
+    }
+    expand_tilde(raw)
+}

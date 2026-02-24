@@ -107,29 +107,6 @@ fn load_config(config_path: &Path) -> AssistantConfig {
     }
 }
 
-// ── Skill directories ─────────────────────────────────────────────────────────
-
-/// Return the list of `(directory, SkillSource)` pairs to scan for skills.
-fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
-    let mut dirs: Vec<(PathBuf, SkillSource)> = Vec::new();
-
-    // Builtin skills next to the binary.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let builtin = exe_dir.join("skills");
-            dirs.push((builtin, SkillSource::Builtin));
-        }
-    }
-
-    // User skills in ~/.assistant/skills/.
-    if let Some(home) = dirs::home_dir() {
-        let user_skills = home.join(".assistant").join("skills");
-        dirs.push((user_skills, SkillSource::User));
-    }
-
-    dirs
-}
-
 // ── /review command ───────────────────────────────────────────────────────────
 
 async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Result<()> {
@@ -382,7 +359,8 @@ async fn bootstrap(
         .await
         .context("Failed to create skill registry")?;
 
-    let dirs_to_scan = skill_dirs();
+    let project_root = std::env::current_dir().ok();
+    let dirs_to_scan = assistant_runtime::bootstrap::skill_dirs(&config, project_root.as_deref());
     let dirs_ref: Vec<(&Path, SkillSource)> = dirs_to_scan
         .iter()
         .map(|(p, s)| (p.as_path(), s.clone()))
