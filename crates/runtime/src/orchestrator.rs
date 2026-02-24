@@ -440,13 +440,25 @@ impl Orchestrator {
                                 .unwrap_or("done");
                             info!(iteration, reason, "end_turn called; stopping turn");
 
+                            let result_text = format!("end_turn: {reason}");
+                            self.append_tool_result(&mut history, "end_turn", &result_text);
+                            let tr_msg = Self::make_tool_result_message(
+                                conversation_id,
+                                base_turn + iteration as i64 + 1,
+                                "end_turn",
+                                &result_text,
+                            );
+                            if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                warn!("Failed to persist end_turn tool-result: {e}");
+                            }
+
                             let mut trace = ExecutionTrace::new(
                                 conversation_id,
                                 iteration as i64,
                                 "end_turn",
                                 params.clone(),
                             );
-                            trace = trace.with_success(format!("end_turn: {reason}"), 0);
+                            trace = trace.with_success(result_text.clone(), 0);
                             if self.trace_enabled {
                                 let trace_store = self.storage.trace_store();
                                 if let Err(e) = trace_store.insert(&trace).await {
