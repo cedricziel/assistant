@@ -6,7 +6,9 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use assistant_core::types::{AnthropicUserLocation, AnthropicWebSearchOptions};
+use assistant_core::types::{
+    AnthropicUserLocation, AnthropicWebFetchOptions, AnthropicWebSearchOptions,
+};
 use assistant_core::LlmConfig;
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse, ToolCallItem,
@@ -30,6 +32,8 @@ pub struct AnthropicConfig {
     pub max_tokens: u32,
     /// Optional hosted web-search configuration.
     pub web_search: Option<WebSearchConfig>,
+    /// Optional hosted web-fetch configuration.
+    pub web_fetch: Option<WebFetchConfig>,
 }
 
 impl Default for AnthropicConfig {
@@ -41,6 +45,7 @@ impl Default for AnthropicConfig {
             timeout_secs: 120,
             max_tokens: 8192,
             web_search: None,
+            web_fetch: None,
         }
     }
 }
@@ -75,6 +80,11 @@ impl AnthropicConfig {
             max_tokens: 8192,
             web_search: if cfg.anthropic.web_search.enabled {
                 Some(WebSearchConfig::from(&cfg.anthropic.web_search))
+            } else {
+                None
+            },
+            web_fetch: if cfg.anthropic.web_fetch.enabled {
+                Some(WebFetchConfig::from(&cfg.anthropic.web_fetch))
             } else {
                 None
             },
@@ -118,6 +128,27 @@ impl From<&AnthropicUserLocation> for WebSearchLocation {
             region: loc.region.clone(),
             country: loc.country.clone(),
             timezone: loc.timezone.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WebFetchConfig {
+    pub max_uses: Option<u32>,
+    pub allowed_domains: Vec<String>,
+    pub blocked_domains: Vec<String>,
+    pub citations_enabled: bool,
+    pub max_content_tokens: Option<u32>,
+}
+
+impl From<&AnthropicWebFetchOptions> for WebFetchConfig {
+    fn from(opts: &AnthropicWebFetchOptions) -> Self {
+        Self {
+            max_uses: opts.max_uses,
+            allowed_domains: opts.allowed_domains.clone(),
+            blocked_domains: opts.blocked_domains.clone(),
+            citations_enabled: opts.citations.enabled,
+            max_content_tokens: opts.max_content_tokens,
         }
     }
 }
@@ -181,6 +212,28 @@ impl AnthropicProvider {
                 if !loc_json.is_empty() {
                     entry["user_location"] = Value::Object(loc_json);
                 }
+            }
+            specs.push(entry);
+        }
+        if let Some(cfg) = &self.config.web_fetch {
+            let mut entry = json!({
+                "type": "web_fetch_20250910",
+                "name": "web_fetch",
+            });
+            if let Some(max) = cfg.max_uses {
+                entry["max_uses"] = json!(max);
+            }
+            if !cfg.allowed_domains.is_empty() {
+                entry["allowed_domains"] = json!(cfg.allowed_domains);
+            }
+            if !cfg.blocked_domains.is_empty() {
+                entry["blocked_domains"] = json!(cfg.blocked_domains);
+            }
+            if cfg.citations_enabled {
+                entry["citations"] = json!({ "enabled": true });
+            }
+            if let Some(limit) = cfg.max_content_tokens {
+                entry["max_content_tokens"] = json!(limit);
             }
             specs.push(entry);
         }
@@ -290,10 +343,15 @@ impl LlmProvider for AnthropicProvider {
             tools: ToolSupport::Native,
             streaming: true,
             vision: true,
-            hosted_tools: if self.config.web_search.is_some() {
-                vec![HostedTool::WebSearch]
-            } else {
-                Vec::new()
+            hosted_tools: {
+                let mut hosted = Vec::new();
+                if self.config.web_search.is_some() {
+                    hosted.push(HostedTool::WebSearch);
+                }
+                if self.config.web_fetch.is_some() {
+                    hosted.push(HostedTool::WebFetch);
+                }
+                hosted
             },
         }
     }

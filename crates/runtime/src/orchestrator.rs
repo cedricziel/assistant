@@ -1169,6 +1169,9 @@ impl Orchestrator {
         if caps.hosted_tools.contains(&HostedTool::WebSearch) && spec.name == "web-search" {
             return true;
         }
+        if caps.hosted_tools.contains(&HostedTool::WebFetch) && spec.name == "web-fetch" {
+            return true;
+        }
         false
     }
 

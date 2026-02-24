@@ -280,6 +280,8 @@ impl Default for LlmConfig {
 pub struct AnthropicOptions {
     #[serde(default)]
     pub web_search: AnthropicWebSearchOptions,
+    #[serde(default)]
+    pub web_fetch: AnthropicWebFetchOptions,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +316,39 @@ pub struct AnthropicUserLocation {
     pub region: Option<String>,
     pub country: Option<String>,
     pub timezone: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnthropicWebFetchOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    pub max_uses: Option<u32>,
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+    #[serde(default)]
+    pub blocked_domains: Vec<String>,
+    #[serde(default)]
+    pub citations: AnthropicCitationsOptions,
+    pub max_content_tokens: Option<u32>,
+}
+
+impl Default for AnthropicWebFetchOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_uses: None,
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+            citations: AnthropicCitationsOptions::default(),
+            max_content_tokens: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AnthropicCitationsOptions {
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// Storage configuration

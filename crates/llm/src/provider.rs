@@ -39,6 +39,8 @@ pub struct Capabilities {
 pub enum HostedTool {
     /// Anthropic-managed `web_search` tool.
     WebSearch,
+    /// Anthropic-managed `web_fetch` tool.
+    WebFetch,
 }
 
 // ── LlmProvider trait ─────────────────────────────────────────────────────────

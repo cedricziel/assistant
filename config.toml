@@ -44,6 +44,15 @@ timeout_secs = 120
 # region = "California"
 # country = "US"
 # timezone = "America/Los_Angeles"
+#
+# # Optional: enable Anthropic's hosted web fetch tool
+# [llm.anthropic.web_fetch]
+# enabled = true
+# max_uses = 10
+# max_content_tokens = 100000
+# allowed_domains = []
+# blocked_domains = []
+# citations.enabled = true
 
 [storage]
 # Path to SQLite database (~/.assistant/assistant.db by default)
