@@ -102,6 +102,11 @@ When Slack is configured the assistant automatically gains these tools (availabl
 
 - Use `allowed_channels` and `allowed_users` allowlists to restrict which channels/users the bot responds to. Empty lists mean all are accepted.
 
+## Triggers
+
+- Plain text messages in any channel/thread the bot can read start a turn.
+- Emoji reactions (`reaction_added`) are also forwarded as synthetic messages, so a quick ":eyes:" or ":question:" reaction can nudge the assistant without typing.
+
 ## Conversation continuity
 
 Each `(channel_id, thread_ts)` pair maps to a stable conversation UUID, so context is preserved across all messages in the same Slack thread.

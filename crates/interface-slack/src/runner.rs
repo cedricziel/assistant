@@ -45,6 +45,25 @@ fn preview(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
+#[derive(Debug)]
+enum SlackIncomingKind {
+    Message,
+    Reaction { emoji: String },
+}
+
+#[derive(Debug)]
+struct SlackIncomingEvent {
+    channel_id: String,
+    user_id: String,
+    thread_ts: SlackTs,
+    /// Unique timestamp for this specific event (used for dedup + stale checks).
+    event_ts: SlackTs,
+    /// Timestamp of the Slack message we anchor reactions/typing indicators to.
+    ack_ts: SlackTs,
+    text: String,
+    kind: SlackIncomingKind,
+}
+
 use crate::config::{SlackConfig, SlackConfigExt};
 use crate::skills::{
     SlackDeleteMessageSkill, SlackGetHistorySkill, SlackListChannelsSkill, SlackLookupUserSkill,
@@ -118,6 +137,78 @@ fn classify_history_msg(msg: &SlackHistoryMessage) -> Option<MessageRole> {
     None
 }
 
+fn incoming_from_message_event(msg: &SlackMessageEvent) -> Option<SlackIncomingEvent> {
+    if msg.subtype.is_some()
+        || msg.sender.bot_id.is_some()
+        || msg.sender.display_as_bot.unwrap_or(false)
+        || msg.sender.user.is_none()
+    {
+        return None;
+    }
+
+    let user_id = msg.sender.user.as_ref()?.to_string();
+    let channel_id = msg.origin.channel.as_ref()?.to_string();
+    let text = msg
+        .content
+        .as_ref()
+        .and_then(|c| c.text.as_ref())
+        .map(|t| t.to_string())
+        .unwrap_or_default();
+
+    if text.trim().is_empty() {
+        return None;
+    }
+
+    let msg_ts = msg.origin.ts.clone();
+    let thread_ts = msg
+        .origin
+        .thread_ts
+        .clone()
+        .unwrap_or_else(|| msg.origin.ts.clone());
+
+    Some(SlackIncomingEvent {
+        channel_id,
+        user_id,
+        thread_ts,
+        event_ts: msg_ts.clone(),
+        ack_ts: msg_ts,
+        text,
+        kind: SlackIncomingKind::Message,
+    })
+}
+
+fn incoming_from_reaction_event(event: &SlackReactionAddedEvent) -> Option<SlackIncomingEvent> {
+    let SlackReactionsItem::Message(item_msg) = &event.item else {
+        return None;
+    };
+
+    let channel_id = item_msg.origin.channel.as_ref()?.to_string();
+    let thread_ts = item_msg
+        .origin
+        .thread_ts
+        .clone()
+        .unwrap_or_else(|| item_msg.origin.ts.clone());
+    let ack_ts = item_msg.origin.ts.clone();
+
+    let original = item_msg.content.text.as_deref().unwrap_or("");
+    let snippet = preview(original, 120).trim().to_string();
+    let emoji = event.reaction.0.clone();
+    let mut text = format!("Reaction :{}: from {}", emoji, event.user.to_string());
+    if !snippet.is_empty() {
+        text.push_str(&format!(" on message: {}", snippet));
+    }
+
+    Some(SlackIncomingEvent {
+        channel_id,
+        user_id: event.user.to_string(),
+        thread_ts,
+        event_ts: event.event_ts.clone(),
+        ack_ts,
+        text,
+        kind: SlackIncomingKind::Reaction { emoji },
+    })
+}
+
 // ── Push-event callback (free async fn — function pointer, not closure) ───────
 
 async fn on_push_event(
@@ -156,60 +247,38 @@ async fn on_push_event(
         )
     };
 
-    let SlackEventCallbackBody::Message(msg) = &event.event else {
-        debug!(event_type = ?event.event, "Ignoring non-message event");
-        return Ok(());
+    let incoming = match &event.event {
+        SlackEventCallbackBody::Message(msg) => match incoming_from_message_event(msg) {
+            Some(evt) => evt,
+            None => {
+                debug!("Ignoring non-human message event");
+                return Ok(());
+            }
+        },
+        SlackEventCallbackBody::ReactionAdded(reaction) => {
+            match incoming_from_reaction_event(reaction) {
+                Some(evt) => evt,
+                None => {
+                    debug!("Ignoring reaction event that is not tied to a message");
+                    return Ok(());
+                }
+            }
+        }
+        other => {
+            debug!(event_type = ?other, "Ignoring unsupported event");
+            return Ok(());
+        }
     };
 
-    // Only process plain human messages (subtype == None).
-    // Any subtype (bot_message, message_changed, message_deleted, …) means
-    // a system/bot/meta event — including the message_changed event Slack fires
-    // when we add a reaction, which would otherwise cause a duplicate reply.
-    if msg.subtype.is_some()
-        || msg.sender.bot_id.is_some()
-        || msg.sender.display_as_bot.unwrap_or(false)
-        || msg.sender.user.is_none()
-    {
-        debug!(
-            subtype = ?msg.subtype,
-            bot_id = ?msg.sender.bot_id,
-            has_user = msg.sender.user.is_some(),
-            "Ignoring non-human message"
-        );
+    let channel_id = incoming.channel_id.clone();
+    let user_id = incoming.user_id.clone();
+    let text = incoming.text.clone();
+    if text.trim().is_empty() {
+        debug!(channel = %channel_id, user = %user_id, "Ignoring empty payload");
         return Ok(());
     }
-
-    let channel_id = msg
-        .origin
-        .channel
-        .as_ref()
-        .map(|c| c.to_string())
-        .unwrap_or_default();
-    let user_id = msg
-        .sender
-        .user
-        .as_ref()
-        .map(|u| u.to_string())
-        .unwrap_or_default();
-    let text = msg
-        .content
-        .as_ref()
-        .and_then(|c| c.text.as_ref())
-        .map(|t| t.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    // Thread ts: inherit an existing thread or start a new one from this message.
-    let thread_ts = msg
-        .origin
-        .thread_ts
-        .clone()
-        .unwrap_or_else(|| msg.origin.ts.clone());
-
-    if text.is_empty() {
-        debug!(channel = %channel_id, user = %user_id, "Ignoring empty message");
-        return Ok(());
-    }
+    let thread_ts = incoming.thread_ts.clone();
+    let msg_ts = incoming.ack_ts.clone();
 
     // Channel allowlist check.
     if !config.allowed_channels.is_empty() && !config.allowed_channels.contains(&channel_id) {
@@ -223,22 +292,19 @@ async fn on_push_event(
         return Ok(());
     }
 
-    // The ts of the original message — used to anchor reactions to it.
-    let msg_ts = msg.origin.ts.clone();
-
     // Deduplicate: slack-morphism opens two WebSocket connections; both deliver
     // the same push event, which would cause double processing without this guard.
     {
         let mut seen = processed_ts.lock().await;
-        if !seen.insert(msg_ts.0.clone()) {
-            debug!(ts = %msg_ts.0, "Skipping duplicate event (already processed on other connection)");
+        if !seen.insert(incoming.event_ts.0.clone()) {
+            debug!(ts = %incoming.event_ts.0, "Skipping duplicate event (already processed on other connection)");
             return Ok(());
         }
         // Prune to prevent unbounded growth. Clear older entries but retain the
         // ts we just inserted so a delayed duplicate from the other connection
         // is still rejected after the prune.
         if seen.len() > 500 {
-            let current = msg_ts.0.clone();
+            let current = incoming.event_ts.0.clone();
             seen.clear();
             seen.insert(current);
         }
@@ -246,20 +312,27 @@ async fn on_push_event(
 
     // Drop messages that predate our startup — these are catch-up events
     // replayed by Slack after a reconnect and should not be reprocessed.
-    let msg_unix: f64 = msg_ts.0.parse().unwrap_or(0.0);
+    let msg_unix: f64 = incoming.event_ts.0.parse().unwrap_or(0.0);
     if msg_unix < started_at {
         debug!(ts = %msg_ts.0, started_at, "Dropping pre-startup message");
         return Ok(());
     }
 
+    let (event_kind, reaction_emoji) = match &incoming.kind {
+        SlackIncomingKind::Message => ("message", None),
+        SlackIncomingKind::Reaction { emoji } => ("reaction", Some(emoji.as_str())),
+    };
+
     info!(
         channel = %channel_id,
         user = %user_id,
-        ts = %msg_ts.0,
+        ts = %incoming.event_ts.0,
         thread_ts = %thread_ts.0,
+        event_kind,
         text_len = text.len(),
         text_preview = preview(&text, 120),
-        "Incoming message"
+        reaction = ?reaction_emoji,
+        "Incoming Slack event"
     );
 
     // Key conversations by (channel_id, thread_ts) so every message in the
@@ -312,8 +385,13 @@ async fn on_push_event(
                 match session.conversations_replies(&replies_req).await {
                     Ok(resp) => {
                         for hist_msg in &resp.messages {
-                            // Skip the triggering message — the orchestrator adds it.
-                            if hist_msg.origin.ts == msg_ts {
+                            // Skip the triggering message when we're currently
+                            // processing a new user message (the orchestrator
+                            // inserts it). Reaction events are synthetic, so
+                            // we keep the original message in-context.
+                            if matches!(incoming.kind, SlackIncomingKind::Message)
+                                && hist_msg.origin.ts == msg_ts
+                            {
                                 continue;
                             }
                             let role = match classify_history_msg(hist_msg) {
@@ -737,7 +815,10 @@ mod tests {
     use assistant_core::SlackConfig;
     use uuid::Uuid;
 
-    use super::classify_history_msg;
+    use super::{
+        classify_history_msg, incoming_from_message_event, incoming_from_reaction_event,
+        SlackIncomingKind,
+    };
     use slack_morphism::prelude::*;
 
     // ── Allowlist tests ───────────────────────────────────────────────────────
@@ -877,6 +958,93 @@ mod tests {
             subtype: None,
             edited: None,
         }
+    }
+
+    fn make_message_event(text: &str) -> SlackMessageEvent {
+        SlackMessageEvent {
+            origin: SlackMessageOrigin {
+                ts: SlackTs("1700000000.000001".to_string()),
+                channel: Some(SlackChannelId("C001".to_string())),
+                channel_type: Some(SlackChannelType("channel".to_string())),
+                thread_ts: None,
+                client_msg_id: Some(SlackClientMessageId("client-1".to_string())),
+            },
+            content: Some(SlackMessageContent::new().with_text(text.to_string())),
+            sender: SlackMessageSender {
+                user: Some(SlackUserId("U001".to_string())),
+                bot_id: None,
+                username: None,
+                display_as_bot: Some(false),
+                user_profile: None,
+                bot_profile: None,
+            },
+            subtype: None,
+            hidden: None,
+            message: None,
+            previous_message: None,
+            deleted_ts: None,
+        }
+    }
+
+    #[test]
+    fn incoming_from_message_event_produces_turn() {
+        let msg = make_message_event("Hello Slack");
+        let incoming = incoming_from_message_event(&msg).expect("expected event");
+        assert!(matches!(incoming.kind, SlackIncomingKind::Message));
+        assert_eq!(incoming.channel_id, "C001");
+        assert_eq!(incoming.user_id, "U001");
+        assert_eq!(incoming.text, "Hello Slack");
+        assert_eq!(incoming.thread_ts.0, "1700000000.000001");
+    }
+
+    #[test]
+    fn incoming_from_reaction_event_mentions_emoji() {
+        let history_msg = SlackHistoryMessage {
+            origin: SlackMessageOrigin {
+                ts: SlackTs("1700000000.000050".to_string()),
+                channel: Some(SlackChannelId("C001".to_string())),
+                channel_type: Some(SlackChannelType("channel".to_string())),
+                thread_ts: None,
+                client_msg_id: Some(SlackClientMessageId("hist-1".to_string())),
+            },
+            content: SlackMessageContent::new().with_text("Original message".to_string()),
+            sender: SlackMessageSender {
+                user: Some(SlackUserId("U001".to_string())),
+                bot_id: None,
+                username: None,
+                display_as_bot: None,
+                user_profile: None,
+                bot_profile: None,
+            },
+            parent: SlackParentMessageParams {
+                reply_count: None,
+                reply_users_count: None,
+                latest_reply: None,
+                reply_users: None,
+                subscribed: None,
+                last_read: None,
+            },
+            subtype: None,
+            edited: None,
+        };
+        let reaction_event = SlackReactionAddedEvent {
+            user: SlackUserId("U999".to_string()),
+            reaction: SlackReactionName("eyes".to_string()),
+            item_user: Some(SlackUserId("U001".to_string())),
+            item: SlackReactionsItem::Message(history_msg),
+            event_ts: SlackTs("1700000000.123456".to_string()),
+        };
+
+        let incoming = incoming_from_reaction_event(&reaction_event).expect("reaction event");
+        match incoming.kind {
+            SlackIncomingKind::Reaction { emoji } => assert_eq!(emoji, "eyes"),
+            _ => panic!("expected reaction kind"),
+        }
+        assert_eq!(incoming.channel_id, "C001");
+        assert_eq!(incoming.user_id, "U999");
+        assert!(incoming.text.contains("Reaction :eyes:"));
+        assert!(incoming.text.contains("U999"));
+        assert_eq!(incoming.thread_ts.0, "1700000000.000050");
     }
 
     fn make_bot_history_msg(ts: &str) -> SlackHistoryMessage {
