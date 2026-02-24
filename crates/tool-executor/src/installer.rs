@@ -68,9 +68,16 @@ async fn install_from_local(
         return Ok(name);
     }
 
-    // Copy the skill directory into the user skills dir
-    copy_dir_all(&src_path, &dest)
-        .with_context(|| format!("Failed to copy skill to '{}'", dest.display()))?;
+    // Copy the skill directory into the user skills dir.
+    // Offload to the blocking thread pool so we don't stall tokio workers.
+    {
+        let src = src_path.clone();
+        let dst = dest.clone();
+        tokio::task::spawn_blocking(move || copy_dir_all(&src, &dst))
+            .await
+            .context("Failed to join blocking copy task")?
+            .with_context(|| format!("Failed to copy skill to '{}'", dest.display()))?;
+    }
     info!(name = %def.name, dest = %dest.display(), "Copied skill directory");
 
     // Re-parse from the destination to get the canonical dir path
