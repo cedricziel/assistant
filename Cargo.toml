@@ -15,7 +15,6 @@ members = [
     "crates/provider-anthropic",
     "crates/storage",
     "crates/runtime",
-    "crates/skills-executor",
     "crates/tool-executor",
     "crates/mcp-server",
     "crates/interface-cli",
@@ -96,7 +95,6 @@ skills = { path = "crates/skills" }
 llm = { path = "crates/llm" }
 storage = { path = "crates/storage" }
 runtime = { path = "crates/runtime" }
-skills-executor = { path = "crates/skills-executor" }
 tool-executor = { path = "crates/tool-executor" }
 
 # Force all crates to use the same curve25519-dalek as libsignal/presage.

@@ -437,33 +437,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "assistant-skills-executor"
-version = "0.1.5"
-dependencies = [
- "anyhow",
- "assistant-core",
- "assistant-llm",
- "assistant-skills",
- "assistant-storage",
- "async-trait",
- "chrono",
- "cron",
- "dirs",
- "extism",
- "glob",
- "jsonschema",
- "reqwest 0.12.28",
- "scraper",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "tracing",
- "uuid",
- "wiremock",
-]
-
-[[package]]
 name = "assistant-storage"
 version = "0.1.5"
 dependencies = [
