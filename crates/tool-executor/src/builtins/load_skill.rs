@@ -54,7 +54,7 @@ impl ToolHandler for LoadSkillHandler {
         match self.registry.get(&skill_name).await {
             Some(skill) => {
                 if skill.body.is_empty() {
-                    Ok(ToolOutput::success(format!(
+                    Ok(ToolOutput::error(format!(
                         "Skill '{}' has no body text.",
                         skill_name
                     )))

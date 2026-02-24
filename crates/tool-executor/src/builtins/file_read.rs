@@ -1,12 +1,13 @@
 //! Builtin handler for file-read tool — reads any file from disk.
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
 use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
+use tokio::io::AsyncReadExt;
+use tracing::debug;
 
 const DEFAULT_LIMIT: usize = 8_000;
 
@@ -57,37 +58,60 @@ impl ToolHandler for FileReadHandler {
 
         let limit = params
             .get("limit")
-            .and_then(|v| v.as_u64())
+            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
             .map(|n| n as usize)
             .unwrap_or(DEFAULT_LIMIT);
 
         let path = expand_tilde(&path_str);
+        debug!(path = %path.display(), "file-read access");
 
-        match fs::read_to_string(&path) {
-            Ok(content) => {
-                let text = content.trim_end();
-                let output = if text.len() > limit {
-                    let mut end = limit;
-                    while end > 0 && !text.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    format!(
-                        "File: {}\n\n{}\n\n[Content truncated at {} characters]",
-                        path.display(),
-                        &text[..end],
-                        limit
-                    )
-                } else {
-                    format!("File: {}\n\n{}", path.display(), text)
-                };
-                Ok(ToolOutput::success(output))
+        // Read asynchronously, capping at limit bytes + 1 to detect truncation.
+        let file = match tokio::fs::File::open(&path).await {
+            Ok(f) => f,
+            Err(e) => {
+                return Ok(ToolOutput::error(format!(
+                    "Failed to read '{}': {}",
+                    path.display(),
+                    e
+                )))
             }
-            Err(e) => Ok(ToolOutput::error(format!(
+        };
+
+        let mut buf = Vec::new();
+        if let Err(e) = file
+            .take((limit as u64).saturating_add(1024))
+            .read_to_end(&mut buf)
+            .await
+        {
+            return Ok(ToolOutput::error(format!(
                 "Failed to read '{}': {}",
                 path.display(),
                 e
-            ))),
+            )));
         }
+
+        let content = String::from_utf8_lossy(&buf);
+        let text = content.trim_end();
+
+        // Count characters (not bytes) to honour the `limit` promise.
+        let char_count = text.chars().count();
+        let output = if char_count > limit {
+            // Find the byte offset corresponding to `limit` chars.
+            let end = text
+                .char_indices()
+                .nth(limit)
+                .map(|(i, _)| i)
+                .unwrap_or(text.len());
+            format!(
+                "File: {}\n\n{}\n\n[Content truncated at {} characters]",
+                path.display(),
+                &text[..end],
+                limit
+            )
+        } else {
+            format!("File: {}\n\n{}", path.display(), text)
+        };
+        Ok(ToolOutput::success(output))
     }
 }
 

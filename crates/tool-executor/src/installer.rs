@@ -158,9 +158,11 @@ async fn install_from_github(
 
     let skill_md_content = skill_md_content.ok_or_else(|| anyhow!("{last_error}"))?;
 
-    // Parse just the frontmatter to get the skill name
+    // Parse just the frontmatter to get the skill name.
+    // Use Path::new("") so the parser skips the directory-name validation
+    // (the check only fires when dir.file_name() is non-empty).
     let temp_def =
-        assistant_skills::parse_skill_content(&skill_md_content, skills_dir, SkillSource::User)
+        assistant_skills::parse_skill_content(&skill_md_content, Path::new(""), SkillSource::User)
             .context("Failed to parse fetched SKILL.md")?;
 
     let skill_name = temp_def.name.clone();

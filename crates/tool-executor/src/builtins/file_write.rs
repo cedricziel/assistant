@@ -6,6 +6,7 @@ use std::fs;
 use anyhow::Result;
 use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
+use tracing::debug;
 
 use super::file_read::expand_tilde;
 
@@ -64,6 +65,7 @@ impl ToolHandler for FileWriteHandler {
         };
 
         let path = expand_tilde(&path_str);
+        debug!(path = %path.display(), "file-write access");
 
         // Create parent directories if needed.
         if let Some(parent) = path.parent() {

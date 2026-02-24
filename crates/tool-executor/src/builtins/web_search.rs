@@ -45,7 +45,7 @@ impl ToolHandler for WebSearchHandler {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query"},
-                "num_results": {"type": "number", "description": "Max results to return (default: 10)"}
+                "num_results": {"type": "integer", "minimum": 1, "description": "Max results to return (default: 10)"}
             },
             "required": ["query"]
         })
@@ -85,7 +85,7 @@ impl ToolHandler for WebSearchHandler {
 
         let num_results = params
             .get("num_results")
-            .and_then(|v| v.as_u64())
+            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
             .map(|n| n as usize)
             .unwrap_or(DEFAULT_NUM_RESULTS);
 

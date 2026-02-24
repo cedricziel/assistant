@@ -6,6 +6,7 @@ use std::fs;
 use anyhow::Result;
 use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
+use tracing::debug;
 
 use super::file_read::expand_tilde;
 
@@ -70,6 +71,7 @@ impl ToolHandler for FileEditHandler {
         };
 
         let path = expand_tilde(&path_str);
+        debug!(path = %path.display(), "file-edit access");
 
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,

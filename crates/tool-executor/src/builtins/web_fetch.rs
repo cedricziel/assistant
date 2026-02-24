@@ -118,8 +118,12 @@ impl ToolHandler for WebFetchHandler {
         // Truncate to max_chars
         let truncated = if text.len() > max_chars {
             let mut end = max_chars;
-            // Walk back to a whitespace boundary to avoid splitting mid-word
+            // Walk back to a valid UTF-8 char boundary.
             while end > 0 && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            // Then walk back to a whitespace boundary to avoid splitting mid-word.
+            while end > 0 && !text[..end].ends_with(char::is_whitespace) {
                 end -= 1;
             }
             format!(
