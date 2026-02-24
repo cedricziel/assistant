@@ -17,9 +17,13 @@ struct Frontmatter {
     license: Option<String>,
     #[serde(default)]
     compatibility: Option<String>,
-    /// Captures all other frontmatter fields as raw JSON values.
+    #[serde(default, rename = "allowed-tools")]
+    allowed_tools: Option<String>,
+    #[serde(default)]
+    metadata: HashMap<String, Value>,
+    /// Capture unknown future frontmatter keys so deserialisation is forward-compatible.
     #[serde(flatten, default)]
-    extra: HashMap<String, Value>,
+    _extra: HashMap<String, Value>,
 }
 
 /// Parse a skill directory containing a SKILL.md file into a SkillDef.
@@ -63,12 +67,30 @@ pub fn parse_skill_content(content: &str, dir: &Path, source: SkillSource) -> Re
         );
     }
 
+    let description = normalize_description(&front.description)?;
+    let compatibility = normalize_compatibility(front.compatibility)?;
+    let allowed_tools = parse_allowed_tools(front.allowed_tools);
+    let metadata = front.metadata;
+    let tier = metadata
+        .get("tier")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let mutating = parse_bool_metadata(&metadata, "mutating")?;
+    let confirmation_required = parse_bool_metadata(&metadata, "confirmation-required")?;
+    let params_schema = parse_params_schema(&metadata)?;
+
     Ok(SkillDef {
         name: front.name,
-        description: front.description,
+        description,
         license: front.license,
-        compatibility: front.compatibility,
-        metadata: front.extra,
+        compatibility,
+        allowed_tools,
+        metadata,
+        tier,
+        mutating,
+        confirmation_required,
+        params_schema,
         body: matter.content,
         dir: dir.to_path_buf(),
         source,
@@ -115,6 +137,72 @@ fn is_kebab_case(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+fn normalize_description(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("SKILL.md description must not be empty");
+    }
+    if trimmed.chars().count() > 1024 {
+        anyhow::bail!("SKILL.md description must be ≤ 1024 characters");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn normalize_compatibility(raw: Option<String>) -> Result<Option<String>> {
+    match raw.map(|s| s.trim().to_string()) {
+        Some(s) if s.is_empty() => Ok(None),
+        Some(s) => {
+            if s.chars().count() > 500 {
+                anyhow::bail!("compatibility field must be ≤ 500 characters");
+            }
+            Ok(Some(s))
+        }
+        None => Ok(None),
+    }
+}
+
+fn parse_allowed_tools(raw: Option<String>) -> Vec<String> {
+    raw.unwrap_or_default()
+        .split_whitespace()
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_string())
+        .collect()
+}
+
+fn parse_bool_metadata(metadata: &HashMap<String, Value>, key: &str) -> Result<bool> {
+    match metadata.get(key) {
+        Some(Value::Bool(v)) => Ok(*v),
+        Some(Value::String(s)) => match s.trim().to_lowercase().as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            other => anyhow::bail!("metadata.{key} must be 'true' or 'false', got '{other}'"),
+        },
+        Some(Value::Number(n)) => Ok(n.as_i64().unwrap_or_default() != 0),
+        Some(_) => anyhow::bail!("metadata.{key} must be a boolean or string"),
+        None => Ok(false),
+    }
+}
+
+fn parse_params_schema(metadata: &HashMap<String, Value>) -> Result<Option<Value>> {
+    match metadata.get("params") {
+        Some(Value::String(json)) => {
+            let trimmed = json.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            let value: Value = serde_json::from_str(trimmed)
+                .with_context(|| "metadata.params must be valid JSON")?;
+            if !value.is_object() {
+                anyhow::bail!("metadata.params must be a JSON object");
+            }
+            Ok(Some(value))
+        }
+        Some(Value::Object(map)) => Ok(Some(Value::Object(map.clone()))),
+        Some(_) => anyhow::bail!("metadata.params must be a JSON object or string"),
+        None => Ok(None),
+    }
 }
 
 /// The bundled `skills/` directory embedded into the binary at compile time.
@@ -170,8 +258,12 @@ mod tests {
 name: test-skill
 description: A test skill for unit testing
 license: MIT
+allowed-tools: Bash jq
 metadata:
   tier: builtin
+  mutating: "true"
+  confirmation-required: "false"
+  params: '{"foo": {"type": "string"}}'
 ---
 
 ## Instructions
@@ -197,6 +289,11 @@ Body text.
         assert_eq!(skill.name, "test-skill");
         assert_eq!(skill.description, "A test skill for unit testing");
         assert_eq!(skill.license, Some("MIT".to_string()));
+        assert_eq!(skill.allowed_tools, vec!["Bash", "jq"]);
+        assert_eq!(skill.tier.as_deref(), Some("builtin"));
+        assert!(skill.mutating);
+        assert!(!skill.confirmation_required);
+        assert!(skill.params_schema.is_some());
         assert!(skill.body.contains("This is a test skill"));
     }
 
@@ -207,12 +304,33 @@ Body text.
 
         assert_eq!(skill.name, "minimal");
         assert!(skill.body.contains("Body text"));
+        assert!(skill.allowed_tools.is_empty());
+        assert!(skill.params_schema.is_none());
     }
 
     #[test]
     fn test_parse_invalid_skill_fails() {
         let dir = PathBuf::from("/tmp/invalid");
         let result = parse_skill_content(INVALID_SKILL_MD, &dir, SkillSource::User);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_description_validation() {
+        let invalid = "---\nname: bad\ndescription:   \n---\n";
+        let dir = PathBuf::from("/tmp/bad");
+        let result = parse_skill_content(invalid, &dir, SkillSource::User);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_compatibility_limit() {
+        let long = format!(
+            "---\nname: compat\ndescription: ok\ncompatibility: {}\n---\n",
+            "x".repeat(501)
+        );
+        let dir = PathBuf::from("/tmp/compat");
+        let result = parse_skill_content(&long, &dir, SkillSource::User);
         assert!(result.is_err());
     }
 }

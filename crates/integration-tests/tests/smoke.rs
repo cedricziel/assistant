@@ -103,7 +103,13 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
         Arc::new(config.clone()),
     ));
 
-    let orchestrator = Arc::new(Orchestrator::new(llm, storage, executor, &config));
+    let orchestrator = Arc::new(Orchestrator::new(
+        llm,
+        storage,
+        executor,
+        registry.clone(),
+        &config,
+    ));
 
     Ok(Fixture {
         orchestrator,

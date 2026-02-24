@@ -160,7 +160,7 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
 
     // Build orchestrator with auto-deny confirmation.
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(AutoDenyConfirmation);
-    let orchestrator = Orchestrator::new(llm, storage, executor, &config)
+    let orchestrator = Orchestrator::new(llm, storage, executor, registry.clone(), &config)
         .with_confirmation_callback(confirmation_cb);
 
     // Extract the [signal] section from config (or use defaults).

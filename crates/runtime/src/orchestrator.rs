@@ -9,7 +9,8 @@ use assistant_core::{
     ExecutionContext, ExecutionTrace, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
 };
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, ToolSpec};
-use assistant_storage::{conversations::ConversationStore, StorageLayer};
+use assistant_skills::SkillDef as SpecSkillDef;
+use assistant_storage::{conversations::ConversationStore, SkillRegistry, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -80,6 +81,7 @@ pub struct Orchestrator {
     llm: Arc<dyn LlmProvider>,
     storage: Arc<StorageLayer>,
     executor: Arc<ToolExecutor>,
+    registry: Arc<SkillRegistry>,
     max_iterations: usize,
     disabled_skills: Vec<String>,
     trace_enabled: bool,
@@ -102,6 +104,7 @@ impl Orchestrator {
         llm: Arc<dyn LlmProvider>,
         storage: Arc<StorageLayer>,
         executor: Arc<ToolExecutor>,
+        registry: Arc<SkillRegistry>,
         config: &assistant_core::AssistantConfig,
     ) -> Self {
         let memory_loader = MemoryLoader::new(config);
@@ -110,6 +113,7 @@ impl Orchestrator {
             llm,
             storage,
             executor,
+            registry,
             max_iterations: config.llm.max_iterations,
             disabled_skills: config.skills.disabled.clone(),
             trace_enabled: config.mirror.trace_enabled,
@@ -195,14 +199,25 @@ impl Orchestrator {
             .chain(global_specs.into_iter())
             .collect();
 
-        let base_system_prompt = self.memory_loader.load_system_prompt();
+        let base_system_prompt = self.compose_system_prompt().await;
         // When extension tools are present, guide the LLM to use them.
         let system_prompt = if ext_specs.is_empty() {
             base_system_prompt
         } else {
-            let reply_tools: Vec<&str> = ext_specs
+            // Separate reply tools by purpose so the LLM understands they are
+            // alternatives, not complements — listing them all with "or" is
+            // ambiguous and causes some models to call several at once.
+            let plain_reply: Vec<&str> = ext_specs
                 .iter()
-                .filter(|s| s.name.contains("reply") || s.name.contains("post"))
+                .filter(|s| {
+                    (s.name.contains("reply") || s.name.contains("post"))
+                        && !s.name.contains("block")
+                })
+                .map(|s| s.name.as_str())
+                .collect();
+            let block_reply: Vec<&str> = ext_specs
+                .iter()
+                .filter(|s| s.name.contains("block"))
                 .map(|s| s.name.as_str())
                 .collect();
             let react_tools: Vec<&str> = ext_specs
@@ -210,29 +225,81 @@ impl Orchestrator {
                 .filter(|s| s.name.contains("react"))
                 .map(|s| s.name.as_str())
                 .collect();
-            let ack_instruction = match (!reply_tools.is_empty(), !react_tools.is_empty()) {
-                (true, true) => format!(
-                    "Before calling `end_turn` you MUST always acknowledge the user's message: \
-                     use `{}` for text responses, or `{}` for brief emoji acknowledgements \
-                     (e.g. `thumbsup`, `white_check_mark`). ",
-                    reply_tools.join("` or `"),
-                    react_tools.join("` or `")
-                ),
-                (true, false) => format!(
-                    "Before calling `end_turn` you MUST always reply using `{}`. ",
-                    reply_tools.join("` or `")
-                ),
-                (false, true) => format!(
-                    "Before calling `end_turn` you MUST always acknowledge using `{}`. ",
-                    react_tools.join("` or `")
-                ),
-                (false, false) => String::new(),
+
+            let has_reply = !plain_reply.is_empty() || !block_reply.is_empty();
+            let has_react = !react_tools.is_empty();
+
+            let ack_instruction = if has_reply && has_react {
+                let plain_names = plain_reply.join("`, `");
+                let block_names = block_reply.join("`, `");
+                let react_names = react_tools.join("`, `");
+                let block_clause = if !block_names.is_empty() {
+                    format!(" or `{block_names}` for rich Block Kit layouts")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "Before calling `end_turn` you MUST send exactly one reply to the user.\n\
+                     - Use `{plain_names}` for plain-text or mrkdwn responses{block_clause}.\n\
+                     - Use `{react_names}` only for a brief emoji-only acknowledgement \
+                       (e.g. `thumbsup`, `white_check_mark`) when no text is needed.\n\
+                     Call at most ONE reply tool per turn — never call two reply tools \
+                     or call the same tool twice.\n"
+                )
+            } else if has_reply {
+                let plain_names = plain_reply.join("`, `");
+                let block_names = block_reply.join("`, `");
+                let block_clause = if !block_names.is_empty() {
+                    format!(" or `{block_names}` for rich Block Kit layouts")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "Before calling `end_turn` you MUST reply to the user exactly once \
+                     using `{plain_names}`{block_clause}. \
+                     Never call a reply tool more than once per turn.\n"
+                )
+            } else if has_react {
+                let react_names = react_tools.join("`, `");
+                format!(
+                    "Before calling `end_turn` you MUST acknowledge the user \
+                     using `{react_names}` (exactly once).\n"
+                )
+            } else {
+                String::new()
             };
+
+            // Collect global (non-extension) posting tools so the prompt can warn
+            // the LLM not to use them instead of the extension reply tools.
+            let ext_names: std::collections::HashSet<&str> =
+                ext_specs.iter().map(|s| s.name.as_str()).collect();
+            let global_post_tools: Vec<String> = self
+                .executor
+                .to_specs()
+                .into_iter()
+                .filter(|s| {
+                    !ext_names.contains(s.name.as_str())
+                        && (s.name.contains("post") || s.name.contains("reply"))
+                })
+                .map(|s| format!("`{}`", s.name))
+                .collect();
+            let global_post_warning = if !global_post_tools.is_empty() {
+                format!(
+                    "Do NOT use {} to reply here — those tools post outside this \
+                     conversation and have no thread context. Use the reply tools \
+                     listed above instead.\n",
+                    global_post_tools.join(", ")
+                )
+            } else {
+                String::new()
+            };
+
             format!(
                 "{base_system_prompt}\n\n---\n\n\
                 You are operating inside a messaging interface. \
                 {ack_instruction}\
-                When you have finished, call `end_turn` to signal completion."
+                {global_post_warning}\
+                When you have finished all work, call `end_turn` to signal completion."
             )
         };
 
@@ -521,9 +588,14 @@ impl Orchestrator {
                             (obs, trace)
                         };
 
-                        if ext_map.contains_key(&name)
-                            && (name.contains("reply") || name.contains("post"))
-                        {
+                        // Mark the turn as replied if any posting/reply tool was
+                        // called — regardless of whether it is an extension tool
+                        // or a global skill (e.g. `slack-post`).  Without this,
+                        // calling a global posting skill leaves `replied=false`
+                        // and the auto-post fallback fires on the next FinalAnswer,
+                        // producing a second message in a different context (e.g.
+                        // channel root vs. thread).
+                        if name.contains("reply") || name.contains("post") {
                             replied = true;
                         }
 
@@ -609,7 +681,7 @@ impl Orchestrator {
         let tool_specs = self.executor.to_specs();
 
         // 5. Build the system prompt fresh from disk.
-        let system_prompt = self.memory_loader.load_system_prompt();
+        let system_prompt = self.compose_system_prompt().await;
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -811,7 +883,7 @@ impl Orchestrator {
 
         let tool_specs = self.executor.to_specs();
 
-        let system_prompt = self.memory_loader.load_system_prompt();
+        let system_prompt = self.compose_system_prompt().await;
 
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
@@ -983,6 +1055,42 @@ impl Orchestrator {
         );
     }
 
+    async fn compose_system_prompt(&self) -> String {
+        let mut prompt = self.memory_loader.load_system_prompt();
+        if let Some(skills_xml) = self.available_skills_xml().await {
+            prompt.push_str("\n\n");
+            prompt.push_str(&skills_xml);
+        }
+        prompt
+    }
+
+    async fn available_skills_xml(&self) -> Option<String> {
+        let skills = self.registry.list().await;
+        if skills.is_empty() {
+            return None;
+        }
+
+        let mut buf = String::new();
+        buf.push_str("<available_skills>\n");
+        for skill in &skills {
+            buf.push_str("  <skill>\n");
+            buf.push_str(&format!("    <name>{}</name>\n", escape_xml(&skill.name)));
+            buf.push_str(&format!(
+                "    <description>{}</description>\n",
+                escape_xml(&skill.description)
+            ));
+            if let Some(location) = skill_location_string(skill) {
+                buf.push_str(&format!(
+                    "    <location>{}</location>\n",
+                    escape_xml(&location)
+                ));
+            }
+            buf.push_str("  </skill>\n");
+        }
+        buf.push_str("</available_skills>");
+        Some(buf)
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     async fn prepare_history(
@@ -1106,6 +1214,30 @@ fn tool_result_content(content: &str, _data: Option<&serde_json::Value>) -> Stri
     content.to_string()
 }
 
+fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {
+    let path = skill.dir.join("SKILL.md");
+    if path.exists() {
+        Some(path.display().to_string())
+    } else {
+        None
+    }
+}
+
+fn escape_xml(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -1170,7 +1302,13 @@ mod tests {
             registry.clone(),
             Arc::new(config.clone()),
         ));
-        let orch = Arc::new(Orchestrator::new(llm, storage.clone(), executor, &config));
+        let orch = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor,
+            registry.clone(),
+            &config,
+        ));
         (orch, storage)
     }
 

@@ -400,8 +400,14 @@ async fn bootstrap(
 
     // Build orchestrator.
     let orchestrator = Arc::new(
-        Orchestrator::new(llm, storage.clone(), executor.clone(), &config)
-            .with_confirmation_callback(confirmation_cb),
+        Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor.clone(),
+            registry.clone(),
+            &config,
+        )
+        .with_confirmation_callback(confirmation_cb),
     );
 
     Ok(Bootstrap {
