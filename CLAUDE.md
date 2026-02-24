@@ -21,6 +21,7 @@ A Rust workspace implementing a local, self-improving AI assistant. Key properti
 | `llama3.1:8b`              | ~8 GB         | Excellent    | 40+ tok/s; strong agentic quality   |
 | `mistral:7b-instruct-v0.3` | ~7 GB         | Good (85 %)  | Fastest; 45 tok/s                   |
 | `deepseek-r1:14b`          | ~11 GB        | Excellent    | Best for complex reasoning          |
+| `phi4:14b`                 | ~11 GB        | Good         | Compact; good structured output     |
 
 > Use `Q4_K_M` quantization for 14 B models. Avoid Q3 — significant quality loss.
 
@@ -73,6 +74,14 @@ interface-cli ──► runtime ──► llm ──► core
 | `skills/*/SKILL.md`                       | Built-in skill definitions (13 skills)                                                                       |
 | `config.toml`                             | Config template — copy to `~/.assistant/config.toml`                                                         |
 
+## Skill discovery order
+
+At startup the assistant scans three locations (highest priority first):
+
+1. `~/.assistant/skills/` — personal skills
+2. `<project>/.assistant/skills/` — project-scoped skills
+3. `<binary dir>/skills/` — built-in skills shipped with the binary
+
 ## Skill tiers
 
 Determined by `metadata.tier` in a `SKILL.md` frontmatter:
@@ -108,9 +117,17 @@ make lint-signal      # clippy for the signal interface crate (separate due to d
 make format           # cargo fmt --all                        ← run before committing
 make run              # cargo run -p assistant-cli
 make run-mcp          # cargo run -p assistant-cli -- mcp
-make run-slack        # cargo run -p assistant-cli -- slack
-make run-mattermost   # cargo run -p assistant-cli -- mattermost
+make run-slack        # cargo run -p assistant-cli --features slack -- slack
+make run-mattermost   # cargo run -p assistant-cli --features mattermost -- mattermost
 make build-signal     # cargo build -p assistant-interface-signal --features signal
+```
+
+To run a single test in a specific crate:
+
+```sh
+cargo test -p assistant-runtime my_test_name
+# Integration tests (note: requires --ignored)
+cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture
 ```
 
 Always run `make lint` and `make format` before committing.
