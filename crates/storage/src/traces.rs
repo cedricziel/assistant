@@ -223,8 +223,8 @@ mod tests {
             let t = ExecutionTrace::new(conv_id, i, "bash", json!({})).with_success("ok", 100);
             store.insert(&t).await.unwrap();
         }
-        let failed = ExecutionTrace::new(conv_id, 3, "bash", json!({}))
-            .with_error("permission denied", 50);
+        let failed =
+            ExecutionTrace::new(conv_id, 3, "bash", json!({})).with_error("permission denied", 50);
         store.insert(&failed).await.unwrap();
 
         let stats = store.stats_for_skill("bash", 100).await.unwrap();
