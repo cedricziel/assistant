@@ -67,6 +67,16 @@ impl ToolHandler for SlackReplyHandler {
             None => return Ok(ToolOutput::error("Missing required parameter 'text'")),
         };
 
+        // Strip inline <think>…</think> blocks before posting; they are
+        // already stored in the DB by the orchestrator and must not be
+        // shown to the user.
+        let text = strip_think_tags(&text);
+        if text.is_empty() {
+            return Ok(ToolOutput::success(
+                "(thinking-only response; no visible content)",
+            ));
+        }
+
         let session = self.client.open_session(&self.token);
         let content = SlackMessageContent::new().with_text(markdown_to_mrkdwn(&text));
         let mut req = SlackApiChatPostMessageRequest::new(self.channel_id.clone().into(), content);
@@ -331,6 +341,39 @@ impl ToolHandler for SlackUploadHandler {
             ))),
         }
     }
+}
+
+// ── Think-tag stripping ───────────────────────────────────────────────────────
+
+/// Strip `<think>…</think>` blocks that some models (e.g. qwen3) embed inline
+/// in their response text when not using a dedicated thinking API.
+///
+/// The full original text (including think blocks) is preserved in the database
+/// by the orchestrator; this function only removes them before posting to Slack
+/// so users never see raw reasoning output.
+fn strip_think_tags(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let lower = input.to_lowercase();
+    let mut pos = 0;
+    while pos < input.len() {
+        match lower[pos..].find("<think>") {
+            Some(open_rel) => {
+                let open_abs = pos + open_rel;
+                result.push_str(&input[pos..open_abs]);
+                match lower[open_abs..].find("</think>") {
+                    Some(close_rel) => {
+                        pos = open_abs + close_rel + "</think>".len();
+                    }
+                    None => break, // unclosed tag — discard the rest
+                }
+            }
+            None => {
+                result.push_str(&input[pos..]);
+                break;
+            }
+        }
+    }
+    result.trim().to_string()
 }
 
 // ── Markdown → mrkdwn conversion ─────────────────────────────────────────────
@@ -613,7 +656,33 @@ pub fn build_slack_tools(
 
 #[cfg(test)]
 mod tests {
-    use super::markdown_to_mrkdwn;
+    use super::{markdown_to_mrkdwn, strip_think_tags};
+
+    #[test]
+    fn think_tags_stripped() {
+        assert_eq!(
+            strip_think_tags("<think>reasoning</think>\nHello!"),
+            "Hello!"
+        );
+    }
+
+    #[test]
+    fn think_tags_middle_stripped() {
+        assert_eq!(
+            strip_think_tags("Before<think>reasoning</think>After"),
+            "BeforeAfter"
+        );
+    }
+
+    #[test]
+    fn no_think_tags_unchanged() {
+        assert_eq!(strip_think_tags("Hello world"), "Hello world");
+    }
+
+    #[test]
+    fn only_think_tags_returns_empty() {
+        assert_eq!(strip_think_tags("<think>all thinking</think>"), "");
+    }
 
     #[test]
     fn bold_double_star_converted() {

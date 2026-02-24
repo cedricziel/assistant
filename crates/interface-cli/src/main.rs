@@ -529,6 +529,15 @@ async fn main() -> Result<()> {
             "Slack is not configured. Add a [slack] section to ~/.assistant/config.toml",
         )?;
         let iface = SlackInterface::new(slack_cfg, bs.orchestrator, bs.storage);
+
+        // Register ambient tools (slack-post, slack-send-dm, slack-list-channels)
+        // so the LLM can see and invoke them during Slack turns.
+        for handler in iface.ambient_tools() {
+            let tool_name = handler.name().to_string();
+            bs.executor.register_ambient_tool(handler);
+            info!("Registered ambient tool: {tool_name}");
+        }
+
         info!("Starting Slack-only mode");
         return iface.run().await;
     }

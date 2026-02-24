@@ -554,6 +554,19 @@ impl Orchestrator {
                 // ── Intermediate thinking step ────────────────────────────────
                 LlmResponse::Thinking(text) => {
                     debug!(iteration, "LLM emitted thinking step");
+                    // Persist to DB so thinking is preserved, but the
+                    // interface (Slack) will never display it directly.
+                    let thinking_msg = {
+                        let mut m = assistant_core::Message::assistant(
+                            conversation_id,
+                            format!("<think>{text}</think>"),
+                        );
+                        m.turn = base_turn + iteration as i64 + 1;
+                        m
+                    };
+                    if let Err(e) = conv_store.save_message(&thinking_msg).await {
+                        warn!("Failed to persist thinking step: {e}");
+                    }
                     history.push(ChatHistoryMessage::Text {
                         role: ChatRole::Assistant,
                         content: text,

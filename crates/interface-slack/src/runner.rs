@@ -46,7 +46,10 @@ fn preview(s: &str, max: usize) -> &str {
 }
 
 use crate::config::{SlackConfig, SlackConfigExt};
-use crate::skills::SlackPostSkill;
+use crate::skills::{
+    SlackDeleteMessageSkill, SlackGetHistorySkill, SlackListChannelsSkill, SlackLookupUserSkill,
+    SlackPostSkill, SlackReactSkill, SlackSendDmSkill, SlackUpdateMessageSkill,
+};
 use crate::tools::build_slack_tools;
 
 // ── Shared callback state ─────────────────────────────────────────────────────
@@ -409,6 +412,15 @@ async fn on_push_event(
     };
     let _conv_guard = conv_lock.lock().await;
 
+    // Prepend a one-line Slack context header so the LLM knows the sender's
+    // user ID and current channel without needing to call any lookup tool.
+    // Format: "[Slack: user=U025CM5HG channel=C025CM5HL]\n<message>"
+    let contextualized_text = format!(
+        "[Slack: user={user_id} channel={channel_id}]\n{text}",
+        user_id = user_id,
+        channel_id = channel_id,
+    );
+
     let orchestrator_start = std::time::Instant::now();
     debug!(
         conversation_id = %conversation_id,
@@ -416,7 +428,12 @@ async fn on_push_event(
         "orchestrator.run_turn_with_tools →"
     );
     let turn_result = orchestrator
-        .run_turn_with_tools(&text, conversation_id, Interface::Slack, extensions)
+        .run_turn_with_tools(
+            &contextualized_text,
+            conversation_id,
+            Interface::Slack,
+            extensions,
+        )
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
@@ -516,9 +533,37 @@ impl SlackInterface {
             }
         };
         let token = SlackApiToken::new(bot_token_str.into());
-        let handler: std::sync::Arc<dyn assistant_core::ToolHandler> =
-            std::sync::Arc::new(SlackPostSkill { client, token });
-        vec![handler]
+        vec![
+            std::sync::Arc::new(SlackPostSkill {
+                client: client.clone(),
+                token: token.clone(),
+            }) as std::sync::Arc<dyn assistant_core::ToolHandler>,
+            std::sync::Arc::new(SlackSendDmSkill {
+                client: client.clone(),
+                token: token.clone(),
+            }),
+            std::sync::Arc::new(SlackListChannelsSkill {
+                client: client.clone(),
+                token: token.clone(),
+            }),
+            std::sync::Arc::new(SlackGetHistorySkill {
+                client: client.clone(),
+                token: token.clone(),
+            }),
+            std::sync::Arc::new(SlackReactSkill {
+                client: client.clone(),
+                token: token.clone(),
+            }),
+            std::sync::Arc::new(SlackUpdateMessageSkill {
+                client: client.clone(),
+                token: token.clone(),
+            }),
+            std::sync::Arc::new(SlackDeleteMessageSkill {
+                client: client.clone(),
+                token: token.clone(),
+            }),
+            std::sync::Arc::new(SlackLookupUserSkill { client, token }),
+        ]
     }
 
     /// Start the Slack Socket Mode listener loop, reconnecting on disconnect.
