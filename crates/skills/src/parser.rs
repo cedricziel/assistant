@@ -111,6 +111,7 @@ fn is_kebab_case(name: &str) -> bool {
         && name.len() <= 64
         && !name.starts_with('-')
         && !name.ends_with('-')
+        && !name.contains("--")
         && name
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')

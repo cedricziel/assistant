@@ -141,6 +141,8 @@ fn build_anthropic_messages(history: &[ChatHistoryMessage]) -> (Vec<Value>, Vec<
             }
 
             ChatHistoryMessage::AssistantToolCalls(calls) => {
+                // Start a new batch; previous pending_ids from older rounds are consumed
+                // by ToolResult messages, so only the current batch goes here.
                 pending_ids.clear();
                 let content_blocks: Vec<Value> = calls
                     .iter()
@@ -163,12 +165,14 @@ fn build_anthropic_messages(history: &[ChatHistoryMessage]) -> (Vec<Value>, Vec<
             }
 
             ChatHistoryMessage::ToolResult { name, content } => {
-                // Look up the tool_use_id by matching the tool name from pending_ids.
-                let tool_use_id = pending_ids
-                    .iter()
-                    .find(|(n, _)| n == name)
-                    .map(|(_, id)| id.clone())
-                    .unwrap_or_else(|| format!("toolu_unknown_{name}"));
+                // Consume the first matching pending entry so that when the same tool
+                // is called twice in one batch, each result gets a distinct id.
+                let pos = pending_ids.iter().position(|(n, _)| n == name);
+                let tool_use_id = if let Some(idx) = pos {
+                    pending_ids.remove(idx).1
+                } else {
+                    format!("toolu_unknown_{name}")
+                };
 
                 let result_block = json!({
                     "type": "tool_result",
@@ -343,7 +347,7 @@ impl AnthropicProvider {
         let mut line_buf = String::new();
         let mut event_type = String::new();
 
-        while let Some(chunk) = byte_stream.next().await {
+        'outer: while let Some(chunk) = byte_stream.next().await {
             let chunk = chunk.map_err(|e| anyhow::anyhow!("SSE stream read error: {e}"))?;
             let text = String::from_utf8_lossy(&chunk);
 
@@ -365,7 +369,7 @@ impl AnthropicProvider {
 
                     if let Some(data) = line.strip_prefix("data: ") {
                         if data == "[DONE]" {
-                            break;
+                            break 'outer;
                         }
                         if let Ok(json) = serde_json::from_str::<Value>(data) {
                             process_sse_event(

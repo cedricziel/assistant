@@ -1072,38 +1072,13 @@ impl Orchestrator {
 // ── Module-level helpers ───────────────────────────────────────────────────────
 
 /// Build the tool result content from a tool output.
-fn tool_result_content(content: &str, data: Option<&serde_json::Value>) -> String {
-    if let Some(d) = data {
-        if let Ok(json) = serde_json::to_string(d) {
-            return json;
-        }
-    }
+///
+/// Always returns the human-readable `content` string so the LLM receives
+/// a consistent, formatted observation. The structured `data` field is for
+/// downstream callers that need machine-readable output; it is not sent to
+/// the model directly.
+fn tool_result_content(content: &str, _data: Option<&serde_json::Value>) -> String {
     content.to_string()
-}
-
-#[allow(dead_code)]
-fn format_params_as_prompt(tool_name: &str, params: &serde_json::Value) -> String {
-    if let serde_json::Value::Object(map) = params {
-        if map.is_empty() {
-            return format!("Execute the '{tool_name}' tool.");
-        }
-        let param_lines: Vec<String> = map
-            .iter()
-            .map(|(k, v)| {
-                let val = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                format!("- {k}: {val}")
-            })
-            .collect();
-        format!(
-            "Execute the '{tool_name}' tool with the following parameters:\n{}",
-            param_lines.join("\n")
-        )
-    } else {
-        format!("Execute the '{tool_name}' tool.")
-    }
 }
 
 #[cfg(test)]

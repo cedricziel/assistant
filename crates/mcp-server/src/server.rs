@@ -43,7 +43,10 @@ pub async fn handle_request(
                     version: env!("CARGO_PKG_VERSION"),
                 },
             };
-            JsonRpcResponse::ok(req.id, serde_json::to_value(result).unwrap())
+            JsonRpcResponse::ok(
+                req.id,
+                serde_json::to_value(result).unwrap_or(serde_json::json!({})),
+            )
         }
 
         "notifications/initialized" | "ping" => JsonRpcResponse::ok(req.id, json!({})),
@@ -63,7 +66,7 @@ pub async fn handle_request(
 
             // Management tools appended after the per-tool entries.
             tools.push(McpTool {
-                name: "run_prompt".to_string(),
+                name: "run-prompt".to_string(),
                 description:
                     "Send a prompt through the orchestrator loop (may invoke multiple tools)."
                         .to_string(),
@@ -76,7 +79,7 @@ pub async fn handle_request(
                 }),
             });
             tools.push(McpTool {
-                name: "install_skill".to_string(),
+                name: "install-skill".to_string(),
                 description: "Install a skill from a local path or GitHub (owner/repo[/path]).".to_string(),
                 input_schema: json!({
                     "type": "object",
@@ -95,7 +98,7 @@ pub async fn handle_request(
             let tool_input = req.params["arguments"].clone();
 
             // ── Management tools ──────────────────────────────────────────────
-            if tool_name == "run_prompt" {
+            if tool_name == "run-prompt" {
                 let Some(prompt) = tool_input["prompt"].as_str() else {
                     return JsonRpcResponse::err(
                         req.id,
@@ -118,7 +121,7 @@ pub async fn handle_request(
                 };
             }
 
-            if tool_name == "install_skill" {
+            if tool_name == "install-skill" {
                 let Some(source) = tool_input["source"].as_str() else {
                     return JsonRpcResponse::err(
                         req.id,

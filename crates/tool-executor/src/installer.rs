@@ -128,7 +128,28 @@ async fn install_from_github(
         };
 
         if resp.status().is_success() {
-            skill_md_content = Some(resp.text().await.context("Failed to read response body")?);
+            // Guard against unexpectedly large responses (1 MB cap).
+            const MAX_SKILL_MD_BYTES: u64 = 1024 * 1024;
+            if let Some(len) = resp.content_length() {
+                if len > MAX_SKILL_MD_BYTES {
+                    last_error = format!(
+                        "SKILL.md at '{url}' is too large ({len} bytes, limit {MAX_SKILL_MD_BYTES})"
+                    );
+                    continue;
+                }
+            }
+            let bytes = resp.bytes().await.context("Failed to read response body")?;
+            if bytes.len() as u64 > MAX_SKILL_MD_BYTES {
+                last_error = format!(
+                    "SKILL.md at '{url}' is too large ({} bytes, limit {MAX_SKILL_MD_BYTES})",
+                    bytes.len()
+                );
+                continue;
+            }
+            skill_md_content = Some(
+                String::from_utf8(bytes.to_vec())
+                    .context("SKILL.md response is not valid UTF-8")?,
+            );
             break;
         }
 
