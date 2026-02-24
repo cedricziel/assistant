@@ -278,10 +278,31 @@ pub struct StorageConfig {
 }
 
 /// Skills configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillsConfig {
+    /// Extra directories to scan for Agent Skills.
+    /// Defaults cover Claude Code / NanoClaw shared skill folders.
+    #[serde(default = "default_skill_extra_dirs")]
     pub extra_dirs: Vec<String>,
+    /// Skills to disable globally.
+    #[serde(default)]
     pub disabled: Vec<String>,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            extra_dirs: default_skill_extra_dirs(),
+            disabled: Vec::new(),
+        }
+    }
+}
+
+fn default_skill_extra_dirs() -> Vec<String> {
+    vec![
+        "~/.claude/skills".to_string(),
+        "./.claude/skills".to_string(),
+    ]
 }
 
 /// MCP server configuration
@@ -326,6 +347,8 @@ pub struct MemoryConfig {
     /// Whether memory loading is enabled (default: true)
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Path to AGENTS.md — workspace rules, session startup ritual, memory discipline
+    pub agents_path: Option<String>,
     /// Path to SOUL.md — personality, values, core truths
     pub soul_path: Option<String>,
     /// Path to IDENTITY.md — name, role, structured identity profile
@@ -342,6 +365,7 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            agents_path: None,
             soul_path: None,
             identity_path: None,
             user_path: None,

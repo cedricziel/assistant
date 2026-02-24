@@ -18,6 +18,68 @@ const BOOTSTRAP_MAX_CHARS_PER_FILE: usize = 20_000;
 /// Maximum total characters across all memory sections in the system prompt.
 const BOOTSTRAP_MAX_CHARS_TOTAL: usize = 150_000;
 
+const DEFAULT_AGENTS: &str = r#"# AGENTS.md — Your Workspace
+
+This is your behavioral rulebook. Read it every session. Follow it.
+
+## Every Session
+
+Before doing anything else:
+
+1. Read today's and yesterday's daily notes (`memory-get target=notes/YYYY-MM-DD`) for recent context
+2. If the user references anything from the past, run `memory-search` before answering
+
+Don't ask permission. Just do it.
+
+## Memory
+
+You wake up fresh each session. These files are your continuity:
+
+- **Daily notes:** `~/.assistant/memory/YYYY-MM-DD.md` — raw log of what happened each day
+- **Long-term:** `~/.assistant/MEMORY.md` — curated facts, preferences, and decisions that survive indefinitely
+
+### 📝 Write It Down — No "Mental Notes"!
+
+**Memory is limited.** If you want to remember something, write it to a file. "Mental notes" don't survive session restarts. Files do.
+
+- When someone says "remember this" → append to today's daily note
+- When you learn something durable (preference, fact, decision) → update `MEMORY.md`
+- When you make a mistake → note it so future-you doesn't repeat it
+- **At the end of every session** → write a brief summary entry to today's daily note
+
+**How to append to today's daily note:**
+
+1. Read the current file: `memory-get target=notes/YYYY-MM-DD`
+2. Append your entry at the end and write the full content back: `file-write path=~/.assistant/memory/YYYY-MM-DD.md`
+
+Format entries as:
+```
+## HH:MM [topic]
+
+<what happened>
+```
+
+### MEMORY.md — Curated, Not a Dump
+
+MEMORY.md is long-term memory — distilled insight, not raw logs. Keep it tidy:
+
+- Write significant decisions, preferences, and facts worth keeping indefinitely
+- Periodically promote key entries from daily notes to MEMORY.md
+- Remove outdated entries; don't accumulate noise
+
+Use `file-edit` for surgical edits to MEMORY.md, or `file-write` to rewrite sections from scratch.
+
+### Reading Memory
+
+- `memory-get target=notes/YYYY-MM-DD` — read a specific day's notes
+- `memory-get target=memory` — read MEMORY.md
+- `memory-search query="natural language"` — search across all memory
+
+---
+
+_This file is yours to evolve. Update it as you learn what works._
+"#;
+
 const DEFAULT_SOUL: &str = r#"# Soul
 
 _You're not a chatbot. You're a local agent running on someone's own hardware — trusted with their files, their messages, their time._
@@ -128,6 +190,7 @@ _Keep this tidy. Outdated entries should be removed, not accumulated._
 
 /// Loads and manages the assistant's persistent markdown memory files.
 pub struct MemoryLoader {
+    agents_path: PathBuf,
     soul_path: PathBuf,
     identity_path: PathBuf,
     user_path: PathBuf,
@@ -142,6 +205,7 @@ impl MemoryLoader {
         let base = base_dir();
         let mem = &config.memory;
         Self {
+            agents_path: resolve_path(&mem.agents_path, &base, "AGENTS.md"),
             soul_path: resolve_path(&mem.soul_path, &base, "SOUL.md"),
             identity_path: resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
             user_path: resolve_path(&mem.user_path, &base, "USER.md"),
@@ -156,6 +220,7 @@ impl MemoryLoader {
     pub fn from_memory_config(mem: &MemoryConfig) -> Self {
         let base = base_dir();
         Self {
+            agents_path: resolve_path(&mem.agents_path, &base, "AGENTS.md"),
             soul_path: resolve_path(&mem.soul_path, &base, "SOUL.md"),
             identity_path: resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
             user_path: resolve_path(&mem.user_path, &base, "USER.md"),
@@ -170,6 +235,7 @@ impl MemoryLoader {
         if !self.enabled {
             return;
         }
+        write_default(&self.agents_path, DEFAULT_AGENTS);
         write_default(&self.soul_path, DEFAULT_SOUL);
         write_default(&self.identity_path, &DEFAULT_IDENTITY);
         write_default(&self.user_path, DEFAULT_USER);
@@ -194,6 +260,7 @@ impl MemoryLoader {
         let mut total_chars: usize = 0;
 
         for (label, path) in [
+            ("Agents", &self.agents_path),
             ("Soul", &self.soul_path),
             ("Identity", &self.identity_path),
             ("User", &self.user_path),
