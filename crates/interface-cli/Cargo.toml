@@ -46,3 +46,5 @@ toml = { workspace = true }
 dirs = { workspace = true }
 # Argument parsing
 clap = { workspace = true }
+# Explicit rustls dep so we can install the ring provider before TLS starts
+rustls = { workspace = true }

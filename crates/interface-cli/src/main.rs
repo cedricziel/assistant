@@ -440,6 +440,12 @@ async fn bootstrap(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Install the default rustls crypto provider (ring) once, before any TLS
+    // handshake.  When both `aws-lc-rs` and `ring` features are compiled in
+    // via transitive dependencies, rustls cannot auto-select one and panics
+    // unless we do this explicitly.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // 1. Parse CLI arguments first so we can configure tracing appropriately.
     let cli = Cli::parse();
 
