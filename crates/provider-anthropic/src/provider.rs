@@ -6,10 +6,11 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use assistant_core::types::{AnthropicUserLocation, AnthropicWebSearchOptions};
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, ToolCallItem, ToolSpec,
-    ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse, ToolCallItem,
+    ToolSpec, ToolSupport,
 };
 
 // ── AnthropicConfig ───────────────────────────────────────────────────────────
@@ -27,6 +28,8 @@ pub struct AnthropicConfig {
     pub timeout_secs: u64,
     /// `max_tokens` sent in every request (Anthropic requires this field).
     pub max_tokens: u32,
+    /// Optional hosted web-search configuration.
+    pub web_search: Option<WebSearchConfig>,
 }
 
 impl Default for AnthropicConfig {
@@ -37,6 +40,7 @@ impl Default for AnthropicConfig {
             base_url: "https://api.anthropic.com".to_string(),
             timeout_secs: 120,
             max_tokens: 8192,
+            web_search: None,
         }
     }
 }
@@ -69,7 +73,52 @@ impl AnthropicConfig {
             },
             timeout_secs: cfg.timeout_secs,
             max_tokens: 8192,
+            web_search: if cfg.anthropic.web_search.enabled {
+                Some(WebSearchConfig::from(&cfg.anthropic.web_search))
+            } else {
+                None
+            },
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WebSearchConfig {
+    pub max_uses: Option<u32>,
+    pub allowed_domains: Vec<String>,
+    pub blocked_domains: Vec<String>,
+    pub user_location: Option<WebSearchLocation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebSearchLocation {
+    pub r#type: Option<String>,
+    pub city: Option<String>,
+    pub region: Option<String>,
+    pub country: Option<String>,
+    pub timezone: Option<String>,
+}
+
+impl From<&AnthropicWebSearchOptions> for WebSearchConfig {
+    fn from(opts: &AnthropicWebSearchOptions) -> Self {
+        Self {
+            max_uses: opts.max_uses,
+            allowed_domains: opts.allowed_domains.clone(),
+            blocked_domains: opts.blocked_domains.clone(),
+            user_location: opts.user_location.as_ref().map(WebSearchLocation::from),
+        }
+    }
+}
+
+impl From<&AnthropicUserLocation> for WebSearchLocation {
+    fn from(loc: &AnthropicUserLocation) -> Self {
+        Self {
+            r#type: loc.r#type.clone(),
+            city: loc.city.clone(),
+            region: loc.region.clone(),
+            country: loc.country.clone(),
+            timezone: loc.timezone.clone(),
+        }
     }
 }
 
@@ -94,6 +143,48 @@ impl AnthropicProvider {
     /// Convenience constructor directly from [`LlmConfig`].
     pub fn from_llm_config(cfg: &LlmConfig) -> anyhow::Result<Self> {
         Self::new(AnthropicConfig::from_llm_config(cfg)?)
+    }
+
+    fn server_tool_specs(&self) -> Vec<Value> {
+        let mut specs = Vec::new();
+        if let Some(cfg) = &self.config.web_search {
+            let mut entry = json!({
+                "type": "web_search_20250305",
+                "name": "web_search",
+            });
+            if let Some(max) = cfg.max_uses {
+                entry["max_uses"] = json!(max);
+            }
+            if !cfg.allowed_domains.is_empty() {
+                entry["allowed_domains"] = json!(cfg.allowed_domains);
+            }
+            if !cfg.blocked_domains.is_empty() {
+                entry["blocked_domains"] = json!(cfg.blocked_domains);
+            }
+            if let Some(loc) = &cfg.user_location {
+                let mut loc_json = serde_json::Map::new();
+                if let Some(t) = &loc.r#type {
+                    loc_json.insert("type".to_string(), json!(t));
+                }
+                if let Some(city) = &loc.city {
+                    loc_json.insert("city".to_string(), json!(city));
+                }
+                if let Some(region) = &loc.region {
+                    loc_json.insert("region".to_string(), json!(region));
+                }
+                if let Some(country) = &loc.country {
+                    loc_json.insert("country".to_string(), json!(country));
+                }
+                if let Some(tz) = &loc.timezone {
+                    loc_json.insert("timezone".to_string(), json!(tz));
+                }
+                if !loc_json.is_empty() {
+                    entry["user_location"] = Value::Object(loc_json);
+                }
+            }
+            specs.push(entry);
+        }
+        specs
     }
 }
 
@@ -199,6 +290,11 @@ impl LlmProvider for AnthropicProvider {
             tools: ToolSupport::Native,
             streaming: true,
             vision: true,
+            hosted_tools: if self.config.web_search.is_some() {
+                vec![HostedTool::WebSearch]
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -241,7 +337,8 @@ impl AnthropicProvider {
         debug!(model = %self.config.model, tools = tools.len(), "Sending request to Anthropic");
 
         let (messages, _) = build_anthropic_messages(history);
-        let tools: Vec<Value> = tools.iter().map(tool_spec_to_anthropic_json).collect();
+        let mut request_tools: Vec<Value> = tools.iter().map(tool_spec_to_anthropic_json).collect();
+        request_tools.extend(self.server_tool_specs());
 
         let mut body = json!({
             "model": self.config.model,
@@ -252,8 +349,8 @@ impl AnthropicProvider {
         if !system_prompt.is_empty() {
             body["system"] = json!(system_prompt);
         }
-        if !tools.is_empty() {
-            body["tools"] = json!(tools);
+        if !request_tools.is_empty() {
+            body["tools"] = json!(request_tools);
         }
 
         let url = format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'));
@@ -299,7 +396,8 @@ impl AnthropicProvider {
         );
 
         let (messages, _) = build_anthropic_messages(history);
-        let tools: Vec<Value> = tools.iter().map(tool_spec_to_anthropic_json).collect();
+        let mut request_tools: Vec<Value> = tools.iter().map(tool_spec_to_anthropic_json).collect();
+        request_tools.extend(self.server_tool_specs());
 
         let mut body = json!({
             "model": self.config.model,
@@ -311,8 +409,8 @@ impl AnthropicProvider {
         if !system_prompt.is_empty() {
             body["system"] = json!(system_prompt);
         }
-        if !tools.is_empty() {
-            body["tools"] = json!(tools);
+        if !request_tools.is_empty() {
+            body["tools"] = json!(request_tools);
         }
 
         let url = format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'));

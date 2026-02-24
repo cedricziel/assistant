@@ -255,6 +255,9 @@ pub struct LlmConfig {
     /// For Anthropic, also checked via `ANTHROPIC_API_KEY` env var.
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Provider-specific Anthropic options.
+    #[serde(default)]
+    pub anthropic: AnthropicOptions,
 }
 
 impl Default for LlmConfig {
@@ -267,8 +270,50 @@ impl Default for LlmConfig {
             timeout_secs: default_llm_timeout_secs(),
             embedding_model: default_embedding_model(),
             api_key: None,
+            anthropic: AnthropicOptions::default(),
         }
     }
+}
+
+/// Additional configuration for Anthropic-specific features.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AnthropicOptions {
+    #[serde(default)]
+    pub web_search: AnthropicWebSearchOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnthropicWebSearchOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    pub max_uses: Option<u32>,
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+    #[serde(default)]
+    pub blocked_domains: Vec<String>,
+    pub user_location: Option<AnthropicUserLocation>,
+}
+
+impl Default for AnthropicWebSearchOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_uses: None,
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+            user_location: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AnthropicUserLocation {
+    #[serde(rename = "type")]
+    pub r#type: Option<String>,
+    pub city: Option<String>,
+    pub region: Option<String>,
+    pub country: Option<String>,
+    pub timezone: Option<String>,
 }
 
 /// Storage configuration

@@ -404,6 +404,7 @@ impl LlmProvider for LlmClient {
             tools: ToolSupport::Native,
             streaming: true,
             vision: false,
+            hosted_tools: Vec::new(),
         }
     }
 

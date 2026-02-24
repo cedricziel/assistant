@@ -30,6 +30,20 @@ timeout_secs = 120
 # api_key   = "sk-ant-..."          # or set ANTHROPIC_API_KEY env var
 # max_iterations = 10
 # timeout_secs   = 120
+#
+# # Optional: enable Anthropic's hosted web search tool
+# [llm.anthropic.web_search]
+# enabled = true
+# max_uses = 3
+# allowed_domains = ["example.com"]
+# blocked_domains = []
+#
+# [llm.anthropic.web_search.user_location]
+# type = "approximate"
+# city = "San Francisco"
+# region = "California"
+# country = "US"
+# timezone = "America/Los_Angeles"
 
 [storage]
 # Path to SQLite database (~/.assistant/assistant.db by default)

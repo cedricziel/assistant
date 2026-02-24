@@ -8,7 +8,9 @@ use anyhow::Result;
 use assistant_core::{
     ExecutionContext, ExecutionTrace, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
 };
-use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, ToolSpec};
+use assistant_llm::{
+    Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse, ToolSpec,
+};
 use assistant_skills::SkillDef as SpecSkillDef;
 use assistant_storage::{conversations::ConversationStore, SkillRegistry, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
@@ -198,7 +200,8 @@ impl Orchestrator {
         //    arbitrary channels without thread context and reliably confuse the LLM
         //    into replying to the channel root instead of the active thread.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
-        let global_specs = self.executor.to_specs();
+        let provider_caps = self.llm.capabilities();
+        let global_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
         let all_specs: Vec<ToolSpec> = ext_specs
             .iter()
             .cloned()
@@ -674,7 +677,8 @@ impl Orchestrator {
             self.prepare_history(user_message, conversation_id).await?;
 
         // 4. Load all registered tool specs.
-        let tool_specs = self.executor.to_specs();
+        let provider_caps = self.llm.capabilities();
+        let tool_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
 
         // 5. Build the system prompt fresh from disk.
         let system_prompt = self.compose_system_prompt().await;
@@ -877,7 +881,8 @@ impl Orchestrator {
         let (conv_store, mut history, base_turn) =
             self.prepare_history(user_message, conversation_id).await?;
 
-        let tool_specs = self.executor.to_specs();
+        let provider_caps = self.llm.capabilities();
+        let tool_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
 
         let system_prompt = self.compose_system_prompt().await;
 
@@ -1151,6 +1156,20 @@ impl Orchestrator {
             name: name.to_string(),
             content: content.to_string(),
         });
+    }
+
+    fn filter_tool_specs(specs: Vec<ToolSpec>, caps: &Capabilities) -> Vec<ToolSpec> {
+        specs
+            .into_iter()
+            .filter(|spec| !Self::tool_suppressed_by_caps(spec, caps))
+            .collect()
+    }
+
+    fn tool_suppressed_by_caps(spec: &ToolSpec, caps: &Capabilities) -> bool {
+        if caps.hosted_tools.contains(&HostedTool::WebSearch) && spec.name == "web-search" {
+            return true;
+        }
+        false
     }
 
     async fn reject_if_disabled(

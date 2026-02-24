@@ -30,6 +30,15 @@ pub struct Capabilities {
     pub streaming: bool,
     /// Whether the provider accepts image inputs.
     pub vision: bool,
+    /// Hosted tools supplied directly by the provider (e.g. Anthropic web search).
+    pub hosted_tools: Vec<HostedTool>,
+}
+
+/// Provider-managed tools that should suppress local equivalents.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum HostedTool {
+    /// Anthropic-managed `web_search` tool.
+    WebSearch,
 }
 
 // ── LlmProvider trait ─────────────────────────────────────────────────────────
