@@ -4,8 +4,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use gray_matter::{engine::YAML, Matter};
 use serde::Deserialize;
+use serde_json::Value;
 
-use crate::skill::{SkillDef, SkillSource, SkillTier};
+use crate::skill::{SkillDef, SkillSource};
 
 /// The raw YAML frontmatter fields from a SKILL.md (Agent Skills spec)
 #[derive(Debug, Deserialize)]
@@ -16,10 +17,9 @@ struct Frontmatter {
     license: Option<String>,
     #[serde(default)]
     compatibility: Option<String>,
-    #[serde(rename = "allowed-tools", default)]
-    allowed_tools: Vec<String>,
-    #[serde(default)]
-    metadata: HashMap<String, String>,
+    /// Captures all other frontmatter fields as raw JSON values.
+    #[serde(flatten, default)]
+    extra: HashMap<String, Value>,
 }
 
 /// Parse a skill directory containing a SKILL.md file into a SkillDef.
@@ -47,60 +47,32 @@ pub fn parse_skill_content(content: &str, dir: &Path, source: SkillSource) -> Re
     )
     .context("Failed to deserialize SKILL.md frontmatter")?;
 
-    // Derive execution tier from metadata.tier
-    let tier = derive_tier(&front.metadata, dir);
-
-    // Derive boolean flags from metadata
-    let mutating = front
-        .metadata
-        .get("mutating")
-        .map(|v| v == "true")
-        .unwrap_or(false);
-
-    let confirmation_required = front
-        .metadata
-        .get("confirmation-required")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    // Validate name: must be kebab-case and match the directory name when non-empty.
+    if !is_kebab_case(&front.name) {
+        anyhow::bail!(
+            "SKILL.md name '{}' must be kebab-case (lowercase letters, digits, hyphens only)",
+            front.name
+        );
+    }
+    let dir_name = dir.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    if !dir_name.is_empty() && front.name != dir_name {
+        anyhow::bail!(
+            "SKILL.md name '{}' must match the directory name '{}'",
+            front.name,
+            dir_name
+        );
+    }
 
     Ok(SkillDef {
         name: front.name,
         description: front.description,
         license: front.license,
         compatibility: front.compatibility,
-        allowed_tools: front.allowed_tools,
-        metadata: front.metadata,
+        metadata: front.extra,
         body: matter.content,
         dir: dir.to_path_buf(),
-        tier,
-        mutating,
-        confirmation_required,
         source,
     })
-}
-
-/// Derive a SkillTier from the `metadata.tier` field and the skill directory.
-fn derive_tier(metadata: &HashMap<String, String>, dir: &Path) -> SkillTier {
-    match metadata.get("tier").map(String::as_str) {
-        Some("script") => {
-            // Look for an entrypoint in scripts/
-            let scripts_dir = dir.join("scripts");
-            let entrypoint = if let Some(ep) = metadata.get("entrypoint") {
-                scripts_dir.join(ep)
-            } else {
-                // Default: look for any executable in scripts/
-                scripts_dir.join("run")
-            };
-            SkillTier::Script { entrypoint }
-        }
-        Some("wasm") => {
-            let plugin = dir.join("plugin.wasm");
-            SkillTier::Wasm { plugin }
-        }
-        Some("builtin") => SkillTier::Builtin,
-        // Default for user skills with no tier specified: prompt
-        _ => SkillTier::Prompt,
-    }
 }
 
 /// Discover and parse all skill directories under a given root directory.
@@ -132,6 +104,19 @@ pub fn discover_skills(skills_root: &Path, source: SkillSource) -> Vec<SkillDef>
     skills
 }
 
+/// Returns `true` if `name` is a valid kebab-case identifier:
+/// lowercase ASCII letters, digits, and interior hyphens only.
+fn is_kebab_case(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && !name.contains("--")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 /// The bundled `skills/` directory embedded into the binary at compile time.
 static EMBEDDED_SKILLS: include_dir::Dir =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../skills");
@@ -143,14 +128,9 @@ static EMBEDDED_SKILLS: include_dir::Dir =
 /// a [`SkillDef`] with [`SkillSource::Builtin`].  Skills that fail to parse
 /// are logged as warnings and skipped.
 pub fn embedded_builtin_skills() -> Vec<SkillDef> {
-    use std::path::PathBuf;
-
     let mut skills = Vec::new();
 
     for entry in EMBEDDED_SKILLS.dirs() {
-        // In include_dir 0.7, all file paths are relative to the embedded
-        // root, so a file inside bash/ is stored as "bash/SKILL.md".
-        // Search from the root using the full relative path.
         let skill_md_path = entry.path().join("SKILL.md");
         let Some(skill_md) = EMBEDDED_SKILLS.get_file(&skill_md_path) else {
             continue;
@@ -163,11 +143,7 @@ pub fn embedded_builtin_skills() -> Vec<SkillDef> {
             continue;
         };
 
-        // Use a synthetic dir based on the skill's directory name so that
-        // `derive_tier` can construct script/wasm entrypoint paths if needed.
-        let dir = PathBuf::from(entry.path());
-
-        match parse_skill_content(content, &dir, SkillSource::Builtin) {
+        match parse_skill_content(content, entry.path(), SkillSource::Builtin) {
             Ok(def) => {
                 tracing::debug!("Embedded builtin skill loaded: {}", def.name);
                 skills.push(def);
@@ -196,8 +172,6 @@ description: A test skill for unit testing
 license: MIT
 metadata:
   tier: builtin
-  mutating: "false"
-  confirmation-required: "false"
 ---
 
 ## Instructions
@@ -222,9 +196,6 @@ Body text.
 
         assert_eq!(skill.name, "test-skill");
         assert_eq!(skill.description, "A test skill for unit testing");
-        assert_eq!(skill.tier, SkillTier::Builtin);
-        assert!(!skill.mutating);
-        assert!(!skill.confirmation_required);
         assert_eq!(skill.license, Some("MIT".to_string()));
         assert!(skill.body.contains("This is a test skill"));
     }
@@ -235,9 +206,7 @@ Body text.
         let skill = parse_skill_content(MINIMAL_SKILL_MD, &dir, SkillSource::User).unwrap();
 
         assert_eq!(skill.name, "minimal");
-        // Default tier when none specified: Prompt
-        assert_eq!(skill.tier, SkillTier::Prompt);
-        assert!(!skill.mutating);
+        assert!(skill.body.contains("Body text"));
     }
 
     #[test]
@@ -245,57 +214,5 @@ Body text.
         let dir = PathBuf::from("/tmp/invalid");
         let result = parse_skill_content(INVALID_SKILL_MD, &dir, SkillSource::User);
         assert!(result.is_err());
-    }
-}
-
-#[cfg(test)]
-mod embedded_tests {
-    use super::*;
-
-    #[test]
-    fn embedded_builtin_skills_are_non_empty() {
-        let skills = embedded_builtin_skills();
-        assert!(
-            !skills.is_empty(),
-            "embedded_builtin_skills() returned empty — include_dir path may be wrong"
-        );
-    }
-
-    #[test]
-    fn embedded_skills_include_memory_get() {
-        let skills = embedded_builtin_skills();
-        assert!(
-            skills.iter().any(|s| s.name == "memory-get"),
-            "memory-get skill not found in embedded skills: {:?}",
-            skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn memory_get_parses_as_builtin_tier() {
-        let skills = embedded_builtin_skills();
-        let skill = skills
-            .iter()
-            .find(|s| s.name == "memory-get")
-            .expect("memory-get skill not found in embedded skills");
-        assert!(
-            matches!(skill.tier, crate::skill::SkillTier::Builtin),
-            "memory-get tier should be Builtin, got {:?}",
-            skill.tier
-        );
-    }
-
-    #[test]
-    fn memory_search_parses_as_builtin_tier() {
-        let skills = embedded_builtin_skills();
-        let skill = skills
-            .iter()
-            .find(|s| s.name == "memory-search")
-            .expect("memory-search skill not found in embedded skills");
-        assert!(
-            matches!(skill.tier, crate::skill::SkillTier::Builtin),
-            "memory-search tier should be Builtin, got {:?}",
-            skill.tier
-        );
     }
 }

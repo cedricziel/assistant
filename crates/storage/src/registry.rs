@@ -1,7 +1,7 @@
 //! Skill registry — maps skill names to `SkillDef` and keeps the `skills` SQLite table in sync.
 
 use anyhow::{Context, Result};
-use assistant_core::skill::{SkillDef, SkillSource};
+use assistant_skills::{SkillDef, SkillSource};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::{collections::HashMap, path::Path, sync::Arc};
@@ -34,8 +34,8 @@ impl SkillRegistry {
     /// `SkillDef` values (upsert to memory + SQLite).
     ///
     /// Each element is `(root_directory, source_kind)`.
-    pub async fn load_from_dirs(&mut self, dirs: &[(&Path, SkillSource)]) -> Result<()> {
-        use assistant_core::parser::parse_skill_dir;
+    pub async fn load_from_dirs(&self, dirs: &[(&Path, SkillSource)]) -> Result<()> {
+        use assistant_skills::parse_skill_dir;
 
         for item in dirs {
             let dir: &Path = item.0;
@@ -76,12 +76,12 @@ impl SkillRegistry {
         Ok(())
     }
 
-    /// Register all skills produced by [`assistant_core::embedded_builtin_skills`].
+    /// Register all skills produced by [`assistant_skills::embedded_builtin_skills`].
     ///
     /// Call this during startup before [`load_from_dirs`] so that disk-based
     /// skills can override the embedded defaults.
-    pub async fn load_embedded(&mut self) -> Result<()> {
-        for def in assistant_core::embedded_builtin_skills() {
+    pub async fn load_embedded(&self) -> Result<()> {
+        for def in assistant_skills::embedded_builtin_skills() {
             info!("Registering embedded builtin skill '{}'", def.name);
             self.register(def).await?;
         }
@@ -110,7 +110,7 @@ impl SkillRegistry {
 
     /// Reload a skill from disk by re-reading its `SKILL.md`.
     pub async fn reload(&self, name: &str) -> Result<()> {
-        use assistant_core::parser::parse_skill_dir;
+        use assistant_skills::parse_skill_dir;
 
         let existing: Option<SkillDef> = self.skills.read().await.get(name).cloned();
         let def = existing.with_context(|| format!("Skill '{}' not found in registry", name))?;
@@ -147,7 +147,8 @@ impl SkillRegistry {
     /// Upsert a `SkillDef` into the `skills` table.
     async fn upsert_to_db(&self, skill: &SkillDef) -> Result<()> {
         let dir_path = skill.dir.to_string_lossy().to_string();
-        let tier = skill.tier.label();
+        // New SkillDef has no tier field — store a fixed "knowledge" label.
+        let tier = "knowledge";
         let source_type = skill.source.to_string();
         let metadata_json = serde_json::to_string(&skill.metadata)?;
         let now = Utc::now();
@@ -185,7 +186,6 @@ impl SkillRegistry {
 mod tests {
     use super::*;
     use crate::StorageLayer;
-    use assistant_core::skill::{SkillDef, SkillSource, SkillTier};
     use std::collections::HashMap;
 
     fn make_skill(name: &str) -> SkillDef {
@@ -194,13 +194,9 @@ mod tests {
             description: format!("Test skill: {}", name),
             license: None,
             compatibility: None,
-            allowed_tools: vec![],
             metadata: HashMap::new(),
             body: "Do the thing.".to_string(),
             dir: std::path::PathBuf::from(format!("/tmp/{}", name)),
-            tier: SkillTier::Builtin,
-            mutating: false,
-            confirmation_required: false,
             source: SkillSource::Builtin,
         }
     }

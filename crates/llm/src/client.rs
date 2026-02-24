@@ -1,5 +1,4 @@
 use anyhow::Context as _;
-use assistant_core::SkillDef;
 use async_trait::async_trait;
 use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
@@ -8,6 +7,7 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 use crate::provider::{Capabilities, LlmProvider, ToolSupport};
+use crate::tool_spec::ToolSpec;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ pub struct ToolCallItem {
 /// The outcome of a single `LlmClient::chat` invocation.
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
-    /// The model wants to call one or more skills.
+    /// The model wants to call one or more tools.
     ToolCalls(Vec<ToolCallItem>),
     /// The model has a definitive answer for the user.
     FinalAnswer(String),
@@ -94,10 +94,8 @@ impl From<&assistant_core::LlmConfig> for LlmClientConfig {
 
 /// High-level LLM client using Ollama native tool-calling.
 ///
-/// Sends requests with a `tools` array (built from skill definitions) to the
+/// Sends requests with a `tools` array (built from ToolSpec definitions) to the
 /// Ollama `/api/chat` endpoint and parses `tool_calls` from the JSON response.
-/// If the model does not support native tool-calling, the call will return a
-/// `FinalAnswer` (or the request will fail with an explicit error).
 pub struct LlmClient {
     config: LlmClientConfig,
     /// Shared reqwest client for all requests.
@@ -123,60 +121,43 @@ impl LlmClient {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /// Send a chat turn and return the model's response.
-    ///
-    /// # Parameters
-    /// * `system_prompt` – base system instructions
-    /// * `history` – previous messages in the conversation
-    /// * `skills` – skills available for this turn (passed as native tools)
     pub async fn chat(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_native(system_prompt, history, skills).await
+        self.chat_native(system_prompt, history, tools).await
     }
 
-    /// Like [`chat`] but streams final-answer tokens through `token_sink` as
-    /// they are generated.
-    ///
-    /// Tool-call steps are never streamed — only the tokens that form part of
-    /// a `FinalAnswer` are forwarded.  The method still returns the complete
-    /// [`LlmResponse`] once the generation is finished.
+    /// Like [`chat`] but streams final-answer tokens through `token_sink`.
     pub async fn chat_streaming(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_native_streaming(system_prompt, history, skills, token_sink)
+        self.chat_native_streaming(system_prompt, history, tools, token_sink)
             .await
     }
 
     // ── Native tool-calling (via reqwest) ────────────────────────────────────
 
-    /// Send a native Ollama tool-call request by constructing the JSON body
-    /// directly with `reqwest`.
-    ///
-    /// `ollama_rs::ToolInfo` uses private fields and type-level generics that
-    /// make it impractical for dynamically-discovered skills; we therefore
-    /// bypass the ollama-rs abstractions here and speak to the REST API
-    /// directly.
     async fn chat_native(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
         debug!(
             model = %self.config.model,
-            skills = skills.len(),
+            tools = tools.len(),
             "Sending native tool-call request to Ollama"
         );
 
         let messages = build_json_messages(system_prompt, history);
-        let tools: Vec<Value> = skills.iter().map(|s| skill_to_tool_json(s)).collect();
+        let tools_json: Vec<Value> = tools.iter().map(tool_spec_to_ollama_json).collect();
 
         let role_summary: Vec<&str> = messages
             .iter()
@@ -191,7 +172,7 @@ impl LlmClient {
         let body = json!({
             "model": self.config.model,
             "messages": messages,
-            "tools": tools,
+            "tools": tools_json,
             "stream": false,
         });
 
@@ -218,7 +199,6 @@ impl LlmClient {
 
         debug!("Native tool-call response received");
 
-        // Check for tool_calls in the response message — collect all of them.
         if let Some(tool_calls) = json
             .pointer("/message/tool_calls")
             .and_then(|v| v.as_array())
@@ -251,7 +231,6 @@ impl LlmClient {
             }
         }
 
-        // No tool calls — treat the content as a final answer.
         let content = json
             .pointer("/message/content")
             .and_then(|v| v.as_str())
@@ -262,14 +241,11 @@ impl LlmClient {
         Ok(LlmResponse::FinalAnswer(content))
     }
 
-    /// Native streaming: sends `"stream": true` to Ollama and forwards content
-    /// tokens to `token_sink`.  Tool-call responses produce no streamed content
-    /// so the sink stays silent until the final chunk reveals tool_calls.
     async fn chat_native_streaming(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse> {
         debug!(
@@ -278,12 +254,12 @@ impl LlmClient {
         );
 
         let messages = build_json_messages(system_prompt, history);
-        let tools: Vec<Value> = skills.iter().map(|s| skill_to_tool_json(s)).collect();
+        let tools_json: Vec<Value> = tools.iter().map(tool_spec_to_ollama_json).collect();
 
         let body = json!({
             "model": self.config.model,
             "messages": messages,
-            "tools": tools,
+            "tools": tools_json,
             "stream": true,
         });
 
@@ -306,7 +282,6 @@ impl LlmClient {
         let mut content = String::new();
         let mut tool_calls_json: Option<Value> = None;
 
-        // Ollama sends NDJSON: one JSON object per line.
         let mut byte_stream = resp.bytes_stream();
         let mut line_buf = String::new();
 
@@ -323,7 +298,6 @@ impl LlmClient {
                     }
 
                     if let Ok(json) = serde_json::from_str::<Value>(line) {
-                        // Accumulate content token and forward to sink.
                         if let Some(token) = json
                             .pointer("/message/content")
                             .and_then(|v| v.as_str())
@@ -331,12 +305,10 @@ impl LlmClient {
                         {
                             content.push_str(token);
                             if let Some(ref sink) = token_sink {
-                                // Best-effort send; if receiver is gone, ignore.
                                 let _ = sink.send(token.to_string()).await;
                             }
                         }
 
-                        // Check for tool_calls in the final chunk.
                         if let Some(tc) = json.pointer("/message/tool_calls") {
                             if tc.as_array().is_some_and(|a| !a.is_empty()) {
                                 tool_calls_json = Some(tc.clone());
@@ -349,7 +321,6 @@ impl LlmClient {
             }
         }
 
-        // Flush any remaining content in the buffer.
         if !line_buf.is_empty() {
             if let Ok(json) = serde_json::from_str::<Value>(&line_buf) {
                 if let Some(token) = json
@@ -372,7 +343,6 @@ impl LlmClient {
 
         debug!("Native streaming response complete");
 
-        // Tool calls take priority over any streamed content — collect all of them.
         if let Some(tc) = tool_calls_json {
             if let Some(arr) = tc.as_array() {
                 let items: Vec<ToolCallItem> = arr
@@ -424,197 +394,50 @@ impl LlmProvider for LlmClient {
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_native(system_prompt, history, skills).await
+        self.chat_native(system_prompt, history, tools).await
     }
 
     async fn chat_streaming(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_native_streaming(system_prompt, history, skills, token_sink)
+        self.chat_native_streaming(system_prompt, history, tools, token_sink)
             .await
     }
 }
 
 // ── Free helpers ──────────────────────────────────────────────────────────────
 
-#[cfg(test)]
-mod tests {
-    use wiremock::{
-        matchers::{method, path},
-        Mock, MockServer, ResponseTemplate,
-    };
-
-    use super::*;
-
-    fn make_client(base_url: &str) -> LlmClient {
-        LlmClient::new(LlmClientConfig {
-            model: "test".to_string(),
-            base_url: base_url.to_string(),
-            timeout_secs: 5,
-        })
-        .unwrap()
-    }
-
-    /// Build an Ollama response body with the given `tool_calls` array.
-    fn tool_calls_body(calls: serde_json::Value) -> serde_json::Value {
-        serde_json::json!({
-            "model": "test",
-            "message": {
-                "role": "assistant",
-                "content": null,
-                "tool_calls": calls
-            },
-            "done": true
-        })
-    }
-
-    fn answer_body(text: &str) -> serde_json::Value {
-        serde_json::json!({
-            "model": "test",
-            "message": { "role": "assistant", "content": text },
-            "done": true
-        })
-    }
-
-    /// A single tool call is returned as `ToolCalls` with exactly one item.
-    #[tokio::test]
-    async fn parses_single_tool_call() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/chat"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
-                serde_json::json!([
-                    { "function": { "name": "my-skill", "arguments": { "key": "val" } } }
-                ]),
-            )))
-            .mount(&server)
-            .await;
-
-        let client = make_client(&server.uri());
-        let resp = client.chat("sys", &[], &[]).await.unwrap();
-
-        let LlmResponse::ToolCalls(items) = resp else {
-            panic!("expected ToolCalls, got {resp:?}");
-        };
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].name, "my-skill");
-        assert_eq!(items[0].params["key"], "val");
-    }
-
-    /// Multiple tool calls in one response are all parsed and returned together.
-    #[tokio::test]
-    async fn parses_multiple_tool_calls() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/chat"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
-                serde_json::json!([
-                    { "function": { "name": "skill-a", "arguments": { "x": 1 } } },
-                    { "function": { "name": "skill-b", "arguments": { "y": 2 } } }
-                ]),
-            )))
-            .mount(&server)
-            .await;
-
-        let client = make_client(&server.uri());
-        let resp = client.chat("sys", &[], &[]).await.unwrap();
-
-        let LlmResponse::ToolCalls(items) = resp else {
-            panic!("expected ToolCalls, got {resp:?}");
-        };
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].name, "skill-a");
-        assert_eq!(items[0].params["x"], 1);
-        assert_eq!(items[1].name, "skill-b");
-        assert_eq!(items[1].params["y"], 2);
-    }
-
-    /// An empty `tool_calls` array falls back to treating the content as a
-    /// `FinalAnswer`.
-    #[tokio::test]
-    async fn empty_tool_calls_falls_back_to_final_answer() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/chat"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(answer_body("hello!")))
-            .mount(&server)
-            .await;
-
-        let client = make_client(&server.uri());
-        let resp = client.chat("sys", &[], &[]).await.unwrap();
-
-        let LlmResponse::FinalAnswer(text) = resp else {
-            panic!("expected FinalAnswer, got {resp:?}");
-        };
-        assert_eq!(text, "hello!");
-    }
-
-    /// An entry with an empty name in `tool_calls` is silently skipped; only
-    /// valid entries survive.
-    #[tokio::test]
-    async fn skips_tool_call_entries_with_empty_name() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/chat"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
-                serde_json::json!([
-                    { "function": { "name": "", "arguments": {} } },
-                    { "function": { "name": "good-skill", "arguments": {} } }
-                ]),
-            )))
-            .mount(&server)
-            .await;
-
-        let client = make_client(&server.uri());
-        let resp = client.chat("sys", &[], &[]).await.unwrap();
-
-        let LlmResponse::ToolCalls(items) = resp else {
-            panic!("expected ToolCalls, got {resp:?}");
-        };
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].name, "good-skill");
-    }
-}
-
-/// Convert a [`SkillDef`] to the JSON structure expected by the Ollama
+/// Convert a [`ToolSpec`] to the JSON structure expected by the Ollama
 /// `tools` array in the `/api/chat` request body.
-fn skill_to_tool_json(skill: &SkillDef) -> Value {
-    let raw = skill.params_schema();
+pub fn tool_spec_to_ollama_json(tool: &ToolSpec) -> Value {
+    let schema = &tool.params_schema;
 
     // Normalise to a proper JSON Schema object.
-    // - ToolHandler schemas are already `{"type":"object","properties":{...},"required":[...]}`.
-    // - SKILL.md schemas are flat property maps `{"param":{"type":..., "description":...}}`.
-    //   Wrap them so the LLM always receives a valid JSON Schema.
-    let parameters = match raw {
-        None => json!({"type": "object", "properties": {}, "required": []}),
-        Some(schema) if schema.get("type").and_then(|t| t.as_str()) == Some("object") => schema,
-        Some(flat) => json!({"type": "object", "properties": flat}),
+    let parameters = if schema.get("type").and_then(|t| t.as_str()) == Some("object") {
+        schema.clone()
+    } else if schema.as_object().is_some() {
+        json!({"type": "object", "properties": schema})
+    } else {
+        json!({"type": "object", "properties": {}, "required": []})
     };
 
     json!({
         "type": "function",
         "function": {
-            "name": skill.name,
-            "description": skill.description,
+            "name": tool.name,
+            "description": tool.description,
             "parameters": parameters,
         }
     })
 }
 
 /// Build the JSON messages array for the native (reqwest) path.
-///
-/// Handles all three [`ChatHistoryMessage`] variants, producing the correct
-/// Ollama wire format for each:
-///
-/// * `Text` → `{"role": "…", "content": "…"}`
-/// * `AssistantToolCalls` → `{"role": "assistant", "content": "", "tool_calls": […]}`
-/// * `ToolResult` → `{"role": "tool", "name": "…", "content": "…"}`
 fn build_json_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Vec<Value> {
     let mut messages = Vec::with_capacity(history.len() + 1);
 
@@ -662,4 +485,136 @@ fn build_json_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> V
     }
 
     messages
+}
+
+#[cfg(test)]
+mod tests {
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    use super::*;
+
+    fn make_client(base_url: &str) -> LlmClient {
+        LlmClient::new(LlmClientConfig {
+            model: "test".to_string(),
+            base_url: base_url.to_string(),
+            timeout_secs: 5,
+        })
+        .unwrap()
+    }
+
+    fn tool_calls_body(calls: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "model": "test",
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": calls
+            },
+            "done": true
+        })
+    }
+
+    fn answer_body(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "model": "test",
+            "message": { "role": "assistant", "content": text },
+            "done": true
+        })
+    }
+
+    #[tokio::test]
+    async fn parses_single_tool_call() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
+                serde_json::json!([
+                    { "function": { "name": "my-tool", "arguments": { "key": "val" } } }
+                ]),
+            )))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::ToolCalls(items) = resp else {
+            panic!("expected ToolCalls, got {resp:?}");
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "my-tool");
+        assert_eq!(items[0].params["key"], "val");
+    }
+
+    #[tokio::test]
+    async fn parses_multiple_tool_calls() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
+                serde_json::json!([
+                    { "function": { "name": "tool-a", "arguments": { "x": 1 } } },
+                    { "function": { "name": "tool-b", "arguments": { "y": 2 } } }
+                ]),
+            )))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::ToolCalls(items) = resp else {
+            panic!("expected ToolCalls, got {resp:?}");
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "tool-a");
+        assert_eq!(items[0].params["x"], 1);
+        assert_eq!(items[1].name, "tool-b");
+        assert_eq!(items[1].params["y"], 2);
+    }
+
+    #[tokio::test]
+    async fn empty_tool_calls_falls_back_to_final_answer() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(answer_body("hello!")))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::FinalAnswer(text) = resp else {
+            panic!("expected FinalAnswer, got {resp:?}");
+        };
+        assert_eq!(text, "hello!");
+    }
+
+    #[tokio::test]
+    async fn skips_tool_call_entries_with_empty_name() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_calls_body(
+                serde_json::json!([
+                    { "function": { "name": "", "arguments": {} } },
+                    { "function": { "name": "good-tool", "arguments": {} } }
+                ]),
+            )))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let resp = client.chat("sys", &[], &[]).await.unwrap();
+
+        let LlmResponse::ToolCalls(items) = resp else {
+            panic!("expected ToolCalls, got {resp:?}");
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "good-tool");
+    }
 }

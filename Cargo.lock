@@ -226,11 +226,13 @@ dependencies = [
  "assistant-provider-anthropic",
  "assistant-provider-ollama",
  "assistant-runtime",
- "assistant-skills-executor",
+ "assistant-skills",
  "assistant-storage",
+ "assistant-tool-executor",
  "clap",
  "dirs",
  "reedline",
+ "rustls",
  "serde_json",
  "tokio",
  "toml 1.0.3+spec-1.1.0",
@@ -264,8 +266,9 @@ dependencies = [
  "assistant-core",
  "assistant-llm",
  "assistant-runtime",
- "assistant-skills-executor",
+ "assistant-skills",
  "assistant-storage",
+ "assistant-tool-executor",
  "reqwest 0.12.28",
  "serde_json",
  "testcontainers",
@@ -281,8 +284,8 @@ dependencies = [
  "anyhow",
  "assistant-core",
  "assistant-runtime",
- "assistant-skills-executor",
  "assistant-storage",
+ "assistant-tool-executor",
  "async-trait",
  "lru",
  "mattermost_api",
@@ -302,8 +305,9 @@ dependencies = [
  "assistant-core",
  "assistant-provider-ollama",
  "assistant-runtime",
- "assistant-skills-executor",
+ "assistant-skills",
  "assistant-storage",
+ "assistant-tool-executor",
  "clap",
  "dirs",
  "futures",
@@ -325,8 +329,8 @@ dependencies = [
  "anyhow",
  "assistant-core",
  "assistant-runtime",
- "assistant-skills-executor",
  "assistant-storage",
+ "assistant-tool-executor",
  "async-trait",
  "serde_json",
  "slack-morphism",
@@ -360,8 +364,8 @@ dependencies = [
  "anyhow",
  "assistant-core",
  "assistant-runtime",
- "assistant-skills-executor",
  "assistant-storage",
+ "assistant-tool-executor",
  "serde",
  "serde_json",
  "tokio",
@@ -406,8 +410,9 @@ dependencies = [
  "anyhow",
  "assistant-core",
  "assistant-llm",
- "assistant-skills-executor",
+ "assistant-skills",
  "assistant-storage",
+ "assistant-tool-executor",
  "async-trait",
  "chrono",
  "cron",
@@ -421,12 +426,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "assistant-skills-executor"
+name = "assistant-skills"
+version = "0.1.5"
+dependencies = [
+ "anyhow",
+ "gray_matter",
+ "include_dir",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "assistant-storage"
+version = "0.1.5"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "assistant-skills",
+ "chrono",
+ "dirs",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "assistant-tool-executor"
 version = "0.1.5"
 dependencies = [
  "anyhow",
  "assistant-core",
  "assistant-llm",
+ "assistant-skills",
  "assistant-storage",
  "async-trait",
  "chrono",
@@ -437,6 +471,7 @@ dependencies = [
  "jsonschema",
  "reqwest 0.12.28",
  "scraper",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",
@@ -444,21 +479,6 @@ dependencies = [
  "tracing",
  "uuid",
  "wiremock",
-]
-
-[[package]]
-name = "assistant-storage"
-version = "0.1.5"
-dependencies = [
- "anyhow",
- "assistant-core",
- "chrono",
- "dirs",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]

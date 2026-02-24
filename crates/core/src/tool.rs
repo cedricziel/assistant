@@ -1,19 +1,44 @@
 //! The `ToolHandler` trait for primitive, self-describing tools.
-//!
-//! Unlike [`SkillHandler`](crate::skill::SkillHandler) which works alongside
-//! `SKILL.md` files, a `ToolHandler` is always self-describing — it embeds its
-//! own name, description, and params schema in code.
 
 use std::collections::HashMap;
 
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::skill::SkillOutput;
 use crate::types::ExecutionContext;
 
-/// Type alias: tool output has the same shape as skill output.
-pub type ToolOutput = SkillOutput;
+/// Output returned by a [`ToolHandler`].
+pub struct ToolOutput {
+    /// The text content returned by the tool.
+    pub content: String,
+    /// Whether the tool completed successfully.
+    pub success: bool,
+    /// Optional structured data alongside the text content.
+    pub data: Option<Value>,
+}
+
+impl ToolOutput {
+    pub fn success(content: impl Into<String>) -> Self {
+        Self {
+            content: content.into(),
+            success: true,
+            data: None,
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            content: message.into(),
+            success: false,
+            data: None,
+        }
+    }
+
+    pub fn with_data(mut self, data: Value) -> Self {
+        self.data = Some(data);
+        self
+    }
+}
 
 /// A primitive, self-describing tool handler.
 ///

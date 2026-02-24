@@ -1,0 +1,36 @@
+[package]
+name = "assistant-tool-executor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "assistant_tool_executor"
+
+[dependencies]
+assistant-core = { path = "../core" }
+assistant-skills = { path = "../skills" }
+assistant-llm = { path = "../llm" }
+assistant-storage = { path = "../storage" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+jsonschema = { workspace = true }
+reqwest = { workspace = true }
+scraper = { workspace = true }
+glob = { workspace = true }
+sha2 = { workspace = true }
+extism = { workspace = true }
+chrono = { workspace = true }
+cron = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+uuid = { workspace = true }
+wiremock = { workspace = true }

@@ -204,17 +204,17 @@ impl MemoryLoader {
                             cap = BOOTSTRAP_MAX_CHARS_PER_FILE,
                             "Memory file truncated"
                         );
-                        format!(
-                            "{}\n[… truncated]",
-                            &trimmed[..BOOTSTRAP_MAX_CHARS_PER_FILE]
-                        )
+                        // Floor to the nearest valid UTF-8 char boundary.
+                        let end = floor_char_boundary(trimmed, BOOTSTRAP_MAX_CHARS_PER_FILE);
+                        format!("{}\n[… truncated]", &trimmed[..end])
                     } else {
                         trimmed.to_string()
                     };
                     // Enforce total cap: only include if it fits (possibly partially).
                     let remaining = BOOTSTRAP_MAX_CHARS_TOTAL - total_chars;
                     let section = if section.len() > remaining {
-                        format!("{}\n[… truncated]", &section[..remaining])
+                        let end = floor_char_boundary(&section, remaining);
+                        format!("{}\n[… truncated]", &section[..end])
                     } else {
                         section
                     };
@@ -311,10 +311,8 @@ Read the file first with `memory-get` if unsure what text is there.\n\
                             cap = BOOTSTRAP_MAX_CHARS_PER_FILE,
                             "Daily notes truncated"
                         );
-                        format!(
-                            "{}\n[… truncated]",
-                            &trimmed[..BOOTSTRAP_MAX_CHARS_PER_FILE]
-                        )
+                        let end = floor_char_boundary(trimmed, BOOTSTRAP_MAX_CHARS_PER_FILE);
+                        format!("{}\n[… truncated]", &trimmed[..end])
                     } else {
                         trimmed.to_string()
                     };
@@ -482,6 +480,18 @@ pub fn expand_tilde(s: &str) -> PathBuf {
         }
     }
     PathBuf::from(s)
+}
+
+/// Return the largest byte index ≤ `index` that falls on a UTF-8 char boundary.
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 fn write_default(path: &Path, content: &str) {

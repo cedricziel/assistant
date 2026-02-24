@@ -1,5 +1,5 @@
-//! Ambient skills contributed by the Slack interface.
+//! Ambient tools contributed by the Slack interface.
 
 pub mod slack_post;
 
-pub use slack_post::{slack_post_def, SlackPostSkill};
+pub use slack_post::SlackPostSkill;

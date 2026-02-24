@@ -98,10 +98,8 @@ impl SkillHandler for SkillFileReadHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_core::{
-        skill::{SkillSource, SkillTier},
-        types::{ExecutionContext, Interface},
-    };
+    use assistant_core::types::{ExecutionContext, Interface};
+    use assistant_skills::{SkillDef as SkillsSkillDef, SkillSource};
     use assistant_storage::{SkillRegistry, StorageLayer};
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -115,7 +113,10 @@ mod tests {
         }
     }
 
-    fn make_skill_def(name: &str, dir: &std::path::Path) -> SkillDef {
+    fn make_skill_def(name: &str, _dir: &std::path::Path) -> SkillDef {
+        // Returns the old assistant_core::SkillDef used as the `_def` parameter
+        // in execute() calls — the handler ignores it, so only the name matters.
+        use assistant_core::skill::{SkillSource as OldSource, SkillTier};
         SkillDef {
             name: name.to_string(),
             description: "Test skill".to_string(),
@@ -124,10 +125,23 @@ mod tests {
             allowed_tools: vec![],
             metadata: std::collections::HashMap::new(),
             body: String::new(),
-            dir: dir.to_path_buf(),
+            dir: _dir.to_path_buf(),
             tier: SkillTier::Builtin,
             mutating: false,
             confirmation_required: false,
+            source: OldSource::Builtin,
+        }
+    }
+
+    fn make_skills_def(name: &str, dir: &std::path::Path) -> SkillsSkillDef {
+        SkillsSkillDef {
+            name: name.to_string(),
+            description: "Test skill".to_string(),
+            license: None,
+            compatibility: None,
+            metadata: std::collections::HashMap::new(),
+            body: String::new(),
+            dir: dir.to_path_buf(),
             source: SkillSource::Builtin,
         }
     }
@@ -135,7 +149,7 @@ mod tests {
     async fn make_registry_with(name: &str, dir: &std::path::Path) -> Arc<SkillRegistry> {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let registry = SkillRegistry::new(storage.pool.clone()).await.unwrap();
-        registry.register(make_skill_def(name, dir)).await.unwrap();
+        registry.register(make_skills_def(name, dir)).await.unwrap();
         Arc::new(registry)
     }
 

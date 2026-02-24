@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use assistant_core::{parser::parse_skill_dir, skill::SkillSource};
+use assistant_skills::{parse_skill_content, parse_skill_dir, SkillSource};
 use assistant_storage::SkillRegistry;
 use tracing::{debug, info};
 
@@ -122,12 +122,8 @@ async fn install_from_github(
     let skill_md_content = resp.text().await.context("Failed to read response body")?;
 
     // Parse just the frontmatter to get the skill name
-    let temp_def = assistant_core::parser::parse_skill_content(
-        &skill_md_content,
-        skills_dir,
-        SkillSource::User,
-    )
-    .context("Failed to parse fetched SKILL.md")?;
+    let temp_def = parse_skill_content(&skill_md_content, skills_dir, SkillSource::User)
+        .context("Failed to parse fetched SKILL.md")?;
 
     let skill_name = temp_def.name.clone();
     let dest = skills_dir.join(&skill_name);

@@ -4,10 +4,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use assistant_core::{LlmConfig, SkillDef};
+use assistant_core::LlmConfig;
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, LlmClient, LlmClientConfig, LlmProvider, LlmResponse,
-    ToolSupport,
+    ToolSpec, ToolSupport,
 };
 
 // ── OllamaConfig ─────────────────────────────────────────────────────────────
@@ -50,9 +50,6 @@ impl From<&LlmConfig> for OllamaConfig {
 // ── OllamaProvider ────────────────────────────────────────────────────────────
 
 /// [`LlmProvider`] implementation backed by the Ollama `/api/chat` endpoint.
-///
-/// Wraps [`LlmClient`] from `assistant-llm`.  Once the HTTP logic is fully
-/// migrated here, `LlmClient` can be inlined or removed.
 pub struct OllamaProvider {
     inner: LlmClient,
     base_url: String,
@@ -109,20 +106,20 @@ impl LlmProvider for OllamaProvider {
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        self.inner.chat(system_prompt, history, skills).await
+        self.inner.chat(system_prompt, history, tools).await
     }
 
     async fn chat_streaming(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse> {
         self.inner
-            .chat_streaming(system_prompt, history, skills, token_sink)
+            .chat_streaming(system_prompt, history, tools, token_sink)
             .await
     }
 
