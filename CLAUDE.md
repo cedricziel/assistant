@@ -76,11 +76,12 @@ interface-cli ──► runtime ──► llm ──► core
 
 ## Skill discovery order
 
-At startup the assistant scans three locations (highest priority first):
+At startup the assistant scans several locations (highest priority first):
 
-1. `~/.assistant/skills/` — personal skills
-2. `<project>/.assistant/skills/` — project-scoped skills
-3. `<binary dir>/skills/` — built-in skills shipped with the binary
+1. Entries from `[skills] extra_dirs` — defaults cover `~/.claude/skills` and `./.claude/skills`
+2. `~/.assistant/skills/` — personal skills
+3. `<project>/.assistant/skills/` — project-scoped skills
+4. `<binary dir>/skills/` — built-in skills shipped with the binary
 
 ## Skill tiers
 
