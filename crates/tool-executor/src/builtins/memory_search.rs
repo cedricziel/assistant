@@ -45,8 +45,10 @@ impl ToolHandler for MemorySearchHandler {
                     "description": "Search query"
                 },
                 "limit": {
-                    "type": "number",
-                    "description": "Maximum number of results to return (default: 5, max: 20)"
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "Maximum number of results to return (default: 5)"
                 }
             },
             "required": ["query"]

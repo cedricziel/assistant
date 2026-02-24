@@ -47,6 +47,22 @@ pub fn parse_skill_content(content: &str, dir: &Path, source: SkillSource) -> Re
     )
     .context("Failed to deserialize SKILL.md frontmatter")?;
 
+    // Validate name: must be kebab-case and match the directory name when non-empty.
+    if !is_kebab_case(&front.name) {
+        anyhow::bail!(
+            "SKILL.md name '{}' must be kebab-case (lowercase letters, digits, hyphens only)",
+            front.name
+        );
+    }
+    let dir_name = dir.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    if !dir_name.is_empty() && front.name != dir_name {
+        anyhow::bail!(
+            "SKILL.md name '{}' must match the directory name '{}'",
+            front.name,
+            dir_name
+        );
+    }
+
     Ok(SkillDef {
         name: front.name,
         description: front.description,
@@ -86,6 +102,17 @@ pub fn discover_skills(skills_root: &Path, source: SkillSource) -> Vec<SkillDef>
         }
     }
     skills
+}
+
+/// Returns `true` if `name` is a valid kebab-case identifier:
+/// lowercase ASCII letters, digits, and interior hyphens only.
+fn is_kebab_case(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// The bundled `skills/` directory embedded into the binary at compile time.

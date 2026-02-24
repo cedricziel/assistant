@@ -143,7 +143,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
                 .await?;
 
         if already_applied == 0 {
-            sqlx::query(sql).execute(pool).await?;
+            sqlx::raw_sql(sql).execute(pool).await?;
             sqlx::query("INSERT INTO _migrations (name) VALUES (?)")
                 .bind(name)
                 .execute(pool)

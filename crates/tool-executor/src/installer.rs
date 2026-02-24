@@ -4,13 +4,15 @@
 //! * Local path  — absolute (`/some/dir`), home-relative (`~/skills/foo`), or relative (`./foo`)
 //! * GitHub      — `owner/repo` or `owner/repo/sub/path` (fetches the `SKILL.md` via raw GitHub)
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use assistant_skills::{parse_skill_dir, SkillSource};
 use assistant_storage::SkillRegistry;
 use tracing::{debug, info};
+
+use crate::builtins::file_read::expand_tilde;
 
 /// Install a skill from `source` into `skills_dir` and register it in `registry`.
 ///
@@ -93,33 +95,41 @@ async fn install_from_github(
     let repo = parts[1];
     let sub_path = if parts.len() == 3 { parts[2] } else { "" };
 
-    // Fetch SKILL.md from the default branch
-    let skill_md_url = if sub_path.is_empty() {
-        format!("https://raw.githubusercontent.com/{owner}/{repo}/main/SKILL.md")
-    } else {
-        format!("https://raw.githubusercontent.com/{owner}/{repo}/main/{sub_path}/SKILL.md")
-    };
-
-    debug!(url = %skill_md_url, "Fetching SKILL.md from GitHub");
-
     let client = reqwest::Client::builder()
         .user_agent("assistant-skill-installer/0.1")
         .build()?;
 
-    let resp = client
-        .get(&skill_md_url)
-        .send()
-        .await
-        .with_context(|| format!("Failed to fetch '{skill_md_url}'"))?;
+    // Try common default branches in order (main, then master).
+    let branches = ["main", "master"];
+    let mut skill_md_content: Option<String> = None;
+    let mut last_error = String::new();
 
-    if !resp.status().is_success() {
-        return Err(anyhow!(
-            "GitHub returned HTTP {} for '{skill_md_url}'",
-            resp.status()
-        ));
+    for branch in &branches {
+        let url = if sub_path.is_empty() {
+            format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/SKILL.md")
+        } else {
+            format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{sub_path}/SKILL.md")
+        };
+
+        debug!(url = %url, "Fetching SKILL.md from GitHub");
+
+        let resp = match client.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = format!("Failed to fetch '{url}': {e}");
+                continue;
+            }
+        };
+
+        if resp.status().is_success() {
+            skill_md_content = Some(resp.text().await.context("Failed to read response body")?);
+            break;
+        }
+
+        last_error = format!("GitHub returned HTTP {} for '{url}'", resp.status());
     }
 
-    let skill_md_content = resp.text().await.context("Failed to read response body")?;
+    let skill_md_content = skill_md_content.ok_or_else(|| anyhow!("{last_error}"))?;
 
     // Parse just the frontmatter to get the skill name
     let temp_def =
@@ -163,14 +173,4 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Expand a leading `~/` to the user's home directory.
-fn expand_tilde(s: &str) -> PathBuf {
-    if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(s)
 }

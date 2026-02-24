@@ -61,6 +61,10 @@ impl ToolHandler for SelfAnalyzeHandler {
         })
     }
 
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,

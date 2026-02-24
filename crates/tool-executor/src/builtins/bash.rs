@@ -90,6 +90,7 @@ impl ToolHandler for BashHandler {
         );
 
         let mut cmd = tokio::process::Command::new("bash");
+        cmd.kill_on_drop(true);
         cmd.arg("-c").arg(&command);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());

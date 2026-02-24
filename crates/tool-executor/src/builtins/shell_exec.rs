@@ -80,6 +80,7 @@ impl ToolHandler for ShellExecHandler {
         debug!("shell-exec: running command: {}", command);
 
         let mut cmd = tokio::process::Command::new("/bin/sh");
+        cmd.kill_on_drop(true);
         cmd.arg("-c").arg(&command);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());

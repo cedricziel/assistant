@@ -19,7 +19,7 @@ impl WebSearchHandler {
             .user_agent("Mozilla/5.0 (compatible; AssistantBot/1.0)")
             .timeout(std::time::Duration::from_secs(15))
             .build()
-            .expect("Failed to build HTTP client");
+            .unwrap_or_default();
         Self { client }
     }
 }

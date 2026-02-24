@@ -285,18 +285,22 @@ impl Orchestrator {
                             "LLM returned final answer; auto-posting via extension reply tool"
                         );
                         let mut params_map = HashMap::new();
-                        // Use whichever parameter the reply tool expects for its text.
-                        let text_param = {
-                            let schema = reply_handler.params_schema();
-                            if schema
-                                .get("properties")
-                                .and_then(|p| p.get("text"))
-                                .is_some()
-                            {
-                                "text"
-                            } else {
-                                "content"
-                            }
+                        // Determine which single text parameter the reply tool expects.
+                        // Only auto-post when there is exactly one required field and it
+                        // is a recognised text-like name; skip otherwise to avoid silent
+                        // failures with multi-param or non-text reply tools.
+                        let schema = reply_handler.params_schema();
+                        let text_param = schema
+                            .get("required")
+                            .and_then(|r| r.as_array())
+                            .and_then(|r| if r.len() == 1 { r[0].as_str() } else { None })
+                            .filter(|name| matches!(*name, "text" | "content" | "message"));
+                        let Some(text_param) = text_param else {
+                            warn!(
+                                tool = %reply_name,
+                                "Auto-post skipped: reply tool requires multiple or non-text params"
+                            );
+                            return Ok(());
                         };
                         params_map.insert(
                             text_param.to_string(),

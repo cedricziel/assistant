@@ -3,7 +3,7 @@
 -- "knowledge" label.  SQLite does not support ALTER COLUMN, so we recreate
 -- the table without the CHECK constraint.
 
-CREATE TABLE IF NOT EXISTS skills_new (
+CREATE TABLE skills_new (
     name            TEXT PRIMARY KEY,
     description     TEXT NOT NULL,
     dir_path        TEXT NOT NULL,
