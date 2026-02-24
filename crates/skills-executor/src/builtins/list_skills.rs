@@ -54,12 +54,14 @@ impl SkillHandler for ListSkillsHandler {
 
         for skill in &skills {
             let desc = truncate(&skill.description, DESC_TRUNCATE);
+            let tier = skill
+                .metadata
+                .get("tier")
+                .and_then(|v| v.as_str())
+                .unwrap_or("knowledge");
             lines.push(format!(
                 "{:<24} {:<62} {:<8} {}",
-                skill.name,
-                desc,
-                skill.tier.label(),
-                skill.source,
+                skill.name, desc, tier, skill.source,
             ));
         }
 

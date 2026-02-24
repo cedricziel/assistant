@@ -129,6 +129,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "007_memory_chunks",
             include_str!("../../../migrations/007_memory_chunks.sql"),
         ),
+        (
+            "008_skills_drop_tier_check",
+            include_str!("../../../migrations/008_skills_drop_tier_check.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {

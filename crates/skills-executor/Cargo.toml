@@ -7,6 +7,7 @@ description = "Skill executor dispatching builtin, prompt, script, and WASM skil
 
 [dependencies]
 assistant-core = { path = "../core" }
+assistant-skills = { path = "../skills" }
 assistant-llm = { path = "../llm" }
 assistant-storage = { path = "../storage" }
 tokio = { workspace = true }

@@ -7,8 +7,7 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use assistant_core::SkillDef;
-
+use crate::tool_spec::ToolSpec;
 use crate::{ChatHistoryMessage, LlmResponse};
 
 // ── Capabilities ─────────────────────────────────────────────────────────────
@@ -39,7 +38,7 @@ pub struct Capabilities {
 ///
 /// All internal orchestration code works against `Arc<dyn LlmProvider>` so the
 /// concrete provider (Ollama, OpenAI, Anthropic, …) is swapped without touching
-/// the runtime or skill-executor.
+/// the runtime or tool-executor.
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     /// Return static metadata about this provider's capabilities.
@@ -50,12 +49,12 @@ pub trait LlmProvider: Send + Sync {
     /// # Parameters
     /// * `system_prompt` – base system instructions
     /// * `history` – previous messages in the conversation
-    /// * `skills` – skills available for this turn (passed as native tools)
+    /// * `tools` – tools available for this turn (passed as native tool specs)
     async fn chat(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse>;
 
     /// Like [`chat`] but streams final-answer tokens through `token_sink` as
@@ -68,7 +67,7 @@ pub trait LlmProvider: Send + Sync {
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse>;
 

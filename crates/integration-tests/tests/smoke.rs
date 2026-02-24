@@ -11,11 +11,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{skill::SkillSource, types::Interface, AssistantConfig};
+use assistant_core::{types::Interface, AssistantConfig};
 use assistant_llm::{LlmClient, LlmClientConfig};
 use assistant_runtime::Orchestrator;
-use assistant_skills_executor::SkillExecutor;
+use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use assistant_tool_executor::ToolExecutor;
 use testcontainers::{
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
@@ -95,14 +96,14 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     let llm = Arc::new(LlmClient::new(llm_config)?);
 
     let config = AssistantConfig::default();
-    let executor = Arc::new(SkillExecutor::new(
+    let executor = Arc::new(ToolExecutor::new(
         storage.clone(),
         llm.clone(),
         registry.clone(),
         Arc::new(config.clone()),
     ));
 
-    let orchestrator = Arc::new(Orchestrator::new(llm, storage, registry, executor, &config));
+    let orchestrator = Arc::new(Orchestrator::new(llm, storage, executor, &config));
 
     Ok(Fixture {
         orchestrator,

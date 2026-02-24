@@ -5,17 +5,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{
-    skill::SkillSource, AssistantConfig, Interface, LlmProviderKind, MemoryLoader,
-};
+use assistant_core::{AssistantConfig, Interface, LlmProviderKind, MemoryLoader};
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{
     orchestrator::ConfirmationCallback, scheduler::spawn_scheduler, Orchestrator,
 };
-use assistant_skills_executor::{install_skill_from_source, SkillExecutor};
+use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
+use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 use clap::{Parser, Subcommand};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use tokio::sync::mpsc;
@@ -68,7 +67,7 @@ impl ConfirmationCallback for CliConfirmation {
     fn confirm(&self, skill_name: &str, params: &serde_json::Value) -> bool {
         let params_str = serde_json::to_string_pretty(params).unwrap_or_default();
         print!(
-            "\nSkill '{}' requires confirmation.\nParams: {}\nProceed? [y/N] ",
+            "\nTool '{}' requires confirmation.\nParams: {}\nProceed? [y/N] ",
             skill_name, params_str
         );
         io::stdout().flush().ok();
@@ -348,7 +347,7 @@ struct Bootstrap {
     config: AssistantConfig,
     storage: Arc<StorageLayer>,
     registry: Arc<SkillRegistry>,
-    executor: Arc<SkillExecutor>,
+    executor: Arc<ToolExecutor>,
     orchestrator: Arc<Orchestrator>,
     user_skills_dir: PathBuf,
 }
@@ -413,8 +412,8 @@ async fn bootstrap(
         ),
     };
 
-    // Build skill executor.
-    let executor = Arc::new(SkillExecutor::new(
+    // Build tool executor.
+    let executor = Arc::new(ToolExecutor::new(
         storage.clone(),
         llm.clone(),
         registry.clone(),
@@ -423,14 +422,8 @@ async fn bootstrap(
 
     // Build orchestrator.
     let orchestrator = Arc::new(
-        Orchestrator::new(
-            llm,
-            storage.clone(),
-            registry.clone(),
-            executor.clone(),
-            &config,
-        )
-        .with_confirmation_callback(confirmation_cb),
+        Orchestrator::new(llm, storage.clone(), executor.clone(), &config)
+            .with_confirmation_callback(confirmation_cb),
     );
 
     Ok(Bootstrap {
@@ -548,21 +541,21 @@ async fn main() -> Result<()> {
 
     // 9. Default mode: interactive REPL + background interfaces.
     //
-    //    Register ambient skills from configured interfaces first, then spawn
+    //    Register ambient tools from configured interfaces first, then spawn
     //    background tasks for those interfaces.
 
-    // 9a. Slack — register slack-post as an ambient skill and start in background.
+    // 9a. Slack — register slack-post as an ambient tool and start in background.
     #[cfg(feature = "slack")]
     if bs.config.slack.is_some() {
         use assistant_interface_slack::SlackInterface;
         let slack_cfg = bs.config.slack.clone().unwrap_or_default();
         let iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
 
-        // Register proactive Slack posting skill.
-        for (def, handler) in iface.ambient_skills() {
-            let skill_name = def.name.clone();
-            bs.executor.register_ambient_skill(def, handler);
-            info!("Registered ambient skill: {skill_name}");
+        // Register proactive Slack posting tool.
+        for handler in iface.ambient_tools() {
+            let tool_name = handler.name().to_string();
+            bs.executor.register_ambient_tool(handler);
+            info!("Registered ambient tool: {tool_name}");
         }
 
         // Spawn the Slack listener in the background.
@@ -637,9 +630,8 @@ async fn main() -> Result<()> {
                                     println!("\nRegistered skills ({}):\n", skills.len());
                                     for s in &skills {
                                         println!(
-                                            "  {:30}  tier={:8}  source={:10}  dir={}",
+                                            "  {:30}  source={:10}  dir={}",
                                             s.name,
-                                            s.tier.label(),
                                             s.source,
                                             s.dir.display()
                                         );
@@ -648,7 +640,6 @@ async fn main() -> Result<()> {
                                 }
                             } else if let Some(skill) = bs.registry.get(arg).await {
                                 println!("\nSkill: {}", skill.name);
-                                println!("  Tier:        {}", skill.tier.label());
                                 println!("  Source:      {}", skill.source);
                                 println!("  Directory:   {}", skill.dir.display());
                                 if !skill.description.is_empty() {

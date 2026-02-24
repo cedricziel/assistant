@@ -6,9 +6,10 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use assistant_core::{LlmConfig, SkillDef};
+use assistant_core::LlmConfig;
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, ToolCallItem, ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, ToolCallItem, ToolSpec,
+    ToolSupport,
 };
 
 // ── AnthropicConfig ───────────────────────────────────────────────────────────
@@ -98,21 +99,23 @@ impl AnthropicProvider {
 
 // ── Message conversion ────────────────────────────────────────────────────────
 
-/// Convert a [`SkillDef`] to the Anthropic `tools` array entry.
+/// Convert a [`ToolSpec`] to the Anthropic `tools` array entry.
 ///
 /// Anthropic uses `input_schema` (not `parameters` like OpenAI/Ollama).
-fn skill_to_anthropic_tool(skill: &SkillDef) -> Value {
-    let raw = skill.params_schema();
+fn tool_spec_to_anthropic_json(tool: &ToolSpec) -> Value {
+    let schema = &tool.params_schema;
 
-    let input_schema = match raw {
-        None => json!({"type": "object", "properties": {}, "required": []}),
-        Some(schema) if schema.get("type").and_then(|t| t.as_str()) == Some("object") => schema,
-        Some(flat) => json!({"type": "object", "properties": flat}),
+    let input_schema = if schema.get("type").and_then(|t| t.as_str()) == Some("object") {
+        schema.clone()
+    } else if schema.as_object().is_some() {
+        json!({"type": "object", "properties": schema})
+    } else {
+        json!({"type": "object", "properties": {}, "required": []})
     };
 
     json!({
-        "name": skill.name,
-        "description": skill.description,
+        "name": tool.name,
+        "description": tool.description,
         "input_schema": input_schema,
     })
 }
@@ -199,20 +202,19 @@ impl LlmProvider for AnthropicProvider {
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_non_streaming(system_prompt, history, skills)
-            .await
+        self.chat_non_streaming(system_prompt, history, tools).await
     }
 
     async fn chat_streaming(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_sse(system_prompt, history, skills, token_sink)
+        self.chat_sse(system_prompt, history, tools, token_sink)
             .await
     }
 
@@ -230,12 +232,12 @@ impl AnthropicProvider {
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        debug!(model = %self.config.model, skills = skills.len(), "Sending request to Anthropic");
+        debug!(model = %self.config.model, tools = tools.len(), "Sending request to Anthropic");
 
         let (messages, _) = build_anthropic_messages(history);
-        let tools: Vec<Value> = skills.iter().map(|s| skill_to_anthropic_tool(s)).collect();
+        let tools: Vec<Value> = tools.iter().map(tool_spec_to_anthropic_json).collect();
 
         let mut body = json!({
             "model": self.config.model,
@@ -284,7 +286,7 @@ impl AnthropicProvider {
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
-        skills: &[&SkillDef],
+        tools: &[ToolSpec],
         token_sink: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<LlmResponse> {
         debug!(
@@ -293,7 +295,7 @@ impl AnthropicProvider {
         );
 
         let (messages, _) = build_anthropic_messages(history);
-        let tools: Vec<Value> = skills.iter().map(|s| skill_to_anthropic_tool(s)).collect();
+        let tools: Vec<Value> = tools.iter().map(tool_spec_to_anthropic_json).collect();
 
         let mut body = json!({
             "model": self.config.model,

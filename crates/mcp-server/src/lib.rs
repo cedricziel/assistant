@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_runtime::Orchestrator;
-use assistant_skills_executor::SkillExecutor;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use assistant_tool_executor::ToolExecutor;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{info, warn};
 
@@ -23,13 +23,13 @@ use crate::protocol::JsonRpcRequest;
 /// # Arguments
 ///
 /// * `orchestrator` — shared orchestrator for `run_prompt` / `invoke_skill`
-/// * `executor` — shared skill executor for `invoke_skill`
-/// * `registry` — shared skill registry for `list_skills` / `resources/list`
+/// * `executor` — shared tool executor for `tools/call`
+/// * `registry` — shared skill registry for `resources/list`
 /// * `_storage` — storage layer (reserved for future use)
 /// * `user_skills_dir` — directory where `install_skill` writes new skills
 pub async fn run(
     orchestrator: Arc<Orchestrator>,
-    executor: Arc<SkillExecutor>,
+    executor: Arc<ToolExecutor>,
     registry: Arc<SkillRegistry>,
     _storage: Arc<StorageLayer>,
     user_skills_dir: PathBuf,

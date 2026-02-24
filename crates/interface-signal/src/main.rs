@@ -21,11 +21,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::{skill::SkillSource, AssistantConfig};
+use assistant_core::AssistantConfig;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{orchestrator::ConfirmationCallback, Orchestrator};
-use assistant_skills_executor::SkillExecutor;
+use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use assistant_tool_executor::ToolExecutor;
 use clap::Parser;
 use tracing::{info, warn};
 
@@ -166,8 +167,8 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
         OllamaProvider::from_llm_config(&config.llm).context("Failed to create LLM client")?,
     );
 
-    // Build skill executor.
-    let executor = Arc::new(SkillExecutor::new(
+    // Build tool executor.
+    let executor = Arc::new(ToolExecutor::new(
         storage.clone(),
         llm.clone(),
         registry.clone(),
@@ -176,7 +177,7 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
 
     // Build orchestrator with auto-deny confirmation.
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(AutoDenyConfirmation);
-    let orchestrator = Orchestrator::new(llm, storage, registry, executor, &config)
+    let orchestrator = Orchestrator::new(llm, storage, executor, &config)
         .with_confirmation_callback(confirmation_cb);
 
     // Extract the [signal] section from config (or use defaults).

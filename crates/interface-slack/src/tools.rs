@@ -6,13 +6,12 @@
 //! add reactions, post rich Block Kit messages, or upload files.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::skill::SkillSource;
-use assistant_core::{ExecutionContext, SkillDef, SkillHandler, SkillOutput, SkillTier};
+use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
+use serde_json::{json, Value};
 use slack_morphism::prelude::*;
 use tracing::{debug, warn};
 
@@ -26,20 +25,46 @@ struct SlackReplyHandler {
 }
 
 #[async_trait]
-impl SkillHandler for SlackReplyHandler {
-    fn skill_name(&self) -> &str {
+impl ToolHandler for SlackReplyHandler {
+    fn name(&self) -> &str {
         "slack-reply"
     }
 
-    async fn execute(
+    fn description(&self) -> &str {
+        "Post a reply message in the current Slack thread. \
+         Use this to send text responses to the user. \
+         Use Slack mrkdwn format (NOT standard Markdown): \
+         *bold*, _italic_, ~strikethrough~, `code`, \
+         ```code block``` for multi-line code, \
+         <url|link text> for hyperlinks. \
+         Do NOT use Markdown syntax (**bold**, *italic*, [text](url), # headings)."
+    }
+
+    fn params_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Reply text in Slack mrkdwn format: *bold*, _italic_, ~strikethrough~, <url|text> for links — NOT standard Markdown"
+                }
+            }
+        })
+    }
+
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
+    async fn run(
         &self,
-        _def: &SkillDef,
-        params: HashMap<String, serde_json::Value>,
+        params: HashMap<String, Value>,
         _ctx: &ExecutionContext,
-    ) -> Result<SkillOutput> {
+    ) -> Result<ToolOutput> {
         let text = match params.get("text").and_then(|v| v.as_str()) {
             Some(t) => t.to_string(),
-            None => return Ok(SkillOutput::error("Missing required parameter 'text'")),
+            None => return Ok(ToolOutput::error("Missing required parameter 'text'")),
         };
 
         let session = self.client.open_session(&self.token);
@@ -52,11 +77,11 @@ impl SkillHandler for SlackReplyHandler {
         match session.chat_post_message(&req).await {
             Ok(resp) => {
                 debug!(channel = %resp.channel, ts = %resp.ts.0, "chat.postMessage ok");
-                Ok(SkillOutput::success("Message posted successfully"))
+                Ok(ToolOutput::success("Message posted successfully"))
             }
             Err(e) => {
                 warn!(error = %e, "chat.postMessage failed");
-                Ok(SkillOutput::error(format!("Failed to post message: {e}")))
+                Ok(ToolOutput::error(format!("Failed to post message: {e}")))
             }
         }
     }
@@ -72,20 +97,40 @@ struct SlackReactHandler {
 }
 
 #[async_trait]
-impl SkillHandler for SlackReactHandler {
-    fn skill_name(&self) -> &str {
+impl ToolHandler for SlackReactHandler {
+    fn name(&self) -> &str {
         "slack-react"
     }
 
-    async fn execute(
+    fn description(&self) -> &str {
+        "Add an emoji reaction to the message that triggered this conversation."
+    }
+
+    fn params_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["emoji"],
+            "properties": {
+                "emoji": {
+                    "type": "string",
+                    "description": "Emoji name without colons, e.g. thumbsup"
+                }
+            }
+        })
+    }
+
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
+    async fn run(
         &self,
-        _def: &SkillDef,
-        params: HashMap<String, serde_json::Value>,
+        params: HashMap<String, Value>,
         _ctx: &ExecutionContext,
-    ) -> Result<SkillOutput> {
+    ) -> Result<ToolOutput> {
         let emoji = match params.get("emoji").and_then(|v| v.as_str()) {
             Some(e) => e.to_string(),
-            None => return Ok(SkillOutput::error("Missing required parameter 'emoji'")),
+            None => return Ok(ToolOutput::error("Missing required parameter 'emoji'")),
         };
 
         let session = self.client.open_session(&self.token);
@@ -96,13 +141,13 @@ impl SkillHandler for SlackReactHandler {
         );
 
         match session.reactions_add(&req).await {
-            Ok(_) => Ok(SkillOutput::success("Reaction added")),
+            Ok(_) => Ok(ToolOutput::success("Reaction added")),
             Err(e) => {
                 let msg = e.to_string();
                 if msg.contains("already_reacted") {
-                    Ok(SkillOutput::success("Reaction already present"))
+                    Ok(ToolOutput::success("Reaction already present"))
                 } else {
-                    Ok(SkillOutput::error(format!("Failed to add reaction: {e}")))
+                    Ok(ToolOutput::error(format!("Failed to add reaction: {e}")))
                 }
             }
         }
@@ -119,25 +164,46 @@ struct SlackReplyBlocksHandler {
 }
 
 #[async_trait]
-impl SkillHandler for SlackReplyBlocksHandler {
-    fn skill_name(&self) -> &str {
+impl ToolHandler for SlackReplyBlocksHandler {
+    fn name(&self) -> &str {
         "slack-reply-blocks"
     }
 
-    async fn execute(
+    fn description(&self) -> &str {
+        "Post a rich Block Kit message in the current Slack thread. \
+         Use this for formatted cards, buttons, and structured layouts."
+    }
+
+    fn params_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["blocks"],
+            "properties": {
+                "blocks": {
+                    "type": "string",
+                    "description": "JSON array of Slack Block Kit blocks"
+                }
+            }
+        })
+    }
+
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
+    async fn run(
         &self,
-        _def: &SkillDef,
-        params: HashMap<String, serde_json::Value>,
+        params: HashMap<String, Value>,
         _ctx: &ExecutionContext,
-    ) -> Result<SkillOutput> {
+    ) -> Result<ToolOutput> {
         let blocks_str = match params.get("blocks").and_then(|v| v.as_str()) {
             Some(b) => b.to_string(),
-            None => return Ok(SkillOutput::error("Missing required parameter 'blocks'")),
+            None => return Ok(ToolOutput::error("Missing required parameter 'blocks'")),
         };
 
         let blocks: Vec<SlackBlock> = match serde_json::from_str(&blocks_str) {
             Ok(b) => b,
-            Err(e) => return Ok(SkillOutput::error(format!("Invalid blocks JSON: {e}"))),
+            Err(e) => return Ok(ToolOutput::error(format!("Invalid blocks JSON: {e}"))),
         };
 
         let session = self.client.open_session(&self.token);
@@ -148,10 +214,8 @@ impl SkillHandler for SlackReplyBlocksHandler {
         }
 
         match session.chat_post_message(&req).await {
-            Ok(_) => Ok(SkillOutput::success(
-                "Block Kit message posted successfully",
-            )),
-            Err(e) => Ok(SkillOutput::error(format!(
+            Ok(_) => Ok(ToolOutput::success("Block Kit message posted successfully")),
+            Err(e) => Ok(ToolOutput::error(format!(
                 "Failed to post Block Kit message: {e}"
             ))),
         }
@@ -168,24 +232,52 @@ struct SlackUploadHandler {
 }
 
 #[async_trait]
-impl SkillHandler for SlackUploadHandler {
-    fn skill_name(&self) -> &str {
+impl ToolHandler for SlackUploadHandler {
+    fn name(&self) -> &str {
         "slack-upload"
     }
 
-    async fn execute(
+    fn description(&self) -> &str {
+        "Upload a file or text snippet to the current Slack channel."
+    }
+
+    fn params_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["content", "filename"],
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "File content"
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Filename including extension"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional file title"
+                }
+            }
+        })
+    }
+
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
+    async fn run(
         &self,
-        _def: &SkillDef,
-        params: HashMap<String, serde_json::Value>,
+        params: HashMap<String, Value>,
         _ctx: &ExecutionContext,
-    ) -> Result<SkillOutput> {
+    ) -> Result<ToolOutput> {
         let content = match params.get("content").and_then(|v| v.as_str()) {
             Some(c) => c.to_string(),
-            None => return Ok(SkillOutput::error("Missing required parameter 'content'")),
+            None => return Ok(ToolOutput::error("Missing required parameter 'content'")),
         };
         let filename = match params.get("filename").and_then(|v| v.as_str()) {
             Some(f) => f.to_string(),
-            None => return Ok(SkillOutput::error("Missing required parameter 'filename'")),
+            None => return Ok(ToolOutput::error("Missing required parameter 'filename'")),
         };
         let title = params
             .get("title")
@@ -206,7 +298,7 @@ impl SkillHandler for SlackUploadHandler {
         };
         let url_resp = match session.get_upload_url_external(&url_req).await {
             Ok(r) => r,
-            Err(e) => return Ok(SkillOutput::error(format!("Failed to get upload URL: {e}"))),
+            Err(e) => return Ok(ToolOutput::error(format!("Failed to get upload URL: {e}"))),
         };
 
         // Step 2: upload the file bytes to the returned URL.
@@ -216,7 +308,7 @@ impl SkillHandler for SlackUploadHandler {
             content_type: "application/octet-stream".to_string(),
         };
         if let Err(e) = session.files_upload_via_url(&upload_req).await {
-            return Ok(SkillOutput::error(format!(
+            return Ok(ToolOutput::error(format!(
                 "Failed to upload file content: {e}"
             )));
         }
@@ -233,8 +325,8 @@ impl SkillHandler for SlackUploadHandler {
         };
 
         match session.files_complete_upload_external(&complete_req).await {
-            Ok(_) => Ok(SkillOutput::success("File uploaded successfully")),
-            Err(e) => Ok(SkillOutput::error(format!(
+            Ok(_) => Ok(ToolOutput::success("File uploaded successfully")),
+            Err(e) => Ok(ToolOutput::error(format!(
                 "Failed to complete file upload: {e}"
             ))),
         }
@@ -474,28 +566,6 @@ fn try_parse_span(chars: &[char], pos: usize, delim_len: usize) -> Option<(Strin
     None
 }
 
-// ── Factory helpers ───────────────────────────────────────────────────────────
-
-fn make_skill_def(name: &str, description: &str, params_json: &str) -> SkillDef {
-    let mut metadata = HashMap::new();
-    metadata.insert("tier".to_string(), "builtin".to_string());
-    metadata.insert("params".to_string(), params_json.to_string());
-    SkillDef {
-        name: name.to_string(),
-        description: description.to_string(),
-        license: None,
-        compatibility: None,
-        allowed_tools: vec![],
-        metadata,
-        body: String::new(),
-        dir: PathBuf::new(),
-        tier: SkillTier::Builtin,
-        mutating: false,
-        confirmation_required: false,
-        source: SkillSource::Builtin,
-    }
-}
-
 // ── Public factory ────────────────────────────────────────────────────────────
 
 /// Build the set of Slack-specific extension tools for one turn.
@@ -512,67 +582,32 @@ pub fn build_slack_tools(
     message_ts: SlackTs,
     client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
     token: SlackApiToken,
-) -> Vec<(SkillDef, Arc<dyn SkillHandler>)> {
+) -> Vec<Arc<dyn ToolHandler>> {
     vec![
-        (
-            make_skill_def(
-                "slack-reply",
-                "Post a reply message in the current Slack thread. \
-                 Use this to send text responses to the user. \
-                 Use Slack mrkdwn format (NOT standard Markdown): \
-                 *bold*, _italic_, ~strikethrough~, `code`, \
-                 ```code block``` for multi-line code, \
-                 <url|link text> for hyperlinks. \
-                 Do NOT use Markdown syntax (**bold**, *italic*, [text](url), # headings).",
-                r#"{"type":"object","properties":{"text":{"type":"string","description":"Reply text in Slack mrkdwn format: *bold*, _italic_, ~strikethrough~, <url|text> for links — NOT standard Markdown"}},"required":["text"]}"#,
-            ),
-            Arc::new(SlackReplyHandler {
-                channel_id: channel_id.clone(),
-                thread_ts: thread_ts.clone(),
-                client: client.clone(),
-                token: token.clone(),
-            }) as Arc<dyn SkillHandler>,
-        ),
-        (
-            make_skill_def(
-                "slack-react",
-                "Add an emoji reaction to the message that triggered this conversation.",
-                r#"{"type":"object","properties":{"emoji":{"type":"string","description":"Emoji name without colons, e.g. thumbsup"}},"required":["emoji"]}"#,
-            ),
-            Arc::new(SlackReactHandler {
-                channel_id: channel_id.clone(),
-                message_ts,
-                client: client.clone(),
-                token: token.clone(),
-            }) as Arc<dyn SkillHandler>,
-        ),
-        (
-            make_skill_def(
-                "slack-reply-blocks",
-                "Post a rich Block Kit message in the current Slack thread. \
-                 Use this for formatted cards, buttons, and structured layouts.",
-                r#"{"type":"object","properties":{"blocks":{"type":"string","description":"JSON array of Slack Block Kit blocks"}},"required":["blocks"]}"#,
-            ),
-            Arc::new(SlackReplyBlocksHandler {
-                channel_id: channel_id.clone(),
-                thread_ts: thread_ts.clone(),
-                client: client.clone(),
-                token: token.clone(),
-            }) as Arc<dyn SkillHandler>,
-        ),
-        (
-            make_skill_def(
-                "slack-upload",
-                "Upload a file or text snippet to the current Slack channel.",
-                r#"{"type":"object","properties":{"content":{"type":"string","description":"File content"},"filename":{"type":"string","description":"Filename including extension"},"title":{"type":"string","description":"Optional file title"}},"required":["content","filename"]}"#,
-            ),
-            Arc::new(SlackUploadHandler {
-                channel_id,
-                thread_ts,
-                client,
-                token,
-            }) as Arc<dyn SkillHandler>,
-        ),
+        Arc::new(SlackReplyHandler {
+            channel_id: channel_id.clone(),
+            thread_ts: thread_ts.clone(),
+            client: client.clone(),
+            token: token.clone(),
+        }) as Arc<dyn ToolHandler>,
+        Arc::new(SlackReactHandler {
+            channel_id: channel_id.clone(),
+            message_ts,
+            client: client.clone(),
+            token: token.clone(),
+        }) as Arc<dyn ToolHandler>,
+        Arc::new(SlackReplyBlocksHandler {
+            channel_id: channel_id.clone(),
+            thread_ts: thread_ts.clone(),
+            client: client.clone(),
+            token: token.clone(),
+        }) as Arc<dyn ToolHandler>,
+        Arc::new(SlackUploadHandler {
+            channel_id,
+            thread_ts,
+            client,
+            token,
+        }) as Arc<dyn ToolHandler>,
     ]
 }
 

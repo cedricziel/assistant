@@ -9,12 +9,14 @@ publish = false
 [workspace]
 members = [
     "crates/core",
+    "crates/skills",
     "crates/llm",
     "crates/provider-ollama",
     "crates/provider-anthropic",
     "crates/storage",
     "crates/runtime",
     "crates/skills-executor",
+    "crates/tool-executor",
     "crates/mcp-server",
     "crates/interface-cli",
     "crates/interface-signal",
@@ -90,10 +92,12 @@ tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 mattermost_api = "0.8"
 # Internal crates
 core = { path = "crates/core" }
+skills = { path = "crates/skills" }
 llm = { path = "crates/llm" }
 storage = { path = "crates/storage" }
 runtime = { path = "crates/runtime" }
 skills-executor = { path = "crates/skills-executor" }
+tool-executor = { path = "crates/tool-executor" }
 
 # Force all crates to use the same curve25519-dalek as libsignal/presage.
 # Without this patch, two versions coexist (crates.io 4.1.3 vs signalapp git fork

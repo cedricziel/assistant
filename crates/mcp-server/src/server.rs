@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use assistant_core::{ExecutionContext, Interface};
 use assistant_runtime::Orchestrator;
-use assistant_skills_executor::{install_skill_from_source, SkillExecutor};
 use assistant_storage::registry::SkillRegistry;
+use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -18,7 +18,7 @@ use crate::protocol::*;
 pub async fn handle_request(
     req: JsonRpcRequest,
     registry: Arc<SkillRegistry>,
-    executor: Arc<SkillExecutor>,
+    executor: Arc<ToolExecutor>,
     orchestrator: Arc<Orchestrator>,
     user_skills_dir: PathBuf,
 ) -> JsonRpcResponse {
@@ -50,14 +50,22 @@ pub async fn handle_request(
 
         // ── Tools ─────────────────────────────────────────────────────────────
         "tools/list" => {
-            let skills = registry.list().await;
-            let mut tools: Vec<McpTool> = skills.iter().map(skill_to_mcp_tool).collect();
+            // Use ToolExecutor specs for the tools list.
+            let tool_specs = executor.to_specs();
+            let mut tools: Vec<McpTool> = tool_specs
+                .iter()
+                .map(|spec| McpTool {
+                    name: spec.name.clone(),
+                    description: spec.description.clone(),
+                    input_schema: spec.params_schema.clone(),
+                })
+                .collect();
 
-            // Management tools appended after the per-skill entries.
+            // Management tools appended after the per-tool entries.
             tools.push(McpTool {
                 name: "run_prompt".to_string(),
                 description:
-                    "Send a prompt through the orchestrator loop (may invoke multiple skills)."
+                    "Send a prompt through the orchestrator loop (may invoke multiple tools)."
                         .to_string(),
                 input_schema: json!({
                     "type": "object",
@@ -132,11 +140,7 @@ pub async fn handle_request(
                 };
             }
 
-            // ── Per-skill dynamic dispatch ─────────────────────────────────────
-            let Some(skill_def) = registry.get(&tool_name).await else {
-                return JsonRpcResponse::err(req.id, -32601, format!("Unknown tool: {tool_name}"));
-            };
-
+            // ── Per-tool dynamic dispatch via ToolExecutor ─────────────────────
             let params: HashMap<String, Value> = if let Value::Object(map) = &tool_input {
                 map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
             } else {
@@ -150,19 +154,20 @@ pub async fn handle_request(
                 interactive: false,
             };
 
-            match executor.execute(&skill_def, params, &ctx).await {
+            match executor.execute(&tool_name, params, &ctx).await {
                 Ok(output) => {
                     let content = vec![ContentItem::text(output.content)];
                     JsonRpcResponse::ok(req.id, json!({ "content": content }))
                 }
                 Err(e) => {
-                    warn!(skill = %tool_name, error = %e, "Skill execution failed");
+                    warn!(tool = %tool_name, error = %e, "Tool execution failed");
                     JsonRpcResponse::err(req.id, -32603, e.to_string())
                 }
             }
         }
 
         // ── Resources ─────────────────────────────────────────────────────────
+        // Resources still use the SkillRegistry (SKILL.md knowledge packages).
         "resources/list" => {
             let skills = registry.list().await;
             let mut resources = vec![McpResource {
@@ -213,10 +218,7 @@ pub async fn handle_request(
                         json!({
                             "name": s.name,
                             "description": s.description,
-                            "tier": s.tier.label(),
                             "source": s.source.to_string(),
-                            "mutating": s.mutating,
-                            "confirmation_required": s.confirmation_required,
                         })
                     })
                     .collect();
@@ -247,7 +249,6 @@ pub async fn handle_request(
                         }
                     }
                     // skills://<name>/<category>/<filename> — return auxiliary file
-                    // splitn(3, '/') yields [name, category, filename] for "name/category/filename"
                     3 if matches!(segments[1], "scripts" | "references" | "assets") => {
                         let skill_name = segments[0];
                         let category = segments[1];
@@ -279,7 +280,6 @@ pub async fn handle_request(
                             ),
                         }
                     }
-                    // Invalid category or unexpected segment count
                     _ => {
                         JsonRpcResponse::err(req.id, -32602, format!("Invalid resource URI: {uri}"))
                     }
@@ -291,7 +291,6 @@ pub async fn handle_request(
 
         other => {
             debug!(method = %other, "Unhandled MCP method");
-            // Return empty ok for notifications (no id), error for unknown methods
             if req.id.is_some() {
                 JsonRpcResponse::err(req.id, -32601, format!("Method not found: {other}"))
             } else {
@@ -301,19 +300,4 @@ pub async fn handle_request(
     }
 }
 
-/// Convert a [`SkillDef`] into an [`McpTool`] for the `tools/list` response.
-///
-/// ToolHandler schemas are already proper JSON Schema (`{"type":"object","properties":{...}}`).
-/// SKILL.md schemas are flat property maps — wrapped here to form a valid inputSchema.
-fn skill_to_mcp_tool(skill: &assistant_core::SkillDef) -> McpTool {
-    let input_schema = match skill.params_schema() {
-        Some(schema) if schema.get("type").and_then(|t| t.as_str()) == Some("object") => schema,
-        Some(flat) => json!({ "type": "object", "properties": flat }),
-        None => json!({ "type": "object", "properties": {} }),
-    };
-    McpTool {
-        name: skill.name.clone(),
-        description: skill.description.clone(),
-        input_schema,
-    }
-}
+// ── skill_to_mcp_tool is no longer needed (using ToolExecutor specs directly) ──
