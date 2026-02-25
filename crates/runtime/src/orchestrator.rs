@@ -502,6 +502,46 @@ impl Orchestrator {
                                 .get("reason")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("done");
+
+                            // Guard: reject end_turn when a reply/react tool
+                            // exists but the LLM never actually called one.
+                            // This prevents the turn from silently completing
+                            // without delivering a visible response to the
+                            // user in messaging interfaces (e.g. Slack).
+                            // Reactions count as valid acknowledgements per the
+                            // system prompt.
+                            let has_reply_tool = ext_map.keys().any(|n| {
+                                n.contains("reply") || n.contains("post") || n.contains("react")
+                            });
+                            if !replied && has_reply_tool {
+                                warn!(
+                                    iteration,
+                                    reason,
+                                    "end_turn rejected: reply tool available but no reply sent"
+                                );
+                                let reject_msg =
+                                    "end_turn rejected: you MUST call the `reply` tool \
+                                     before ending the turn. The user has not seen any \
+                                     response yet.";
+                                otel_span.set_attribute(KeyValue::new("tool_status", "rejected"));
+                                otel_span.set_attribute(KeyValue::new(
+                                    "tool_observation",
+                                    reject_msg.to_string(),
+                                ));
+                                self.append_tool_result(&mut history, "end_turn", reject_msg);
+                                let tr_msg = Self::make_tool_result_message(
+                                    conversation_id,
+                                    turn_index,
+                                    "end_turn",
+                                    reject_msg,
+                                );
+                                if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                    warn!("Failed to persist rejected end_turn tool-result: {e}");
+                                }
+                                otel_span.end();
+                                continue;
+                            }
+
                             info!(iteration, reason, "end_turn called; stopping turn");
 
                             let result_text = format!("end_turn: {reason}");
@@ -656,14 +696,17 @@ impl Orchestrator {
                             obs
                         };
 
-                        // Mark the turn as replied if any posting/reply tool was
-                        // called — regardless of whether it is an extension tool
-                        // or a global skill (e.g. `slack-post`).  Without this,
-                        // calling a global posting skill leaves `replied=false`
-                        // and the auto-post fallback fires on the next FinalAnswer,
-                        // producing a second message in a different context (e.g.
-                        // channel root vs. thread).
-                        if name.contains("reply") || name.contains("post") {
+                        // Mark the turn as acknowledged if any posting, reply,
+                        // or reaction tool was called — regardless of whether it
+                        // is an extension tool or a global skill (e.g.
+                        // `slack-post`).  Without this, calling a global posting
+                        // skill leaves `replied=false` and the auto-post fallback
+                        // fires on the next FinalAnswer, producing a second
+                        // message in a different context (e.g. channel root vs.
+                        // thread).  Reactions (e.g. `react`) count as valid
+                        // acknowledgements per the system prompt.
+                        if name.contains("reply") || name.contains("post") || name.contains("react")
+                        {
                             replied = true;
                         }
 
@@ -1860,13 +1903,18 @@ mod tests {
     }
 
     fn ollama_tool_calls(names: &[&str]) -> Value {
-        let calls: Vec<Value> = names
+        ollama_tool_calls_with_args(&names.iter().map(|n| (*n, json!({}))).collect::<Vec<_>>())
+    }
+
+    /// Build a tool-call Ollama response where each entry is `(name, arguments)`.
+    fn ollama_tool_calls_with_args(calls: &[(&str, Value)]) -> Value {
+        let tc: Vec<Value> = calls
             .iter()
-            .map(|n| json!({ "function": { "name": n, "arguments": {} } }))
+            .map(|(n, a)| json!({ "function": { "name": n, "arguments": a } }))
             .collect();
         json!({
             "model": "test",
-            "message": { "role": "assistant", "content": null, "tool_calls": calls },
+            "message": { "role": "assistant", "content": null, "tool_calls": tc },
             "done": true
         })
     }
@@ -2026,5 +2074,250 @@ mod tests {
             2,
             "three tool calls must be handled in ONE iteration"
         );
+    }
+
+    // ── Mock extension handlers ─────────────────────────────────────────────
+
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use assistant_core::tool::{ToolHandler, ToolOutput};
+    use assistant_core::types::ExecutionContext;
+    use async_trait::async_trait;
+
+    /// A fake extension tool that records how many times it was called.
+    struct MockExtTool {
+        tool_name: &'static str,
+        call_count: AtomicUsize,
+    }
+
+    impl MockExtTool {
+        fn new(name: &'static str) -> Self {
+            Self {
+                tool_name: name,
+                call_count: AtomicUsize::new(0),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.call_count.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl ToolHandler for MockExtTool {
+        fn name(&self) -> &str {
+            self.tool_name
+        }
+
+        fn description(&self) -> &str {
+            "mock extension tool"
+        }
+
+        fn params_schema(&self) -> Value {
+            json!({
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string" }
+                },
+                "required": []
+            })
+        }
+
+        async fn run(
+            &self,
+            _params: HashMap<String, Value>,
+            _ctx: &ExecutionContext,
+        ) -> anyhow::Result<ToolOutput> {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolOutput::success("ok"))
+        }
+    }
+
+    // ── end_turn rejection tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn end_turn_rejected_when_reply_tool_exists_but_not_called() {
+        let server = MockServer::start().await;
+
+        // 1st LLM call: model calls end_turn without calling reply first.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_args(&[(
+                    "end_turn",
+                    json!({"reason": "replied"}),
+                )])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // 2nd LLM call: after rejection, model calls reply then end_turn.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_args(&[
+                    ("reply", json!({"text": "hello!"})),
+                    ("end_turn", json!({"reason": "replied"})),
+                ])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let reply_handler = Arc::new(MockExtTool::new("reply"));
+
+        orch.run_turn_with_tools(
+            "hi",
+            Uuid::new_v4(),
+            Interface::Slack,
+            vec![reply_handler.clone() as Arc<dyn ToolHandler>],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(
+            reqs.len(),
+            2,
+            "expected 2 LLM calls: first end_turn rejected, second with reply"
+        );
+
+        // The rejection message should appear in the second LLM call.
+        let msgs = messages_in(&reqs[1]);
+        let has_rejection = msgs.iter().any(|m| {
+            m["role"] == "tool"
+                && m["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("end_turn rejected")
+        });
+        assert!(
+            has_rejection,
+            "second LLM call must contain the end_turn rejection; msgs: {msgs:?}"
+        );
+
+        assert_eq!(
+            reply_handler.calls(),
+            1,
+            "reply handler must have been called exactly once"
+        );
+    }
+
+    #[tokio::test]
+    async fn end_turn_accepted_without_reply_tool_in_cli_mode() {
+        let server = MockServer::start().await;
+
+        // Model calls end_turn — no reply extension tool exists (CLI mode).
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_args(&[(
+                    "end_turn",
+                    json!({"reason": "done"}),
+                )])),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+
+        // No extension tools — CLI mode, end_turn should be accepted.
+        orch.run_turn_with_tools("hi", Uuid::new_v4(), Interface::Cli, vec![], None)
+            .await
+            .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(
+            reqs.len(),
+            1,
+            "end_turn without reply tools should be accepted in a single LLM call"
+        );
+    }
+
+    #[tokio::test]
+    async fn end_turn_accepted_after_reply_tool_called() {
+        let server = MockServer::start().await;
+
+        // Model calls reply first, then end_turn — should be accepted immediately.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_args(&[
+                    ("reply", json!({"text": "hello!"})),
+                    ("end_turn", json!({"reason": "replied"})),
+                ])),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let reply_handler = Arc::new(MockExtTool::new("reply"));
+
+        orch.run_turn_with_tools(
+            "hi",
+            Uuid::new_v4(),
+            Interface::Slack,
+            vec![reply_handler.clone() as Arc<dyn ToolHandler>],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(
+            reqs.len(),
+            1,
+            "reply + end_turn in same call should complete in a single LLM call"
+        );
+
+        assert_eq!(reply_handler.calls(), 1, "reply must have been called once");
+    }
+
+    #[tokio::test]
+    async fn end_turn_accepted_after_react_tool_called() {
+        let server = MockServer::start().await;
+
+        // Model calls react then end_turn — reaction is a valid acknowledgement.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_args(&[
+                    ("react", json!({"emoji": "thumbsup"})),
+                    ("end_turn", json!({"reason": "acknowledged with reaction"})),
+                ])),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+        let reply_handler = Arc::new(MockExtTool::new("reply"));
+        let react_handler = Arc::new(MockExtTool::new("react"));
+
+        orch.run_turn_with_tools(
+            "thanks!",
+            Uuid::new_v4(),
+            Interface::Slack,
+            vec![
+                reply_handler.clone() as Arc<dyn ToolHandler>,
+                react_handler.clone() as Arc<dyn ToolHandler>,
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(
+            reqs.len(),
+            1,
+            "react + end_turn should complete in a single LLM call"
+        );
+
+        assert_eq!(react_handler.calls(), 1, "react must have been called once");
+        assert_eq!(reply_handler.calls(), 0, "reply must not have been called");
     }
 }

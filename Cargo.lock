@@ -379,6 +379,7 @@ dependencies = [
  "assistant-skills",
  "assistant-storage",
  "assistant-tool-executor",
+ "async-trait",
  "chrono",
  "cron",
  "dirs",

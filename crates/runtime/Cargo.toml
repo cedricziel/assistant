@@ -30,4 +30,5 @@ toml = { workspace = true }
 sqlx = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
 wiremock = { workspace = true }
