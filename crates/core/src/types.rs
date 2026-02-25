@@ -359,6 +359,11 @@ impl Default for McpConfig {
 pub struct MirrorConfig {
     pub trace_enabled: bool,
     pub analysis_window: usize,
+    /// When `true`, LLM span events include full message content
+    /// (`gen_ai.input.messages`, `gen_ai.output.messages`, etc.).
+    /// Off by default because content may contain PII.
+    #[serde(default)]
+    pub trace_content: bool,
 }
 
 impl Default for MirrorConfig {
@@ -366,6 +371,7 @@ impl Default for MirrorConfig {
         Self {
             trace_enabled: true,
             analysis_window: 50,
+            trace_content: false,
         }
     }
 }

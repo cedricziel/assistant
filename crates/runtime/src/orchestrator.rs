@@ -94,6 +94,8 @@ pub struct Orchestrator {
     /// Memory loader used to rebuild the system prompt at the start of every
     /// turn so that writes made by memory tools are reflected immediately.
     memory_loader: MemoryLoader,
+    /// When true, record full message content on LLM spans (PII-sensitive).
+    trace_content: bool,
 }
 
 impl Orchestrator {
@@ -123,6 +125,7 @@ impl Orchestrator {
             disabled_skills: config.skills.disabled.clone(),
             confirmation_callback: None,
             memory_loader,
+            trace_content: config.mirror.trace_content,
         }
     }
 
@@ -331,10 +334,23 @@ impl Orchestrator {
                 interactive: false,
             };
 
-            let mut llm_span = start_llm_span(self.llm.as_ref(), iteration, &turn_cx);
+            let mut llm_span = start_llm_span(
+                self.llm.as_ref(),
+                iteration,
+                &turn_cx,
+                self.trace_content,
+                &system_prompt,
+                &history,
+                &all_specs,
+            );
             let response = self.llm.chat(&system_prompt, &history, &all_specs).await;
             let response = response?;
-            finish_llm_span(&mut llm_span, response.meta());
+            finish_llm_span(
+                &mut llm_span,
+                response.meta(),
+                &response,
+                self.trace_content,
+            );
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
@@ -766,10 +782,23 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
-            let mut llm_span = start_llm_span(self.llm.as_ref(), iteration, &turn_cx);
+            let mut llm_span = start_llm_span(
+                self.llm.as_ref(),
+                iteration,
+                &turn_cx,
+                self.trace_content,
+                &system_prompt,
+                &history,
+                &tool_specs,
+            );
             let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
             let response = response?;
-            finish_llm_span(&mut llm_span, response.meta());
+            finish_llm_span(
+                &mut llm_span,
+                response.meta(),
+                &response,
+                self.trace_content,
+            );
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
@@ -1001,7 +1030,15 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
-            let mut llm_span = start_llm_span(self.llm.as_ref(), iteration, &turn_cx);
+            let mut llm_span = start_llm_span(
+                self.llm.as_ref(),
+                iteration,
+                &turn_cx,
+                self.trace_content,
+                &system_prompt,
+                &history,
+                &tool_specs,
+            );
             let response = self
                 .llm
                 .chat_streaming(
@@ -1012,7 +1049,12 @@ impl Orchestrator {
                 )
                 .await;
             let response = response?;
-            finish_llm_span(&mut llm_span, response.meta());
+            finish_llm_span(
+                &mut llm_span,
+                response.meta(),
+                &response,
+                self.trace_content,
+            );
 
             match response {
                 LlmResponse::FinalAnswer(text, _meta) => {
@@ -1391,10 +1433,20 @@ fn start_tool_span(
 
 /// Create an OTel span for an LLM chat call, populated with GenAI semantic
 /// convention request-side attributes.
+///
+/// When `trace_content` is `true`, the span also records:
+/// - `gen_ai.system_instructions` — the full system prompt
+/// - `gen_ai.input.messages` — serialised chat history
+/// - `gen_ai.tool.definitions` — serialised tool spec list
+#[allow(clippy::too_many_arguments)]
 fn start_llm_span(
     llm: &dyn LlmProvider,
     iteration: usize,
     parent_cx: &OtelContext,
+    trace_content: bool,
+    system_prompt: &str,
+    history: &[ChatHistoryMessage],
+    tools: &[ToolSpec],
 ) -> opentelemetry::global::BoxedSpan {
     let tracer = global::tracer("assistant.orchestrator");
     let model = llm.model_name();
@@ -1411,12 +1463,45 @@ fn start_llm_span(
         llm.server_address().to_string(),
     ));
     span.set_attribute(KeyValue::new("iteration", iteration as i64));
+
+    if trace_content {
+        span.set_attribute(KeyValue::new(
+            "gen_ai.system_instructions",
+            system_prompt.to_string(),
+        ));
+        let input_json = serialize_history_for_span(history);
+        span.set_attribute(KeyValue::new("gen_ai.input.messages", input_json));
+        if !tools.is_empty() {
+            let tools_json = serde_json::to_string(
+                &tools
+                    .iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "name": t.name,
+                            "description": t.description,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or_default();
+            span.set_attribute(KeyValue::new("gen_ai.tool.definitions", tools_json));
+        }
+    }
+
     span
 }
 
 /// Enrich an LLM span with GenAI semantic convention response-side attributes
 /// extracted from [`LlmResponseMeta`].
-fn finish_llm_span(span: &mut opentelemetry::global::BoxedSpan, meta: &LlmResponseMeta) {
+///
+/// When `trace_content` is `true`, the assistant's output text is also recorded
+/// as `gen_ai.output.messages`.
+fn finish_llm_span(
+    span: &mut opentelemetry::global::BoxedSpan,
+    meta: &LlmResponseMeta,
+    response: &LlmResponse,
+    trace_content: bool,
+) {
     if let Some(model) = &meta.model {
         span.set_attribute(KeyValue::new("gen_ai.response.model", model.clone()));
     }
@@ -1436,7 +1521,62 @@ fn finish_llm_span(span: &mut opentelemetry::global::BoxedSpan, meta: &LlmRespon
     if let Some(output) = meta.output_tokens {
         span.set_attribute(KeyValue::new("gen_ai.usage.output_tokens", output as i64));
     }
+
+    if trace_content {
+        let output_json = match response {
+            LlmResponse::FinalAnswer(text, _) => {
+                serde_json::json!([{"role": "assistant", "content": text}]).to_string()
+            }
+            LlmResponse::ToolCalls(calls, _) => {
+                let items: Vec<serde_json::Value> = calls
+                    .iter()
+                    .map(|c| {
+                        serde_json::json!({
+                            "role": "assistant",
+                            "tool_call": { "name": c.name, "arguments": c.params }
+                        })
+                    })
+                    .collect();
+                serde_json::Value::Array(items).to_string()
+            }
+            LlmResponse::Thinking(text, _) => {
+                serde_json::json!([{"role": "assistant", "thinking": text}]).to_string()
+            }
+        };
+        span.set_attribute(KeyValue::new("gen_ai.output.messages", output_json));
+    }
+
     span.end();
+}
+
+/// Serialise [`ChatHistoryMessage`] slices into a compact JSON string for span
+/// content capture.
+fn serialize_history_for_span(history: &[ChatHistoryMessage]) -> String {
+    let items: Vec<serde_json::Value> = history
+        .iter()
+        .map(|msg| match msg {
+            ChatHistoryMessage::Text { role, content } => {
+                let role_str = match role {
+                    ChatRole::System => "system",
+                    ChatRole::User => "user",
+                    ChatRole::Assistant => "assistant",
+                    ChatRole::Tool => "tool",
+                };
+                serde_json::json!({"role": role_str, "content": content})
+            }
+            ChatHistoryMessage::AssistantToolCalls(calls) => {
+                let tc: Vec<serde_json::Value> = calls
+                    .iter()
+                    .map(|c| serde_json::json!({"name": c.name, "arguments": c.params}))
+                    .collect();
+                serde_json::json!({"role": "assistant", "tool_calls": tc})
+            }
+            ChatHistoryMessage::ToolResult { name, content } => {
+                serde_json::json!({"role": "tool", "name": name, "content": content})
+            }
+        })
+        .collect();
+    serde_json::Value::Array(items).to_string()
 }
 
 fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {

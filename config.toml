@@ -85,6 +85,9 @@ listen = "127.0.0.1:3000"
 trace_enabled = true
 # How many recent traces to include in self-analysis (per skill)
 analysis_window = 50
+# Record full message content on LLM spans (system prompt, input messages,
+# output messages, tool definitions).  Off by default — content may contain PII.
+# trace_content = false
 
 [memory]
 # Persistent markdown memory files.
