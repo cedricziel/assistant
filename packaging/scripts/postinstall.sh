@@ -7,7 +7,23 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload 2>/dev/null || true
 fi
 
-cat <<'MSG'
+# On upgrade: re-enable and restart services that were previously enabled.
+# On fresh install: just print instructions.
+action="${1:-configure}"
+
+if [ "$action" = "configure" ] && [ -n "$2" ]; then
+    # $2 is set to the old version on upgrade — restart services.
+    for user_id in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | sort -u); do
+        for svc in assistant-slack assistant-mattermost assistant-web-ui; do
+            # Only restart if the unit file exists and was previously enabled.
+            if systemctl --user -M "${user_id}@.host" is-enabled "$svc" 2>/dev/null | grep -q enabled; then
+                systemctl --user -M "${user_id}@.host" daemon-reload 2>/dev/null || true
+                systemctl --user -M "${user_id}@.host" restart "$svc" 2>/dev/null || true
+            fi
+        done
+    done
+else
+    cat <<'MSG'
 
 assistant has been installed.  To run the Slack or Mattermost bot as a
 background service for your user account:
@@ -28,3 +44,4 @@ background service for your user account:
     journalctl --user -u assistant-mattermost -f
 
 MSG
+fi
