@@ -64,6 +64,36 @@ struct SlackIncomingEvent {
     kind: SlackIncomingKind,
 }
 
+/// A message waiting to be processed in a conversation turn.
+///
+/// When multiple messages arrive for the same thread while a turn is in-flight,
+/// they accumulate in `pending_messages` and are drained into a single combined
+/// orchestrator turn once the per-conversation lock is acquired.
+struct PendingMessage {
+    text: String,
+    user_id: String,
+    channel_id: String,
+    thread_ts: SlackTs,
+    msg_ts: SlackTs,
+}
+
+/// Build a single contextualized prompt from a batch of pending messages.
+///
+/// Each message gets a `[Slack: user=… channel=…]` header so the LLM can
+/// attribute authorship.  Messages are separated by a blank line.
+fn build_batch_prompt(batch: &[PendingMessage]) -> String {
+    batch
+        .iter()
+        .map(|m| {
+            format!(
+                "[Slack: user={} channel={}]\n{}",
+                m.user_id, m.channel_id, m.text
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 use crate::config::{SlackConfig, SlackConfigExt};
 use crate::skills::{
     SlackDeleteMessageSkill, SlackGetHistorySkill, SlackListChannelsSkill, SlackLookupUserSkill,
@@ -104,6 +134,13 @@ struct SlackCallbackState {
     /// for the current turn to finish before starting their own, ensuring
     /// the LLM always sees a consistent, complete history.
     conv_locks: Arc<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>>,
+    /// Per-conversation queue of messages waiting for their turn.
+    ///
+    /// Messages push themselves here before acquiring the per-conversation
+    /// lock.  When the lock is acquired, the handler drains all pending
+    /// messages and combines them into a single orchestrator turn.  This
+    /// avoids N sequential turns when N messages arrive during one turn.
+    pending_messages: Arc<Mutex<HashMap<Uuid, Vec<PendingMessage>>>>,
 }
 
 // ── History-message helpers ───────────────────────────────────────────────────
@@ -226,6 +263,7 @@ async fn on_push_event(
         started_at,
         storage,
         conv_locks,
+        pending_messages,
     ) = {
         let guard = states.read().await;
         let s = guard
@@ -244,6 +282,7 @@ async fn on_push_event(
             s.started_at,
             s.storage.clone(),
             s.conv_locks.clone(),
+            s.pending_messages.clone(),
         )
     };
 
@@ -440,42 +479,39 @@ async fn on_push_event(
         }
     }
 
-    // Acknowledge receipt with 👀 — visible while the orchestrator is running.
-    debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.add eyes");
-    let ack_req = SlackApiReactionsAddRequest::new(
+    // Acknowledge receipt with ⏳ — visible while the message is queued,
+    // before the per-conversation lock is acquired.
+    debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.add hourglass_flowing_sand (queued)");
+    let queue_req = SlackApiReactionsAddRequest::new(
         channel_id.clone().into(),
-        SlackReactionName("eyes".to_string()),
+        SlackReactionName("hourglass_flowing_sand".to_string()),
         msg_ts.clone(),
     );
-    if let Err(e) = session.reactions_add(&ack_req).await {
+    if let Err(e) = session.reactions_add(&queue_req).await {
         let msg = e.to_string();
         if msg.contains("already_reacted") {
-            debug!("Eyes reaction already present, skipping");
+            debug!("Hourglass reaction already present, skipping");
         } else {
-            warn!(error = %e, "reactions.add eyes failed");
+            warn!(error = %e, "reactions.add hourglass_flowing_sand failed");
         }
     }
 
-    // Show a typing/processing status in the thread via the Assistant API.
-    debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → is thinking…");
-    let set_status_req = SlackApiAssistantThreadsSetStatusRequest::new(
-        channel_id.clone().into(),
-        "is thinking\u{2026}".to_string(),
-        thread_ts.clone(),
-    );
-    if let Err(e) = session.assistant_threads_set_status(&set_status_req).await {
-        debug!(error = %e, "assistant.threads.setStatus failed");
+    // Push this message into the per-conversation pending queue so that if
+    // multiple messages pile up while a turn is in-flight, they can be
+    // drained and combined into a single orchestrator turn.
+    {
+        let mut queue = pending_messages.lock().await;
+        queue
+            .entry(conversation_id)
+            .or_default()
+            .push(PendingMessage {
+                text: text.clone(),
+                user_id: user_id.clone(),
+                channel_id: channel_id.clone(),
+                thread_ts: thread_ts.clone(),
+                msg_ts: msg_ts.clone(),
+            });
     }
-
-    // Build per-turn Slack extension tools.  The LLM calls these to post
-    // replies, react, or upload files.  No auto-reply after the turn.
-    let extensions = build_slack_tools(
-        channel_id.clone(),
-        Some(thread_ts.clone()),
-        msg_ts.clone(),
-        client.clone(),
-        bot_token.clone(),
-    );
 
     // Acquire (or create) the per-conversation mutex so that if two messages
     // arrive for the same thread while a turn is in-flight, the second one
@@ -490,19 +526,88 @@ async fn on_push_event(
     };
     let _conv_guard = conv_lock.lock().await;
 
-    // Prepend a one-line Slack context header so the LLM knows the sender's
-    // user ID and current channel without needing to call any lookup tool.
-    // Format: "[Slack: user=U025CM5HG channel=C025CM5HL]\n<message>"
-    let contextualized_text = format!(
-        "[Slack: user={user_id} channel={channel_id}]\n{text}",
-        user_id = user_id,
-        channel_id = channel_id,
+    // ── Drain the pending queue ──────────────────────────────────────────────
+    //
+    // All messages that arrived while the previous turn was running (including
+    // our own) are now waiting in the queue.  Drain them all so they become a
+    // single combined orchestrator turn instead of N sequential turns.
+    let batch: Vec<PendingMessage> = {
+        let mut queue = pending_messages.lock().await;
+        queue.remove(&conversation_id).unwrap_or_default()
+    };
+
+    if batch.is_empty() {
+        // Another handler already drained our message — nothing to do.
+        debug!(conversation_id = %conversation_id, "Pending queue empty, another handler processed our message");
+        return Ok(());
+    }
+
+    let batch_size = batch.len();
+    info!(
+        conversation_id = %conversation_id,
+        batch_size,
+        "Drained pending queue — processing as single turn"
     );
+
+    // Swap ⏳ → 👀 for every message in the batch now that we're actively
+    // processing this turn.
+    for pending in &batch {
+        debug!(channel = %pending.channel_id, ts = %pending.msg_ts.0, "⏳ → 👀");
+        let remove_hg = SlackApiReactionsRemoveRequest::new(SlackReactionName(
+            "hourglass_flowing_sand".to_string(),
+        ))
+        .with_channel(pending.channel_id.clone().into())
+        .with_timestamp(pending.msg_ts.clone());
+        if let Err(e) = session.reactions_remove(&remove_hg).await {
+            warn!(error = %e, ts = %pending.msg_ts.0, "reactions.remove hourglass_flowing_sand failed");
+        }
+        let add_eyes = SlackApiReactionsAddRequest::new(
+            pending.channel_id.clone().into(),
+            SlackReactionName("eyes".to_string()),
+            pending.msg_ts.clone(),
+        );
+        if let Err(e) = session.reactions_add(&add_eyes).await {
+            let msg = e.to_string();
+            if msg.contains("already_reacted") {
+                debug!("Eyes reaction already present, skipping");
+            } else {
+                warn!(error = %e, ts = %pending.msg_ts.0, "reactions.add eyes failed");
+            }
+        }
+    }
+
+    // Show a typing/processing status in the thread via the Assistant API.
+    debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → is thinking…");
+    let set_status_req = SlackApiAssistantThreadsSetStatusRequest::new(
+        channel_id.clone().into(),
+        "is thinking\u{2026}".to_string(),
+        thread_ts.clone(),
+    );
+    if let Err(e) = session.assistant_threads_set_status(&set_status_req).await {
+        debug!(error = %e, "assistant.threads.setStatus failed");
+    }
+
+    // Build per-turn Slack extension tools bound to the *last* message in the
+    // batch (most recent), so `react` targets the newest user message.
+    let last = batch.last().expect("batch is non-empty");
+    let extensions = build_slack_tools(
+        last.channel_id.clone(),
+        Some(last.thread_ts.clone()),
+        last.msg_ts.clone(),
+        client.clone(),
+        bot_token.clone(),
+    );
+
+    // Combine all pending messages into a single contextualized prompt.
+    // Each message retains its own Slack context header so the LLM knows
+    // who sent what.
+    let contextualized_text = build_batch_prompt(&batch);
 
     let orchestrator_start = std::time::Instant::now();
     debug!(
         conversation_id = %conversation_id,
-        text_len = text.len(),
+        batch_size,
+        text_len = contextualized_text.len(),
         "orchestrator.run_turn_with_tools →"
     );
     let turn_result = orchestrator
@@ -516,13 +621,17 @@ async fn on_push_event(
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
-    // Remove 👀 and clear the typing status — regardless of outcome.
-    debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.remove eyes");
-    let remove_req = SlackApiReactionsRemoveRequest::new(SlackReactionName("eyes".to_string()))
-        .with_channel(channel_id.clone().into())
-        .with_timestamp(msg_ts.clone());
-    if let Err(e) = session.reactions_remove(&remove_req).await {
-        warn!(error = %e, "reactions.remove eyes failed");
+    // Remove 👀 from every message in the batch and clear the typing status
+    // — regardless of outcome.
+    for pending in &batch {
+        debug!(channel = %pending.channel_id, ts = %pending.msg_ts.0, "reactions.remove eyes");
+        let remove_eyes =
+            SlackApiReactionsRemoveRequest::new(SlackReactionName("eyes".to_string()))
+                .with_channel(pending.channel_id.clone().into())
+                .with_timestamp(pending.msg_ts.clone());
+        if let Err(e) = session.reactions_remove(&remove_eyes).await {
+            warn!(error = %e, ts = %pending.msg_ts.0, "reactions.remove eyes failed");
+        }
     }
 
     debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → clear");
@@ -539,7 +648,7 @@ async fn on_push_event(
     }
 
     if let Err(e) = turn_result {
-        error!(error = %e, elapsed_ms, "orchestrator error");
+        error!(error = %e, elapsed_ms, batch_size, "orchestrator error");
         // Notify the user so they aren't left waiting silently.
         let err_req = SlackApiChatPostMessageRequest::new(
             channel_id.clone().into(),
@@ -556,6 +665,7 @@ async fn on_push_event(
     debug!(
         conversation_id = %conversation_id,
         elapsed_ms,
+        batch_size,
         "orchestrator.run_turn_with_tools ← ok"
     );
 
@@ -738,6 +848,7 @@ impl SlackInterface {
                 started_at,
                 storage: self.storage.clone(),
                 conv_locks: conv_locks.clone(),
+                pending_messages: Arc::new(Mutex::new(HashMap::new())),
             };
 
             let listener_environment = Arc::new(
@@ -812,15 +923,17 @@ impl SlackInterface {
 mod tests {
     use std::collections::hash_map::Entry;
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use assistant_core::SlackConfig;
+    use slack_morphism::prelude::*;
+    use tokio::sync::Mutex;
     use uuid::Uuid;
 
     use super::{
-        classify_history_msg, incoming_from_message_event, incoming_from_reaction_event,
-        SlackIncomingKind,
+        build_batch_prompt, classify_history_msg, incoming_from_message_event,
+        incoming_from_reaction_event, PendingMessage, SlackIncomingKind,
     };
-    use slack_morphism::prelude::*;
 
     // ── Allowlist tests ───────────────────────────────────────────────────────
 
@@ -1128,5 +1241,116 @@ mod tests {
     fn classify_system_event_as_none() {
         let msg = make_system_history_msg("1700000002.000000");
         assert_eq!(classify_history_msg(&msg), None);
+    }
+
+    // ── Pending-message batch tests ──────────────────────────────────────────
+
+    fn make_pending(user: &str, channel: &str, text: &str, ts: &str) -> PendingMessage {
+        PendingMessage {
+            text: text.to_string(),
+            user_id: user.to_string(),
+            channel_id: channel.to_string(),
+            thread_ts: SlackTs("1700000000.000000".to_string()),
+            msg_ts: SlackTs(ts.to_string()),
+        }
+    }
+
+    #[test]
+    fn batch_prompt_single_message() {
+        let batch = vec![make_pending("U001", "C001", "hello world", "1.0")];
+        let prompt = build_batch_prompt(&batch);
+        assert_eq!(prompt, "[Slack: user=U001 channel=C001]\nhello world");
+    }
+
+    #[test]
+    fn batch_prompt_multiple_messages_preserves_order_and_headers() {
+        let batch = vec![
+            make_pending("U001", "C001", "first", "1.0"),
+            make_pending("U002", "C001", "second", "2.0"),
+            make_pending("U001", "C001", "third", "3.0"),
+        ];
+        let prompt = build_batch_prompt(&batch);
+        let expected = "\
+[Slack: user=U001 channel=C001]\nfirst\n\n\
+[Slack: user=U002 channel=C001]\nsecond\n\n\
+[Slack: user=U001 channel=C001]\nthird";
+        assert_eq!(prompt, expected);
+    }
+
+    #[test]
+    fn batch_prompt_empty_batch_produces_empty_string() {
+        let batch: Vec<PendingMessage> = vec![];
+        let prompt = build_batch_prompt(&batch);
+        assert!(prompt.is_empty(), "empty batch must produce empty string");
+    }
+
+    #[tokio::test]
+    async fn pending_queue_drain_returns_all_and_leaves_empty() {
+        let pending: Arc<Mutex<HashMap<Uuid, Vec<PendingMessage>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let conv_id = Uuid::new_v4();
+
+        // Push three messages.
+        {
+            let mut q = pending.lock().await;
+            let entry = q.entry(conv_id).or_default();
+            entry.push(make_pending("U001", "C001", "msg-a", "1.0"));
+            entry.push(make_pending("U002", "C001", "msg-b", "2.0"));
+            entry.push(make_pending("U003", "C001", "msg-c", "3.0"));
+        }
+
+        // Drain — should get all three.
+        let batch: Vec<PendingMessage> = {
+            let mut q = pending.lock().await;
+            q.remove(&conv_id).unwrap_or_default()
+        };
+        assert_eq!(batch.len(), 3, "drain must return all queued messages");
+        assert_eq!(batch[0].text, "msg-a");
+        assert_eq!(batch[1].text, "msg-b");
+        assert_eq!(batch[2].text, "msg-c");
+
+        // Second drain — must be empty (another handler would early-return).
+        let second: Vec<PendingMessage> = {
+            let mut q = pending.lock().await;
+            q.remove(&conv_id).unwrap_or_default()
+        };
+        assert!(
+            second.is_empty(),
+            "second drain must return empty — messages already consumed"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_queue_separate_conversations_are_isolated() {
+        let pending: Arc<Mutex<HashMap<Uuid, Vec<PendingMessage>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let conv_a = Uuid::new_v4();
+        let conv_b = Uuid::new_v4();
+
+        {
+            let mut q = pending.lock().await;
+            q.entry(conv_a)
+                .or_default()
+                .push(make_pending("U001", "C001", "for-a", "1.0"));
+            q.entry(conv_b)
+                .or_default()
+                .push(make_pending("U002", "C002", "for-b", "2.0"));
+        }
+
+        // Drain conv_a — must only get conv_a's message.
+        let batch_a: Vec<PendingMessage> = {
+            let mut q = pending.lock().await;
+            q.remove(&conv_a).unwrap_or_default()
+        };
+        assert_eq!(batch_a.len(), 1);
+        assert_eq!(batch_a[0].text, "for-a");
+
+        // conv_b must still be intact.
+        let batch_b: Vec<PendingMessage> = {
+            let mut q = pending.lock().await;
+            q.remove(&conv_b).unwrap_or_default()
+        };
+        assert_eq!(batch_b.len(), 1);
+        assert_eq!(batch_b[0].text, "for-b");
     }
 }
