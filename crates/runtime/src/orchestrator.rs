@@ -16,8 +16,8 @@ use assistant_storage::{conversations::ConversationStore, SkillRegistry, Storage
 use assistant_tool_executor::ToolExecutor;
 use opentelemetry::{
     global,
-    trace::{Span as _, Tracer as _},
-    KeyValue,
+    trace::{Span as _, TraceContextExt, Tracer as _},
+    Context as OtelContext, KeyValue,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
@@ -158,6 +158,7 @@ impl Orchestrator {
         conversation_id: Uuid,
         interface: Interface,
         extensions: Vec<Arc<dyn ToolHandler>>,
+        trace_cx: Option<&OtelContext>,
     ) -> Result<()> {
         let turn_span = info_span!(
             "conversation_turn",
@@ -167,6 +168,28 @@ impl Orchestrator {
         );
         let _turn_guard = turn_span.enter();
         info!("Starting turn with extension tools");
+
+        // -- OTel trace hierarchy --
+        let tracer = global::tracer("assistant.orchestrator");
+        let _conv_cx = match trace_cx {
+            Some(cx) => cx.clone(),
+            None => {
+                let mut span = tracer.start("conversation");
+                span.set_attribute(KeyValue::new(
+                    "conversation_id",
+                    conversation_id.to_string(),
+                ));
+                span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+                OtelContext::current().with_span(span)
+            }
+        };
+        let mut otel_turn = tracer.start_with_context("turn", &_conv_cx);
+        otel_turn.set_attribute(KeyValue::new(
+            "conversation_id",
+            conversation_id.to_string(),
+        ));
+        otel_turn.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+        let turn_cx = _conv_cx.with_span(otel_turn);
 
         // Build extension lookup: name → handler.
         let ext_map: HashMap<String, Arc<dyn ToolHandler>> = extensions
@@ -307,7 +330,11 @@ impl Orchestrator {
                 interactive: false,
             };
 
-            let response = self.llm.chat(&system_prompt, &history, &all_specs).await?;
+            let mut llm_span = tracer.start_with_context("llm_call", &turn_cx);
+            llm_span.set_attribute(KeyValue::new("iteration", iteration as i64));
+            let response = self.llm.chat(&system_prompt, &history, &all_specs).await;
+            llm_span.end();
+            let response = response?;
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
@@ -425,6 +452,7 @@ impl Orchestrator {
                             &interface,
                             &name,
                             &params,
+                            &turn_cx,
                         );
 
                         if name == "end_turn" {
@@ -684,12 +712,35 @@ impl Orchestrator {
         user_message: &str,
         conversation_id: Uuid,
         interface: Interface,
+        trace_cx: Option<&OtelContext>,
     ) -> Result<TurnResult> {
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
             "Starting turn"
         );
+
+        // -- OTel trace hierarchy --
+        let tracer = global::tracer("assistant.orchestrator");
+        let _conv_cx = match trace_cx {
+            Some(cx) => cx.clone(),
+            None => {
+                let mut span = tracer.start("conversation");
+                span.set_attribute(KeyValue::new(
+                    "conversation_id",
+                    conversation_id.to_string(),
+                ));
+                span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+                OtelContext::current().with_span(span)
+            }
+        };
+        let mut otel_turn = tracer.start_with_context("turn", &_conv_cx);
+        otel_turn.set_attribute(KeyValue::new(
+            "conversation_id",
+            conversation_id.to_string(),
+        ));
+        otel_turn.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+        let turn_cx = _conv_cx.with_span(otel_turn);
 
         // 1-3. Set up conversation, load prior history, persist user message.
         let (conv_store, mut history, base_turn) =
@@ -715,7 +766,11 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
-            let response = self.llm.chat(&system_prompt, &history, &tool_specs).await?;
+            let mut llm_span = tracer.start_with_context("llm_call", &turn_cx);
+            llm_span.set_attribute(KeyValue::new("iteration", iteration as i64));
+            let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
+            llm_span.end();
+            let response = response?;
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
@@ -762,6 +817,7 @@ impl Orchestrator {
                             &interface,
                             &name,
                             &params,
+                            &turn_cx,
                         );
 
                         // Disabled-tools gate.
@@ -896,12 +952,35 @@ impl Orchestrator {
         conversation_id: Uuid,
         interface: Interface,
         token_sink: mpsc::Sender<String>,
+        trace_cx: Option<&OtelContext>,
     ) -> Result<TurnResult> {
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
             "Starting streaming turn"
         );
+
+        // -- OTel trace hierarchy --
+        let tracer = global::tracer("assistant.orchestrator");
+        let _conv_cx = match trace_cx {
+            Some(cx) => cx.clone(),
+            None => {
+                let mut span = tracer.start("conversation");
+                span.set_attribute(KeyValue::new(
+                    "conversation_id",
+                    conversation_id.to_string(),
+                ));
+                span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+                OtelContext::current().with_span(span)
+            }
+        };
+        let mut otel_turn = tracer.start_with_context("turn", &_conv_cx);
+        otel_turn.set_attribute(KeyValue::new(
+            "conversation_id",
+            conversation_id.to_string(),
+        ));
+        otel_turn.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+        let turn_cx = _conv_cx.with_span(otel_turn);
 
         let (conv_store, mut history, base_turn) =
             self.prepare_history(user_message, conversation_id).await?;
@@ -923,6 +1002,8 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
+            let mut llm_span = tracer.start_with_context("llm_call", &turn_cx);
+            llm_span.set_attribute(KeyValue::new("iteration", iteration as i64));
             let response = self
                 .llm
                 .chat_streaming(
@@ -931,7 +1012,9 @@ impl Orchestrator {
                     &tool_specs,
                     Some(token_sink.clone()),
                 )
-                .await?;
+                .await;
+            llm_span.end();
+            let response = response?;
 
             match response {
                 LlmResponse::FinalAnswer(text) => {
@@ -976,6 +1059,7 @@ impl Orchestrator {
                             &interface,
                             &name,
                             &params,
+                            &turn_cx,
                         );
 
                         if let Some(reason) = self
@@ -1264,6 +1348,23 @@ fn tool_result_content(content: &str, _data: Option<&serde_json::Value>) -> Stri
     content.to_string()
 }
 
+/// Create an OpenTelemetry context carrying a conversation-level root span.
+///
+/// Callers that manage conversation lifetimes (e.g. the CLI REPL or Slack
+/// thread handler) should create this once per conversation and pass it to
+/// each `run_turn*` call so all turns within the conversation share a single
+/// trace.
+pub fn start_conversation_context(conversation_id: Uuid, interface: &Interface) -> OtelContext {
+    let tracer = global::tracer("assistant.orchestrator");
+    let mut span = tracer.start("conversation");
+    span.set_attribute(KeyValue::new(
+        "conversation_id",
+        conversation_id.to_string(),
+    ));
+    span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+    OtelContext::current().with_span(span)
+}
+
 fn start_tool_span(
     conversation_id: Uuid,
     iteration: usize,
@@ -1271,9 +1372,10 @@ fn start_tool_span(
     interface: &Interface,
     tool_name: &str,
     params: &serde_json::Value,
+    parent_cx: &OtelContext,
 ) -> opentelemetry::global::BoxedSpan {
     let tracer = global::tracer("assistant.orchestrator");
-    let mut span = tracer.start("tool_execution");
+    let mut span = tracer.start_with_context("tool_execution", parent_cx);
     span.set_attribute(KeyValue::new(
         "conversation_id",
         conversation_id.to_string(),
@@ -1402,7 +1504,7 @@ mod tests {
         let (orch, _) = build(&server.uri()).await;
         let conv_id = Uuid::new_v4();
 
-        orch.run_turn("hello", conv_id, Interface::Cli)
+        orch.run_turn("hello", conv_id, Interface::Cli, None)
             .await
             .unwrap();
 
@@ -1424,10 +1526,10 @@ mod tests {
         let (orch, _) = build(&server.uri()).await;
         let conv_id = Uuid::new_v4();
 
-        orch.run_turn("first message", conv_id, Interface::Cli)
+        orch.run_turn("first message", conv_id, Interface::Cli, None)
             .await
             .unwrap();
-        orch.run_turn("second message", conv_id, Interface::Cli)
+        orch.run_turn("second message", conv_id, Interface::Cli, None)
             .await
             .unwrap();
 
@@ -1453,10 +1555,10 @@ mod tests {
         let (orch, _) = build(&server.uri()).await;
         let conv_id = Uuid::new_v4();
 
-        orch.run_turn("turn one", conv_id, Interface::Cli)
+        orch.run_turn("turn one", conv_id, Interface::Cli, None)
             .await
             .unwrap();
-        orch.run_turn("turn two", conv_id, Interface::Cli)
+        orch.run_turn("turn two", conv_id, Interface::Cli, None)
             .await
             .unwrap();
 
@@ -1495,7 +1597,7 @@ mod tests {
         seed_bot.turn = 1;
         conv_store.save_message(&seed_bot).await.unwrap();
 
-        orch.run_turn("follow-up", conv_id, Interface::Slack)
+        orch.run_turn("follow-up", conv_id, Interface::Slack, None)
             .await
             .unwrap();
 
@@ -1520,13 +1622,13 @@ mod tests {
         let (orch, _) = build(&server.uri()).await;
         let conv_id = Uuid::new_v4();
 
-        orch.run_turn("turn 1", conv_id, Interface::Cli)
+        orch.run_turn("turn 1", conv_id, Interface::Cli, None)
             .await
             .unwrap();
-        orch.run_turn("turn 2", conv_id, Interface::Cli)
+        orch.run_turn("turn 2", conv_id, Interface::Cli, None)
             .await
             .unwrap();
-        orch.run_turn("turn 3", conv_id, Interface::Cli)
+        orch.run_turn("turn 3", conv_id, Interface::Cli, None)
             .await
             .unwrap();
 
@@ -1551,10 +1653,10 @@ mod tests {
         let conv_a = Uuid::new_v4();
         let conv_b = Uuid::new_v4();
 
-        orch.run_turn("conv-a message", conv_a, Interface::Cli)
+        orch.run_turn("conv-a message", conv_a, Interface::Cli, None)
             .await
             .unwrap();
-        orch.run_turn("conv-b message", conv_b, Interface::Cli)
+        orch.run_turn("conv-b message", conv_b, Interface::Cli, None)
             .await
             .unwrap();
 
@@ -1601,7 +1703,7 @@ mod tests {
 
         let (orch, _) = build(&server.uri()).await;
         let result = orch
-            .run_turn("go", Uuid::new_v4(), Interface::Cli)
+            .run_turn("go", Uuid::new_v4(), Interface::Cli, None)
             .await
             .unwrap();
         assert_eq!(result.answer, "done");
@@ -1644,7 +1746,7 @@ mod tests {
             .await;
 
         let (orch, _) = build(&server.uri()).await;
-        orch.run_turn("go", Uuid::new_v4(), Interface::Cli)
+        orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None)
             .await
             .unwrap();
 
@@ -1678,7 +1780,7 @@ mod tests {
             .await;
 
         let (orch, _) = build(&server.uri()).await;
-        orch.run_turn("go", Uuid::new_v4(), Interface::Cli)
+        orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None)
             .await
             .unwrap();
 
@@ -1725,7 +1827,7 @@ mod tests {
             .await;
 
         let (orch, _) = build(&server.uri()).await;
-        orch.run_turn("go", Uuid::new_v4(), Interface::Cli)
+        orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None)
             .await
             .unwrap();
 

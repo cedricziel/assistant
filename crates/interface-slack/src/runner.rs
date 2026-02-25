@@ -511,6 +511,7 @@ async fn on_push_event(
             conversation_id,
             Interface::Slack,
             extensions,
+            None,
         )
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();

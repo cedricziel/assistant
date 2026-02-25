@@ -159,7 +159,13 @@ impl WebsocketHandler for MattermostHandler {
         let orchestrator_start = std::time::Instant::now();
         let turn_result = self
             .orchestrator
-            .run_turn_with_tools(&text, conversation_id, Interface::Mattermost, extensions)
+            .run_turn_with_tools(
+                &text,
+                conversation_id,
+                Interface::Mattermost,
+                extensions,
+                None,
+            )
             .await;
         let elapsed_ms = orchestrator_start.elapsed().as_millis();
 

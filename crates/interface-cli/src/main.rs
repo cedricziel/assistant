@@ -10,7 +10,8 @@ use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{
-    init_tracing, orchestrator::ConfirmationCallback, scheduler::spawn_scheduler, Orchestrator,
+    init_tracing, orchestrator::ConfirmationCallback, scheduler::spawn_scheduler,
+    start_conversation_context, Orchestrator,
 };
 use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
@@ -589,6 +590,7 @@ async fn main() -> Result<()> {
 
     // 11. One conversation per session.
     let conversation_id = Uuid::new_v4();
+    let conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
     info!(conversation_id = %conversation_id, "Starting CLI session");
 
     println!(
@@ -728,7 +730,7 @@ async fn main() -> Result<()> {
 
                 let turn_result = bs
                     .orchestrator
-                    .run_turn_streaming(input, conversation_id, Interface::Cli, tx)
+                    .run_turn_streaming(input, conversation_id, Interface::Cli, tx, Some(&conv_cx))
                     .await;
 
                 // Wait for the printer to flush all buffered tokens.

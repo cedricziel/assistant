@@ -61,7 +61,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
 
         let conversation_id = Uuid::new_v4();
         let result = orchestrator
-            .run_turn(&task.prompt, conversation_id, Interface::Cli)
+            .run_turn(&task.prompt, conversation_id, Interface::Cli, None)
             .await;
 
         match result {
@@ -118,7 +118,7 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
 
     let conversation_id = Uuid::new_v4();
     match orchestrator
-        .run_turn(&prompt, conversation_id, Interface::Cli)
+        .run_turn(&prompt, conversation_id, Interface::Cli, None)
         .await
     {
         Ok(turn) => {

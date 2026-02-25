@@ -134,6 +134,7 @@ async fn test_memory_round_trip() -> Result<()> {
             "Remember this: my favourite colour is indigo",
             f.conversation_id,
             Interface::Cli,
+            None,
         )
         .await?;
 
@@ -144,6 +145,7 @@ async fn test_memory_round_trip() -> Result<()> {
             "What is my favourite colour?",
             f.conversation_id,
             Interface::Cli,
+            None,
         )
         .await?;
 
@@ -171,6 +173,7 @@ async fn test_list_skills() -> Result<()> {
             "List all available skills",
             f.conversation_id,
             Interface::Cli,
+            None,
         )
         .await?;
 
@@ -205,7 +208,7 @@ async fn test_tool_loop_terminates() -> Result<()> {
 
     let result = f
         .orchestrator
-        .run_turn("What is 2 + 2?", f.conversation_id, Interface::Cli)
+        .run_turn("What is 2 + 2?", f.conversation_id, Interface::Cli, None)
         .await?;
 
     assert!(!result.answer.is_empty());
@@ -227,6 +230,7 @@ async fn test_self_analyze_runs() -> Result<()> {
             "Store the value 'hello' under key 'smoke-test'",
             f.conversation_id,
             Interface::Cli,
+            None,
         )
         .await?;
 
@@ -237,6 +241,7 @@ async fn test_self_analyze_runs() -> Result<()> {
             "Analyse the memory-write skill and suggest improvements",
             f.conversation_id,
             Interface::Cli,
+            None,
         )
         .await?;
 
