@@ -30,4 +30,3 @@ sqlx = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }
-async-trait = { workspace = true }
