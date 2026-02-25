@@ -155,4 +155,16 @@ impl LlmProvider for OllamaProvider {
             .next()
             .ok_or_else(|| anyhow::anyhow!("Empty embeddings array in response"))
     }
+
+    fn provider_name(&self) -> &str {
+        self.inner.provider_name()
+    }
+
+    fn model_name(&self) -> &str {
+        self.inner.model_name()
+    }
+
+    fn server_address(&self) -> &str {
+        &self.base_url
+    }
 }

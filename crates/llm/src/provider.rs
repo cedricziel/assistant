@@ -90,4 +90,26 @@ pub trait LlmProvider: Send + Sync {
     async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
         Err(anyhow::anyhow!("Embedding not supported by this provider"))
     }
+
+    // ── Provider identity (for OTel GenAI semantic conventions) ───────────
+
+    /// Short, stable identifier for the provider system (e.g. `"ollama"`,
+    /// `"anthropic"`).  Maps to the OTel `gen_ai.system` attribute.
+    fn provider_name(&self) -> &str {
+        "unknown"
+    }
+
+    /// The model name configured for this provider instance (e.g.
+    /// `"qwen2.5:7b"`, `"claude-opus-4-6"`).
+    /// Maps to the OTel `gen_ai.request.model` attribute.
+    fn model_name(&self) -> &str {
+        "unknown"
+    }
+
+    /// Base URL / address of the inference server (e.g.
+    /// `"http://localhost:11434"`, `"https://api.anthropic.com"`).
+    /// Maps to the OTel `server.address` attribute.
+    fn server_address(&self) -> &str {
+        ""
+    }
 }

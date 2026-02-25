@@ -381,6 +381,18 @@ impl LlmProvider for AnthropicProvider {
             "Anthropic does not support text embeddings"
         ))
     }
+
+    fn provider_name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn model_name(&self) -> &str {
+        &self.config.model
+    }
+
+    fn server_address(&self) -> &str {
+        &self.config.base_url
+    }
 }
 
 impl AnthropicProvider {

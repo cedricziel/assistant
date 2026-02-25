@@ -473,6 +473,18 @@ impl LlmProvider for LlmClient {
         self.chat_native_streaming(system_prompt, history, tools, token_sink)
             .await
     }
+
+    fn provider_name(&self) -> &str {
+        "ollama"
+    }
+
+    fn model_name(&self) -> &str {
+        &self.config.model
+    }
+
+    fn server_address(&self) -> &str {
+        &self.config.base_url
+    }
 }
 
 // ── Free helpers ──────────────────────────────────────────────────────────────
