@@ -11,7 +11,7 @@ use assistant_core::types::{
 };
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse,
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
     LlmResponseMeta, ToolCallItem, ToolSpec, ToolSupport,
 };
 
@@ -282,6 +282,24 @@ fn build_anthropic_messages(history: &[ChatHistoryMessage]) -> (Vec<Value>, Vec<
                     ChatRole::Assistant => "assistant",
                 };
                 messages.push(json!({ "role": role_str, "content": content }));
+            }
+
+            ChatHistoryMessage::MultimodalUser { content } => {
+                let blocks: Vec<Value> = content
+                    .iter()
+                    .map(|block| match block {
+                        ContentBlock::Text(text) => json!({"type": "text", "text": text}),
+                        ContentBlock::Image { media_type, data } => json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": data,
+                            }
+                        }),
+                    })
+                    .collect();
+                messages.push(json!({"role": "user", "content": blocks}));
             }
 
             ChatHistoryMessage::AssistantToolCalls(calls) => {
@@ -766,6 +784,116 @@ fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<Ll
         return Ok(LlmResponse::Thinking(thinking_parts.join(""), meta));
     }
     Ok(LlmResponse::FinalAnswer(text_parts.join(""), meta))
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use assistant_llm::{ChatHistoryMessage, ChatRole, ContentBlock};
+
+    use super::build_anthropic_messages;
+
+    #[test]
+    fn multimodal_user_produces_content_blocks_array() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("What is in this image?".to_string()),
+                ContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    data: "iVBORw0KGgo=".to_string(),
+                },
+            ],
+        }];
+        let (messages, _) = build_anthropic_messages(&history);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+
+        let content = messages[0]["content"].as_array().expect("content array");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "What is in this image?");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["type"], "base64");
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["source"]["data"], "iVBORw0KGgo=");
+    }
+
+    #[test]
+    fn multimodal_user_text_only_still_emits_blocks() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![ContentBlock::Text("just text".to_string())],
+        }];
+        let (messages, _) = build_anthropic_messages(&history);
+        let content = messages[0]["content"].as_array().expect("content array");
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "just text");
+    }
+
+    #[test]
+    fn plain_text_message_uses_string_content() {
+        let history = vec![ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "hello".to_string(),
+        }];
+        let (messages, _) = build_anthropic_messages(&history);
+        assert_eq!(messages[0]["content"], "hello");
+    }
+
+    #[test]
+    fn multimodal_user_multiple_images() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("compare these".to_string()),
+                ContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    data: "img1".to_string(),
+                },
+                ContentBlock::Image {
+                    media_type: "image/jpeg".to_string(),
+                    data: "img2".to_string(),
+                },
+            ],
+        }];
+        let (messages, _) = build_anthropic_messages(&history);
+        let content = messages[0]["content"].as_array().expect("content array");
+        assert_eq!(content.len(), 3, "text + 2 images");
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[2]["source"]["media_type"], "image/jpeg");
+    }
+
+    #[test]
+    fn multimodal_user_interleaved_with_text_messages() {
+        let history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "first".to_string(),
+            },
+            ChatHistoryMessage::MultimodalUser {
+                content: vec![
+                    ContentBlock::Text("look at this".to_string()),
+                    ContentBlock::Image {
+                        media_type: "image/png".to_string(),
+                        data: "abc".to_string(),
+                    },
+                ],
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "I see an image".to_string(),
+            },
+        ];
+        let (messages, _) = build_anthropic_messages(&history);
+        assert_eq!(messages.len(), 3);
+        // First: plain text
+        assert_eq!(messages[0]["content"], "first");
+        // Second: multimodal blocks
+        assert!(messages[1]["content"].is_array());
+        // Third: plain text assistant
+        assert_eq!(messages[2]["content"], "I see an image");
+        assert_eq!(messages[2]["role"], "assistant");
+    }
 }
 
 /// Extract [`LlmResponseMeta`] from an Anthropic non-streaming JSON response.
