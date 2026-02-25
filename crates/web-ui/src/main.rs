@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
     let router = Router::new()
         .route("/", get(show_dashboard))
         .route("/traces", get(show_dashboard))
-        .route("/trace/:trace_id", get(show_trace_detail))
+        .route("/trace/{trace_id}", get(show_trace_detail))
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
