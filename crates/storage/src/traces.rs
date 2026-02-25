@@ -50,6 +50,10 @@ pub struct RecordedSpan {
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub attributes: Value,
+    /// Prompt/input token count (from `gen_ai.usage.input_tokens`).
+    pub input_tokens: Option<i64>,
+    /// Completion/output token count (from `gen_ai.usage.output_tokens`).
+    pub output_tokens: Option<i64>,
 }
 
 /// SQLite-backed store for execution traces.
@@ -71,7 +75,7 @@ impl TraceStore {
         let rows = sqlx::query(
             "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
                     tool_name, tool_status, tool_observation, tool_error, duration_ms, \
-                    start_time, end_time, attributes \
+                    start_time, end_time, attributes, input_tokens, output_tokens \
              FROM distributed_traces \
              WHERE tool_name = ?1 \
              ORDER BY start_time DESC \
@@ -90,7 +94,7 @@ impl TraceStore {
         let rows = sqlx::query(
             "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
                     tool_name, tool_status, tool_observation, tool_error, duration_ms, \
-                    start_time, end_time, attributes \
+                    start_time, end_time, attributes, input_tokens, output_tokens \
              FROM distributed_traces \
              WHERE tool_name IS NOT NULL \
              ORDER BY start_time DESC \
@@ -185,7 +189,7 @@ impl TraceStore {
         let rows = sqlx::query(
             "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
                     tool_name, tool_status, tool_observation, tool_error, duration_ms, \
-                    start_time, end_time, attributes \
+                    start_time, end_time, attributes, input_tokens, output_tokens \
              FROM distributed_traces \
              WHERE trace_id = ?1 \
              ORDER BY start_time ASC",
@@ -315,6 +319,11 @@ impl TraceStore {
             start_time: row.get("start_time"),
             end_time: row.get("end_time"),
             attributes,
+            input_tokens: row.try_get::<Option<i64>, _>("input_tokens").ok().flatten(),
+            output_tokens: row
+                .try_get::<Option<i64>, _>("output_tokens")
+                .ok()
+                .flatten(),
         })
     }
 }

@@ -72,6 +72,13 @@ impl SqliteSpanExporter {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        let input_tokens = attrs
+            .get("gen_ai.usage.input_tokens")
+            .and_then(|v| v.as_i64());
+        let output_tokens = attrs
+            .get("gen_ai.usage.output_tokens")
+            .and_then(|v| v.as_i64());
+
         let parent_span_id = if span.parent_span_id == SpanId::INVALID {
             None
         } else {
@@ -81,8 +88,9 @@ impl SqliteSpanExporter {
         sqlx::query(
             "INSERT INTO distributed_traces \
                 (span_id, trace_id, parent_span_id, name, conversation_id, turn, tool_name, \
-                 tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, attributes) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+                 tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, \
+                 attributes, input_tokens, output_tokens) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16) \
              ON CONFLICT(span_id) DO NOTHING",
         )
         .bind(span.span_context.span_id().to_string())
@@ -99,6 +107,8 @@ impl SqliteSpanExporter {
         .bind(start_time)
         .bind(end_time)
         .bind(attrs_serialized)
+        .bind(input_tokens)
+        .bind(output_tokens)
         .execute(&pool)
         .await?;
 
