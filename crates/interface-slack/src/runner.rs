@@ -214,11 +214,21 @@ fn format_file_attachments(files: &[SlackFile]) -> String {
 /// Image MIME types that vision-capable models can process.
 const IMAGE_MIME_PREFIXES: &[&str] = &["image/jpeg", "image/png", "image/gif", "image/webp"];
 
+/// Maximum image file size we will download and base64-encode (5 MB).
+/// Matches the Anthropic API per-image limit.
+const MAX_IMAGE_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
+
+/// Timeout for downloading a single Slack file attachment.
+const SLACK_FILE_DOWNLOAD_TIMEOUT_SECS: u64 = 15;
+
 /// Download a Slack file and return it as a base64-encoded [`ContentBlock::Image`].
 ///
 /// Only images with a recognised MIME type are downloaded; all other files are
 /// skipped (returns `None`).  The download uses the bot token for
 /// authentication since Slack private file URLs require a Bearer header.
+///
+/// Downloads are bounded by [`SLACK_FILE_DOWNLOAD_TIMEOUT_SECS`] and
+/// [`MAX_IMAGE_ATTACHMENT_BYTES`] to prevent stalling or OOM.
 async fn download_slack_file_as_content_block(
     file: &SlackFile,
     bot_token: &str,
@@ -240,7 +250,12 @@ async fn download_slack_file_as_content_block(
 
     debug!(file_id = %file.id.0, mime = %mime, "Downloading Slack file for vision");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            SLACK_FILE_DOWNLOAD_TIMEOUT_SECS,
+        ))
+        .build()
+        .ok()?;
     let resp = client
         .get(url.as_str())
         .header("Authorization", format!("Bearer {bot_token}"))
@@ -257,7 +272,29 @@ async fn download_slack_file_as_content_block(
         return None;
     }
 
+    // Check Content-Length header before downloading the body.
+    if resp
+        .content_length()
+        .is_some_and(|len| len > MAX_IMAGE_ATTACHMENT_BYTES as u64)
+    {
+        warn!(
+            file_id = %file.id.0,
+            limit = MAX_IMAGE_ATTACHMENT_BYTES,
+            "Skipping oversized Slack file attachment"
+        );
+        return None;
+    }
+
     let bytes = resp.bytes().await.ok()?;
+    if bytes.len() > MAX_IMAGE_ATTACHMENT_BYTES {
+        warn!(
+            file_id = %file.id.0,
+            size = bytes.len(),
+            limit = MAX_IMAGE_ATTACHMENT_BYTES,
+            "Skipping oversized Slack file attachment after download"
+        );
+        return None;
+    }
     let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
     Some(ContentBlock::Image {

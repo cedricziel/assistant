@@ -1640,7 +1640,7 @@ fn serialize_history_for_span(history: &[ChatHistoryMessage]) -> String {
                             serde_json::json!({
                                 "type": "image",
                                 "media_type": media_type,
-                                "size_bytes": data.len(),
+                                "size_base64_chars": data.len(),
                             })
                         }
                     })
@@ -2384,8 +2384,8 @@ mod tests {
             "media_type should be present"
         );
         assert!(
-            json_str.contains("size_bytes"),
-            "size_bytes placeholder should be present"
+            json_str.contains("size_base64_chars"),
+            "size_base64_chars field should be present"
         );
     }
 
