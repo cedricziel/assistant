@@ -10,6 +10,8 @@ use assistant_core::Interface;
 use assistant_storage::StorageLayer;
 use chrono::Utc;
 use cron::Schedule;
+use opentelemetry::trace::{Span, TraceContextExt, Tracer};
+use opentelemetry::{global, Context as OtelContext, KeyValue};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -123,9 +125,23 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
 
     info!("Running heartbeat from {}", heartbeat_path.display());
 
+    // Start a root span so heartbeat traces are easily identifiable.
+    let tracer = global::tracer("sysiphos.heartbeat");
     let conversation_id = Uuid::new_v4();
+    let mut span = tracer.start("heartbeat");
+    span.set_attribute(KeyValue::new(
+        "conversation_id",
+        conversation_id.to_string(),
+    ));
+    let heartbeat_cx = OtelContext::current().with_span(span);
+
     match orchestrator
-        .run_turn(&prompt, conversation_id, Interface::Cli, None)
+        .run_turn(
+            &prompt,
+            conversation_id,
+            Interface::Cli,
+            Some(&heartbeat_cx),
+        )
         .await
     {
         Ok(turn) => {
