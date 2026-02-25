@@ -164,7 +164,7 @@ fn default_llm_base_url() -> String {
     "http://localhost:11434".to_string()
 }
 fn default_llm_max_iterations() -> usize {
-    10
+    80
 }
 fn default_llm_timeout_secs() -> u64 {
     120

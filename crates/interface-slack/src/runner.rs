@@ -193,7 +193,7 @@ fn incoming_from_reaction_event(event: &SlackReactionAddedEvent) -> Option<Slack
     let original = item_msg.content.text.as_deref().unwrap_or("");
     let snippet = preview(original, 120).trim().to_string();
     let emoji = event.reaction.0.clone();
-    let mut text = format!("Reaction :{}: from {}", emoji, event.user.to_string());
+    let mut text = format!("Reaction :{}: from {}", emoji, event.user);
     if !snippet.is_empty() {
         text.push_str(&format!(" on message: {}", snippet));
     }

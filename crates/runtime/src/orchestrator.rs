@@ -499,10 +499,8 @@ impl Orchestrator {
 
                             let obs = match exec_result {
                                 Ok(output) => {
-                                    otel_span.set_attribute(KeyValue::new(
-                                        "duration_ms",
-                                        duration_ms as i64,
-                                    ));
+                                    otel_span
+                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
                                     otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
                                     otel_span.set_attribute(KeyValue::new(
                                         "tool_observation",
@@ -514,10 +512,8 @@ impl Orchestrator {
                                 Err(err) => {
                                     warn!(tool = %name, %err, "Extension tool execution failed");
                                     let msg = err.to_string();
-                                    otel_span.set_attribute(KeyValue::new(
-                                        "duration_ms",
-                                        duration_ms as i64,
-                                    ));
+                                    otel_span
+                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
                                     otel_span.set_attribute(KeyValue::new("tool_status", "error"));
                                     otel_span
                                         .set_attribute(KeyValue::new("tool_error", msg.clone()));

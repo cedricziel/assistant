@@ -16,7 +16,7 @@ model = "qwen2.5:7b"
 # Ollama API base URL
 base_url = "http://localhost:11434"
 # Maximum tool-calling iterations per turn
-max_iterations = 10
+max_iterations = 80
 # Timeout for LLM calls (seconds)
 timeout_secs = 120
 
@@ -28,7 +28,7 @@ timeout_secs = 120
 # provider  = "anthropic"
 # model     = "claude-opus-4-6"     # or claude-sonnet-4-6, claude-haiku-4-5-20251001
 # api_key   = "sk-ant-..."          # or set ANTHROPIC_API_KEY env var
-# max_iterations = 10
+# max_iterations = 80
 # timeout_secs   = 120
 #
 # # Optional: enable Anthropic's hosted web search tool
