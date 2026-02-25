@@ -183,3 +183,166 @@ fn status_fields(status: &Status) -> (&'static str, Option<String>) {
         Status::Error { description } => ("error", Some(description.to_string())),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StorageLayer;
+    use opentelemetry::trace::{SpanContext, SpanKind, TraceFlags, TraceId, TraceState};
+    use opentelemetry::InstrumentationLibrary;
+    use opentelemetry_sdk::export::trace::SpanData;
+    use opentelemetry_sdk::trace::{SpanEvents, SpanLinks};
+    use std::time::{Duration, SystemTime};
+
+    fn make_span(name: &str, tool_name: Option<&str>, status: Status) -> SpanData {
+        let now = SystemTime::now();
+        let trace_id = TraceId::from(uuid::Uuid::new_v4().as_u128());
+        let span_id = SpanId::from(rand_u64());
+
+        let mut attributes = vec![];
+        if let Some(tn) = tool_name {
+            attributes.push(KeyValue::new("tool_name", tn.to_string()));
+            attributes.push(KeyValue::new("tool_status", "ok"));
+        }
+
+        SpanData {
+            span_context: SpanContext::new(
+                trace_id,
+                span_id,
+                TraceFlags::SAMPLED,
+                false,
+                TraceState::default(),
+            ),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Internal,
+            name: name.to_string().into(),
+            start_time: now,
+            end_time: now + Duration::from_millis(42),
+            attributes,
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
+            status,
+            instrumentation_lib: InstrumentationLibrary::default(),
+        }
+    }
+
+    fn rand_u64() -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        SystemTime::now().hash(&mut h);
+        std::thread::current().id().hash(&mut h);
+        h.finish()
+    }
+
+    async fn row_count(pool: &SqlitePool, table: &str) -> i64 {
+        let q = format!("SELECT COUNT(*) AS cnt FROM {table}");
+        sqlx::query_scalar::<_, i64>(&q)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_export_persists_exact_count() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let mut exporter = SqliteSpanExporter::new(storage.pool.clone());
+
+        let batch = vec![
+            make_span("span-1", Some("bash"), Status::Ok),
+            make_span("span-2", Some("file-read"), Status::Ok),
+            make_span("span-3", None, Status::Unset),
+        ];
+
+        exporter.export(batch).await.unwrap();
+
+        let count = row_count(&storage.pool, "distributed_traces").await;
+        assert_eq!(count, 3, "exporter must produce exactly one row per span");
+    }
+
+    #[tokio::test]
+    async fn test_export_preserves_tool_metadata() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let mut exporter = SqliteSpanExporter::new(storage.pool.clone());
+
+        let batch = vec![make_span("execute_tool bash", Some("bash"), Status::Ok)];
+        exporter.export(batch).await.unwrap();
+
+        let row = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+            "SELECT name, tool_name, tool_status FROM distributed_traces LIMIT 1",
+        )
+        .fetch_one(&storage.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.0, "execute_tool bash");
+        assert_eq!(row.1.as_deref(), Some("bash"));
+        assert_eq!(row.2.as_deref(), Some("ok"));
+    }
+
+    #[tokio::test]
+    async fn test_export_records_duration() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let mut exporter = SqliteSpanExporter::new(storage.pool.clone());
+
+        let now = SystemTime::now();
+        let trace_id = TraceId::from(uuid::Uuid::new_v4().as_u128());
+        let span_id = SpanId::from(rand_u64());
+
+        let span = SpanData {
+            span_context: SpanContext::new(
+                trace_id,
+                span_id,
+                TraceFlags::SAMPLED,
+                false,
+                TraceState::default(),
+            ),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Internal,
+            name: "timed".into(),
+            start_time: now,
+            end_time: now + Duration::from_millis(150),
+            attributes: vec![],
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
+            status: Status::Ok,
+            instrumentation_lib: InstrumentationLibrary::default(),
+        };
+
+        exporter.export(vec![span]).await.unwrap();
+
+        let dur: i64 = sqlx::query_scalar("SELECT duration_ms FROM distributed_traces LIMIT 1")
+            .fetch_one(&storage.pool)
+            .await
+            .unwrap();
+
+        assert_eq!(dur, 150);
+    }
+
+    #[tokio::test]
+    async fn test_export_captures_error_status() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let mut exporter = SqliteSpanExporter::new(storage.pool.clone());
+
+        let batch = vec![make_span(
+            "failing",
+            Some("web-fetch"),
+            Status::Error {
+                description: "timeout".into(),
+            },
+        )];
+        exporter.export(batch).await.unwrap();
+
+        let attrs_str: String =
+            sqlx::query_scalar("SELECT attributes FROM distributed_traces LIMIT 1")
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        let attrs: serde_json::Value = serde_json::from_str(&attrs_str).unwrap();
+
+        assert_eq!(attrs["otel.status_code"], "error");
+        assert_eq!(attrs["otel.status_message"], "timeout");
+    }
+}
