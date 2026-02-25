@@ -296,15 +296,19 @@ version = "0.1.7"
 dependencies = [
  "anyhow",
  "assistant-core",
+ "assistant-llm",
  "assistant-runtime",
  "assistant-storage",
  "async-trait",
+ "base64 0.22.1",
+ "reqwest 0.12.28",
  "serde_json",
  "slack-morphism",
  "tokio",
  "tokio-tungstenite",
  "toml",
  "tracing",
+ "url",
  "uuid",
 ]
 

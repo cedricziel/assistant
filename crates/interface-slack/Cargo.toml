@@ -11,11 +11,14 @@ path = "src/lib.rs"
 
 [dependencies]
 assistant-core = { path = "../core" }
+assistant-llm = { path = "../llm" }
 assistant-runtime = { path = "../runtime" }
 assistant-storage = { path = "../storage" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+base64 = { workspace = true }
+reqwest = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
@@ -27,6 +30,7 @@ tokio-tungstenite = { workspace = true }
 # cert-store feature, leaving wss:// connections broken without this override).
 [dev-dependencies]
 toml = { workspace = true }
+url = "2"
 
 [package.metadata.cargo-machete]
 ignored = ["tokio-tungstenite"]
