@@ -278,6 +278,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures",
+ "opentelemetry",
  "presage",
  "presage-store-sqlite",
  "qr2term",

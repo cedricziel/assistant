@@ -86,6 +86,8 @@ impl SignalInterface {
         use std::collections::HashMap;
 
         use assistant_core::Interface;
+        use assistant_runtime::start_conversation_context;
+        use opentelemetry::Context as OtelContext;
         use uuid::Uuid;
 
         // ── Graceful shutdown ─────────────────────────────────────────────────
@@ -143,9 +145,10 @@ impl SignalInterface {
             .map_err(|e| anyhow::anyhow!("Failed to start message stream: {e}"))?;
         pin_mut!(messages);
 
-        // Track one conversation_id per sender so the orchestrator retains
-        // memory across messages from the same Signal contact.
-        let mut conversations: HashMap<String, Uuid> = HashMap::new();
+        // Track one (conversation_id, OtelContext) per sender so the
+        // orchestrator retains memory across messages from the same Signal
+        // contact and all turns share a single conversation-level trace.
+        let mut conversations: HashMap<String, (Uuid, OtelContext)> = HashMap::new();
 
         loop {
             let maybe_received = tokio::select! {
@@ -205,9 +208,13 @@ impl SignalInterface {
                     // borrow structure simple and avoids sharing the manager
                     // across tasks.
                     let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
-                    let conversation_id = *conversations
-                        .entry(sender_str.clone())
-                        .or_insert_with(Uuid::new_v4);
+                    let (conversation_id, conv_cx) =
+                        conversations.entry(sender_str.clone()).or_insert_with(|| {
+                            let id = Uuid::new_v4();
+                            let cx = start_conversation_context(id, &Interface::Signal);
+                            (id, cx)
+                        });
+                    let conversation_id = *conversation_id;
 
                     let collector = tokio::spawn(async move {
                         let mut buf = String::new();
@@ -220,7 +227,13 @@ impl SignalInterface {
                     let orchestrator_start = std::time::Instant::now();
                     let turn_result = self
                         .orchestrator
-                        .run_turn_streaming(&text, conversation_id, Interface::Signal, tok_tx, None)
+                        .run_turn_streaming(
+                            &text,
+                            conversation_id,
+                            Interface::Signal,
+                            tok_tx,
+                            Some(conv_cx),
+                        )
                         .await;
                     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
