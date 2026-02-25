@@ -7,7 +7,7 @@ After=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/assistant web-ui
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 # All log output goes to the user journal.
