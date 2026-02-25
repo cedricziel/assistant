@@ -61,9 +61,10 @@ rustls = { version = "0.23", features = ["ring"] }
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = { version = "0.24", features = ["trace"] }
+opentelemetry = { version = "0.24", features = ["trace", "logs"] }
 opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic", "tls"] }
-opentelemetry_sdk = { version = "0.24", features = ["trace", "rt-tokio"] }
+opentelemetry_sdk = { version = "0.24", features = ["trace", "logs", "rt-tokio"] }
+opentelemetry-appender-tracing = "0.5"
 # CLI / config
 clap = { version = "4", features = ["derive"] }
 dirs = "6"

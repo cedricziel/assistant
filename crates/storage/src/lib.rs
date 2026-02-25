@@ -1,4 +1,6 @@
 pub mod conversations;
+pub mod log_telemetry;
+pub mod logs;
 pub mod memory_chunks;
 pub mod refinements;
 pub mod registry;
@@ -7,6 +9,8 @@ pub mod telemetry;
 pub mod traces;
 
 pub use conversations::{ConversationRecord, ConversationStore};
+pub use log_telemetry::SqliteLogExporter;
+pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
@@ -51,6 +55,11 @@ impl StorageLayer {
     /// Convenience: build a `TraceStore` backed by this pool.
     pub fn trace_store(&self) -> TraceStore {
         TraceStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `LogStore` backed by this pool.
+    pub fn log_store(&self) -> LogStore {
+        LogStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `ConversationStore` backed by this pool.
@@ -143,6 +152,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "010_trace_token_usage",
             include_str!("../../../migrations/010_trace_token_usage.sql"),
         ),
+        ("011_logs", include_str!("../../../migrations/011_logs.sql")),
     ];
 
     for (name, sql) in migrations {
