@@ -220,7 +220,7 @@ impl SignalInterface {
                     let orchestrator_start = std::time::Instant::now();
                     let turn_result = self
                         .orchestrator
-                        .run_turn_streaming(&text, conversation_id, Interface::Signal, tok_tx)
+                        .run_turn_streaming(&text, conversation_id, Interface::Signal, tok_tx, None)
                         .await;
                     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
