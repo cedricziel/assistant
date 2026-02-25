@@ -357,28 +357,42 @@ impl Orchestrator {
             match response {
                 // ── Final answer ──────────────────────────────────────────────
                 LlmResponse::FinalAnswer(text, _meta) => {
+                    // When a reply was already posted via an extension tool,
+                    // persist any non-empty wrap-up text and finish the turn.
+                    if replied {
+                        if !text.trim().is_empty() {
+                            let assistant_msg = {
+                                let mut m =
+                                    assistant_core::Message::assistant(conversation_id, &text);
+                                m.turn = base_turn + iteration as i64 + 1;
+                                m
+                            };
+                            if let Err(e) = conv_store.save_message(&assistant_msg).await {
+                                warn!("Failed to persist post-reply assistant message: {e}");
+                            }
+                        }
+                        return Ok(());
+                    }
+
+                    // Empty final answer with no reply sent yet — the user would
+                    // see nothing.  Don't persist the empty message (it pollutes
+                    // history and can cause the model to repeat the pattern on
+                    // subsequent turns) and loop to give the model another chance.
+                    if text.trim().is_empty() {
+                        warn!(
+                            iteration,
+                            "LLM returned empty final answer without a prior reply; retrying"
+                        );
+                        continue;
+                    }
+
+                    // Non-empty answer — persist to DB.
                     let assistant_msg = {
                         let mut m = assistant_core::Message::assistant(conversation_id, &text);
                         m.turn = base_turn + iteration as i64 + 1;
                         m
                     };
                     conv_store.save_message(&assistant_msg).await?;
-
-                    if replied {
-                        return Ok(());
-                    }
-
-                    // Don't attempt to auto-post an empty answer — this causes
-                    // messaging APIs (e.g. Slack) to reject with "no_text".
-                    // This can happen with thinking models (e.g. qwen3) when the
-                    // model produces a reasoning block but no visible reply text.
-                    if text.trim().is_empty() {
-                        warn!(
-                            iteration,
-                            "LLM returned empty final answer; skipping auto-post"
-                        );
-                        return Ok(());
-                    }
 
                     // If a reply-capable extension tool exists, use it to forward
                     // the answer to the user.
@@ -851,12 +865,17 @@ impl Orchestrator {
                 LlmResponse::FinalAnswer(text, _meta) => {
                     info!(iteration, "LLM returned final answer");
 
-                    let assistant_msg = {
-                        let mut m = Message::assistant(conversation_id, &text);
-                        m.turn = base_turn + iteration as i64 + 1;
-                        m
-                    };
-                    conv_store.save_message(&assistant_msg).await?;
+                    // Don't persist empty final answers — they pollute the
+                    // conversation history and can confuse the model on
+                    // subsequent turns.
+                    if !text.trim().is_empty() {
+                        let assistant_msg = {
+                            let mut m = Message::assistant(conversation_id, &text);
+                            m.turn = base_turn + iteration as i64 + 1;
+                            m
+                        };
+                        conv_store.save_message(&assistant_msg).await?;
+                    }
 
                     return Ok(TurnResult { answer: text });
                 }
@@ -1107,12 +1126,17 @@ impl Orchestrator {
                 LlmResponse::FinalAnswer(text, _meta) => {
                     info!(iteration, "Streaming LLM returned final answer");
 
-                    let assistant_msg = {
-                        let mut m = Message::assistant(conversation_id, &text);
-                        m.turn = base_turn + iteration as i64 + 1;
-                        m
-                    };
-                    conv_store.save_message(&assistant_msg).await?;
+                    // Don't persist empty final answers — they pollute the
+                    // conversation history and can confuse the model on
+                    // subsequent turns.
+                    if !text.trim().is_empty() {
+                        let assistant_msg = {
+                            let mut m = Message::assistant(conversation_id, &text);
+                            m.turn = base_turn + iteration as i64 + 1;
+                            m
+                        };
+                        conv_store.save_message(&assistant_msg).await?;
+                    }
 
                     return Ok(TurnResult { answer: text });
                 }
@@ -2167,6 +2191,59 @@ mod tests {
         }
     }
 
+    /// A fake reply extension tool whose `params_schema` has `"required": ["text"]`
+    /// so auto-post picks it up.  Records every `text` value it receives.
+    struct MockReplyExtTool {
+        call_count: AtomicUsize,
+        texts: tokio::sync::Mutex<Vec<String>>,
+    }
+
+    impl MockReplyExtTool {
+        fn new() -> Self {
+            Self {
+                call_count: AtomicUsize::new(0),
+                texts: tokio::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.call_count.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl ToolHandler for MockReplyExtTool {
+        fn name(&self) -> &str {
+            "reply"
+        }
+
+        fn description(&self) -> &str {
+            "mock reply extension tool"
+        }
+
+        fn params_schema(&self) -> Value {
+            json!({
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string" }
+                },
+                "required": ["text"]
+            })
+        }
+
+        async fn run(
+            &self,
+            params: HashMap<String, Value>,
+            _ctx: &ExecutionContext,
+        ) -> anyhow::Result<ToolOutput> {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            if let Some(Value::String(t)) = params.get("text") {
+                self.texts.lock().await.push(t.clone());
+            }
+            Ok(ToolOutput::success("ok"))
+        }
+    }
+
     // ── end_turn rejection tests ──────────────────────────────────────────────
 
     #[tokio::test]
@@ -2355,6 +2432,147 @@ mod tests {
 
         assert_eq!(react_handler.calls(), 1, "react must have been called once");
         assert_eq!(reply_handler.calls(), 0, "reply must not have been called");
+    }
+
+    // ── empty FinalAnswer history-poisoning tests ──────────────────────────────
+
+    #[tokio::test]
+    async fn empty_final_answer_not_persisted_and_retries() {
+        // Scenario: LLM returns a tool call, then an empty FinalAnswer, then a
+        // real answer.  The empty FinalAnswer must NOT be saved to the DB, and
+        // the loop must retry until a non-empty answer is produced.
+        let server = MockServer::start().await;
+
+        // 1st LLM call: model calls a builtin tool (will get an error observation
+        //   because "some-tool" is unknown, but that's fine — we just need a
+        //   tool-call iteration to precede the empty answer).
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["some-tool"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // 2nd LLM call: model returns an empty FinalAnswer — should be retried.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("")))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // 3rd LLM call: model returns a non-empty FinalAnswer — should be
+        //   persisted and auto-posted via the reply tool.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_answer("here is your answer")),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, storage) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+        let reply_handler = Arc::new(MockReplyExtTool::new());
+
+        orch.run_turn_with_tools(
+            "hi",
+            conv_id,
+            Interface::Slack,
+            vec![reply_handler.clone() as Arc<dyn ToolHandler>],
+            None,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        // Verify: 3 LLM calls (tool call → empty answer retry → real answer).
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(
+            reqs.len(),
+            3,
+            "expected 3 LLM calls: tool-call, empty-answer retry, real answer; got {}",
+            reqs.len()
+        );
+
+        // Verify: reply handler was called exactly once with the real answer.
+        assert_eq!(
+            reply_handler.calls(),
+            1,
+            "reply handler must be called once for the non-empty answer"
+        );
+        let texts = reply_handler.texts.lock().await;
+        assert_eq!(
+            texts[0], "here is your answer",
+            "reply handler must receive the non-empty answer text"
+        );
+        drop(texts);
+
+        // Verify: no empty assistant *text* messages in the DB.
+        // (Tool-call messages legitimately have empty content + tool_calls_json.)
+        let conv_store = storage.conversation_store();
+        let history = conv_store.load_history(conv_id).await.unwrap();
+        let empty_text_assistant_msgs: Vec<_> = history
+            .iter()
+            .filter(|m| {
+                m.role == assistant_core::types::MessageRole::Assistant
+                    && m.content.trim().is_empty()
+                    && m.tool_calls_json.is_none()
+            })
+            .collect();
+        assert!(
+            empty_text_assistant_msgs.is_empty(),
+            "no empty FinalAnswer assistant messages should be persisted; found {} in DB",
+            empty_text_assistant_msgs.len()
+        );
+
+        // Verify: the non-empty answer IS persisted.
+        let assistant_msgs: Vec<_> = history
+            .iter()
+            .filter(|m| m.role == assistant_core::types::MessageRole::Assistant)
+            .collect();
+        assert!(
+            assistant_msgs
+                .iter()
+                .any(|m| m.content == "here is your answer"),
+            "the non-empty answer must be persisted in the DB; assistant msgs: {assistant_msgs:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_final_answer_not_persisted_in_run_turn() {
+        // Verify the same protection in the simpler `run_turn` path (CLI mode).
+        let server = MockServer::start().await;
+        mount_answer(&server, "").await;
+
+        let (orch, storage) = build(&server.uri()).await;
+        let conv_id = Uuid::new_v4();
+
+        let result = orch
+            .run_turn("hello", conv_id, Interface::Cli, None)
+            .await
+            .unwrap();
+
+        // run_turn still returns the (empty) answer to the caller...
+        assert_eq!(result.answer, "");
+
+        // ...but must NOT have persisted it to the DB.
+        let conv_store = storage.conversation_store();
+        let history = conv_store.load_history(conv_id).await.unwrap();
+        let empty_assistant_msgs: Vec<_> = history
+            .iter()
+            .filter(|m| {
+                m.role == assistant_core::types::MessageRole::Assistant
+                    && m.content.trim().is_empty()
+            })
+            .collect();
+        assert!(
+            empty_assistant_msgs.is_empty(),
+            "empty assistant message must not be persisted in run_turn; found {} in DB",
+            empty_assistant_msgs.len()
+        );
     }
 
     // ── MultimodalUser / OTel serialisation tests ────────────────────────────
