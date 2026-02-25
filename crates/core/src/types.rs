@@ -299,7 +299,7 @@ pub struct AnthropicWebSearchOptions {
 impl Default for AnthropicWebSearchOptions {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             max_uses: None,
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
@@ -335,7 +335,7 @@ pub struct AnthropicWebFetchOptions {
 impl Default for AnthropicWebFetchOptions {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             max_uses: None,
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),

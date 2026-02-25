@@ -33,7 +33,7 @@ timeout_secs = 120
 #
 # # Optional: enable Anthropic's hosted web search tool
 # [llm.anthropic.web_search]
-# enabled = true
+# enabled = true           # enabled by default; set to false to disable
 # max_uses = 3
 # allowed_domains = ["example.com"]
 # blocked_domains = []
@@ -47,7 +47,7 @@ timeout_secs = 120
 #
 # # Optional: enable Anthropic's hosted web fetch tool
 # [llm.anthropic.web_fetch]
-# enabled = true
+# enabled = true           # enabled by default; set to false to disable
 # max_uses = 10
 # max_content_tokens = 100000
 # allowed_domains = []
