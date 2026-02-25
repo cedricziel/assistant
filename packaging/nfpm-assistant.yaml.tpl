@@ -26,6 +26,7 @@ contents:
   # systemd user unit files — enable per-user with:
   #   systemctl --user enable --now assistant-slack
   #   systemctl --user enable --now assistant-mattermost
+  #   systemctl --user enable --now assistant-web-ui
   - src: packaging/systemd/user/assistant-slack.service
     dst: /usr/lib/systemd/user/assistant-slack.service
     file_info:
@@ -33,5 +34,10 @@ contents:
 
   - src: packaging/systemd/user/assistant-mattermost.service
     dst: /usr/lib/systemd/user/assistant-mattermost.service
+    file_info:
+      mode: 0644
+
+  - src: packaging/systemd/user/assistant-web-ui.service
+    dst: /usr/lib/systemd/user/assistant-web-ui.service
     file_info:
       mode: 0644
