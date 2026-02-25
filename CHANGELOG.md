@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.9](https://github.com/cedricziel/assistant/compare/v0.1.8...v0.1.9) (2026-02-25)
+
+
+### Features
+
+* **runtime:** add sysiphos.heartbeat root span to heartbeat traces ([#50](https://github.com/cedricziel/assistant/issues/50)) ([b468fb9](https://github.com/cedricziel/assistant/commit/b468fb9c90fff007f9784bf98baf105e0647e85a))
+
+
+### Bug Fixes
+
+* **packaging:** restart services on upgrade instead of leaving them dead ([#52](https://github.com/cedricziel/assistant/issues/52)) ([d61c1c1](https://github.com/cedricziel/assistant/commit/d61c1c171d255f601e0bea31b676cd20af0d18b4))
+
 ## [0.1.8](https://github.com/cedricziel/assistant/compare/v0.1.7...v0.1.8) (2026-02-25)
 
 
