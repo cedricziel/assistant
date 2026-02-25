@@ -19,6 +19,20 @@ pub struct TraceStats {
     pub common_errors: Vec<String>,
 }
 
+/// Aggregated metadata describing a single distributed trace/tree.
+#[derive(Debug, Clone)]
+pub struct TraceSummary {
+    pub trace_id: String,
+    pub conversation_id: Option<Uuid>,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub span_count: i64,
+    pub tool_span_count: i64,
+    pub error_count: i64,
+    pub tool_names: Vec<String>,
+    pub root_span_name: Option<String>,
+}
+
 /// A persisted OpenTelemetry span row enriched with tool metadata.
 #[derive(Debug, Clone)]
 pub struct RecordedSpan {
@@ -83,6 +97,100 @@ impl TraceStore {
              LIMIT ?1",
         )
         .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(Self::row_to_span).collect()
+    }
+
+    /// Return metadata for the newest distributed traces, optionally filtered to
+    /// those that include a particular tool span.
+    pub async fn list_recent_traces(
+        &self,
+        limit: i64,
+        skill_filter: Option<&str>,
+    ) -> Result<Vec<TraceSummary>> {
+        let rows = sqlx::query(
+            "SELECT \
+                trace_id, \
+                MAX(conversation_id) AS conversation_id, \
+                MIN(start_time) AS trace_start, \
+                MAX(end_time) AS trace_end, \
+                COUNT(*) AS span_count, \
+                SUM(CASE WHEN tool_name IS NOT NULL THEN 1 ELSE 0 END) AS tool_span_count, \
+                SUM(CASE WHEN tool_status = 'error' THEN 1 ELSE 0 END) AS error_count, \
+                GROUP_CONCAT(DISTINCT CASE WHEN tool_name IS NULL THEN '' ELSE tool_name END) AS tool_names, \
+                MAX(CASE WHEN parent_span_id IS NULL THEN name ELSE NULL END) AS root_span_name \
+            FROM distributed_traces \
+            GROUP BY trace_id \
+            HAVING (?1 IS NULL) OR SUM(CASE WHEN tool_name = ?1 THEN 1 ELSE 0 END) > 0 \
+            ORDER BY trace_start DESC \
+            LIMIT ?2",
+        )
+        .bind(skill_filter)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let conv_raw: Option<String> = row.try_get("conversation_id").ok().flatten();
+                let conversation_id = match conv_raw {
+                    Some(ref raw) if !raw.is_empty() => Some(Uuid::parse_str(raw)?),
+                    _ => None,
+                };
+                let start_time: DateTime<Utc> = row.get("trace_start");
+                let end_time: DateTime<Utc> = row.get("trace_end");
+                let span_count: i64 = row.get("span_count");
+                let tool_span_count: i64 = row.get("tool_span_count");
+                let error_count: i64 = row.get("error_count");
+                let root_span_name = row
+                    .try_get::<Option<String>, _>("root_span_name")
+                    .ok()
+                    .flatten();
+                let tool_concat = row
+                    .try_get::<Option<String>, _>("tool_names")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let tool_names = tool_concat
+                    .split(',')
+                    .filter_map(|name| {
+                        let trimmed = name.trim();
+                        if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        }
+                    })
+                    .collect();
+                Ok(TraceSummary {
+                    trace_id: row.get("trace_id"),
+                    conversation_id,
+                    start_time,
+                    end_time,
+                    span_count,
+                    tool_span_count,
+                    error_count,
+                    tool_names,
+                    root_span_name,
+                })
+            })
+            .collect()
+    }
+
+    /// Fetch every span belonging to a trace ordered by start time so the UI can
+    /// render the full hierarchy/timeline.
+    pub async fn get_trace(&self, trace_id: &str) -> Result<Vec<RecordedSpan>> {
+        let rows = sqlx::query(
+            "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
+                    tool_name, tool_status, tool_observation, tool_error, duration_ms, \
+                    start_time, end_time, attributes \
+             FROM distributed_traces \
+             WHERE trace_id = ?1 \
+             ORDER BY start_time ASC",
+        )
+        .bind(trace_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -286,6 +394,94 @@ mod tests {
         assert!(!stats.common_errors.is_empty());
     }
 
+    #[tokio::test]
+    async fn test_trace_summaries_and_filters() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("analysis")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let store = storage.trace_store();
+
+        insert_span(&storage.pool, conv_id, "bash", "ok", Some("ok"), None, 100).await;
+        insert_span(
+            &storage.pool,
+            conv_id,
+            "search",
+            "error",
+            None,
+            Some("boom"),
+            80,
+        )
+        .await;
+
+        let all = store.list_recent_traces(10, None).await.unwrap();
+        assert_eq!(all.len(), 2);
+
+        let bash_only = store.list_recent_traces(10, Some("bash")).await.unwrap();
+        assert_eq!(bash_only.len(), 1);
+        assert_eq!(bash_only[0].tool_names, vec!["bash".to_string()]);
+
+        let search_only = store.list_recent_traces(10, Some("search")).await.unwrap();
+        assert_eq!(search_only.len(), 1);
+        assert_eq!(search_only[0].error_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_trace_retrieves_hierarchy() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.trace_store();
+
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("trace")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let trace_id = Uuid::new_v4().to_string();
+        let parent_id = Uuid::new_v4().to_string();
+        let child_id = Uuid::new_v4().to_string();
+
+        insert_custom_span(
+            &storage.pool,
+            &trace_id,
+            &parent_id,
+            None,
+            conv_id,
+            "root",
+            "ok",
+            None,
+            None,
+            42,
+        )
+        .await;
+        insert_custom_span(
+            &storage.pool,
+            &trace_id,
+            &child_id,
+            Some(&parent_id),
+            conv_id,
+            "child",
+            "error",
+            Some("boom"),
+            Some("fail"),
+            10,
+        )
+        .await;
+
+        let spans = store.get_trace(&trace_id).await.unwrap();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].span_id, parent_id);
+        assert_eq!(spans[1].parent_span_id.as_deref(), Some(parent_id.as_str()));
+    }
+
     async fn insert_span(
         pool: &SqlitePool,
         conversation_id: Uuid,
@@ -313,6 +509,49 @@ mod tests {
         )
         .bind(span_id)
         .bind(trace_id)
+        .bind(conversation_id.to_string())
+        .bind(tool_name)
+        .bind(status)
+        .bind(observation)
+        .bind(error)
+        .bind(duration_ms)
+        .bind(start)
+        .bind(end)
+        .bind(attrs.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_custom_span(
+        pool: &SqlitePool,
+        trace_id: &str,
+        span_id: &str,
+        parent_span_id: Option<&str>,
+        conversation_id: Uuid,
+        tool_name: &str,
+        status: &str,
+        observation: Option<&str>,
+        error: Option<&str>,
+        duration_ms: i64,
+    ) {
+        let start = Utc::now();
+        let end = start + chrono::Duration::milliseconds(duration_ms.max(0));
+        let attrs = json!({
+            "conversation_id": conversation_id.to_string(),
+            "tool_name": tool_name,
+            "tool_status": status,
+        });
+
+        sqlx::query(
+            "INSERT INTO distributed_traces \
+                (span_id, trace_id, parent_span_id, name, conversation_id, turn, tool_name, \
+                 tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, attributes) \
+             VALUES (?1, ?2, ?3, 'tool_execution', ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+        )
+        .bind(span_id)
+        .bind(trace_id)
+        .bind(parent_span_id)
         .bind(conversation_id.to_string())
         .bind(tool_name)
         .bind(status)

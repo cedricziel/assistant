@@ -12,7 +12,7 @@ pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
 pub use telemetry::SqliteSpanExporter;
-pub use traces::{RecordedSpan, TraceStats, TraceStore};
+pub use traces::{RecordedSpan, TraceStats, TraceStore, TraceSummary};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
