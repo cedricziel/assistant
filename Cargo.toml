@@ -53,6 +53,9 @@ rustls = { version = "0.23", features = ["ring"] }
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.24"
+opentelemetry = { version = "0.23", features = ["trace"] }
+opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic", "tls"] }
 # CLI / config
 clap = { version = "4", features = ["derive"] }
 dirs = "6"

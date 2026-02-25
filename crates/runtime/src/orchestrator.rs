@@ -15,7 +15,7 @@ use assistant_skills::SkillDef as SpecSkillDef;
 use assistant_storage::{conversations::ConversationStore, SkillRegistry, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -158,12 +158,14 @@ impl Orchestrator {
         interface: Interface,
         extensions: Vec<Arc<dyn ToolHandler>>,
     ) -> Result<()> {
-        info!(
-            conversation_id = %conversation_id,
+        let turn_span = info_span!(
+            "conversation_turn",
+            %conversation_id,
             interface = ?interface,
-            extension_count = extensions.len(),
-            "Starting turn with extension tools"
+            extension_tools = extensions.len()
         );
+        let _turn_guard = turn_span.enter();
+        info!("Starting turn with extension tools");
 
         // Build extension lookup: name → handler.
         let ext_map: HashMap<String, Arc<dyn ToolHandler>> = extensions
@@ -415,6 +417,27 @@ impl Orchestrator {
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
+                        let tool_span = info_span!(
+                            "tool_execution",
+                            %conversation_id,
+                            iteration,
+                            tool = %name
+                        );
+                        let _tool_guard = tool_span.enter();
+                        let tool_span = info_span!(
+                            "tool_execution",
+                            %conversation_id,
+                            iteration,
+                            tool = %name
+                        );
+                        let _tool_guard = tool_span.enter();
+                        let tool_span = info_span!(
+                            "tool_execution",
+                            %conversation_id,
+                            iteration,
+                            tool = %name
+                        );
+                        let _tool_guard = tool_span.enter();
 
                         if name == "end_turn" {
                             if has_real_calls {
@@ -477,6 +500,8 @@ impl Orchestrator {
                         // Extension tools take priority and bypass the safety gate.
                         let (observation, trace_result) = if let Some(handler) = ext_map.get(&name)
                         {
+                            let ext_span = info_span!("extension_tool", tool = %name);
+                            let _ext_guard = ext_span.enter();
                             debug!(tool = %name, "Dispatching to extension handler");
 
                             let params_map: HashMap<String, serde_json::Value> =
@@ -511,6 +536,12 @@ impl Orchestrator {
                             (obs, trace)
                         } else {
                             // Global executor path.
+                            let builtin_span = info_span!(
+                                "tool_handler",
+                                tool = %name,
+                                source = "builtin"
+                            );
+                            let _builtin_guard = builtin_span.enter();
                             if self
                                 .reject_if_disabled(
                                     &name,
@@ -687,6 +718,8 @@ impl Orchestrator {
 
         // 6. Tool-calling loop.
         for iteration in 0..self.max_iterations {
+            let iteration_span = info_span!("turn_iteration", iteration);
+            let _iteration_guard = iteration_span.enter();
             debug!(iteration, "Tool-calling loop iteration");
 
             let ctx = ExecutionContext {
@@ -720,7 +753,7 @@ impl Orchestrator {
                 LlmResponse::ToolCalls(tool_call_items) => {
                     info!(
                         count = tool_call_items.len(),
-                        iteration, "LLM requested tool execution(s)"
+                        "LLM requested tool execution(s)"
                     );
 
                     history.push(ChatHistoryMessage::AssistantToolCalls(
@@ -889,6 +922,8 @@ impl Orchestrator {
         let mut traces: Vec<ExecutionTrace> = Vec::new();
 
         for iteration in 0..self.max_iterations {
+            let iteration_span = info_span!("turn_iteration", iteration);
+            let _iteration_guard = iteration_span.enter();
             debug!(iteration, "Streaming tool-calling loop iteration");
 
             let ctx = ExecutionContext {

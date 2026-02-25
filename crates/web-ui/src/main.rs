@@ -38,9 +38,10 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::default().add_directive(Level::INFO.into())
-        }))
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::default().add_directive(Level::INFO.into())),
+        )
         .init();
 
     let db_path = match args.db_path.or_else(default_db_path) {
@@ -67,12 +68,11 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn show_skills(State(state): State<AppState>) -> Result<Html<String>, (axum::http::StatusCode, String)> {
+async fn show_skills(
+    State(state): State<AppState>,
+) -> Result<Html<String>, (axum::http::StatusCode, String)> {
     let store = TraceStore::new(state.pool.clone());
-    let skills = store
-        .list_skills()
-        .await
-        .map_err(internal_error)?;
+    let skills = store.list_skills().await.map_err(internal_error)?;
 
     let mut rows = String::new();
     for skill in skills {
@@ -192,5 +192,8 @@ fn default_css() -> &'static str {
 }
 
 fn internal_error<E: std::fmt::Display>(err: E) -> (axum::http::StatusCode, String) {
-    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        err.to_string(),
+    )
 }

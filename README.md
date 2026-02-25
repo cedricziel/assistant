@@ -219,6 +219,22 @@ make run-mattermost # cargo run -p assistant-cli -- mattermost
 cargo run -p assistant-web-ui -- --listen 127.0.0.1:8080
 ```
 
+## Observability
+
+The runtime emits [tracing](https://docs.rs/tracing/) spans for every turn and
+tool execution. To forward them to an OpenTelemetry backend (Jaeger, Tempo,
+Honeycomb, etc.), set the standard OTLP endpoint before starting the assistant:
+
+```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+cargo run -p assistant-cli -- slack
+```
+
+When the environment variable is present the CLI automatically installs an OTLP
+exporter (batching on the Tokio runtime) and attaches span metadata such as the
+conversation ID, iteration number, and tool name. Remove the variable to fall
+back to local logging only.
+
 ### Pre-commit hooks
 
 Git hooks live in `.githooks/`. After cloning, activate them once:

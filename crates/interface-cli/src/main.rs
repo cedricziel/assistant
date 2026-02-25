@@ -16,9 +16,11 @@ use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 use clap::{Parser, Subcommand};
+use opentelemetry::sdk::{self, resource::Resource};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use uuid::Uuid;
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -104,6 +106,46 @@ fn load_config(config_path: &Path) -> AssistantConfig {
             warn!("Failed to parse config at {}: {e}", config_path.display());
             AssistantConfig::default()
         }
+    }
+}
+
+struct OtelGuard;
+
+impl Drop for OtelGuard {
+    fn drop(&mut self) {
+        opentelemetry::global::shutdown_tracer_provider();
+    }
+}
+
+fn init_tracing() -> Result<Option<OtelGuard>> {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+
+    if let Ok(endpoint) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
+        let exporter = opentelemetry_otlp::new_exporter()
+            .tonic()
+            .with_endpoint(endpoint);
+        let tracer =
+            opentelemetry_otlp::new_pipeline()
+                .tracing()
+                .with_exporter(exporter)
+                .with_trace_config(sdk::trace::Config::default().with_resource(Resource::new(
+                    vec![opentelemetry::KeyValue::new("service.name", "assistant")],
+                )))
+                .install_batch(opentelemetry::runtime::Tokio)?;
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .with(tracing_opentelemetry::layer().with_tracer(tracer))
+            .init();
+        Ok(Some(OtelGuard))
+    } else {
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .init();
+        Ok(None)
     }
 }
 
@@ -433,15 +475,8 @@ async fn main() -> Result<()> {
     // 1. Parse CLI arguments first so we can configure tracing appropriately.
     let cli = Cli::parse();
 
-    // 2. For MCP mode, all output on stdout is JSON-RPC — route logs to stderr.
-    //    For all other modes the default (stderr) writer is also fine.
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .init();
+    // 2. Initialize tracing (optionally wiring OpenTelemetry if env vars are set).
+    let _otel_guard = init_tracing()?;
 
     // 3. Resolve home directory (needed for both early and late subcommands).
     let home = dirs::home_dir().context("Cannot determine home directory")?;
