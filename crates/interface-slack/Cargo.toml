@@ -13,7 +13,6 @@ path = "src/lib.rs"
 assistant-core = { path = "../core" }
 assistant-runtime = { path = "../runtime" }
 assistant-storage = { path = "../storage" }
-assistant-tool-executor = { path = "../tool-executor" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
