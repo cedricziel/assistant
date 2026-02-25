@@ -9,7 +9,8 @@ use assistant_core::{
     ExecutionContext, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
 };
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse, ToolSpec,
+    Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse,
+    LlmResponseMeta, ToolSpec,
 };
 use assistant_skills::SkillDef as SpecSkillDef;
 use assistant_storage::{conversations::ConversationStore, SkillRegistry, StorageLayer};
@@ -330,11 +331,10 @@ impl Orchestrator {
                 interactive: false,
             };
 
-            let mut llm_span = tracer.start_with_context("llm_call", &turn_cx);
-            llm_span.set_attribute(KeyValue::new("iteration", iteration as i64));
+            let mut llm_span = start_llm_span(self.llm.as_ref(), iteration, &turn_cx);
             let response = self.llm.chat(&system_prompt, &history, &all_specs).await;
-            llm_span.end();
             let response = response?;
+            finish_llm_span(&mut llm_span, response.meta());
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
@@ -766,11 +766,10 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
-            let mut llm_span = tracer.start_with_context("llm_call", &turn_cx);
-            llm_span.set_attribute(KeyValue::new("iteration", iteration as i64));
+            let mut llm_span = start_llm_span(self.llm.as_ref(), iteration, &turn_cx);
             let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
-            llm_span.end();
             let response = response?;
+            finish_llm_span(&mut llm_span, response.meta());
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
@@ -1002,8 +1001,7 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
             };
 
-            let mut llm_span = tracer.start_with_context("llm_call", &turn_cx);
-            llm_span.set_attribute(KeyValue::new("iteration", iteration as i64));
+            let mut llm_span = start_llm_span(self.llm.as_ref(), iteration, &turn_cx);
             let response = self
                 .llm
                 .chat_streaming(
@@ -1013,8 +1011,8 @@ impl Orchestrator {
                     Some(token_sink.clone()),
                 )
                 .await;
-            llm_span.end();
             let response = response?;
+            finish_llm_span(&mut llm_span, response.meta());
 
             match response {
                 LlmResponse::FinalAnswer(text, _meta) => {
@@ -1375,7 +1373,8 @@ fn start_tool_span(
     parent_cx: &OtelContext,
 ) -> opentelemetry::global::BoxedSpan {
     let tracer = global::tracer("assistant.orchestrator");
-    let mut span = tracer.start_with_context("tool_execution", parent_cx);
+    let span_name = format!("execute_tool {tool_name}");
+    let mut span = tracer.start_with_context(span_name, parent_cx);
     span.set_attribute(KeyValue::new(
         "conversation_id",
         conversation_id.to_string(),
@@ -1388,6 +1387,56 @@ fn start_tool_span(
         serde_json::to_string(params).unwrap_or_else(|_| "<unserializable>".to_string());
     span.set_attribute(KeyValue::new("tool_params", params_json));
     span
+}
+
+/// Create an OTel span for an LLM chat call, populated with GenAI semantic
+/// convention request-side attributes.
+fn start_llm_span(
+    llm: &dyn LlmProvider,
+    iteration: usize,
+    parent_cx: &OtelContext,
+) -> opentelemetry::global::BoxedSpan {
+    let tracer = global::tracer("assistant.orchestrator");
+    let model = llm.model_name();
+    let span_name = format!("chat {model}");
+    let mut span = tracer.start_with_context(span_name, parent_cx);
+    span.set_attribute(KeyValue::new(
+        "gen_ai.system",
+        llm.provider_name().to_string(),
+    ));
+    span.set_attribute(KeyValue::new("gen_ai.request.model", model.to_string()));
+    span.set_attribute(KeyValue::new("gen_ai.operation.name", "chat"));
+    span.set_attribute(KeyValue::new(
+        "server.address",
+        llm.server_address().to_string(),
+    ));
+    span.set_attribute(KeyValue::new("iteration", iteration as i64));
+    span
+}
+
+/// Enrich an LLM span with GenAI semantic convention response-side attributes
+/// extracted from [`LlmResponseMeta`].
+fn finish_llm_span(span: &mut opentelemetry::global::BoxedSpan, meta: &LlmResponseMeta) {
+    if let Some(model) = &meta.model {
+        span.set_attribute(KeyValue::new("gen_ai.response.model", model.clone()));
+    }
+    if let Some(id) = &meta.response_id {
+        span.set_attribute(KeyValue::new("gen_ai.response.id", id.clone()));
+    }
+    if let Some(reason) = &meta.finish_reason {
+        // OTel spec uses a string array; we record the single reason as a scalar.
+        span.set_attribute(KeyValue::new(
+            "gen_ai.response.finish_reasons",
+            reason.clone(),
+        ));
+    }
+    if let Some(input) = meta.input_tokens {
+        span.set_attribute(KeyValue::new("gen_ai.usage.input_tokens", input as i64));
+    }
+    if let Some(output) = meta.output_tokens {
+        span.set_attribute(KeyValue::new("gen_ai.usage.output_tokens", output as i64));
+    }
+    span.end();
 }
 
 fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {
