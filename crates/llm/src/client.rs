@@ -11,12 +11,30 @@ use crate::tool_spec::ToolSpec;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+/// A single content block in a multimodal message.
+///
+/// Used by [`ChatHistoryMessage::MultimodalUser`] to carry a mix of text and
+/// inline images.
+#[derive(Debug, Clone)]
+pub enum ContentBlock {
+    /// A text segment.
+    Text(String),
+    /// A base64-encoded image.
+    Image {
+        /// MIME type, e.g. `"image/png"`, `"image/jpeg"`.
+        media_type: String,
+        /// Base64-encoded image data (no data-URI prefix).
+        data: String,
+    },
+}
+
 /// A single message in the chat history as tracked by the caller.
 ///
-/// The enum reflects the three structurally distinct message kinds in the
+/// The enum reflects the structurally distinct message kinds in the
 /// Ollama (and OpenAI-compatible) multi-turn tool-calling format:
 ///
 /// * `Text` — a plain user, assistant, or system message.
+/// * `MultimodalUser` — a user message with mixed text and image content.
 /// * `AssistantToolCalls` — the assistant's decision to invoke one or more
 ///   tools.  Serialises to `{"role":"assistant","content":"","tool_calls":[…]}`.
 /// * `ToolResult` — the result returned for a single tool invocation.
@@ -25,6 +43,11 @@ use crate::tool_spec::ToolSpec;
 pub enum ChatHistoryMessage {
     /// A plain text message (user / assistant / system).
     Text { role: ChatRole, content: String },
+    /// A user message with mixed text and image content blocks.
+    ///
+    /// Providers that do not support vision should extract only the
+    /// [`ContentBlock::Text`] parts and discard images.
+    MultimodalUser { content: Vec<ContentBlock> },
     /// The assistant requested one or more tool calls in a single turn.
     AssistantToolCalls(Vec<ToolCallItem>),
     /// The result of a single tool invocation.
@@ -185,7 +208,9 @@ impl LlmClient {
             "Sending native tool-call request to Ollama"
         );
 
-        let messages = build_json_messages(system_prompt, history);
+        // Ollama vision support depends on the model; default to false to avoid
+        // sending images to non-vision models which would cause a rejection.
+        let messages = build_json_messages(system_prompt, history, false);
         let tools_json: Vec<Value> = tools.iter().map(tool_spec_to_ollama_json).collect();
 
         let role_summary: Vec<&str> = messages
@@ -302,7 +327,7 @@ impl LlmClient {
             "Sending native streaming request to Ollama"
         );
 
-        let messages = build_json_messages(system_prompt, history);
+        let messages = build_json_messages(system_prompt, history, false);
         let tools_json: Vec<Value> = tools.iter().map(tool_spec_to_ollama_json).collect();
 
         let body = json!({
@@ -532,7 +557,15 @@ pub fn tool_spec_to_ollama_json(tool: &ToolSpec) -> Value {
 }
 
 /// Build the JSON messages array for the native (reqwest) path.
-fn build_json_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Vec<Value> {
+///
+/// When `vision` is `false`, image content blocks inside
+/// [`ChatHistoryMessage::MultimodalUser`] are discarded so that non-vision
+/// Ollama models do not reject the request.
+fn build_json_messages(
+    system_prompt: &str,
+    history: &[ChatHistoryMessage],
+    vision: bool,
+) -> Vec<Value> {
     let mut messages = Vec::with_capacity(history.len() + 1);
 
     if !system_prompt.is_empty() {
@@ -567,6 +600,30 @@ fn build_json_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> V
                     "content": "",
                     "tool_calls": tool_calls,
                 }));
+            }
+            ChatHistoryMessage::MultimodalUser { content } => {
+                // Ollama supports images via an `images` field alongside `content`.
+                // When vision is disabled, discard image blocks so that non-vision
+                // models do not reject the request.
+                let mut texts = Vec::new();
+                let mut images = Vec::new();
+                for block in content {
+                    match block {
+                        ContentBlock::Text(t) => texts.push(t.as_str()),
+                        ContentBlock::Image { data, .. } if vision => {
+                            images.push(json!(data));
+                        }
+                        ContentBlock::Image { .. } => { /* vision disabled — skip */ }
+                    }
+                }
+                let combined_text = texts.join("\n");
+                if images.is_empty() {
+                    messages.push(json!({ "role": "user", "content": combined_text }));
+                } else {
+                    messages.push(
+                        json!({ "role": "user", "content": combined_text, "images": images }),
+                    );
+                }
             }
             ChatHistoryMessage::ToolResult { name, content } => {
                 messages.push(json!({
@@ -710,5 +767,96 @@ mod tests {
         };
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, "good-tool");
+    }
+
+    // ── build_json_messages tests (MultimodalUser) ───────────────────────────
+
+    #[test]
+    fn multimodal_user_text_only_produces_plain_user_message() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![ContentBlock::Text("hello".to_string())],
+        }];
+        let msgs = build_json_messages("", &history, true);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "hello");
+        assert!(msgs[0].get("images").is_none(), "no images field expected");
+    }
+
+    #[test]
+    fn multimodal_user_with_image_emits_images_field() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("describe this".to_string()),
+                ContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    data: "iVBORw0KGgo=".to_string(),
+                },
+            ],
+        }];
+        let msgs = build_json_messages("", &history, true);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "describe this");
+        let images = msgs[0]["images"].as_array().expect("images field");
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0], "iVBORw0KGgo=");
+    }
+
+    #[test]
+    fn multimodal_user_multiple_images() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("compare".to_string()),
+                ContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    data: "img1data".to_string(),
+                },
+                ContentBlock::Image {
+                    media_type: "image/jpeg".to_string(),
+                    data: "img2data".to_string(),
+                },
+            ],
+        }];
+        let msgs = build_json_messages("", &history, true);
+        let images = msgs[0]["images"].as_array().expect("images field");
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0], "img1data");
+        assert_eq!(images[1], "img2data");
+    }
+
+    #[test]
+    fn multimodal_user_image_only_has_empty_content() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![ContentBlock::Image {
+                media_type: "image/png".to_string(),
+                data: "abc123".to_string(),
+            }],
+        }];
+        let msgs = build_json_messages("", &history, true);
+        assert_eq!(msgs[0]["content"], "");
+        let images = msgs[0]["images"].as_array().expect("images field");
+        assert_eq!(images.len(), 1);
+    }
+
+    #[test]
+    fn multimodal_user_vision_false_strips_images() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("describe this".to_string()),
+                ContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    data: "iVBORw0KGgo=".to_string(),
+                },
+            ],
+        }];
+        let msgs = build_json_messages("", &history, false);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "describe this");
+        assert!(
+            msgs[0].get("images").is_none(),
+            "images must be stripped when vision is false"
+        );
     }
 }

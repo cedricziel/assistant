@@ -165,6 +165,7 @@ impl WebsocketHandler for MattermostHandler {
                 Interface::Mattermost,
                 extensions,
                 None,
+                vec![],
             )
             .await;
         let elapsed_ms = orchestrator_start.elapsed().as_millis();

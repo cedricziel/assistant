@@ -32,8 +32,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{Interface, Message, MessageRole};
+use assistant_llm::ContentBlock;
 use assistant_runtime::Orchestrator;
 use assistant_storage::StorageLayer;
+use base64::Engine as _;
+
 use slack_morphism::prelude::*;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
@@ -75,6 +78,8 @@ struct PendingMessage {
     channel_id: String,
     thread_ts: SlackTs,
     msg_ts: SlackTs,
+    /// Multimodal content blocks (images) downloaded from Slack file attachments.
+    attachments: Vec<ContentBlock>,
 }
 
 /// Build a single contextualized prompt from a batch of pending messages.
@@ -161,12 +166,14 @@ fn classify_history_msg(msg: &SlackHistoryMessage) -> Option<MessageRole> {
         return Some(MessageRole::Assistant);
     }
 
-    // Any non-bot subtype is a system event — skip.
-    if msg.subtype.is_some() {
+    // FileShare is a user-initiated subtype — treat as a normal user message.
+    // All other non-bot subtypes are system events — skip.
+    let is_file_share = matches!(msg.subtype, Some(SlackMessageEventType::FileShare));
+    if msg.subtype.is_some() && !is_file_share {
         return None;
     }
 
-    // Plain human message.
+    // Plain human message (or file-share from a human).
     if msg.sender.user.is_some() {
         return Some(MessageRole::User);
     }
@@ -174,9 +181,137 @@ fn classify_history_msg(msg: &SlackHistoryMessage) -> Option<MessageRole> {
     None
 }
 
+/// Format attached [`SlackFile`]s into a human-readable text block that is
+/// appended to the message body so the LLM is aware of shared files.
+fn format_file_attachments(files: &[SlackFile]) -> String {
+    let mut parts = Vec::with_capacity(files.len());
+    for f in files {
+        let name = f
+            .name
+            .as_deref()
+            .or(f.title.as_deref())
+            .unwrap_or("unnamed");
+        let mime = f
+            .mimetype
+            .as_ref()
+            .map(|m| m.to_string())
+            .unwrap_or_default();
+        let url = f
+            .permalink
+            .as_ref()
+            .or(f.url_private.as_ref())
+            .map(|u| u.as_str())
+            .unwrap_or("no URL");
+        if mime.is_empty() {
+            parts.push(format!("[Attached file: {name} — {url}]"));
+        } else {
+            parts.push(format!("[Attached file: {name} ({mime}) — {url}]"));
+        }
+    }
+    parts.join("\n")
+}
+
+/// Image MIME types that vision-capable models can process.
+const IMAGE_MIME_PREFIXES: &[&str] = &["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+/// Maximum image file size we will download and base64-encode (5 MB).
+/// Matches the Anthropic API per-image limit.
+const MAX_IMAGE_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
+
+/// Timeout for downloading a single Slack file attachment.
+const SLACK_FILE_DOWNLOAD_TIMEOUT_SECS: u64 = 15;
+
+/// Download a Slack file and return it as a base64-encoded [`ContentBlock::Image`].
+///
+/// Only images with a recognised MIME type are downloaded; all other files are
+/// skipped (returns `None`).  The download uses the bot token for
+/// authentication since Slack private file URLs require a Bearer header.
+///
+/// Downloads are bounded by [`SLACK_FILE_DOWNLOAD_TIMEOUT_SECS`] and
+/// [`MAX_IMAGE_ATTACHMENT_BYTES`] to prevent stalling or OOM.
+async fn download_slack_file_as_content_block(
+    file: &SlackFile,
+    bot_token: &str,
+) -> Option<ContentBlock> {
+    let mime = file.mimetype.as_ref().map(|m| m.to_string())?;
+    if !IMAGE_MIME_PREFIXES.iter().any(|p| mime.starts_with(p)) {
+        debug!(
+            file_id = %file.id.0,
+            mime = %mime,
+            "Skipping non-image file attachment"
+        );
+        return None;
+    }
+
+    let url = file
+        .url_private_download
+        .as_ref()
+        .or(file.url_private.as_ref())?;
+
+    debug!(file_id = %file.id.0, mime = %mime, "Downloading Slack file for vision");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            SLACK_FILE_DOWNLOAD_TIMEOUT_SECS,
+        ))
+        .build()
+        .ok()?;
+    let resp = client
+        .get(url.as_str())
+        .header("Authorization", format!("Bearer {bot_token}"))
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        warn!(
+            file_id = %file.id.0,
+            status = %resp.status(),
+            "Failed to download Slack file"
+        );
+        return None;
+    }
+
+    // Check Content-Length header before downloading the body.
+    if resp
+        .content_length()
+        .is_some_and(|len| len > MAX_IMAGE_ATTACHMENT_BYTES as u64)
+    {
+        warn!(
+            file_id = %file.id.0,
+            limit = MAX_IMAGE_ATTACHMENT_BYTES,
+            "Skipping oversized Slack file attachment"
+        );
+        return None;
+    }
+
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.len() > MAX_IMAGE_ATTACHMENT_BYTES {
+        warn!(
+            file_id = %file.id.0,
+            size = bytes.len(),
+            limit = MAX_IMAGE_ATTACHMENT_BYTES,
+            "Skipping oversized Slack file attachment after download"
+        );
+        return None;
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    Some(ContentBlock::Image {
+        media_type: mime,
+        data,
+    })
+}
+
 fn incoming_from_message_event(msg: &SlackMessageEvent) -> Option<SlackIncomingEvent> {
-    if msg.subtype.is_some()
-        || msg.sender.bot_id.is_some()
+    // Allow FileShare through so that file attachments are visible to the LLM.
+    // All other subtypes (bot_message, message_changed, …) remain filtered.
+    let is_file_share = matches!(msg.subtype, Some(SlackMessageEventType::FileShare));
+
+    if msg.subtype.is_some() && !is_file_share {
+        return None;
+    }
+    if msg.sender.bot_id.is_some()
         || msg.sender.display_as_bot.unwrap_or(false)
         || msg.sender.user.is_none()
     {
@@ -185,16 +320,29 @@ fn incoming_from_message_event(msg: &SlackMessageEvent) -> Option<SlackIncomingE
 
     let user_id = msg.sender.user.as_ref()?.to_string();
     let channel_id = msg.origin.channel.as_ref()?.to_string();
-    let text = msg
+
+    let body_text = msg
         .content
         .as_ref()
         .and_then(|c| c.text.as_ref())
         .map(|t| t.to_string())
         .unwrap_or_default();
 
-    if text.trim().is_empty() {
-        return None;
-    }
+    // Build a combined text: user message body + file attachment descriptions.
+    let file_text = msg
+        .content
+        .as_ref()
+        .and_then(|c| c.files.as_ref())
+        .filter(|files| !files.is_empty())
+        .map(|files| format_file_attachments(files))
+        .unwrap_or_default();
+
+    let text = match (body_text.trim().is_empty(), file_text.is_empty()) {
+        (true, true) => return None,
+        (true, false) => file_text,
+        (false, true) => body_text,
+        (false, false) => format!("{body_text}\n\n{file_text}"),
+    };
 
     let msg_ts = msg.origin.ts.clone();
     let thread_ts = msg
@@ -286,9 +434,17 @@ async fn on_push_event(
         )
     };
 
-    let incoming = match &event.event {
+    // Extract the incoming event and any attached files for vision processing.
+    let (incoming, slack_files) = match &event.event {
         SlackEventCallbackBody::Message(msg) => match incoming_from_message_event(msg) {
-            Some(evt) => evt,
+            Some(evt) => {
+                let files = msg
+                    .content
+                    .as_ref()
+                    .and_then(|c| c.files.clone())
+                    .unwrap_or_default();
+                (evt, files)
+            }
             None => {
                 debug!("Ignoring non-human message event");
                 return Ok(());
@@ -296,7 +452,7 @@ async fn on_push_event(
         },
         SlackEventCallbackBody::ReactionAdded(reaction) => {
             match incoming_from_reaction_event(reaction) {
-                Some(evt) => evt,
+                Some(evt) => (evt, Vec::new()),
                 None => {
                     debug!("Ignoring reaction event that is not tied to a message");
                     return Ok(());
@@ -437,11 +593,20 @@ async fn on_push_event(
                                 Some(r) => r,
                                 None => continue,
                             };
-                            let content =
-                                hist_msg.content.text.as_deref().unwrap_or("").to_string();
-                            if content.is_empty() {
-                                continue;
-                            }
+                            let body = hist_msg.content.text.as_deref().unwrap_or("");
+                            let file_text = hist_msg
+                                .content
+                                .files
+                                .as_ref()
+                                .filter(|files| !files.is_empty())
+                                .map(|files| format_file_attachments(files))
+                                .unwrap_or_default();
+                            let content = match (body.trim().is_empty(), file_text.is_empty()) {
+                                (true, true) => continue,
+                                (true, false) => file_text,
+                                (false, true) => body.to_string(),
+                                (false, false) => format!("{body}\n\n{file_text}"),
+                            };
                             let msg_to_seed = Message::new(conversation_id, role, content);
                             if let Err(e) = conv_store.save_message(&msg_to_seed).await {
                                 warn!(error = %e, "Failed to seed thread history message");
@@ -496,6 +661,23 @@ async fn on_push_event(
         }
     }
 
+    // Download image files from Slack for vision-capable models.
+    // Non-image files are skipped — the LLM still sees their metadata in the
+    // text description appended by `format_file_attachments`.
+    let bot_token_str = bot_token.token_value.0.as_str();
+    let mut attachments = Vec::new();
+    for file in &slack_files {
+        if let Some(block) = download_slack_file_as_content_block(file, bot_token_str).await {
+            attachments.push(block);
+        }
+    }
+    if !attachments.is_empty() {
+        info!(
+            count = attachments.len(),
+            "Downloaded image attachments for vision"
+        );
+    }
+
     // Push this message into the per-conversation pending queue so that if
     // multiple messages pile up while a turn is in-flight, they can be
     // drained and combined into a single orchestrator turn.
@@ -510,6 +692,7 @@ async fn on_push_event(
                 channel_id: channel_id.clone(),
                 thread_ts: thread_ts.clone(),
                 msg_ts: msg_ts.clone(),
+                attachments,
             });
     }
 
@@ -603,11 +786,18 @@ async fn on_push_event(
     // who sent what.
     let contextualized_text = build_batch_prompt(&batch);
 
+    // Collect image attachments from all messages in the batch.
+    let all_attachments: Vec<ContentBlock> = batch
+        .iter()
+        .flat_map(|m| m.attachments.iter().cloned())
+        .collect();
+
     let orchestrator_start = std::time::Instant::now();
     debug!(
         conversation_id = %conversation_id,
         batch_size,
         text_len = contextualized_text.len(),
+        attachment_count = all_attachments.len(),
         "orchestrator.run_turn_with_tools →"
     );
     let turn_result = orchestrator
@@ -617,6 +807,7 @@ async fn on_push_event(
             Interface::Slack,
             extensions,
             None,
+            all_attachments,
         )
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
@@ -931,8 +1122,9 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        build_batch_prompt, classify_history_msg, incoming_from_message_event,
-        incoming_from_reaction_event, PendingMessage, SlackIncomingKind,
+        build_batch_prompt, classify_history_msg, format_file_attachments,
+        incoming_from_message_event, incoming_from_reaction_event, PendingMessage,
+        SlackIncomingKind,
     };
 
     // ── Allowlist tests ───────────────────────────────────────────────────────
@@ -1252,6 +1444,7 @@ mod tests {
             channel_id: channel.to_string(),
             thread_ts: SlackTs("1700000000.000000".to_string()),
             msg_ts: SlackTs(ts.to_string()),
+            attachments: Vec::new(),
         }
     }
 
@@ -1352,5 +1545,292 @@ mod tests {
         };
         assert_eq!(batch_b.len(), 1);
         assert_eq!(batch_b[0].text, "for-b");
+    }
+
+    // ── File attachment tests ────────────────────────────────────────────────
+
+    #[test]
+    fn format_file_attachments_single_file_with_mime() {
+        use url::Url;
+        let files = vec![SlackFile {
+            id: SlackFileId("F001".to_string()),
+            created: None,
+            timestamp: None,
+            name: Some("report.pdf".to_string()),
+            title: None,
+            mimetype: Some(SlackMimeType("application/pdf".to_string())),
+            filetype: None,
+            pretty_type: None,
+            external_type: None,
+            user: None,
+            username: None,
+            url_private: None,
+            url_private_download: None,
+            permalink: Some(Url::parse("https://files.slack.com/report.pdf").unwrap()),
+            permalink_public: None,
+            reactions: None,
+            flags: SlackFileFlags {
+                editable: None,
+                is_external: None,
+                is_public: None,
+                public_url_shared: None,
+                display_as_bot: None,
+                is_starred: None,
+                has_rich_preview: None,
+            },
+        }];
+        let result = format_file_attachments(&files);
+        assert!(result.contains("report.pdf"));
+        assert!(result.contains("application/pdf"));
+        assert!(result.contains("https://files.slack.com/report.pdf"));
+    }
+
+    #[test]
+    fn format_file_attachments_falls_back_to_title() {
+        use url::Url;
+        let files = vec![SlackFile {
+            id: SlackFileId("F002".to_string()),
+            created: None,
+            timestamp: None,
+            name: None,
+            title: Some("My Image".to_string()),
+            mimetype: Some(SlackMimeType("image/png".to_string())),
+            filetype: None,
+            pretty_type: None,
+            external_type: None,
+            user: None,
+            username: None,
+            url_private: Some(Url::parse("https://files.slack.com/img.png").unwrap()),
+            url_private_download: None,
+            permalink: None,
+            permalink_public: None,
+            reactions: None,
+            flags: SlackFileFlags {
+                editable: None,
+                is_external: None,
+                is_public: None,
+                public_url_shared: None,
+                display_as_bot: None,
+                is_starred: None,
+                has_rich_preview: None,
+            },
+        }];
+        let result = format_file_attachments(&files);
+        assert!(
+            result.contains("My Image"),
+            "should fall back to title when name is absent"
+        );
+    }
+
+    #[test]
+    fn format_file_attachments_no_mime_omits_parens() {
+        let files = vec![SlackFile {
+            id: SlackFileId("F003".to_string()),
+            created: None,
+            timestamp: None,
+            name: Some("data.bin".to_string()),
+            title: None,
+            mimetype: None,
+            filetype: None,
+            pretty_type: None,
+            external_type: None,
+            user: None,
+            username: None,
+            url_private: None,
+            url_private_download: None,
+            permalink: None,
+            permalink_public: None,
+            reactions: None,
+            flags: SlackFileFlags {
+                editable: None,
+                is_external: None,
+                is_public: None,
+                public_url_shared: None,
+                display_as_bot: None,
+                is_starred: None,
+                has_rich_preview: None,
+            },
+        }];
+        let result = format_file_attachments(&files);
+        assert!(
+            !result.contains('('),
+            "no parens expected when mime is absent"
+        );
+        assert!(result.contains("data.bin"));
+    }
+
+    #[test]
+    fn incoming_from_file_share_event_includes_file_metadata() {
+        use url::Url;
+        let file = SlackFile {
+            id: SlackFileId("F100".to_string()),
+            created: None,
+            timestamp: None,
+            name: Some("photo.jpg".to_string()),
+            title: None,
+            mimetype: Some(SlackMimeType("image/jpeg".to_string())),
+            filetype: None,
+            pretty_type: None,
+            external_type: None,
+            user: None,
+            username: None,
+            url_private: None,
+            url_private_download: None,
+            permalink: Some(Url::parse("https://files.slack.com/photo.jpg").unwrap()),
+            permalink_public: None,
+            reactions: None,
+            flags: SlackFileFlags {
+                editable: None,
+                is_external: None,
+                is_public: None,
+                public_url_shared: None,
+                display_as_bot: None,
+                is_starred: None,
+                has_rich_preview: None,
+            },
+        };
+        let msg = SlackMessageEvent {
+            origin: SlackMessageOrigin {
+                ts: SlackTs("1700000000.000010".to_string()),
+                channel: Some(SlackChannelId("C001".to_string())),
+                channel_type: Some(SlackChannelType("channel".to_string())),
+                thread_ts: None,
+                client_msg_id: None,
+            },
+            content: Some(
+                SlackMessageContent::new()
+                    .with_text("Check this out".to_string())
+                    .with_files(vec![file]),
+            ),
+            sender: SlackMessageSender {
+                user: Some(SlackUserId("U001".to_string())),
+                bot_id: None,
+                username: None,
+                display_as_bot: Some(false),
+                user_profile: None,
+                bot_profile: None,
+            },
+            subtype: Some(SlackMessageEventType::FileShare),
+            hidden: None,
+            message: None,
+            previous_message: None,
+            deleted_ts: None,
+        };
+
+        let incoming = incoming_from_message_event(&msg).expect("FileShare should be accepted");
+        assert!(matches!(incoming.kind, SlackIncomingKind::Message));
+        assert!(
+            incoming.text.contains("Check this out"),
+            "body text present"
+        );
+        assert!(incoming.text.contains("photo.jpg"), "file name present");
+        assert!(incoming.text.contains("image/jpeg"), "mime type present");
+    }
+
+    #[test]
+    fn incoming_from_file_share_no_text_still_accepted() {
+        use url::Url;
+        let file = SlackFile {
+            id: SlackFileId("F200".to_string()),
+            created: None,
+            timestamp: None,
+            name: Some("screenshot.png".to_string()),
+            title: None,
+            mimetype: Some(SlackMimeType("image/png".to_string())),
+            filetype: None,
+            pretty_type: None,
+            external_type: None,
+            user: None,
+            username: None,
+            url_private: None,
+            url_private_download: None,
+            permalink: Some(Url::parse("https://files.slack.com/screenshot.png").unwrap()),
+            permalink_public: None,
+            reactions: None,
+            flags: SlackFileFlags {
+                editable: None,
+                is_external: None,
+                is_public: None,
+                public_url_shared: None,
+                display_as_bot: None,
+                is_starred: None,
+                has_rich_preview: None,
+            },
+        };
+        // FileShare with no text — only file metadata.
+        let msg = SlackMessageEvent {
+            origin: SlackMessageOrigin {
+                ts: SlackTs("1700000000.000020".to_string()),
+                channel: Some(SlackChannelId("C001".to_string())),
+                channel_type: Some(SlackChannelType("channel".to_string())),
+                thread_ts: None,
+                client_msg_id: None,
+            },
+            content: Some(SlackMessageContent::new().with_files(vec![file])),
+            sender: SlackMessageSender {
+                user: Some(SlackUserId("U001".to_string())),
+                bot_id: None,
+                username: None,
+                display_as_bot: Some(false),
+                user_profile: None,
+                bot_profile: None,
+            },
+            subtype: Some(SlackMessageEventType::FileShare),
+            hidden: None,
+            message: None,
+            previous_message: None,
+            deleted_ts: None,
+        };
+
+        let incoming =
+            incoming_from_message_event(&msg).expect("file-only share should be accepted");
+        assert!(
+            incoming.text.contains("screenshot.png"),
+            "file metadata must be in text"
+        );
+    }
+
+    #[test]
+    fn incoming_from_non_fileshare_subtype_still_rejected() {
+        let msg = SlackMessageEvent {
+            origin: SlackMessageOrigin {
+                ts: SlackTs("1700000000.000030".to_string()),
+                channel: Some(SlackChannelId("C001".to_string())),
+                channel_type: Some(SlackChannelType("channel".to_string())),
+                thread_ts: None,
+                client_msg_id: None,
+            },
+            content: Some(SlackMessageContent::new().with_text("joined".to_string())),
+            sender: SlackMessageSender {
+                user: Some(SlackUserId("U001".to_string())),
+                bot_id: None,
+                username: None,
+                display_as_bot: Some(false),
+                user_profile: None,
+                bot_profile: None,
+            },
+            subtype: Some(SlackMessageEventType::ChannelJoin),
+            hidden: None,
+            message: None,
+            previous_message: None,
+            deleted_ts: None,
+        };
+
+        assert!(
+            incoming_from_message_event(&msg).is_none(),
+            "non-FileShare subtypes must still be rejected"
+        );
+    }
+
+    #[test]
+    fn classify_file_share_as_user() {
+        use assistant_core::MessageRole;
+        let mut msg = make_human_history_msg("1700000005.000000");
+        msg.subtype = Some(SlackMessageEventType::FileShare);
+        assert_eq!(
+            classify_history_msg(&msg),
+            Some(MessageRole::User),
+            "FileShare from a human should classify as User"
+        );
     }
 }

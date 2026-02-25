@@ -54,6 +54,8 @@ async-trait = "0.1"
 # IDs and time
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+# Encoding
+base64 = "0.22"
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 # TLS — explicit dep so binaries can install_default() when both aws-lc-rs and ring are in tree

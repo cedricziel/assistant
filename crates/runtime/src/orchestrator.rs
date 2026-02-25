@@ -9,7 +9,7 @@ use assistant_core::{
     ExecutionContext, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
 };
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse,
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
     LlmResponseMeta, ToolSpec,
 };
 use assistant_skills::SkillDef as SpecSkillDef;
@@ -163,6 +163,7 @@ impl Orchestrator {
         interface: Interface,
         extensions: Vec<Arc<dyn ToolHandler>>,
         trace_cx: Option<&OtelContext>,
+        attachments: Vec<ContentBlock>,
     ) -> Result<()> {
         let turn_span = info_span!(
             "conversation_turn",
@@ -219,8 +220,9 @@ impl Orchestrator {
         }
 
         // 1-3. Set up conversation, load prior history, persist user message.
-        let (conv_store, mut history, base_turn) =
-            self.prepare_history(user_message, conversation_id).await?;
+        let (conv_store, mut history, base_turn) = self
+            .prepare_history(user_message, conversation_id, attachments)
+            .await?;
 
         // 4. Load global tool specs and merge with extensions for LLM tool listing.
         //    Extension specs come first so the LLM sees them prominently.
@@ -802,8 +804,9 @@ impl Orchestrator {
         let turn_cx = _conv_cx.with_span(otel_turn);
 
         // 1-3. Set up conversation, load prior history, persist user message.
-        let (conv_store, mut history, base_turn) =
-            self.prepare_history(user_message, conversation_id).await?;
+        let (conv_store, mut history, base_turn) = self
+            .prepare_history(user_message, conversation_id, Vec::new())
+            .await?;
 
         // 4. Load all registered tool specs.
         let provider_caps = self.llm.capabilities();
@@ -1053,8 +1056,9 @@ impl Orchestrator {
         otel_turn.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
         let turn_cx = _conv_cx.with_span(otel_turn);
 
-        let (conv_store, mut history, base_turn) =
-            self.prepare_history(user_message, conversation_id).await?;
+        let (conv_store, mut history, base_turn) = self
+            .prepare_history(user_message, conversation_id, Vec::new())
+            .await?;
 
         let provider_caps = self.llm.capabilities();
         let tool_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
@@ -1297,6 +1301,7 @@ impl Orchestrator {
         &self,
         user_message: &str,
         conversation_id: Uuid,
+        attachments: Vec<ContentBlock>,
     ) -> Result<(ConversationStore, Vec<ChatHistoryMessage>, i64)> {
         let conv_store = self.storage.conversation_store();
         conv_store
@@ -1342,10 +1347,20 @@ impl Orchestrator {
                 _ => None,
             })
             .collect();
-        history.push(ChatHistoryMessage::Text {
-            role: ChatRole::User,
-            content: user_message.to_string(),
-        });
+
+        // When attachments are present, emit a MultimodalUser message so
+        // vision-capable providers receive the inline images.  Otherwise
+        // fall back to the lightweight Text variant.
+        if attachments.is_empty() {
+            history.push(ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: user_message.to_string(),
+            });
+        } else {
+            let mut blocks = vec![ContentBlock::Text(user_message.to_string())];
+            blocks.extend(attachments);
+            history.push(ChatHistoryMessage::MultimodalUser { content: blocks });
+        }
 
         Ok((conv_store, history, base_turn))
     }
@@ -1614,6 +1629,24 @@ fn serialize_history_for_span(history: &[ChatHistoryMessage]) -> String {
                     .collect();
                 serde_json::json!({"role": "assistant", "tool_calls": tc})
             }
+            ChatHistoryMessage::MultimodalUser { content } => {
+                let blocks: Vec<serde_json::Value> = content
+                    .iter()
+                    .map(|block| match block {
+                        assistant_llm::ContentBlock::Text(t) => {
+                            serde_json::json!({"type": "text", "text": t})
+                        }
+                        assistant_llm::ContentBlock::Image { media_type, data } => {
+                            serde_json::json!({
+                                "type": "image",
+                                "media_type": media_type,
+                                "size_base64_chars": data.len(),
+                            })
+                        }
+                    })
+                    .collect();
+                serde_json::json!({"role": "user", "content": blocks})
+            }
             ChatHistoryMessage::ToolResult { name, content } => {
                 serde_json::json!({"role": "tool", "name": name, "content": content})
             }
@@ -1651,7 +1684,7 @@ mod tests {
     use std::sync::Arc;
 
     use assistant_core::{types::Interface, AssistantConfig};
-    use assistant_llm::{LlmClient, LlmClientConfig, LlmProvider};
+    use assistant_llm::{ChatHistoryMessage, LlmClient, LlmClientConfig, LlmProvider};
     use assistant_storage::{registry::SkillRegistry, StorageLayer};
     use assistant_tool_executor::ToolExecutor;
     use serde_json::{json, Value};
@@ -2175,6 +2208,7 @@ mod tests {
             Interface::Slack,
             vec![reply_handler.clone() as Arc<dyn ToolHandler>],
             None,
+            vec![],
         )
         .await
         .unwrap();
@@ -2226,7 +2260,7 @@ mod tests {
         let (orch, _) = build(&server.uri()).await;
 
         // No extension tools — CLI mode, end_turn should be accepted.
-        orch.run_turn_with_tools("hi", Uuid::new_v4(), Interface::Cli, vec![], None)
+        orch.run_turn_with_tools("hi", Uuid::new_v4(), Interface::Cli, vec![], None, vec![])
             .await
             .unwrap();
 
@@ -2263,6 +2297,7 @@ mod tests {
             Interface::Slack,
             vec![reply_handler.clone() as Arc<dyn ToolHandler>],
             None,
+            vec![],
         )
         .await
         .unwrap();
@@ -2306,6 +2341,7 @@ mod tests {
                 react_handler.clone() as Arc<dyn ToolHandler>,
             ],
             None,
+            vec![],
         )
         .await
         .unwrap();
@@ -2319,5 +2355,96 @@ mod tests {
 
         assert_eq!(react_handler.calls(), 1, "react must have been called once");
         assert_eq!(reply_handler.calls(), 0, "reply must not have been called");
+    }
+
+    // ── MultimodalUser / OTel serialisation tests ────────────────────────────
+
+    #[test]
+    fn serialize_history_multimodal_user_omits_base64_data() {
+        use super::serialize_history_for_span;
+        use assistant_llm::ContentBlock;
+
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("describe this".to_string()),
+                ContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    data: "A".repeat(10_000), // large base64 payload
+                },
+            ],
+        }];
+
+        let json_str = serialize_history_for_span(&history);
+        assert!(
+            !json_str.contains(&"A".repeat(100)),
+            "base64 data must NOT appear in span output"
+        );
+        assert!(
+            json_str.contains("image/png"),
+            "media_type should be present"
+        );
+        assert!(
+            json_str.contains("size_base64_chars"),
+            "size_base64_chars field should be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_history_with_attachments_emits_multimodal_user() {
+        use assistant_llm::ContentBlock;
+
+        let server = MockServer::start().await;
+        mount_answer(&server, "ok").await;
+        let (orch, _) = build(&server.uri()).await;
+
+        let conv_id = Uuid::new_v4();
+        let attachments = vec![ContentBlock::Image {
+            media_type: "image/jpeg".to_string(),
+            data: "base64data".to_string(),
+        }];
+
+        let (_conv_store, history, _turn) = orch
+            .prepare_history("look at this", conv_id, attachments)
+            .await
+            .unwrap();
+
+        // The last message in history should be MultimodalUser.
+        let last = history.last().expect("history non-empty");
+        match last {
+            ChatHistoryMessage::MultimodalUser { content } => {
+                assert_eq!(content.len(), 2, "text block + image block");
+                assert!(
+                    matches!(&content[0], ContentBlock::Text(t) if t == "look at this"),
+                    "first block should be the text"
+                );
+                assert!(
+                    matches!(&content[1], ContentBlock::Image { media_type, .. } if media_type == "image/jpeg"),
+                    "second block should be the image"
+                );
+            }
+            other => panic!("expected MultimodalUser, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn prepare_history_without_attachments_emits_plain_text() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "ok").await;
+        let (orch, _) = build(&server.uri()).await;
+
+        let conv_id = Uuid::new_v4();
+        let (_conv_store, history, _turn) = orch
+            .prepare_history("hello", conv_id, Vec::new())
+            .await
+            .unwrap();
+
+        let last = history.last().expect("history non-empty");
+        match last {
+            ChatHistoryMessage::Text { role, content } => {
+                assert_eq!(*role, assistant_llm::ChatRole::User);
+                assert_eq!(content, "hello");
+            }
+            other => panic!("expected Text, got {:?}", other),
+        }
     }
 }
