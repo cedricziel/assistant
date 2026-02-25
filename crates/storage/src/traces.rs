@@ -15,6 +15,10 @@ pub struct TraceStats {
     pub success_count: i64,
     pub error_count: i64,
     pub avg_duration_ms: f64,
+    /// Total prompt/input tokens consumed in the analysis window.
+    pub total_input_tokens: i64,
+    /// Total completion/output tokens consumed in the analysis window.
+    pub total_output_tokens: i64,
     /// Up to 5 most-frequent error messages observed in the window.
     pub common_errors: Vec<String>,
 }
@@ -223,7 +227,7 @@ impl TraceStore {
         // Aggregate over the newest `window` rows for this skill.
         let agg_row = sqlx::query(
             "WITH recent AS ( \
-                SELECT tool_status, duration_ms \
+                SELECT tool_status, duration_ms, input_tokens, output_tokens \
                 FROM distributed_traces \
                 WHERE tool_name = ?1 \
                 ORDER BY start_time DESC \
@@ -233,7 +237,9 @@ impl TraceStore {
                 COUNT(*)                                           AS total, \
                 SUM(CASE WHEN tool_status = 'error' THEN 0 ELSE 1 END) AS success_count, \
                 SUM(CASE WHEN tool_status = 'error' THEN 1 ELSE 0 END) AS error_count, \
-                COALESCE(AVG(CAST(duration_ms AS REAL)), 0.0)      AS avg_duration_ms \
+                COALESCE(AVG(CAST(duration_ms AS REAL)), 0.0)      AS avg_duration_ms, \
+                COALESCE(SUM(input_tokens), 0)                     AS total_input_tokens, \
+                COALESCE(SUM(output_tokens), 0)                    AS total_output_tokens \
             FROM recent",
         )
         .bind(skill_name)
@@ -245,6 +251,8 @@ impl TraceStore {
         let success_count: i64 = agg_row.try_get("success_count").unwrap_or(0);
         let error_count: i64 = agg_row.try_get("error_count").unwrap_or(0);
         let avg_duration_ms: f64 = agg_row.try_get("avg_duration_ms").unwrap_or(0.0);
+        let total_input_tokens: i64 = agg_row.try_get("total_input_tokens").unwrap_or(0);
+        let total_output_tokens: i64 = agg_row.try_get("total_output_tokens").unwrap_or(0);
 
         // Collect the most common error strings (up to 5).
         let err_rows = sqlx::query(
@@ -278,6 +286,8 @@ impl TraceStore {
             success_count,
             error_count,
             avg_duration_ms,
+            total_input_tokens,
+            total_output_tokens,
             common_errors,
         })
     }

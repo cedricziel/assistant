@@ -115,6 +115,19 @@ impl ToolHandler for SelfAnalyzeHandler {
             stats.avg_duration_ms
         ));
 
+        let has_token_data = stats.total_input_tokens > 0 || stats.total_output_tokens > 0;
+        if has_token_data {
+            lines.push(format!("  Total input tok  : {}", stats.total_input_tokens));
+            lines.push(format!(
+                "  Total output tok : {}",
+                stats.total_output_tokens
+            ));
+            lines.push(format!(
+                "  Total tokens     : {}",
+                stats.total_input_tokens + stats.total_output_tokens
+            ));
+        }
+
         if !stats.common_errors.is_empty() {
             lines.push(String::new());
             lines.push("  Most common errors:".to_string());
@@ -143,9 +156,11 @@ impl ToolHandler for SelfAnalyzeHandler {
         debug!(skill = %skill_name, "Requesting LLM-generated skill refinement");
 
         let system_prompt = "You are an expert at writing clear, precise AI skill instructions. \
-            You will receive execution statistics and the current SKILL.md body for a skill. \
+            You will receive execution statistics (including token usage when available) and the \
+            current SKILL.md body for a skill. \
             Respond with an improved SKILL.md body (the Markdown section only, without frontmatter) \
-            that would help the AI use this skill more effectively and avoid past errors. \
+            that would help the AI use this skill more effectively, avoid past errors, and \
+            optimize token consumption where possible. \
             Be concise and actionable.";
 
         let error_summary = if stats.common_errors.is_empty() {
@@ -154,10 +169,21 @@ impl ToolHandler for SelfAnalyzeHandler {
             stats.common_errors.join("; ")
         };
 
+        let token_section = if has_token_data {
+            format!(
+                "\n- Total input tokens: {}\n- Total output tokens: {}\n- Total tokens: {}",
+                stats.total_input_tokens,
+                stats.total_output_tokens,
+                stats.total_input_tokens + stats.total_output_tokens,
+            )
+        } else {
+            String::new()
+        };
+
         let user_prompt = format!(
             "Skill: {}\n\nExecution statistics (last {} runs):\n\
             - Total: {}\n- Successes: {}\n- Failures: {}\n\
-            - Avg duration: {:.1} ms\n- Common errors: {}\n\n\
+            - Avg duration: {:.1} ms\n- Common errors: {}{}\n\n\
             Current SKILL.md instructions:\n---\n{}\n---\n\n\
             Please write an improved version of the instructions section only.",
             skill_name,
@@ -167,6 +193,7 @@ impl ToolHandler for SelfAnalyzeHandler {
             stats.error_count,
             stats.avg_duration_ms,
             error_summary,
+            token_section,
             current_body,
         );
 
@@ -198,11 +225,24 @@ impl ToolHandler for SelfAnalyzeHandler {
             }
         };
 
-        let rationale = format!(
-            "Automated analysis: {} total executions, {} errors, {:.1}ms avg. \
-            LLM-generated improvement proposal.",
-            stats.total, stats.error_count, stats.avg_duration_ms
-        );
+        let rationale = if has_token_data {
+            format!(
+                "Automated analysis: {} total executions, {} errors, {:.1}ms avg, \
+                {} total tokens ({} in / {} out). LLM-generated improvement proposal.",
+                stats.total,
+                stats.error_count,
+                stats.avg_duration_ms,
+                stats.total_input_tokens + stats.total_output_tokens,
+                stats.total_input_tokens,
+                stats.total_output_tokens,
+            )
+        } else {
+            format!(
+                "Automated analysis: {} total executions, {} errors, {:.1}ms avg. \
+                LLM-generated improvement proposal.",
+                stats.total, stats.error_count, stats.avg_duration_ms
+            )
+        };
 
         let refinement_id = self
             .storage
