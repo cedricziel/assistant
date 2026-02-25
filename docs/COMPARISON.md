@@ -64,7 +64,7 @@ We share the SKILL.md format with NanoClaw — which is not surprising given Nan
 | **Primary store** | Plain Markdown files (`AGENTS.md`, `MEMORY.md`, `SOUL.md`, etc.) + local SQLite | SQLite + per-group `CLAUDE.md` files | **SQLite exclusively** |
 | **Memory retrieval** | Hybrid: 70% vector search + 30% BM25 keyword (RAG-lite, local SQLite embeddings) | Direct file read into context | SQL queries (no vector/semantic search) |
 | **Conversation history** | JSONL file on disk (full), in-memory context (compacted) | SQLite messages table | **SQLite messages table** |
-| **Self-improvement traces** | Not explicitly designed | Not present | **`ExecutionTrace` table** — first-class concept |
+| **Self-improvement traces** | Not explicitly designed | Not present | **`distributed_traces` (OpenTelemetry spans)** — first-class concept |
 | **Skill refinements** | Not present | Not present | **`RefinementsStore`** — proposed SKILL.md diffs with accept/reject workflow |
 | **Memory isolation** | `MEMORY.md` never loads in group channels (privacy feature) | Per-group `CLAUDE.md` — fully isolated | Per-conversation isolation, no group concept |
 
@@ -120,7 +120,7 @@ OpenClaw's hybrid vector+BM25 search is something we lack entirely — our `Memo
 
 | Concept | OpenClaw | NanoClaw | Our Assistant |
 |---|---|---|---|
-| **Execution tracing** | Not a core concept | Not present | **First-class: `ExecutionTrace` with duration, params, errors** |
+| **Execution tracing** | Not a core concept | Not present | **First-class: OpenTelemetry spans with duration, params, errors** |
 | **Statistical analysis** | Not present | Not present | **`TraceStats`: success rate, avg duration, common errors** |
 | **Skill refinement proposals** | Not present | Not present | **`RefinementsStore`: propose → review → accept/reject SKILL.md diffs** |
 | **Proactive scheduling** | Heartbeat daemon (every 30 min default) + full cron | Task scheduler (cron/interval/once) | `ScheduleTaskHandler` (nascent) |
@@ -160,7 +160,7 @@ OpenClaw's hybrid vector+BM25 search is something we lack entirely — our `Memo
 ### Where we're ahead of both
 
 1. **Execution tier system** — our 4-tier `SkillTier` (Prompt/Script/Wasm/Builtin) is architecturally richer than anything either project has.
-2. **Self-improvement feedback loop** — `ExecutionTrace` → `TraceStats` → `SelfAnalyzeHandler` → `RefinementsStore` is a first-class system neither has.
+2. **Self-improvement feedback loop** — distributed trace spans → `TraceStats` → `SelfAnalyzeHandler` → `RefinementsStore` is a first-class system neither has.
 3. **Dual-mode LLM client** — native tool calling with explicit ReAct fallback handles model heterogeneity neither SDK-locked (NanoClaw) nor provider-agnostic (OpenClaw) approaches need to solve.
 4. **Compile-time correctness** — Rust's type system catches entire classes of runtime errors that TypeScript cannot.
 

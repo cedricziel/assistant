@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ExecutionContext, ExecutionTrace, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
+    ExecutionContext, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
 };
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse, ToolSpec,
@@ -14,6 +14,11 @@ use assistant_llm::{
 use assistant_skills::SkillDef as SpecSkillDef;
 use assistant_storage::{conversations::ConversationStore, SkillRegistry, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
+use opentelemetry::{
+    global,
+    trace::{Span as _, Tracer as _},
+    KeyValue,
+};
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
@@ -32,8 +37,6 @@ pub trait ConfirmationCallback: Send + Sync {
 pub struct TurnResult {
     /// The assistant's final answer to the user.
     pub answer: String,
-    /// All tool execution traces collected during this turn.
-    pub traces: Vec<ExecutionTrace>,
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -76,7 +79,7 @@ fn end_turn_spec() -> ToolSpec {
 /// 4. Repeatedly call the LLM until it returns a `FinalAnswer` or the
 ///    iteration limit is reached.
 /// 5. For each `ToolCall` response: check disabled-skills list, optionally
-///    confirm with the user, execute the tool, record an [`ExecutionTrace`],
+///    confirm with the user, execute the tool, emit an OpenTelemetry span,
 ///    and append an `OBSERVATION` to the conversation history.
 /// 6. Persist the final assistant message and return [`TurnResult`].
 pub struct Orchestrator {
@@ -86,7 +89,6 @@ pub struct Orchestrator {
     registry: Arc<SkillRegistry>,
     max_iterations: usize,
     disabled_skills: Vec<String>,
-    trace_enabled: bool,
     confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
     /// Memory loader used to rebuild the system prompt at the start of every
     /// turn so that writes made by memory tools are reflected immediately.
@@ -118,7 +120,6 @@ impl Orchestrator {
             registry,
             max_iterations: config.llm.max_iterations,
             disabled_skills: config.skills.disabled.clone(),
-            trace_enabled: config.mirror.trace_enabled,
             confirmation_callback: None,
             memory_loader,
         }
@@ -292,7 +293,6 @@ impl Orchestrator {
             )
         };
 
-        let mut traces: Vec<ExecutionTrace> = Vec::new();
         let mut turn_ended = false;
         let mut replied = false;
 
@@ -417,27 +417,15 @@ impl Orchestrator {
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
-                        let tool_span = info_span!(
-                            "tool_execution",
-                            %conversation_id,
+                        let turn_index = base_turn + iteration as i64 + 1;
+                        let mut otel_span = start_tool_span(
+                            conversation_id,
                             iteration,
-                            tool = %name
+                            turn_index,
+                            &interface,
+                            &name,
+                            &params,
                         );
-                        let _tool_guard = tool_span.enter();
-                        let tool_span = info_span!(
-                            "tool_execution",
-                            %conversation_id,
-                            iteration,
-                            tool = %name
-                        );
-                        let _tool_guard = tool_span.enter();
-                        let tool_span = info_span!(
-                            "tool_execution",
-                            %conversation_id,
-                            iteration,
-                            tool = %name
-                        );
-                        let _tool_guard = tool_span.enter();
 
                         if name == "end_turn" {
                             if has_real_calls {
@@ -447,16 +435,22 @@ impl Orchestrator {
                                 );
                                 let deferred_msg =
                                     "end_turn deferred: processing other tool calls first";
+                                otel_span.set_attribute(KeyValue::new("tool_status", "deferred"));
+                                otel_span.set_attribute(KeyValue::new(
+                                    "tool_observation",
+                                    deferred_msg.to_string(),
+                                ));
                                 self.append_tool_result(&mut history, "end_turn", deferred_msg);
                                 let tr_msg = Self::make_tool_result_message(
                                     conversation_id,
-                                    base_turn + iteration as i64 + 1,
+                                    turn_index,
                                     "end_turn",
                                     deferred_msg,
                                 );
                                 if let Err(e) = conv_store.save_message(&tr_msg).await {
                                     warn!("Failed to persist deferred end_turn tool-result: {e}");
                                 }
+                                otel_span.end();
                                 continue;
                             }
 
@@ -467,10 +461,15 @@ impl Orchestrator {
                             info!(iteration, reason, "end_turn called; stopping turn");
 
                             let result_text = format!("end_turn: {reason}");
+                            otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                            otel_span.set_attribute(KeyValue::new(
+                                "tool_observation",
+                                result_text.clone(),
+                            ));
                             self.append_tool_result(&mut history, "end_turn", &result_text);
                             let tr_msg = Self::make_tool_result_message(
                                 conversation_id,
-                                base_turn + iteration as i64 + 1,
+                                turn_index,
                                 "end_turn",
                                 &result_text,
                             );
@@ -478,30 +477,13 @@ impl Orchestrator {
                                 warn!("Failed to persist end_turn tool-result: {e}");
                             }
 
-                            let mut trace = ExecutionTrace::new(
-                                conversation_id,
-                                iteration as i64,
-                                "end_turn",
-                                params.clone(),
-                            );
-                            trace = trace.with_success(result_text.clone(), 0);
-                            if self.trace_enabled {
-                                let trace_store = self.storage.trace_store();
-                                if let Err(e) = trace_store.insert(&trace).await {
-                                    warn!("Failed to persist end_turn trace: {e}");
-                                }
-                            }
-                            traces.push(trace);
-
                             turn_ended = true;
+                            otel_span.end();
                             break;
                         }
 
                         // Extension tools take priority and bypass the safety gate.
-                        let (observation, trace_result) = if let Some(handler) = ext_map.get(&name)
-                        {
-                            let ext_span = info_span!("extension_tool", tool = %name);
-                            let _ext_guard = ext_span.enter();
+                        let observation = if let Some(handler) = ext_map.get(&name) {
                             debug!(tool = %name, "Dispatching to extension handler");
 
                             let params_map: HashMap<String, serde_json::Value> =
@@ -515,25 +497,34 @@ impl Orchestrator {
                             let exec_result = handler.run(params_map, &ctx).await;
                             let duration_ms = start.elapsed().as_millis() as i64;
 
-                            let mut trace = ExecutionTrace::new(
-                                conversation_id,
-                                iteration as i64,
-                                &name,
-                                params.clone(),
-                            );
                             let obs = match exec_result {
                                 Ok(output) => {
-                                    trace = trace.with_success(output.content.clone(), duration_ms);
+                                    otel_span.set_attribute(KeyValue::new(
+                                        "duration_ms",
+                                        duration_ms as i64,
+                                    ));
+                                    otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                                    otel_span.set_attribute(KeyValue::new(
+                                        "tool_observation",
+                                        output.content.clone(),
+                                    ));
+                                    debug!(observation = %output.content, "extension observation");
                                     output.content
                                 }
                                 Err(err) => {
                                     warn!(tool = %name, %err, "Extension tool execution failed");
                                     let msg = err.to_string();
-                                    trace = trace.with_error(msg.clone(), duration_ms);
+                                    otel_span.set_attribute(KeyValue::new(
+                                        "duration_ms",
+                                        duration_ms as i64,
+                                    ));
+                                    otel_span.set_attribute(KeyValue::new("tool_status", "error"));
+                                    otel_span
+                                        .set_attribute(KeyValue::new("tool_error", msg.clone()));
                                     format!("Error executing '{name}': {msg}")
                                 }
                             };
-                            (obs, trace)
+                            obs
                         } else {
                             // Global executor path.
                             let builtin_span = info_span!(
@@ -542,16 +533,19 @@ impl Orchestrator {
                                 source = "builtin"
                             );
                             let _builtin_guard = builtin_span.enter();
-                            if self
+                            if let Some(reason) = self
                                 .reject_if_disabled(
                                     &name,
                                     &mut history,
                                     &conv_store,
                                     conversation_id,
-                                    base_turn + iteration as i64 + 1,
+                                    turn_index,
                                 )
                                 .await
                             {
+                                otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
+                                otel_span.set_attribute(KeyValue::new("tool_error", reason));
+                                otel_span.end();
                                 continue;
                             }
 
@@ -596,26 +590,30 @@ impl Orchestrator {
                             let exec_result = self.executor.execute(&name, params_map, &ctx).await;
                             let duration_ms = start.elapsed().as_millis() as i64;
 
-                            let mut trace = ExecutionTrace::new(
-                                conversation_id,
-                                iteration as i64,
-                                &name,
-                                params.clone(),
-                            );
                             let obs = match exec_result {
                                 Ok(output) => {
                                     debug!(tool = %name, duration_ms, "Tool execution completed");
-                                    trace = trace.with_success(output.content.clone(), duration_ms);
+                                    otel_span
+                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
+                                    otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                                    otel_span.set_attribute(KeyValue::new(
+                                        "tool_observation",
+                                        output.content.clone(),
+                                    ));
                                     tool_result_content(&output.content, output.data.as_ref())
                                 }
                                 Err(err) => {
                                     warn!(tool = %name, %err, "Tool execution failed");
                                     let msg = err.to_string();
-                                    trace = trace.with_error(msg.clone(), duration_ms);
+                                    otel_span
+                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
+                                    otel_span.set_attribute(KeyValue::new("tool_status", "error"));
+                                    otel_span
+                                        .set_attribute(KeyValue::new("tool_error", msg.clone()));
                                     format!("Error executing '{name}': {msg}")
                                 }
                             };
-                            (obs, trace)
+                            obs
                         };
 
                         // Mark the turn as replied if any posting/reply tool was
@@ -629,13 +627,6 @@ impl Orchestrator {
                             replied = true;
                         }
 
-                        if self.trace_enabled {
-                            let trace_store = self.storage.trace_store();
-                            if let Err(e) = trace_store.insert(&trace_result).await {
-                                warn!("Failed to persist execution trace: {e}");
-                            }
-                        }
-                        traces.push(trace_result);
                         self.append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
@@ -646,6 +637,7 @@ impl Orchestrator {
                         if let Err(e) = conv_store.save_message(&tr_msg).await {
                             warn!("Failed to persist tool-result message: {e}");
                         }
+                        otel_span.end();
                     }
 
                     if turn_ended || replied {
@@ -714,8 +706,6 @@ impl Orchestrator {
         // 5. Build the system prompt fresh from disk.
         let system_prompt = self.compose_system_prompt().await;
 
-        let mut traces: Vec<ExecutionTrace> = Vec::new();
-
         // 6. Tool-calling loop.
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
@@ -743,10 +733,7 @@ impl Orchestrator {
                     };
                     conv_store.save_message(&assistant_msg).await?;
 
-                    return Ok(TurnResult {
-                        answer: text,
-                        traces,
-                    });
+                    return Ok(TurnResult { answer: text });
                 }
 
                 // ── Tool calls ────────────────────────────────────────────────
@@ -771,18 +758,30 @@ impl Orchestrator {
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
+                        let turn_index = base_turn + iteration as i64 + 1;
+                        let mut otel_span = start_tool_span(
+                            conversation_id,
+                            iteration,
+                            turn_index,
+                            &interface,
+                            &name,
+                            &params,
+                        );
 
                         // Disabled-tools gate.
-                        if self
+                        if let Some(reason) = self
                             .reject_if_disabled(
                                 &name,
                                 &mut history,
                                 &conv_store,
                                 conversation_id,
-                                base_turn + iteration as i64 + 1,
+                                turn_index,
                             )
                             .await
                         {
+                            otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
+                            otel_span.set_attribute(KeyValue::new("tool_error", reason));
+                            otel_span.end();
                             continue;
                         }
 
@@ -800,16 +799,22 @@ impl Orchestrator {
                                 if !cb.confirm(&name, &params) {
                                     let observation = format!("User denied execution of '{name}'.");
                                     info!(%observation);
+                                    otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
+                                    otel_span.set_attribute(KeyValue::new(
+                                        "tool_error",
+                                        observation.clone(),
+                                    ));
                                     self.append_tool_result(&mut history, &name, &observation);
                                     let tr_msg = Self::make_tool_result_message(
                                         conversation_id,
-                                        base_turn + iteration as i64 + 1,
+                                        turn_index,
                                         &name,
                                         &observation,
                                     );
                                     if let Err(e) = conv_store.save_message(&tr_msg).await {
                                         warn!("Failed to persist tool-result message: {e}");
                                     }
+                                    otel_span.end();
                                     continue;
                                 }
                             }
@@ -826,13 +831,6 @@ impl Orchestrator {
                         let exec_result = self.executor.execute(&name, params_map, &ctx).await;
                         let duration_ms = start.elapsed().as_millis() as i64;
 
-                        let mut trace = ExecutionTrace::new(
-                            conversation_id,
-                            iteration as i64,
-                            &name,
-                            params.clone(),
-                        );
-
                         let observation = match exec_result {
                             Ok(output) => {
                                 debug!(
@@ -841,30 +839,28 @@ impl Orchestrator {
                                     success = output.success,
                                     "Tool execution completed"
                                 );
-                                trace = trace.with_success(output.content.clone(), duration_ms);
+                                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
+                                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                                otel_span.set_attribute(KeyValue::new(
+                                    "tool_observation",
+                                    output.content.clone(),
+                                ));
                                 tool_result_content(&output.content, output.data.as_ref())
                             }
                             Err(err) => {
                                 warn!(tool = %name, %err, "Tool execution failed");
                                 let msg = err.to_string();
-                                trace = trace.with_error(msg.clone(), duration_ms);
+                                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
+                                otel_span.set_attribute(KeyValue::new("tool_status", "error"));
+                                otel_span.set_attribute(KeyValue::new("tool_error", msg.clone()));
                                 format!("Error executing '{name}': {msg}")
                             }
                         };
 
-                        if self.trace_enabled {
-                            let trace_store = self.storage.trace_store();
-                            if let Err(e) = trace_store.insert(&trace).await {
-                                warn!("Failed to persist execution trace: {e}");
-                            }
-                        }
-
-                        traces.push(trace);
-
                         self.append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
-                            base_turn + iteration as i64 + 1,
+                            turn_index,
                             &name,
                             &observation,
                         );
@@ -919,8 +915,6 @@ impl Orchestrator {
 
         let system_prompt = self.compose_system_prompt().await;
 
-        let mut traces: Vec<ExecutionTrace> = Vec::new();
-
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
             let _iteration_guard = iteration_span.enter();
@@ -954,10 +948,7 @@ impl Orchestrator {
                     };
                     conv_store.save_message(&assistant_msg).await?;
 
-                    return Ok(TurnResult {
-                        answer: text,
-                        traces,
-                    });
+                    return Ok(TurnResult { answer: text });
                 }
 
                 LlmResponse::ToolCalls(tool_call_items) => {
@@ -981,17 +972,29 @@ impl Orchestrator {
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
+                        let turn_index = base_turn + iteration as i64 + 1;
+                        let mut otel_span = start_tool_span(
+                            conversation_id,
+                            iteration,
+                            turn_index,
+                            &interface,
+                            &name,
+                            &params,
+                        );
 
-                        if self
+                        if let Some(reason) = self
                             .reject_if_disabled(
                                 &name,
                                 &mut history,
                                 &conv_store,
                                 conversation_id,
-                                base_turn + iteration as i64 + 1,
+                                turn_index,
                             )
                             .await
                         {
+                            otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
+                            otel_span.set_attribute(KeyValue::new("tool_error", reason));
+                            otel_span.end();
                             continue;
                         }
 
@@ -1008,16 +1011,22 @@ impl Orchestrator {
                                 if !cb.confirm(&name, &params) {
                                     let observation = format!("User denied execution of '{name}'.");
                                     info!(%observation);
+                                    otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
+                                    otel_span.set_attribute(KeyValue::new(
+                                        "tool_error",
+                                        observation.clone(),
+                                    ));
                                     self.append_tool_result(&mut history, &name, &observation);
                                     let tr_msg = Self::make_tool_result_message(
                                         conversation_id,
-                                        base_turn + iteration as i64 + 1,
+                                        turn_index,
                                         &name,
                                         &observation,
                                     );
                                     if let Err(e) = conv_store.save_message(&tr_msg).await {
                                         warn!("Failed to persist tool-result message: {e}");
                                     }
+                                    otel_span.end();
                                     continue;
                                 }
                             }
@@ -1034,44 +1043,36 @@ impl Orchestrator {
                         let exec_result = self.executor.execute(&name, params_map, &ctx).await;
                         let duration_ms = start.elapsed().as_millis() as i64;
 
-                        let mut trace = ExecutionTrace::new(
-                            conversation_id,
-                            iteration as i64,
-                            &name,
-                            params.clone(),
-                        );
-
                         let observation = match exec_result {
                             Ok(output) => {
-                                trace = trace.with_success(output.content.clone(), duration_ms);
+                                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
+                                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                                otel_span.set_attribute(KeyValue::new(
+                                    "tool_observation",
+                                    output.content.clone(),
+                                ));
                                 tool_result_content(&output.content, output.data.as_ref())
                             }
                             Err(err) => {
                                 warn!(tool = %name, %err, "Tool execution failed");
                                 let msg = err.to_string();
-                                trace = trace.with_error(msg.clone(), duration_ms);
+                                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
+                                otel_span.set_attribute(KeyValue::new("tool_status", "error"));
+                                otel_span.set_attribute(KeyValue::new("tool_error", msg.clone()));
                                 format!("Error executing '{name}': {msg}")
                             }
                         };
-
-                        if self.trace_enabled {
-                            let trace_store = self.storage.trace_store();
-                            if let Err(e) = trace_store.insert(&trace).await {
-                                warn!("Failed to persist execution trace: {e}");
-                            }
-                        }
-
-                        traces.push(trace);
                         self.append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
-                            base_turn + iteration as i64 + 1,
+                            turn_index,
                             &name,
                             &observation,
                         );
                         if let Err(e) = conv_store.save_message(&tr_msg).await {
                             warn!("Failed to persist tool-result message: {e}");
                         }
+                        otel_span.end();
                     }
                 }
 
@@ -1217,9 +1218,9 @@ impl Orchestrator {
         conv_store: &ConversationStore,
         conversation_id: Uuid,
         turn_idx: i64,
-    ) -> bool {
+    ) -> Option<String> {
         if !self.disabled_skills.iter().any(|s| s == name) {
-            return false;
+            return None;
         }
         let observation = format!("Tool '{name}' is disabled by configuration.");
         warn!(%observation);
@@ -1228,7 +1229,7 @@ impl Orchestrator {
         if let Err(e) = conv_store.save_message(&tr_msg).await {
             warn!("Failed to persist tool-result message: {e}");
         }
-        true
+        Some(observation)
     }
 
     fn make_tool_call_message(
@@ -1265,6 +1266,30 @@ impl Orchestrator {
 /// the model directly.
 fn tool_result_content(content: &str, _data: Option<&serde_json::Value>) -> String {
     content.to_string()
+}
+
+fn start_tool_span(
+    conversation_id: Uuid,
+    iteration: usize,
+    turn: i64,
+    interface: &Interface,
+    tool_name: &str,
+    params: &serde_json::Value,
+) -> opentelemetry::global::BoxedSpan {
+    let tracer = global::tracer("assistant.orchestrator");
+    let mut span = tracer.start("tool_execution");
+    span.set_attribute(KeyValue::new(
+        "conversation_id",
+        conversation_id.to_string(),
+    ));
+    span.set_attribute(KeyValue::new("iteration", iteration as i64));
+    span.set_attribute(KeyValue::new("turn", turn));
+    span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+    span.set_attribute(KeyValue::new("tool_name", tool_name.to_string()));
+    let params_json =
+        serde_json::to_string(params).unwrap_or_else(|_| "<unserializable>".to_string());
+    span.set_attribute(KeyValue::new("tool_params", params_json));
+    span
 }
 
 fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {

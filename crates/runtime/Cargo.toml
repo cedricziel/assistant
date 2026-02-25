@@ -15,6 +15,10 @@ tokio = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 # cron expression parsing for scheduler
@@ -22,6 +26,7 @@ cron = { workspace = true }
 # bootstrap helpers
 dirs = { workspace = true }
 toml = { workspace = true }
+sqlx = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }

@@ -3,6 +3,7 @@ pub mod memory_chunks;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
+pub mod telemetry;
 pub mod traces;
 
 pub use conversations::{ConversationRecord, ConversationStore};
@@ -10,7 +11,8 @@ pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
-pub use traces::{TraceStats, TraceStore};
+pub use telemetry::SqliteSpanExporter;
+pub use traces::{RecordedSpan, TraceStats, TraceStore};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -132,6 +134,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "008_skills_drop_tier_check",
             include_str!("../../../migrations/008_skills_drop_tier_check.sql"),
+        ),
+        (
+            "009_distributed_traces",
+            include_str!("../../../migrations/009_distributed_traces.sql"),
         ),
     ];
 

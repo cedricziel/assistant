@@ -9,7 +9,7 @@ A Rust workspace implementing a local, self-improving AI assistant. Key properti
 - **LLM**: Ollama (hardcoded fallback `qwen2.5:7b`; override via `config.toml`); native tool-calling only
 - **Skills**: [Agent Skills](https://agentskills.io) open standard — `SKILL.md` directories, portable across tools
 - **Storage**: SQLite via `sqlx` with 4 embedded migrations
-- **Self-improvement**: every execution writes an `ExecutionTrace`; `self-analyze` generates SKILL.md proposals queued for `/review`
+- **Self-improvement**: every execution emits an OpenTelemetry span; `self-analyze` turns those spans into SKILL.md proposals queued for `/review`
 - **MCP server**: stdio JSON-RPC 2.0 exposing skills to Claude Code and other MCP clients
 
 ## Recommended Ollama models (2026, ≤ 12 GB VRAM)
@@ -59,7 +59,7 @@ interface-cli ──► runtime ──► llm ──► core
 | File                                      | Role                                                                                                         |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `crates/core/src/skill.rs`                | `SkillDef`, `SkillTier`, `SkillHandler` trait, `SkillOutput`, `SkillSource`                                  |
-| `crates/core/src/types.rs`                | `Message`, `ExecutionContext`, `ExecutionTrace`, `AssistantConfig`, `Interface`                              |
+| `crates/core/src/types.rs`                | `Message`, `ExecutionContext`, `AssistantConfig`, `Interface`                                               |
 | `crates/core/src/parser.rs`               | `parse_skill_dir()`, `parse_skill_content()`, `discover_skills()`                                            |
 | `crates/core/src/memory.rs`               | `MemoryLoader` — loads/bootstraps `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md` from `~/.assistant/`      |
 | `crates/llm/src/provider.rs`              | `LlmProvider` trait — implement to add a new backend (OpenAI, Anthropic, …)                                  |

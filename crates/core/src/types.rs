@@ -63,53 +63,6 @@ impl Message {
     }
 }
 
-/// An execution trace record (written to SQLite for self-improvement)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionTrace {
-    pub id: Uuid,
-    pub conversation_id: Uuid,
-    pub turn: i64,
-    pub action_skill: String,
-    pub action_params: serde_json::Value,
-    pub observation: Option<String>,
-    pub error: Option<String>,
-    pub duration_ms: i64,
-    pub created_at: DateTime<Utc>,
-}
-
-impl ExecutionTrace {
-    pub fn new(
-        conversation_id: Uuid,
-        turn: i64,
-        action_skill: impl Into<String>,
-        action_params: serde_json::Value,
-    ) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            conversation_id,
-            turn,
-            action_skill: action_skill.into(),
-            action_params,
-            observation: None,
-            error: None,
-            duration_ms: 0,
-            created_at: Utc::now(),
-        }
-    }
-
-    pub fn with_success(mut self, observation: impl Into<String>, duration_ms: i64) -> Self {
-        self.observation = Some(observation.into());
-        self.duration_ms = duration_ms;
-        self
-    }
-
-    pub fn with_error(mut self, error: impl Into<String>, duration_ms: i64) -> Self {
-        self.error = Some(error.into());
-        self.duration_ms = duration_ms;
-        self
-    }
-}
-
 /// Runtime context passed to every skill execution
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {

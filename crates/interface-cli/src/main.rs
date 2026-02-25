@@ -10,17 +10,15 @@ use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{
-    orchestrator::ConfirmationCallback, scheduler::spawn_scheduler, Orchestrator,
+    init_tracing, orchestrator::ConfirmationCallback, scheduler::spawn_scheduler, Orchestrator,
 };
 use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 use clap::{Parser, Subcommand};
-use opentelemetry::sdk::{self, resource::Resource};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use uuid::Uuid;
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -84,68 +82,43 @@ impl ConfirmationCallback for CliConfirmation {
 
 // ── Config loading ────────────────────────────────────────────────────────────
 
-fn load_config(config_path: &Path) -> AssistantConfig {
+enum ConfigLoadMessage {
+    Info(String),
+    Warn(String),
+}
+
+fn load_config_messages(config_path: &Path) -> (AssistantConfig, Vec<ConfigLoadMessage>) {
     if !config_path.exists() {
-        return AssistantConfig::default();
+        return (AssistantConfig::default(), Vec::new());
     }
 
+    let mut messages = Vec::new();
     let raw = match std::fs::read_to_string(config_path) {
         Ok(s) => s,
         Err(e) => {
-            warn!("Failed to read config at {}: {e}", config_path.display());
-            return AssistantConfig::default();
+            messages.push(ConfigLoadMessage::Warn(format!(
+                "Failed to read config at {}: {e}",
+                config_path.display()
+            )));
+            return (AssistantConfig::default(), messages);
         }
     };
 
     match toml::from_str::<AssistantConfig>(&raw) {
         Ok(cfg) => {
-            info!("Loaded config from {}", config_path.display());
-            cfg
+            messages.push(ConfigLoadMessage::Info(format!(
+                "Loaded config from {}",
+                config_path.display()
+            )));
+            (cfg, messages)
         }
         Err(e) => {
-            warn!("Failed to parse config at {}: {e}", config_path.display());
-            AssistantConfig::default()
+            messages.push(ConfigLoadMessage::Warn(format!(
+                "Failed to parse config at {}: {e}",
+                config_path.display()
+            )));
+            (AssistantConfig::default(), messages)
         }
-    }
-}
-
-struct OtelGuard;
-
-impl Drop for OtelGuard {
-    fn drop(&mut self) {
-        opentelemetry::global::shutdown_tracer_provider();
-    }
-}
-
-fn init_tracing() -> Result<Option<OtelGuard>> {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
-
-    if let Ok(endpoint) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
-        let exporter = opentelemetry_otlp::new_exporter()
-            .tonic()
-            .with_endpoint(endpoint);
-        let tracer =
-            opentelemetry_otlp::new_pipeline()
-                .tracing()
-                .with_exporter(exporter)
-                .with_trace_config(sdk::trace::Config::default().with_resource(Resource::new(
-                    vec![opentelemetry::KeyValue::new("service.name", "assistant")],
-                )))
-                .install_batch(opentelemetry::runtime::Tokio)?;
-
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(fmt_layer)
-            .with(tracing_opentelemetry::layer().with_tracer(tracer))
-            .init();
-        Ok(Some(OtelGuard))
-    } else {
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(fmt_layer)
-            .init();
-        Ok(None)
     }
 }
 
@@ -374,27 +347,11 @@ struct Bootstrap {
 async fn bootstrap(
     home: &Path,
     confirmation_cb: Arc<dyn ConfirmationCallback>,
+    storage: Arc<StorageLayer>,
+    config: AssistantConfig,
 ) -> Result<Bootstrap> {
     let assistant_dir = home.join(".assistant");
     let user_skills_dir = assistant_dir.join("skills");
-    let config_path = assistant_dir.join("config.toml");
-    let config = load_config(&config_path);
-
-    // Resolve database path.
-    let db_path: PathBuf = config
-        .storage
-        .db_path
-        .as_ref()
-        .map(PathBuf::from)
-        .or_else(|| Some(assistant_dir.join("assistant.db")))
-        .unwrap();
-
-    // Open storage layer.
-    let storage = Arc::new(
-        StorageLayer::new(&db_path)
-            .await
-            .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
-    );
 
     // Build skill registry.
     let registry = SkillRegistry::new(storage.pool.clone())
@@ -475,28 +432,24 @@ async fn main() -> Result<()> {
     // 1. Parse CLI arguments first so we can configure tracing appropriately.
     let cli = Cli::parse();
 
-    // 2. Initialize tracing (optionally wiring OpenTelemetry if env vars are set).
-    let _otel_guard = init_tracing()?;
-
-    // 3. Resolve home directory (needed for both early and late subcommands).
+    // 2. Resolve home directory and eagerly load config before tracing init.
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
     let config_path = assistant_dir.join("config.toml");
+    let (config, config_logs) = load_config_messages(&config_path);
+    let db_path: PathBuf = config
+        .storage
+        .db_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| assistant_dir.join("assistant.db"));
 
-    // 4. Handle Reset early — does not need heavy resources.
+    // 3. Handle Reset early — does not need heavy resources.
     if let Some(Command::Reset { yes }) = &cli.command {
-        let config = load_config(&config_path);
-        let db_path: PathBuf = config
-            .storage
-            .db_path
-            .as_ref()
-            .map(PathBuf::from)
-            .or_else(|| Some(assistant_dir.join("assistant.db")))
-            .unwrap();
         return cmd_reset(&db_path, &config, *yes);
     }
 
-    // 5. Bootstrap all heavy resources.
+    // 4. Prepare confirmation behavior before bootstrapping the stack.
     //
     //    MCP and Slack/Mattermost modes use auto-deny confirmation (no terminal
     //    interaction). REPL mode uses the interactive CLI confirmation.
@@ -524,7 +477,21 @@ async fn main() -> Result<()> {
             Arc::new(CliConfirmation)
         };
 
-    let bs = bootstrap(&home, confirmation_cb).await?;
+    let storage = Arc::new(
+        StorageLayer::new(&db_path)
+            .await
+            .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
+    );
+
+    let _otel_guard = init_tracing(storage.pool.clone(), config.mirror.trace_enabled)?;
+    for msg in config_logs {
+        match msg {
+            ConfigLoadMessage::Info(text) => info!("{text}"),
+            ConfigLoadMessage::Warn(text) => warn!("{text}"),
+        }
+    }
+
+    let bs = bootstrap(&home, confirmation_cb, storage.clone(), config).await?;
 
     // 6. MCP mode — run the stdio JSON-RPC server and exit.
     #[cfg(feature = "mcp")]

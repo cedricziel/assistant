@@ -5,7 +5,7 @@ pub mod types;
 pub use memory::{base_dir, expand_tilde, resolve_dir, resolve_path, MemoryLoader};
 pub use tool::{ToolHandler, ToolOutput};
 pub use types::{
-    AssistantConfig, ExecutionContext, ExecutionTrace, Interface, LlmConfig, LlmProviderKind,
-    MattermostConfig, McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, SignalConfig,
-    SkillsConfig, SlackConfig, StorageConfig,
+    AssistantConfig, ExecutionContext, Interface, LlmConfig, LlmProviderKind, MattermostConfig,
+    McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, SignalConfig, SkillsConfig,
+    SlackConfig, StorageConfig,
 };

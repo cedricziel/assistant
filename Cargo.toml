@@ -24,6 +24,14 @@ members = [
     "crates/integration-tests",
     "crates/web-ui",
 ]
+default-members = [
+    "crates/interface-cli",
+    "crates/interface-signal",
+    "crates/interface-slack",
+    "crates/interface-mattermost",
+    "crates/web-ui",
+    "crates/mcp-server",
+]
 resolver = "2"
 
 [workspace.package]
@@ -53,9 +61,9 @@ rustls = { version = "0.23", features = ["ring"] }
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-opentelemetry = "0.24"
-opentelemetry = { version = "0.23", features = ["trace"] }
+opentelemetry = { version = "0.24", features = ["trace"] }
 opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic", "tls"] }
+opentelemetry_sdk = { version = "0.24", features = ["trace", "rt-tokio"] }
 # CLI / config
 clap = { version = "4", features = ["derive"] }
 dirs = "6"

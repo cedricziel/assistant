@@ -1,8 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use anyhow::Result;
-use assistant_core::ExecutionTrace;
-use assistant_storage::{default_db_path, StorageLayer, TraceStore};
+use assistant_storage::{default_db_path, RecordedSpan, StorageLayer, TraceStore};
 use axum::{extract::State, response::Html, routing::get, Router};
 use chrono::{DateTime, Local};
 use clap::Parser;
@@ -149,8 +148,8 @@ async fn show_traces(
     Ok(Html(body))
 }
 
-fn render_trace_row(trace: &ExecutionTrace) -> String {
-    let ts: DateTime<Local> = DateTime::from(trace.created_at);
+fn render_trace_row(trace: &RecordedSpan) -> String {
+    let ts: DateTime<Local> = DateTime::from(trace.start_time);
     let observation = trace
         .observation
         .as_deref()
@@ -161,11 +160,20 @@ fn render_trace_row(trace: &ExecutionTrace) -> String {
         .as_ref()
         .map(|e| html_escape(e))
         .unwrap_or_else(|| "&mdash;".to_string());
+    let tool_name = trace
+        .tool_name
+        .as_deref()
+        .map(html_escape)
+        .unwrap_or_else(|| "(unknown)".to_string());
+    let conversation = trace
+        .conversation_id
+        .map(|id| html_escape(&id.to_string()))
+        .unwrap_or_else(|| "&mdash;".to_string());
     format!(
         "<tr><td>{ts}</td><td>{skill}</td><td>{conv}</td><td>{duration}</td><td class=\"obs\">{obs}</td><td class=\"err\">{err}</td></tr>",
         ts = ts.format("%Y-%m-%d %H:%M:%S"),
-        skill = html_escape(&trace.action_skill),
-        conv = trace.conversation_id,
+        skill = tool_name,
+        conv = conversation,
         duration = trace.duration_ms,
         obs = observation,
         err = error,

@@ -112,7 +112,8 @@ Or via the MCP `install_skill` tool when connecting from Claude Code.
 
 ## Self-improvement
 
-Every skill execution is recorded as an `ExecutionTrace` in SQLite. When you run:
+Every skill execution produces an OpenTelemetry span that lands in SQLite's
+`distributed_traces` table. When you run:
 
 ```
 assistant> Analyse the web-fetch skill and suggest improvements
