@@ -19,6 +19,7 @@ tracing-subscriber = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 # cron expression parsing for scheduler
