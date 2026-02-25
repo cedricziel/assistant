@@ -57,6 +57,8 @@ impl ToolExecutor {
             Arc::new(LoadSkillHandler::new(registry.clone())),
             Arc::new(SelfAnalyzeHandler::new(storage.clone(), llm, registry)),
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
+            Arc::new(CancelTaskHandler::new(storage.clone())),
+            Arc::new(ListTasksHandler::new(storage.clone())),
         ];
 
         let mut tool_handlers = self.tool_handlers.write().unwrap();
