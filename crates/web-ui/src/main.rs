@@ -2,9 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::{net::SocketAddr, path::PathBuf};
 
 use anyhow::Result;
-use assistant_storage::{
-    default_db_path, RecordedSpan, StorageLayer, TraceStats, TraceStore, TraceSummary,
-};
+use assistant_storage::{default_db_path, RecordedSpan, StorageLayer, TraceStore, TraceSummary};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -12,10 +10,9 @@ use axum::{
     routing::get,
     Router,
 };
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use clap::Parser;
 use serde::Deserialize;
-use serde_json::to_string_pretty;
 use sqlx::SqlitePool;
 use tower_http::trace::TraceLayer;
 use tracing::{info, Level};
@@ -47,6 +44,7 @@ struct TraceQuery {
     skill: Option<String>,
     status: Option<String>,
     conversation: Option<String>,
+    min_duration_ms: Option<i64>,
 }
 
 #[tokio::main]
@@ -90,16 +88,6 @@ async fn show_dashboard(
     Query(query): Query<TraceQuery>,
 ) -> Result<Html<String>, (StatusCode, String)> {
     let store = TraceStore::new(state.pool.clone());
-    let skills = store.list_skills().await.map_err(internal_error)?;
-
-    let mut skill_stats: Vec<TraceStats> = Vec::new();
-    for skill in &skills {
-        let stats = store
-            .stats_for_skill(skill, 100)
-            .await
-            .map_err(internal_error)?;
-        skill_stats.push(stats);
-    }
 
     let skill_filter = query
         .skill
@@ -122,10 +110,13 @@ async fn show_dashboard(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
+    let min_duration_ms = query.min_duration_ms;
+
     let all_traces = store
         .list_recent_traces(state.trace_limit, None)
         .await
         .map_err(internal_error)?;
+    let total_count = all_traces.len();
     let mut traces = all_traces.clone();
 
     if let Some(filter) = skill_filter {
@@ -155,40 +146,38 @@ async fn show_dashboard(
         });
     }
 
+    if let Some(min_ms) = min_duration_ms {
+        traces.retain(|trace| {
+            let elapsed = (trace.end_time - trace.start_time).num_milliseconds();
+            elapsed >= min_ms
+        });
+    }
+
+    let filtered_count = traces.len();
     let skill_facets = build_skill_facets(&all_traces);
     let status_facets = build_status_facets(&all_traces);
 
-    let query_builder = render_query_builder(
-        &skills,
-        skill_filter,
-        status_value.as_deref(),
-        conversation_value.as_deref(),
-    );
     let sidebar = render_sidebar(
         &skill_facets,
         skill_filter,
         &status_facets,
         status_value.as_deref(),
         conversation_value.as_deref(),
+        min_duration_ms,
+        filtered_count,
+        total_count,
     );
-    let trace_panel = render_trace_list(&traces);
-    let skill_panel = format!(
-        "<div class=\"panel\"><div class=\"panel-head\"><div><h2>Skill health</h2>\
-         <p>Rolling stats over the last 100 executions per skill</p></div></div>{stats}</div>",
-        stats = render_skill_stats(&skill_stats),
-    );
+    let trace_panel = render_trace_list(&traces, total_count);
 
     let body = format!(
         "<html><head><title>Agent Trace Analytics</title><style>{css}</style></head>\
          <body><div class=\"layout\">\
          <aside class=\"sidebar\">{sidebar}</aside>\
-         <main class=\"main\">{query}{traces}{skills}</main>\
+         <main class=\"main\">{sections}</main>\
          </div></body></html>",
         css = default_css(),
         sidebar = sidebar,
-        query = query_builder,
-        traces = trace_panel,
-        skills = skill_panel,
+        sections = trace_panel,
     );
 
     Ok(Html(body))
@@ -208,75 +197,41 @@ async fn show_trace_detail(
     }
 
     let detail_html = render_trace_detail(&trace_id, &spans);
+    let js = detail_js();
     let body = format!(
         "<html><head><title>Trace {trace_id}</title><style>{css}</style></head>\
-         <body><div class=\"page\">{detail}</div></body></html>",
+         <body><div class=\"page\">{detail}</div><script>{js}</script></body></html>",
         trace_id = html_escape(&trace_id),
         css = default_css(),
         detail = detail_html,
+        js = js,
     );
 
     Ok(Html(body))
 }
 
-fn render_query_builder(
-    skills: &[String],
-    selected_skill: Option<&str>,
-    status_value: Option<&str>,
-    conversation_value: Option<&str>,
-) -> String {
-    let skill_options = render_skill_options(skills, selected_skill);
-    let status_val = status_value.unwrap_or("");
-    let conversation_val = conversation_value.unwrap_or("");
-    format!(
-        "<section class=\"panel query-builder\">\
-         <div class=\"panel-head\"><div><p class=\"eyebrow\">Query builder</p>\
-         <h1>Slice the timeline</h1>\
-         <p>Combine filters to inspect specific agent behaviours.</p></div></div>\
-         <form method=\"get\">\
-            <div class=\"qb-grid\">\
-              <label>Skill<select name=\"skill\"><option value=\"\">All skills</option>{skill_options}</select></label>\
-              <label>Status<select name=\"status\">\
-                  <option value=\"\"{status_all}>All outcomes</option>\
-                  <option value=\"ok\"{status_ok}>Successful runs</option>\
-                  <option value=\"error\"{status_err}>Runs with errors</option>\
-              </select></label>\
-              <label>Conversation<input type=\"text\" name=\"conversation\" value=\"{conversation}\" placeholder=\"Conversation UUID\"></label>\
-            </div>\
-            <div class=\"qb-actions\">\
-                <button type=\"submit\">Run query</button>\
-                <a href=\"/\">Clear all</a>\
-            </div>\
-         </form>\
-         </section>",
-        status_all = if status_val.is_empty() { " selected" } else { "" },
-        status_ok = if status_val.eq_ignore_ascii_case("ok") {
-            " selected"
-        } else {
-            ""
-        },
-        status_err = if status_val.eq_ignore_ascii_case("error") {
-            " selected"
-        } else {
-            ""
-        },
-        conversation = html_escape(conversation_val),
-    )
-}
-
+#[allow(clippy::too_many_arguments)]
 fn render_sidebar(
     skill_facets: &[(String, usize)],
     selected_skill: Option<&str>,
-    status_facets: &[(String, usize)],
+    _status_facets: &[(String, usize)],
     selected_status: Option<&str>,
     conversation: Option<&str>,
+    min_duration_ms: Option<i64>,
+    filtered_count: usize,
+    total_count: usize,
 ) -> String {
     let mut skill_items = String::new();
     for (skill, count) in skill_facets.iter().take(12) {
         let active = selected_skill
             .map(|s| s.eq_ignore_ascii_case(skill))
             .unwrap_or(false);
-        let url = build_query_url(Some(skill.as_str()), selected_status, conversation);
+        let url = build_query_url(
+            Some(skill.as_str()),
+            selected_status,
+            conversation,
+            min_duration_ms,
+        );
         skill_items.push_str(&format!(
             "<li><a class=\"facet-link{active}\" href=\"{url}\">\
              <span>{label}</span><em>{count}</em></a></li>",
@@ -290,157 +245,175 @@ fn render_sidebar(
         skill_items.push_str("<li class=\"muted\">No skill activity yet</li>");
     }
 
-    let mut status_items = String::new();
-    for (status, count) in status_facets {
-        let label = match status.as_str() {
-            "ok" => "Healthy runs",
-            "error" => "Runs with errors",
-            other => other,
+    // Hidden inputs to preserve other filter params in the status form
+    let skill_hidden = selected_skill
+        .map(|s| {
+            format!(
+                "<input type=\"hidden\" name=\"skill\" value=\"{}\">",
+                html_escape(s)
+            )
+        })
+        .unwrap_or_default();
+    let conv_hidden = conversation
+        .map(|c| {
+            format!(
+                "<input type=\"hidden\" name=\"conversation\" value=\"{}\">",
+                html_escape(c)
+            )
+        })
+        .unwrap_or_default();
+    let min_dur_hidden = min_duration_ms
+        .map(|d| format!("<input type=\"hidden\" name=\"min_duration_ms\" value=\"{d}\">"))
+        .unwrap_or_default();
+
+    // Status radio group (auto-submits on change)
+    let status_options: &[(&str, &str)] = &[("", "All"), ("ok", "Success"), ("error", "Error")];
+    let mut status_radios = String::new();
+    for (value, label) in status_options {
+        let checked = if value.is_empty() {
+            selected_status.is_none()
+        } else {
+            selected_status
+                .map(|s| s.eq_ignore_ascii_case(value))
+                .unwrap_or(false)
         };
-        let active = selected_status
-            .map(|s| s.eq_ignore_ascii_case(status))
-            .unwrap_or(false);
-        let url = build_query_url(selected_skill, Some(status.as_str()), conversation);
-        status_items.push_str(&format!(
-            "<li><a class=\"facet-link{active}\" href=\"{url}\">\
-             <span>{label}</span><em>{count}</em></a></li>",
-            active = if active { " active" } else { "" },
-            url = url,
-            label = html_escape(label),
-            count = count,
+        status_radios.push_str(&format!(
+            "<label class=\"radio-label\"><input type=\"radio\" name=\"status\" value=\"{value}\"\
+             onchange=\"this.form.submit()\"{checked}> {label}</label>",
+            value = value,
+            checked = if checked { " checked" } else { "" },
+            label = label,
         ));
     }
-    if status_items.is_empty() {
-        status_items.push_str("<li class=\"muted\">No traces available</li>");
-    }
+    let status_form = format!(
+        "<form method=\"get\">{skill}{conv}{min_dur}{radios}</form>",
+        skill = skill_hidden,
+        conv = conv_hidden,
+        min_dur = min_dur_hidden,
+        radios = status_radios,
+    );
 
-    let conversation_chip = conversation.map(|conv| {
-        format!(
-            "<div class=\"facet-note\">Conversation filter active:<br><strong>{}</strong></div>",
-            html_escape(conv)
-        )
-    });
+    // Min Duration sub-form — hidden inputs preserve skill, conversation, status
+    let skill_hidden2 = selected_skill
+        .map(|s| {
+            format!(
+                "<input type=\"hidden\" name=\"skill\" value=\"{}\">",
+                html_escape(s)
+            )
+        })
+        .unwrap_or_default();
+    let conv_hidden2 = conversation
+        .map(|c| {
+            format!(
+                "<input type=\"hidden\" name=\"conversation\" value=\"{}\">",
+                html_escape(c)
+            )
+        })
+        .unwrap_or_default();
+    let status_hidden = selected_status
+        .map(|s| {
+            format!(
+                "<input type=\"hidden\" name=\"status\" value=\"{}\">",
+                html_escape(s)
+            )
+        })
+        .unwrap_or_default();
+    let min_dur_val = min_duration_ms.map(|d| d.to_string()).unwrap_or_default();
+    let min_dur_form = format!(
+        "<form method=\"get\" class=\"min-dur-row\">{skill}{conv}{status}\
+         <input type=\"number\" name=\"min_duration_ms\" value=\"{val}\" placeholder=\"e.g. 500\" min=\"0\">\
+         <button type=\"submit\">Go</button></form>",
+        skill = skill_hidden2,
+        conv = conv_hidden2,
+        status = status_hidden,
+        val = html_escape(&min_dur_val),
+    );
 
     format!(
         "<div class=\"sidebar-inner\">\
          <div class=\"brand\"><p>assistant</p><h2>Telemetry</h2></div>\
-         <div class=\"facet-group\"><h3>Skills</h3><ul>{skills}</ul></div>\
-         <div class=\"facet-group\"><h3>Status</h3><ul>{status}</ul></div>\
-         {conversation} \
-         <div class=\"facet-footer\"><a href=\"/\">Reset filters</a></div>\
+         <div class=\"facet-group\"><h3>Service</h3><ul>{skills}</ul></div>\
+         <div class=\"facet-group\"><h3>Status</h3>{status_form}</div>\
+         <div class=\"facet-group\"><h3>Min Duration</h3>{min_dur_form}</div>\
+         <div class=\"facet-footer\">\
+           <span class=\"trace-count\">Showing {filtered} of {total} traces</span>\
+           <a href=\"/\">Reset filters</a>\
+         </div>\
          </div>",
         skills = skill_items,
-        status = status_items,
-        conversation = conversation_chip.unwrap_or_default(),
+        status_form = status_form,
+        min_dur_form = min_dur_form,
+        filtered = filtered_count,
+        total = total_count,
     )
 }
 
-fn render_trace_list(traces: &[TraceSummary]) -> String {
+fn render_trace_list(traces: &[TraceSummary], total_count: usize) -> String {
     if traces.is_empty() {
-        return "<div class=\"panel trace-panel\"><div class=\"panel-head\"><div><h2>Trace results</h2><p>No traces match this query yet. Trigger a skill or soften the filters.</p></div></div><p class=\"empty\">No rows to display.</p></div>".to_string();
+        return "<div class=\"panel trace-panel\"><div class=\"panel-head\"><div>\
+                <h2>Traces</h2><p>No traces match this query yet. Trigger a skill or soften the filters.</p>\
+                </div></div><p class=\"empty\">No rows to display.</p></div>"
+            .to_string();
     }
 
     let mut rows = String::new();
     for trace in traces {
-        let ts: DateTime<Local> = DateTime::from(trace.start_time);
         let elapsed_ms = (trace.end_time - trace.start_time).num_milliseconds();
-        let conversation = trace
-            .conversation_id
-            .as_ref()
-            .map(|id| {
-                let text = html_escape(&id.to_string());
-                format!(
-                    "<a href=\"/?conversation={id}\">{text}</a>",
-                    id = text,
-                    text = text
-                )
-            })
-            .unwrap_or_else(|| "&mdash;".to_string());
-        let status_class = if trace.error_count > 0 {
-            "status-pill error"
+        let short_id = if trace.trace_id.len() >= 8 {
+            &trace.trace_id[..8]
         } else {
-            "status-pill ok"
+            trace.trace_id.as_str()
         };
-        let status_label = if trace.error_count > 0 {
-            format!(
-                "{} error{}",
-                trace.error_count,
-                if trace.error_count == 1 { "" } else { "s" }
-            )
+        let service = trace
+            .tool_names
+            .iter()
+            .find(|t| !t.is_empty())
+            .map(|t| html_escape(t))
+            .unwrap_or_else(|| "<span class=\"muted\">&mdash;</span>".to_string());
+        let duration = format_duration(elapsed_ms);
+        let (status_icon, status_class) = if trace.error_count > 0 {
+            ("&#x2717;", "status-err")
         } else {
-            "Healthy".to_string()
+            ("&#x2713;", "status-ok")
         };
-        let mut tool_preview = String::new();
-        let mut shown = 0usize;
-        for tool in trace.tool_names.iter().filter(|t| !t.is_empty()) {
-            if shown >= 3 {
-                break;
-            }
-            if shown > 0 {
-                tool_preview.push_str("<span class=\"dot\">&middot;</span>");
-            }
-            tool_preview.push_str(&html_escape(tool));
-            shown += 1;
-        }
-        if shown == 0 {
-            tool_preview.push_str("<span class=\"muted\">No tools</span>");
-        } else if trace.tool_names.len() > shown {
-            tool_preview.push_str(&format!(
-                "<span class=\"muted\">+{} more</span>",
-                trace.tool_names.len() - shown
-            ));
-        }
         let trace_url = html_escape(&trace.trace_id);
         rows.push_str(&format!(
-            "<tr>\
-             <td><div class=\"primary\">{time}</div><div class=\"subtle\">{duration}</div></td>\
-             <td>{conversation}</td>\
+            "<tr onclick=\"window.location='/trace/{trace_url}'\">\
+             <td><span class=\"trace-id\">{short_id}&hellip;</span></td>\
+             <td>{service}</td>\
+             <td>{duration}</td>\
              <td>{spans}</td>\
-             <td><span class=\"{status_class}\">{status}</span></td>\
-             <td>{tools}</td>\
-             <td><a href=\"/trace/{trace}\">Open</a></td>\
+             <td><span class=\"{status_class}\">{status_icon}</span></td>\
              </tr>",
-            time = ts.format("%b %d, %H:%M"),
-            duration = format_duration(elapsed_ms),
-            conversation = conversation,
+            trace_url = trace_url,
+            short_id = html_escape(short_id),
+            service = service,
+            duration = duration,
             spans = trace.span_count,
             status_class = status_class,
-            status = html_escape(&status_label),
-            tools = tool_preview,
-            trace = trace_url,
+            status_icon = status_icon,
         ));
     }
 
     format!(
         "<div class=\"panel trace-panel\">\
-         <div class=\"panel-head\"><div><h2>Trace results</h2><p>{count} matching runs (newest first)</p></div>\
-         <span class=\"pill\">{count}</span></div>\
+         <div class=\"panel-head\"><div><h2>Traces</h2></div>\
+         <span class=\"pill\">{filtered} of {total}</span></div>\
          <table class=\"trace-table\">\
-            <thead><tr><th>Timestamp</th><th>Conversation</th><th>Spans</th><th>Status</th><th>Tools seen</th><th></th></tr></thead>\
+            <thead><tr>\
+              <th>Trace ID</th>\
+              <th>Service</th>\
+              <th>Duration</th>\
+              <th>Spans</th>\
+              <th>Status</th>\
+            </tr></thead>\
             <tbody>{rows}</tbody>\
          </table>\
          </div>",
-        count = traces.len(),
+        filtered = traces.len(),
+        total = total_count,
         rows = rows,
     )
-}
-
-fn render_skill_options(skills: &[String], selected: Option<&str>) -> String {
-    let mut options = String::new();
-    for skill in skills {
-        let name = html_escape(skill);
-        let selected_attr = selected
-            .map(|s| s.eq_ignore_ascii_case(skill))
-            .unwrap_or(false);
-        let attr = if selected_attr { " selected" } else { "" };
-        options.push_str(&format!(
-            "<option value=\"{value}\"{attr}>{label}</option>",
-            value = name,
-            attr = attr,
-            label = name
-        ));
-    }
-    options
 }
 
 fn build_skill_facets(traces: &[TraceSummary]) -> Vec<(String, usize)> {
@@ -490,6 +463,7 @@ fn build_query_url(
     skill: Option<&str>,
     status: Option<&str>,
     conversation: Option<&str>,
+    min_duration_ms: Option<i64>,
 ) -> String {
     let mut parts = Vec::new();
     if let Some(value) = skill.filter(|s| !s.is_empty()) {
@@ -500,6 +474,9 @@ fn build_query_url(
     }
     if let Some(value) = conversation.filter(|s| !s.is_empty()) {
         parts.push(format!("conversation={}", url_encode(value)));
+    }
+    if let Some(value) = min_duration_ms {
+        parts.push(format!("min_duration_ms={value}"));
     }
     if parts.is_empty() {
         "/".to_string()
@@ -520,54 +497,6 @@ fn url_encode(input: &str) -> String {
         .collect()
 }
 
-fn render_skill_stats(stats: &[TraceStats]) -> String {
-    if stats.is_empty() {
-        return "<p class=\"empty\">No skill executions recorded yet.</p>".to_string();
-    }
-    let mut cards = String::new();
-    for stat in stats {
-        let success_rate = if stat.total > 0 {
-            (stat.success_count as f64 / stat.total as f64) * 100.0
-        } else {
-            0.0
-        };
-        let severity = if stat.error_count > 0 {
-            "skill-card warn"
-        } else {
-            "skill-card"
-        };
-        let errors = if stat.common_errors.is_empty() {
-            "<span class=\"muted\">No recurring errors</span>".to_string()
-        } else {
-            let joined = stat
-                .common_errors
-                .iter()
-                .take(3)
-                .map(|e| format!("<li>{}</li>", html_escape(e)))
-                .collect::<String>();
-            format!("<ul>{}</ul>", joined)
-        };
-        cards.push_str(&format!(
-            "<article class=\"{class}\">\
-             <h3>{name}</h3>\
-             <div class=\"metrics\">\
-               <div><p>Success rate</p><strong>{rate:.0}%</strong></div>\
-               <div><p>Avg duration</p><strong>{avg:.0} ms</strong></div>\
-               <div><p>Runs</p><strong>{total}</strong></div>\
-             </div>\
-             <div class=\"errors\"><p>Top errors</p>{errors}</div>\
-             </article>",
-            class = severity,
-            name = html_escape(&stat.skill_name),
-            rate = success_rate,
-            avg = stat.avg_duration_ms,
-            total = stat.total,
-            errors = errors,
-        ));
-    }
-    format!("<div class=\"skills-grid\">{}</div>", cards)
-}
-
 fn render_trace_detail(trace_id: &str, spans: &[RecordedSpan]) -> String {
     let start = spans.first().map(|s| s.start_time).unwrap_or_else(Utc::now);
     let end = spans
@@ -575,64 +504,251 @@ fn render_trace_detail(trace_id: &str, spans: &[RecordedSpan]) -> String {
         .map(|s| s.end_time)
         .unwrap_or(start + chrono::Duration::milliseconds(1));
     let duration = (end - start).num_milliseconds();
-    let conversation = spans
-        .iter()
-        .find_map(|s| s.conversation_id.as_ref())
-        .map(|id| id.to_string());
     let distinct_tools = collect_distinct_tools(spans);
     let error_spans = spans
         .iter()
         .filter(|span| span.error.is_some() || span.tool_status.as_deref() == Some("error"))
         .count();
-    let tool_invocations = spans.iter().filter(|span| span.tool_name.is_some()).count();
 
-    let meta = format!(
-        "<div class=\"metrics-grid\">\
-         <div><p>Conversation</p><strong>{conversation}</strong></div>\
-         <div><p>Duration</p><strong>{duration}</strong></div>\
-         <div><p>Tool calls</p><strong>{tools}</strong></div>\
-         <div><p>Error spans</p><strong>{errors}</strong></div>\
-         </div>",
-        conversation = conversation
-            .map(|id| {
-                let safe = html_escape(&id);
-                format!(
-                    "<a href=\"/?conversation={id}\">{label}</a>",
-                    id = safe,
-                    label = safe
-                )
-            })
-            .unwrap_or_else(|| "&mdash;".to_string()),
-        duration = format_duration(duration),
-        tools = tool_invocations,
-        errors = error_spans,
-    );
-
-    let tool_badges = if distinct_tools.is_empty() {
-        "<span class=\"badge muted\">No tool spans captured</span>".to_string()
+    // Service chain: first → last distinct tool
+    let svc_chain = if distinct_tools.is_empty() {
+        "&mdash;".to_string()
+    } else if distinct_tools.len() == 1 {
+        html_escape(&distinct_tools[0])
     } else {
-        distinct_tools
-            .iter()
-            .map(|tool| format!("<span class=\"badge\">{}</span>", html_escape(tool)))
-            .collect()
+        format!(
+            "{} &rarr; {}",
+            html_escape(&distinct_tools[0]),
+            html_escape(&distinct_tools[distinct_tools.len() - 1])
+        )
     };
 
-    let tree = render_span_tree(spans);
+    let status_badge = if error_spans > 0 {
+        "<span class=\"hdr-badge error\">ERR</span>"
+    } else {
+        "<span class=\"hdr-badge ok\">OK</span>"
+    };
+
+    let short_id = if trace_id.len() >= 8 {
+        &trace_id[..8]
+    } else {
+        trace_id
+    };
+
+    let header_bar = format!(
+        "<div class=\"trace-header-bar\">\
+         <a class=\"hdr-back\" href=\"/\">&larr; Back</a>\
+         <span class=\"hdr-sep\">|</span>\
+         <span class=\"hdr-trace-id\">Trace {short_id}&hellip;</span>\
+         <span class=\"hdr-sep\">|</span>\
+         <span class=\"hdr-svc\">{svc}</span>\
+         <span class=\"hdr-sep\">|</span>\
+         <span class=\"hdr-dur\">{dur}</span>\
+         <span class=\"hdr-sep\">|</span>\
+         {badge}\
+         </div>",
+        short_id = html_escape(short_id),
+        svc = svc_chain,
+        dur = format_duration(duration),
+        badge = status_badge,
+    );
+
+    let waterfall = render_waterfall_with_hierarchy(start, end, spans);
+    let attrs_panel = render_attributes_panel();
 
     format!(
         "<div class=\"trace-detail\">\
-         <a class=\"back-link\" href=\"/\">&larr; Back to all traces</a>\
-         <h1>Trace timeline</h1>\
-         <p class=\"lede\">Trace ID: {trace}</p>\
-         {meta}\
-         <div class=\"tool-badges\"><p>Tools invoked</p>{badges}</div>\
-         <section><h2>Span hierarchy</h2>{tree}</section>\
+         {header}\
+         <section class=\"wf-section\">{waterfall}</section>\
+         {attrs}\
          </div>",
-        trace = html_escape(trace_id),
-        meta = meta,
-        badges = tool_badges,
-        tree = tree,
+        header = header_bar,
+        waterfall = waterfall,
+        attrs = attrs_panel,
     )
+}
+
+/// DFS traversal to produce ordered `(span_index, depth)` pairs.
+/// Must be a standalone fn — Rust cannot recurse closures.
+fn collect_dfs(
+    indexes: &[usize],
+    spans: &[RecordedSpan],
+    children: &HashMap<String, Vec<usize>>,
+    depth: usize,
+    out: &mut Vec<(usize, usize)>,
+) {
+    for &idx in indexes {
+        out.push((idx, depth));
+        if let Some(child_indexes) = children.get(&spans[idx].span_id) {
+            collect_dfs(child_indexes, spans, children, depth + 1, out);
+        }
+    }
+}
+
+fn render_waterfall_with_hierarchy(
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    spans: &[RecordedSpan],
+) -> String {
+    if spans.is_empty() {
+        return "<p class=\"empty\">No spans recorded for this trace.</p>".to_string();
+    }
+    let total_ms = (end - start).num_milliseconds().max(1);
+
+    // Build parent/child map
+    let mut ids = HashSet::new();
+    for span in spans {
+        ids.insert(span.span_id.clone());
+    }
+    let mut children: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut roots: Vec<usize> = Vec::new();
+    for (idx, span) in spans.iter().enumerate() {
+        if let Some(parent) = &span.parent_span_id {
+            if ids.contains(parent) {
+                children.entry(parent.clone()).or_default().push(idx);
+            } else {
+                roots.push(idx);
+            }
+        } else {
+            roots.push(idx);
+        }
+    }
+    if roots.is_empty() {
+        roots.push(0);
+    }
+    roots.sort_by_key(|idx| spans[*idx].start_time);
+    for child in children.values_mut() {
+        child.sort_by_key(|idx| spans[*idx].start_time);
+    }
+
+    // DFS ordering
+    let mut ordered: Vec<(usize, usize)> = Vec::new();
+    collect_dfs(&roots, spans, &children, 0, &mut ordered);
+
+    // Time axis: 5 evenly-spaced tick labels
+    let tick_labels: String = (0usize..=4)
+        .map(|i| {
+            let ms = (total_ms as f64 * i as f64 / 4.0) as i64;
+            format!("<span>{}</span>", format_duration(ms))
+        })
+        .collect();
+    let time_axis = format!("<div class=\"wf-time-axis\">{tick_labels}</div>");
+
+    // Waterfall rows
+    let mut rows = String::new();
+    for (idx, depth) in &ordered {
+        let span = &spans[*idx];
+        let label = span
+            .tool_name
+            .as_deref()
+            .map(html_escape)
+            .unwrap_or_else(|| html_escape(&span.name));
+        let offset_ms = (span.start_time - start).num_milliseconds().max(0);
+        let offset_pct = ((offset_ms as f64 / total_ms as f64) * 100.0).clamp(0.0, 100.0);
+        let width_pct = ((span.duration_ms.max(1) as f64 / total_ms as f64) * 100.0)
+            .clamp(0.5, 100.0 - offset_pct);
+        let bar_class = match span.tool_status.as_deref() {
+            Some("error") => "wf-bar error",
+            Some("ok") => "wf-bar ok",
+            _ => "wf-bar",
+        };
+        let err_icon = if span.error.is_some() || span.tool_status.as_deref() == Some("error") {
+            "<span class=\"wf-err-icon\">&#x2717;</span>"
+        } else {
+            ""
+        };
+        let padding_left = depth * 16;
+        let duration = format_duration(span.duration_ms);
+
+        // Build attrs JSON for the click-handler; html_escape so quotes become &quot;
+        // The browser decodes HTML entities before getAttribute returns, so JSON.parse works.
+        let mut m = serde_json::json!({
+            "span_id": span.span_id,
+            "name": span.name,
+            "duration_ms": span.duration_ms,
+            "status": span.tool_status.as_deref().unwrap_or("unknown"),
+            "attributes": span.attributes,
+        });
+        if let Some(t) = &span.tool_name {
+            m["tool_name"] = serde_json::Value::String(t.clone());
+        }
+        if let Some(obs) = &span.observation {
+            m["observation"] = serde_json::Value::String(obs.clone());
+        }
+        if let Some(err) = &span.error {
+            m["error"] = serde_json::Value::String(err.clone());
+        }
+        let attrs_json = serde_json::to_string(&m).unwrap_or_else(|_| "{}".to_string());
+        let attrs_escaped = html_escape(&attrs_json);
+
+        rows.push_str(&format!(
+            "<div class=\"wf-row\" data-span-id=\"{span_id}\" data-attrs=\"{attrs}\">\
+               <div class=\"wf-label-col\" style=\"padding-left:{pad}px\">\
+                 <span class=\"wf-label\">{err_icon}{label}</span>\
+                 <span class=\"wf-dur\">{duration}</span>\
+               </div>\
+               <div class=\"wf-track-axis\">\
+                 <div class=\"{bar_class}\" style=\"margin-left:{offset}%;width:{width}%;\"></div>\
+               </div>\
+             </div>",
+            span_id = html_escape(&span.span_id),
+            attrs = attrs_escaped,
+            pad = padding_left,
+            err_icon = err_icon,
+            label = label,
+            duration = duration,
+            bar_class = bar_class,
+            offset = offset_pct,
+            width = width_pct,
+        ));
+    }
+
+    format!(
+        "<div class=\"wf-container\">{time_axis}{rows}</div>",
+        time_axis = time_axis,
+        rows = rows,
+    )
+}
+
+fn render_attributes_panel() -> String {
+    "<div id=\"span-attrs-panel\" class=\"attrs-panel\">\
+     <div id=\"span-attrs-content\">Click a span row to view its attributes.</div>\
+     </div>"
+        .to_string()
+}
+
+fn detail_js() -> &'static str {
+    r#"
+(function(){
+  var rows = document.querySelectorAll('.wf-row');
+  var panel = document.getElementById('span-attrs-content');
+  rows.forEach(function(row){
+    row.addEventListener('click', function(){
+      rows.forEach(function(r){ r.classList.remove('selected'); });
+      row.classList.add('selected');
+      var raw = row.getAttribute('data-attrs');
+      var data;
+      try { data = JSON.parse(raw); } catch(e){ panel.textContent = 'Could not parse attributes.'; return; }
+      var html = '<table class="attr-table">';
+      function addRow(k, v){
+        html += '<tr><td class="attr-k">' + k + '</td><td class="attr-v">' + String(v) + '</td></tr>';
+      }
+      if(data.span_id) addRow('span_id', data.span_id);
+      if(data.name) addRow('name', data.name);
+      if(data.tool_name) addRow('tool_name', data.tool_name);
+      if(data.status) addRow('status', data.status);
+      if(data.duration_ms !== undefined) addRow('duration_ms', data.duration_ms + ' ms');
+      if(data.observation) addRow('observation', data.observation);
+      if(data.error) addRow('error', data.error);
+      if(data.attributes && typeof data.attributes === 'object'){
+        Object.keys(data.attributes).forEach(function(k){ addRow(k, data.attributes[k]); });
+      }
+      html += '</table>';
+      panel.innerHTML = html;
+    });
+  });
+})();
+"#
 }
 
 fn collect_distinct_tools(spans: &[RecordedSpan]) -> Vec<String> {
@@ -648,137 +764,6 @@ fn collect_distinct_tools(spans: &[RecordedSpan]) -> Vec<String> {
         }
     }
     tools
-}
-
-fn render_span_tree(spans: &[RecordedSpan]) -> String {
-    if spans.is_empty() {
-        return "<p class=\"empty\">No spans recorded for this trace.</p>".to_string();
-    }
-
-    let mut ids = HashSet::new();
-    for span in spans {
-        ids.insert(span.span_id.clone());
-    }
-
-    let mut children: HashMap<String, Vec<usize>> = HashMap::new();
-    let mut roots: Vec<usize> = Vec::new();
-    for (idx, span) in spans.iter().enumerate() {
-        if let Some(parent) = &span.parent_span_id {
-            if ids.contains(parent) {
-                children.entry(parent.clone()).or_default().push(idx);
-            } else {
-                roots.push(idx);
-            }
-        } else {
-            roots.push(idx);
-        }
-    }
-
-    if roots.is_empty() {
-        roots.push(0);
-    }
-
-    roots.sort_by_key(|idx| spans[*idx].start_time);
-    for child in children.values_mut() {
-        child.sort_by_key(|idx| spans[*idx].start_time);
-    }
-
-    render_span_nodes(&roots, spans, &children)
-}
-
-fn render_span_nodes(
-    indexes: &[usize],
-    spans: &[RecordedSpan],
-    children: &HashMap<String, Vec<usize>>,
-) -> String {
-    if indexes.is_empty() {
-        return String::new();
-    }
-    let mut html = String::new();
-    html.push_str("<ul class=\"span-tree\">");
-    for idx in indexes {
-        html.push_str("<li>");
-        html.push_str(&render_span_node(*idx, spans, children));
-        html.push_str("</li>");
-    }
-    html.push_str("</ul>");
-    html
-}
-
-fn render_span_node(
-    index: usize,
-    spans: &[RecordedSpan],
-    children: &HashMap<String, Vec<usize>>,
-) -> String {
-    let span = &spans[index];
-    let ts: DateTime<Local> = DateTime::from(span.start_time);
-    let status_class = match span.tool_status.as_deref() {
-        Some("error") => "span-card status-error",
-        Some("ok") => "span-card status-ok",
-        _ => "span-card",
-    };
-    let title = span
-        .tool_name
-        .as_deref()
-        .map(html_escape)
-        .unwrap_or_else(|| html_escape(&span.name));
-    let duration = format_duration(span.duration_ms);
-    let observation = span
-        .observation
-        .as_deref()
-        .map(|text| {
-            format!(
-                "<div class=\"span-observation\"><strong>Observation</strong><pre>{}</pre></div>",
-                html_escape(text.trim())
-            )
-        })
-        .unwrap_or_default();
-    let error = span
-        .error
-        .as_deref()
-        .map(|text| {
-            format!(
-                "<div class=\"span-error\"><strong>Error</strong><pre>{}</pre></div>",
-                html_escape(text.trim())
-            )
-        })
-        .unwrap_or_default();
-    let meta = format!(
-        "Started {ts} &middot; Span {span_id}{turn}",
-        ts = ts.format("%Y-%m-%d %H:%M:%S"),
-        span_id = html_escape(&span.span_id),
-        turn = span
-            .turn
-            .map(|t| format!(" &middot; Turn {t}"))
-            .unwrap_or_default(),
-    );
-    let attrs = to_string_pretty(&span.attributes).unwrap_or_else(|_| span.attributes.to_string());
-
-    let mut block = format!(
-        "<div class=\"{class}\">\
-         <div class=\"span-head\">\
-            <div><p class=\"span-name\">{name}</p><h3>{title}</h3></div>\
-            <span class=\"duration\">{duration}</span>\
-         </div>\
-         <p class=\"span-meta\">{meta}</p>\
-         {observation}{error}\
-         <details><summary>Attributes</summary><pre>{attrs}</pre></details>\
-         </div>",
-        class = status_class,
-        name = html_escape(&span.name),
-        title = title,
-        duration = duration,
-        meta = meta,
-        observation = observation,
-        error = error,
-        attrs = html_escape(&attrs),
-    );
-
-    if let Some(child_indexes) = children.get(&span.span_id) {
-        block.push_str(&render_span_nodes(child_indexes, spans, children));
-    }
-
-    block
 }
 
 fn format_duration(ms: i64) -> String {
@@ -879,13 +864,49 @@ fn default_css() -> &'static str {
     }
     .facet-footer {
         margin-top: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
     }
-    .facet-note {
+    .trace-count {
         font-size: 0.8rem;
-        color: #9fb4d6;
-        background: rgba(111, 163, 255, 0.08);
-        padding: 0.8rem;
-        border-radius: 12px;
+        color: #8aa5d8;
+    }
+    .radio-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+        color: #c2d6f0;
+        cursor: pointer;
+        padding: 0.25rem 0;
+    }
+    .radio-label input[type=radio] {
+        accent-color: #6ec6ff;
+    }
+    .min-dur-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    .min-dur-row input[type=number] {
+        background: #020511;
+        border: 1px solid #15243b;
+        border-radius: 8px;
+        color: #e5e9f0;
+        padding: 0.35rem 0.6rem;
+        font-size: 0.85rem;
+        width: 80px;
+    }
+    .min-dur-row button {
+        background: linear-gradient(135deg, #64cafe, #8b5dff);
+        border: none;
+        border-radius: 8px;
+        color: #050b16;
+        padding: 0.35rem 0.8rem;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 0.85rem;
     }
     .main {
         padding: 2.5rem 2.5rem 3rem;
@@ -917,50 +938,7 @@ fn default_css() -> &'static str {
         border-radius: 999px;
         padding: 0.2rem 0.8rem;
         font-size: 0.9rem;
-    }
-    .query-builder form {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-    }
-    .qb-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 1rem;
-    }
-    .query-builder label {
-        display: flex;
-        flex-direction: column;
-        gap: 0.4rem;
-        font-size: 0.85rem;
-        color: #9fb4d6;
-    }
-    .query-builder select,
-    .query-builder input {
-        background: #020511;
-        border: 1px solid #15243b;
-        border-radius: 12px;
-        color: #e5e9f0;
-        padding: 0.5rem 0.6rem;
-    }
-    .qb-actions {
-        display: flex;
-        gap: 1rem;
-        align-items: center;
-    }
-    .qb-actions button {
-        border: none;
-        border-radius: 999px;
-        background: linear-gradient(135deg, #64cafe, #8b5dff);
-        color: #050b16;
-        padding: 0.6rem 1.6rem;
-        font-weight: 600;
-        cursor: pointer;
-    }
-    .qb-actions a {
-        color: #8ba2c6;
-        text-decoration: none;
-        font-size: 0.9rem;
+        white-space: nowrap;
     }
     .trace-table {
         width: 100%;
@@ -971,7 +949,7 @@ fn default_css() -> &'static str {
         padding: 0.8rem;
         border-bottom: 1px solid #0f1f36;
         text-align: left;
-        vertical-align: top;
+        vertical-align: middle;
     }
     .trace-table th {
         font-size: 0.8rem;
@@ -981,6 +959,26 @@ fn default_css() -> &'static str {
     }
     .trace-table tr:last-child td {
         border-bottom: none;
+    }
+    .trace-table tbody tr {
+        cursor: pointer;
+        transition: background 0.1s;
+    }
+    .trace-table tbody tr:hover {
+        background: rgba(110, 198, 255, 0.06);
+    }
+    .trace-id {
+        font-family: ui-monospace, monospace;
+        font-size: 0.85rem;
+        color: #a0bfe0;
+    }
+    .status-ok {
+        color: #63e6be;
+        font-weight: 700;
+    }
+    .status-err {
+        color: #f87171;
+        font-weight: 700;
     }
     .primary {
         font-weight: 600;
@@ -1010,40 +1008,8 @@ fn default_css() -> &'static str {
         color: #8ba2c6;
         margin: 0;
     }
-    .skills-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 1rem;
-    }
-    .skill-card {
-        background: #071222;
-        border: 1px solid #14233a;
-        padding: 1rem;
-        border-radius: 18px;
-    }
-    .skill-card.warn {
-        border-color: rgba(248, 113, 113, 0.4);
-    }
-    .skill-card h3 {
-        margin-top: 0;
-    }
-    .skill-card .metrics {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.6rem;
-    }
-    .skill-card .metrics p {
-        margin: 0;
-        color: #8898b5;
-        font-size: 0.75rem;
-    }
-    .skill-card .metrics strong {
-        font-size: 1.1rem;
-    }
-    .skill-card .errors ul {
-        margin: 0.3rem 0 0;
-        padding-left: 1rem;
-        color: #fca5a5;
+    .muted {
+        color: #8ba2c6;
     }
     .badge {
         background: rgba(94, 195, 255, 0.15);
@@ -1056,8 +1022,9 @@ fn default_css() -> &'static str {
         background: rgba(255, 255, 255, 0.08);
         color: #a7b6d8;
     }
+    /* Trace detail page */
     .page {
-        max-width: 1100px;
+        max-width: 1400px;
         margin: 0 auto;
         padding: 2.5rem 1.5rem 4rem;
     }
@@ -1067,94 +1034,158 @@ fn default_css() -> &'static str {
         border-radius: 24px;
         padding: 2rem;
     }
-    .back-link {
+    /* Header bar */
+    .trace-header-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #0f1f36;
+    }
+    .hdr-back {
         text-decoration: none;
         color: #9ccfff;
         font-size: 0.9rem;
     }
-    .metrics-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 1rem;
-        margin: 1rem 0 1.5rem;
+    .hdr-sep {
+        color: #2a3d5a;
     }
-    .metrics-grid p {
-        margin: 0;
-        color: #97a4c0;
-        font-size: 0.85rem;
+    .hdr-trace-id {
+        font-family: ui-monospace, monospace;
+        font-size: 0.9rem;
+        color: #c8def5;
     }
-    .metrics-grid strong {
-        font-size: 1.4rem;
+    .hdr-svc {
+        font-weight: 600;
     }
-    .tool-badges {
+    .hdr-dur {
+        color: #a0bfe0;
+    }
+    .hdr-badge {
+        border-radius: 999px;
+        padding: 0.2rem 0.8rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .hdr-badge.ok {
+        background: rgba(99, 230, 190, 0.2);
+        color: #9ef7d6;
+    }
+    .hdr-badge.error {
+        background: rgba(248, 113, 113, 0.2);
+        color: #ffb4b4;
+    }
+    /* Waterfall */
+    .wf-container {
+        display: flex;
+        flex-direction: column;
+    }
+    .wf-time-axis {
+        display: flex;
+        justify-content: space-between;
+        margin-left: 250px;
+        font-size: 0.75rem;
+        color: #5a7396;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #0d1a2e;
+        margin-bottom: 0.5rem;
+    }
+    .wf-row {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
-        flex-wrap: wrap;
-        margin-bottom: 1.5rem;
+        height: 30px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.1s;
     }
-    .tool-badges p {
-        margin: 0;
-        font-weight: 500;
+    .wf-row:hover {
+        background: rgba(110, 198, 255, 0.07);
     }
-    .span-tree {
-        list-style: none;
-        padding-left: 0;
+    .wf-row.selected {
+        background: rgba(110, 198, 255, 0.13);
     }
-    .span-tree li {
-        margin-left: 1rem;
-        padding-left: 1rem;
-        border-left: 2px solid rgba(255, 255, 255, 0.05);
-    }
-    .span-card {
-        background: #060b18;
-        border: 1px solid #1f2937;
-        border-radius: 16px;
-        padding: 1rem;
-        margin-bottom: 1rem;
-    }
-    .span-card.status-ok {
-        border-color: rgba(94, 195, 255, 0.3);
-    }
-    .span-card.status-error {
-        border-color: rgba(248, 113, 113, 0.6);
-    }
-    .span-head {
+    .wf-label-col {
+        width: 250px;
+        min-width: 250px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 1rem;
+        padding-right: 0.75rem;
+        overflow: hidden;
     }
-    .span-name {
-        margin: 0;
-        color: #97a4c0;
-        font-size: 0.85rem;
+    .wf-label {
+        font-size: 0.82rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #c0d4ee;
     }
-    .span-meta {
-        color: #97a4c0;
-        font-size: 0.85rem;
+    .wf-dur {
+        font-size: 0.75rem;
+        color: #5a7396;
+        white-space: nowrap;
+        margin-left: 0.5rem;
     }
-    .span-observation,
-    .span-error {
-        background: rgba(94, 195, 255, 0.08);
-        border-radius: 12px;
-        padding: 0.6rem;
-        font-family: ui-monospace, monospace;
-        white-space: pre-wrap;
-    }
-    .span-error {
-        background: rgba(248, 113, 113, 0.12);
-        color: #fecaca;
-    }
-    details {
-        margin-top: 0.5rem;
-    }
-    details pre {
-        white-space: pre-wrap;
-        background: #030712;
-        border-radius: 10px;
-        padding: 0.5rem;
+    .wf-err-icon {
+        color: #f87171;
+        margin-right: 0.3rem;
         font-size: 0.8rem;
+    }
+    .wf-track-axis {
+        flex: 1;
+        position: relative;
+        height: 18px;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.1);
+    }
+    .wf-bar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        border-radius: 999px;
+        background: rgba(94, 195, 255, 0.7);
+        min-width: 3px;
+    }
+    .wf-bar.ok {
+        background: rgba(99, 230, 190, 0.75);
+    }
+    .wf-bar.error {
+        background: rgba(248, 113, 113, 0.85);
+    }
+    .wf-section {
+        margin: 0.5rem 0 1.5rem;
+    }
+    /* Attributes panel */
+    .attrs-panel {
+        background: #030a15;
+        border: 1px solid #0f1f36;
+        border-radius: 14px;
+        padding: 1rem;
+        min-height: 80px;
+        font-size: 0.85rem;
+        color: #9fb4d6;
+    }
+    .attr-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .attr-table td {
+        padding: 0.3rem 0.5rem;
+        vertical-align: top;
+        border-bottom: 1px solid #0d1a2e;
+    }
+    .attr-k {
+        font-family: ui-monospace, monospace;
+        color: #6ec6ff;
+        width: 35%;
+        white-space: nowrap;
+    }
+    .attr-v {
+        font-family: ui-monospace, monospace;
+        color: #c0d4ee;
+        word-break: break-all;
     }
     @media (max-width: 900px) {
         .layout {
@@ -1164,15 +1195,21 @@ fn default_css() -> &'static str {
             border-right: none;
             border-bottom: 1px solid #0b1b32;
         }
+        .wf-label-col {
+            width: 150px;
+            min-width: 150px;
+        }
+        .wf-time-axis {
+            margin-left: 150px;
+        }
     }
     @media (max-width: 640px) {
-        .qb-actions {
-            flex-direction: column;
-            align-items: flex-start;
+        .wf-label-col {
+            width: 100px;
+            min-width: 100px;
         }
-        .span-tree li {
-            margin-left: 0.4rem;
-            padding-left: 0.8rem;
+        .wf-time-axis {
+            margin-left: 100px;
         }
     }
     "#
