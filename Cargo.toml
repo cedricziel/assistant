@@ -22,6 +22,7 @@ members = [
     "crates/interface-slack",
     "crates/interface-mattermost",
     "crates/integration-tests",
+    "crates/web-ui",
 ]
 resolver = "2"
 

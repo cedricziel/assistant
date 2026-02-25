@@ -196,7 +196,8 @@ assistant/
 │   ├── interface-cli/         # Unified binary: REPL + background interfaces
 │   ├── interface-slack/       # Slack Socket Mode library + slack-post skill
 │   ├── interface-mattermost/  # Mattermost WebSocket library
-│   └── interface-signal/      # Signal interface (feature-gated, separate binary)
+│   ├── interface-signal/      # Signal interface (feature-gated, separate binary)
+│   └── web-ui/                # Optional trace analysis web UI
 ├── docker/                    # Dockerfiles (all build the unified assistant binary)
 ├── migrations/                # SQLite migration files
 ├── skills/                    # Built-in SKILL.md definitions
@@ -214,6 +215,8 @@ make run            # cargo run -p assistant-cli  (REPL + background interfaces)
 make run-mcp        # cargo run -p assistant-cli -- mcp
 make run-slack      # cargo run -p assistant-cli -- slack
 make run-mattermost # cargo run -p assistant-cli -- mattermost
+# Trace analysis UI
+cargo run -p assistant-web-ui -- --listen 127.0.0.1:8080
 ```
 
 ### Pre-commit hooks

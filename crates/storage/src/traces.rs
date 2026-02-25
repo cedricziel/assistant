@@ -101,6 +101,60 @@ impl TraceStore {
             .collect()
     }
 
+    /// Return the `limit` most-recent traces across all skills.
+    pub async fn list_recent(&self, limit: i64) -> Result<Vec<ExecutionTrace>> {
+        let rows = sqlx::query(
+            "SELECT id, conversation_id, turn, action_skill, action_params, \
+                    observation, error, duration_ms, created_at \
+             FROM execution_traces \
+             ORDER BY created_at DESC \
+             LIMIT ?1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|r| {
+                let id_str: String = r.get("id");
+                let conv_str: String = r.get("conversation_id");
+                let id = Uuid::parse_str(&id_str)?;
+                let conversation_id = Uuid::parse_str(&conv_str)?;
+                let params_str: String = r.get("action_params");
+                let action_params = serde_json::from_str(&params_str)?;
+                let created_at: DateTime<Utc> = r.get("created_at");
+
+                Ok(ExecutionTrace {
+                    id,
+                    conversation_id,
+                    turn: r.get("turn"),
+                    action_skill: r.get("action_skill"),
+                    action_params,
+                    observation: r.get("observation"),
+                    error: r.get("error"),
+                    duration_ms: r.get("duration_ms"),
+                    created_at,
+                })
+            })
+            .collect()
+    }
+
+    /// List distinct skill names that have recorded traces.
+    pub async fn list_skills(&self) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT DISTINCT action_skill \
+             FROM execution_traces \
+             ORDER BY action_skill",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.try_get::<String, _>("action_skill").ok())
+            .collect())
+    }
+
     /// Compute aggregate statistics over the most-recent `window` traces for a skill.
     pub async fn stats_for_skill(&self, skill_name: &str, window: i64) -> Result<TraceStats> {
         // Aggregate over the newest `window` rows for this skill.
