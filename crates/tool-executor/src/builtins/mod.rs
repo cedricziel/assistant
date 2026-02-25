@@ -1,9 +1,11 @@
 pub mod bash;
+pub mod cancel_task;
 pub mod file_edit;
 pub mod file_glob;
 pub mod file_read;
 pub mod file_write;
 pub mod list_skills;
+pub mod list_tasks;
 pub mod load_skill;
 pub mod memory_get;
 pub mod memory_search;
@@ -13,11 +15,13 @@ pub mod web_fetch;
 pub mod web_search;
 
 pub use bash::BashHandler;
+pub use cancel_task::CancelTaskHandler;
 pub use file_edit::FileEditHandler;
 pub use file_glob::FileGlobHandler;
 pub use file_read::FileReadHandler;
 pub use file_write::FileWriteHandler;
 pub use list_skills::ListSkillsHandler;
+pub use list_tasks::ListTasksHandler;
 pub use load_skill::LoadSkillHandler;
 pub use memory_get::MemoryGetHandler;
 pub use memory_search::MemorySearchHandler;

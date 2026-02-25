@@ -77,9 +77,16 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
             }
         }
 
-        // Compute the next run time from the cron expression.
-        let next_run = compute_next_run(&task.cron_expr);
-        task_store.record_run(task.id, now, next_run).await?;
+        if task.once {
+            // One-shot task: record the run and disable it.
+            task_store.record_run(task.id, now, None).await?;
+            task_store.disable(task.id).await?;
+            info!(task_name = %task.name, "One-shot task disabled after execution");
+        } else {
+            // Recurring task: compute the next run from the cron expression.
+            let next_run = compute_next_run(&task.cron_expr);
+            task_store.record_run(task.id, now, next_run).await?;
+        }
     }
 
     Ok(())

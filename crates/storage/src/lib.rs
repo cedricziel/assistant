@@ -153,6 +153,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             include_str!("../../../migrations/010_trace_token_usage.sql"),
         ),
         ("011_logs", include_str!("../../../migrations/011_logs.sql")),
+        (
+            "012_scheduled_tasks_once",
+            include_str!("../../../migrations/012_scheduled_tasks_once.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {
