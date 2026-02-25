@@ -51,15 +51,44 @@ pub struct ToolCallItem {
     pub id: Option<String>,
 }
 
+/// Metadata returned alongside the model's response.
+///
+/// Fields are best-effort: providers populate what they can, leaving the rest
+/// as `None` / `0`.  The struct is intentionally cheap to clone.
+#[derive(Debug, Clone, Default)]
+pub struct LlmResponseMeta {
+    /// Model identifier echoed by the provider (e.g. `"qwen2.5:7b"`).
+    pub model: Option<String>,
+    /// Number of tokens in the prompt (input).
+    pub input_tokens: Option<u64>,
+    /// Number of tokens in the completion (output).
+    pub output_tokens: Option<u64>,
+    /// Provider-specific finish/stop reason (e.g. `"stop"`, `"tool_calls"`).
+    pub finish_reason: Option<String>,
+    /// Provider-assigned response/message ID.
+    pub response_id: Option<String>,
+}
+
 /// The outcome of a single `LlmClient::chat` invocation.
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
     /// The model wants to call one or more tools.
-    ToolCalls(Vec<ToolCallItem>),
+    ToolCalls(Vec<ToolCallItem>, LlmResponseMeta),
     /// The model has a definitive answer for the user.
-    FinalAnswer(String),
+    FinalAnswer(String, LlmResponseMeta),
     /// The model emitted only a reasoning step (no action yet).
-    Thinking(String),
+    Thinking(String, LlmResponseMeta),
+}
+
+impl LlmResponse {
+    /// Access the response metadata regardless of variant.
+    pub fn meta(&self) -> &LlmResponseMeta {
+        match self {
+            LlmResponse::ToolCalls(_, m) => m,
+            LlmResponse::FinalAnswer(_, m) => m,
+            LlmResponse::Thinking(_, m) => m,
+        }
+    }
 }
 
 /// Configuration for the LLM client.
@@ -199,6 +228,9 @@ impl LlmClient {
 
         debug!("Native tool-call response received");
 
+        // Extract response metadata from the Ollama JSON envelope.
+        let meta = extract_ollama_meta(&json);
+
         if let Some(tool_calls) = json
             .pointer("/message/tool_calls")
             .and_then(|v| v.as_array())
@@ -227,7 +259,7 @@ impl LlmClient {
                 .collect();
             if !items.is_empty() {
                 debug!(count = items.len(), "Native tool calls received");
-                return Ok(LlmResponse::ToolCalls(items));
+                return Ok(LlmResponse::ToolCalls(items, meta));
             }
         }
 
@@ -250,12 +282,12 @@ impl LlmClient {
                 .filter(|s| !s.trim().is_empty())
             {
                 debug!("Model returned empty content with non-empty thinking; surfacing as Thinking step");
-                return Ok(LlmResponse::Thinking(thinking.to_string()));
+                return Ok(LlmResponse::Thinking(thinking.to_string(), meta));
             }
         }
 
         debug!("Native request returned no tool_calls; treating as final answer");
-        Ok(LlmResponse::FinalAnswer(content))
+        Ok(LlmResponse::FinalAnswer(content, meta))
     }
 
     async fn chat_native_streaming(
@@ -298,6 +330,7 @@ impl LlmClient {
 
         let mut content = String::new();
         let mut tool_calls_json: Option<Value> = None;
+        let mut final_json: Option<Value> = None;
 
         let mut byte_stream = resp.bytes_stream();
         let mut line_buf = String::new();
@@ -331,6 +364,11 @@ impl LlmClient {
                                 tool_calls_json = Some(tc.clone());
                             }
                         }
+
+                        // The final chunk carries `done: true` and the metadata.
+                        if json.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                            final_json = Some(json);
+                        }
                     }
                 } else {
                     line_buf.push(ch);
@@ -355,10 +393,18 @@ impl LlmClient {
                         tool_calls_json = Some(tc.clone());
                     }
                 }
+                if json.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    final_json = Some(json);
+                }
             }
         }
 
         debug!("Native streaming response complete");
+
+        let meta = final_json
+            .as_ref()
+            .map(extract_ollama_meta)
+            .unwrap_or_default();
 
         if let Some(tc) = tool_calls_json {
             if let Some(arr) = tc.as_array() {
@@ -386,12 +432,12 @@ impl LlmClient {
                     .collect();
                 if !items.is_empty() {
                     debug!(count = items.len(), "Native streaming: tool calls received");
-                    return Ok(LlmResponse::ToolCalls(items));
+                    return Ok(LlmResponse::ToolCalls(items, meta));
                 }
             }
         }
 
-        Ok(LlmResponse::FinalAnswer(content))
+        Ok(LlmResponse::FinalAnswer(content, meta))
     }
 }
 
@@ -430,6 +476,24 @@ impl LlmProvider for LlmClient {
 }
 
 // ── Free helpers ──────────────────────────────────────────────────────────────
+
+/// Extract [`LlmResponseMeta`] from an Ollama JSON response object.
+///
+/// Ollama puts metadata at the top level:
+///   `model`, `prompt_eval_count` (input tokens), `eval_count` (output tokens),
+///   `done_reason` (finish reason).
+fn extract_ollama_meta(json: &Value) -> LlmResponseMeta {
+    LlmResponseMeta {
+        model: json.get("model").and_then(|v| v.as_str()).map(String::from),
+        input_tokens: json.get("prompt_eval_count").and_then(|v| v.as_u64()),
+        output_tokens: json.get("eval_count").and_then(|v| v.as_u64()),
+        finish_reason: json
+            .get("done_reason")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        response_id: None, // Ollama does not emit a response ID.
+    }
+}
 
 /// Convert a [`ToolSpec`] to the JSON structure expected by the Ollama
 /// `tools` array in the `/api/chat` request body.
@@ -559,7 +623,7 @@ mod tests {
         let client = make_client(&server.uri());
         let resp = client.chat("sys", &[], &[]).await.unwrap();
 
-        let LlmResponse::ToolCalls(items) = resp else {
+        let LlmResponse::ToolCalls(items, _meta) = resp else {
             panic!("expected ToolCalls, got {resp:?}");
         };
         assert_eq!(items.len(), 1);
@@ -584,7 +648,7 @@ mod tests {
         let client = make_client(&server.uri());
         let resp = client.chat("sys", &[], &[]).await.unwrap();
 
-        let LlmResponse::ToolCalls(items) = resp else {
+        let LlmResponse::ToolCalls(items, _meta) = resp else {
             panic!("expected ToolCalls, got {resp:?}");
         };
         assert_eq!(items.len(), 2);
@@ -606,7 +670,7 @@ mod tests {
         let client = make_client(&server.uri());
         let resp = client.chat("sys", &[], &[]).await.unwrap();
 
-        let LlmResponse::FinalAnswer(text) = resp else {
+        let LlmResponse::FinalAnswer(text, _meta) = resp else {
             panic!("expected FinalAnswer, got {resp:?}");
         };
         assert_eq!(text, "hello!");
@@ -629,7 +693,7 @@ mod tests {
         let client = make_client(&server.uri());
         let resp = client.chat("sys", &[], &[]).await.unwrap();
 
-        let LlmResponse::ToolCalls(items) = resp else {
+        let LlmResponse::ToolCalls(items, _meta) = resp else {
             panic!("expected ToolCalls, got {resp:?}");
         };
         assert_eq!(items.len(), 1);

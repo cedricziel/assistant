@@ -11,8 +11,8 @@ use assistant_core::types::{
 };
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse, ToolCallItem,
-    ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatRole, HostedTool, LlmProvider, LlmResponse,
+    LlmResponseMeta, ToolCallItem, ToolSpec, ToolSupport,
 };
 
 // ── AnthropicConfig ───────────────────────────────────────────────────────────
@@ -436,7 +436,9 @@ impl AnthropicProvider {
             .map_err(|e| anyhow::anyhow!("Failed to parse Anthropic response: {e}"))?;
 
         debug!("Anthropic response received");
-        parse_response_json(&json)
+
+        let meta = extract_anthropic_meta(&json);
+        parse_response_json(&json, meta)
     }
 
     // ── SSE streaming ─────────────────────────────────────────────────────────
@@ -498,6 +500,8 @@ impl AnthropicProvider {
         // Current block index and type.
         let mut current_block_idx: Option<usize> = None;
         let mut current_block_type = String::new();
+        // Response metadata accumulated from message_start + message_delta events.
+        let mut sse_meta = LlmResponseMeta::default();
 
         let mut byte_stream = resp.bytes_stream();
         let mut line_buf = String::new();
@@ -537,6 +541,7 @@ impl AnthropicProvider {
                                 &mut current_block_idx,
                                 &mut current_block_type,
                                 &token_sink,
+                                &mut sse_meta,
                             )
                             .await;
                         }
@@ -569,15 +574,15 @@ impl AnthropicProvider {
                 .collect();
             if !items.is_empty() {
                 debug!(count = items.len(), "Anthropic SSE: tool calls received");
-                return Ok(LlmResponse::ToolCalls(items));
+                return Ok(LlmResponse::ToolCalls(items, sse_meta));
             }
         }
 
         if !thinking_buf.is_empty() {
-            return Ok(LlmResponse::Thinking(thinking_buf));
+            return Ok(LlmResponse::Thinking(thinking_buf, sse_meta));
         }
 
-        Ok(LlmResponse::FinalAnswer(text_buf))
+        Ok(LlmResponse::FinalAnswer(text_buf, sse_meta))
     }
 }
 
@@ -593,8 +598,18 @@ async fn process_sse_event(
     current_block_idx: &mut Option<usize>,
     current_block_type: &mut String,
     token_sink: &Option<mpsc::Sender<String>>,
+    meta: &mut LlmResponseMeta,
 ) {
     match event_type {
+        // `message_start` carries model, id, and input_tokens.
+        "message_start" => {
+            if let Some(msg) = json.get("message") {
+                meta.model = msg.get("model").and_then(|v| v.as_str()).map(String::from);
+                meta.response_id = msg.get("id").and_then(|v| v.as_str()).map(String::from);
+                meta.input_tokens = msg.pointer("/usage/input_tokens").and_then(|v| v.as_u64());
+            }
+        }
+
         "content_block_start" => {
             let idx = json.pointer("/index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let block_type = json
@@ -661,14 +676,27 @@ async fn process_sse_event(
             }
         }
 
-        // message_delta and message_stop are informational; no state needed.
+        // `message_delta` carries stop_reason and output_tokens.
+        "message_delta" => {
+            meta.finish_reason = json
+                .pointer("/delta/stop_reason")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            if let Some(out) = json
+                .pointer("/usage/output_tokens")
+                .and_then(|v| v.as_u64())
+            {
+                meta.output_tokens = Some(out);
+            }
+        }
+
         _ => {}
     }
 }
 
 // ── Response parser (non-streaming) ──────────────────────────────────────────
 
-fn parse_response_json(json: &Value) -> anyhow::Result<LlmResponse> {
+fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<LlmResponse> {
     let content = json
         .get("content")
         .and_then(|v| v.as_array())
@@ -720,10 +748,29 @@ fn parse_response_json(json: &Value) -> anyhow::Result<LlmResponse> {
             count = tool_calls.len(),
             "Anthropic non-streaming: tool calls received"
         );
-        return Ok(LlmResponse::ToolCalls(tool_calls));
+        return Ok(LlmResponse::ToolCalls(tool_calls, meta));
     }
     if !thinking_parts.is_empty() {
-        return Ok(LlmResponse::Thinking(thinking_parts.join("")));
+        return Ok(LlmResponse::Thinking(thinking_parts.join(""), meta));
     }
-    Ok(LlmResponse::FinalAnswer(text_parts.join("")))
+    Ok(LlmResponse::FinalAnswer(text_parts.join(""), meta))
+}
+
+/// Extract [`LlmResponseMeta`] from an Anthropic non-streaming JSON response.
+///
+/// Top-level fields: `model`, `id`, `stop_reason`, `usage.input_tokens`,
+/// `usage.output_tokens`.
+fn extract_anthropic_meta(json: &Value) -> LlmResponseMeta {
+    LlmResponseMeta {
+        model: json.get("model").and_then(|v| v.as_str()).map(String::from),
+        response_id: json.get("id").and_then(|v| v.as_str()).map(String::from),
+        finish_reason: json
+            .get("stop_reason")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        input_tokens: json.pointer("/usage/input_tokens").and_then(|v| v.as_u64()),
+        output_tokens: json
+            .pointer("/usage/output_tokens")
+            .and_then(|v| v.as_u64()),
+    }
 }

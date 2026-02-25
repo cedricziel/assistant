@@ -338,7 +338,7 @@ impl Orchestrator {
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
-                LlmResponse::FinalAnswer(text) => {
+                LlmResponse::FinalAnswer(text, _meta) => {
                     let assistant_msg = {
                         let mut m = assistant_core::Message::assistant(conversation_id, &text);
                         m.turn = base_turn + iteration as i64 + 1;
@@ -421,7 +421,7 @@ impl Orchestrator {
                 }
 
                 // ── Tool calls ────────────────────────────────────────────────
-                LlmResponse::ToolCalls(tool_call_items) => {
+                LlmResponse::ToolCalls(tool_call_items, _meta) => {
                     info!(
                         count = tool_call_items.len(),
                         iteration, "LLM requested tool execution(s)"
@@ -670,7 +670,7 @@ impl Orchestrator {
                 }
 
                 // ── Intermediate thinking step ────────────────────────────────
-                LlmResponse::Thinking(text) => {
+                LlmResponse::Thinking(text, _meta) => {
                     debug!(iteration, "LLM emitted thinking step");
                     // Persist to DB so thinking is preserved, but the
                     // interface (Slack) will never display it directly.
@@ -774,7 +774,7 @@ impl Orchestrator {
 
             match response {
                 // ── Final answer ──────────────────────────────────────────────
-                LlmResponse::FinalAnswer(text) => {
+                LlmResponse::FinalAnswer(text, _meta) => {
                     info!(iteration, "LLM returned final answer");
 
                     let assistant_msg = {
@@ -788,7 +788,7 @@ impl Orchestrator {
                 }
 
                 // ── Tool calls ────────────────────────────────────────────────
-                LlmResponse::ToolCalls(tool_call_items) => {
+                LlmResponse::ToolCalls(tool_call_items, _meta) => {
                     info!(
                         count = tool_call_items.len(),
                         "LLM requested tool execution(s)"
@@ -923,7 +923,7 @@ impl Orchestrator {
                 }
 
                 // ── Intermediate thinking step ────────────────────────────────
-                LlmResponse::Thinking(text) => {
+                LlmResponse::Thinking(text, _meta) => {
                     debug!(iteration, "LLM emitted thinking step");
                     history.push(ChatHistoryMessage::Text {
                         role: ChatRole::Assistant,
@@ -1017,7 +1017,7 @@ impl Orchestrator {
             let response = response?;
 
             match response {
-                LlmResponse::FinalAnswer(text) => {
+                LlmResponse::FinalAnswer(text, _meta) => {
                     info!(iteration, "Streaming LLM returned final answer");
 
                     let assistant_msg = {
@@ -1030,7 +1030,7 @@ impl Orchestrator {
                     return Ok(TurnResult { answer: text });
                 }
 
-                LlmResponse::ToolCalls(tool_call_items) => {
+                LlmResponse::ToolCalls(tool_call_items, _meta) => {
                     info!(
                         count = tool_call_items.len(),
                         iteration, "Streaming LLM requested tool execution(s)"
@@ -1156,7 +1156,7 @@ impl Orchestrator {
                     }
                 }
 
-                LlmResponse::Thinking(text) => {
+                LlmResponse::Thinking(text, _meta) => {
                     debug!(iteration, "Streaming LLM emitted thinking step");
                     history.push(ChatHistoryMessage::Text {
                         role: ChatRole::Assistant,
