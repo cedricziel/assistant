@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use assistant_core::Interface;
+use assistant_core::{strip_html_comments, Interface};
 use assistant_storage::StorageLayer;
 use chrono::Utc;
 use cron::Schedule;
@@ -116,8 +116,8 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         return Ok(());
     }
 
-    let prompt = std::fs::read_to_string(heartbeat_path)?;
-    let prompt = prompt.trim().to_string();
+    let raw = std::fs::read_to_string(heartbeat_path)?;
+    let prompt = strip_html_comments(&raw);
 
     if prompt.is_empty() {
         return Ok(());

@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    Attachment, ExecutionContext, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
+    strip_html_comments, Attachment, ExecutionContext, Interface, MemoryLoader, Message,
+    MessageRole, ToolHandler,
 };
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
@@ -1947,33 +1948,6 @@ fn escape_xml(input: &str) -> String {
         }
     }
     escaped
-}
-
-/// Remove `<!-- ... -->` HTML comments from a string and trim the result.
-/// Used to detect whether BOOT.md / HEARTBEAT.md contain actual instructions
-/// or are just comment-only placeholder files.
-fn strip_html_comments(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut rest = input;
-    while let Some(start) = rest.find("<!--") {
-        result.push_str(&rest[..start]);
-        match rest[start..].find("-->") {
-            Some(end) => rest = &rest[start + end + 3..],
-            None => {
-                // Unterminated comment — drop everything from `<!--` onward.
-                break;
-            }
-        }
-    }
-    result.push_str(rest);
-    // Also strip the markdown heading if it's the only non-comment content
-    // (e.g. "# Boot\n" with nothing else).
-    let trimmed = result.trim();
-    let stripped = trimmed
-        .strip_prefix("# Boot")
-        .or_else(|| trimmed.strip_prefix("# Heartbeat"))
-        .unwrap_or(trimmed);
-    stripped.trim().to_string()
 }
 
 #[cfg(test)]

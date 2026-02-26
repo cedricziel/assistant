@@ -499,3 +499,101 @@ fn write_default(path: &Path, content: &str) {
         debug!(path = %path.display(), "Wrote default memory file");
     }
 }
+
+/// Remove `<!-- ... -->` HTML comments from a string, strip any lone heading
+/// line (e.g. `# Boot`, `# Heartbeat`), and trim whitespace.
+///
+/// Used by the orchestrator and scheduler to detect whether template files
+/// like BOOT.md / HEARTBEAT.md contain actual instructions or are just
+/// comment-only placeholders.
+pub fn strip_html_comments(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find("<!--") {
+        result.push_str(&rest[..start]);
+        match rest[start..].find("-->") {
+            Some(end) => rest = &rest[start + end + 3..],
+            None => {
+                // Unterminated comment — drop everything from `<!--` onward.
+                rest = "";
+                break;
+            }
+        }
+    }
+    result.push_str(rest);
+
+    // Strip a lone markdown heading if it's the only non-comment content.
+    let trimmed = result.trim();
+    if let Some(after_heading) = trimmed.strip_prefix('#') {
+        // Consume the rest of the first line (e.g. "# Boot\n").
+        let first_line_end = after_heading.find('\n').unwrap_or(after_heading.len());
+        let remainder = after_heading[first_line_end..].trim();
+        if remainder.is_empty() {
+            return String::new();
+        }
+    }
+    trimmed.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_comments_empty_input() {
+        assert_eq!(strip_html_comments(""), "");
+    }
+
+    #[test]
+    fn strip_comments_no_comments() {
+        assert_eq!(strip_html_comments("hello world"), "hello world");
+    }
+
+    #[test]
+    fn strip_comments_only_comments() {
+        let input = "<!-- this is a comment -->";
+        assert_eq!(strip_html_comments(input), "");
+    }
+
+    #[test]
+    fn strip_comments_heading_plus_comments_is_empty() {
+        let input = "# Boot\n\n<!-- just a placeholder -->\n<!-- nothing here -->";
+        assert_eq!(strip_html_comments(input), "");
+    }
+
+    #[test]
+    fn strip_comments_default_heartbeat_template_is_empty() {
+        assert_eq!(strip_html_comments(DEFAULT_HEARTBEAT), "");
+    }
+
+    #[test]
+    fn strip_comments_default_boot_template_is_empty() {
+        assert_eq!(strip_html_comments(DEFAULT_BOOT), "");
+    }
+
+    #[test]
+    fn strip_comments_preserves_real_content() {
+        let input = "# Boot\n\n<!-- setup -->\nCheck email and calendar.";
+        let result = strip_html_comments(input);
+        assert!(
+            result.contains("Check email and calendar."),
+            "real content must be preserved, got: {result:?}"
+        );
+        assert!(
+            !result.contains("<!--"),
+            "comments must be stripped, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn strip_comments_unterminated_comment_drops_remainder() {
+        let input = "before <!-- unterminated";
+        assert_eq!(strip_html_comments(input), "before");
+    }
+
+    #[test]
+    fn strip_comments_multiple_comments() {
+        let input = "a <!-- x --> b <!-- y --> c";
+        assert_eq!(strip_html_comments(input), "a  b  c");
+    }
+}
