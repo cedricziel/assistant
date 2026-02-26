@@ -189,6 +189,12 @@ version = "0.1.14"
 [[package]]
 name = "assistant-a2a-json-schema"
 version = "0.1.14"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
+]
 
 [[package]]
 name = "assistant-a2a-proto"
@@ -472,17 +478,21 @@ name = "assistant-web-ui"
 version = "0.1.14"
 dependencies = [
  "anyhow",
+ "assistant-a2a-json-schema",
  "assistant-storage",
  "axum 0.8.8",
  "chrono",
  "clap",
+ "futures",
  "serde",
  "serde_json",
  "sqlx",
  "tokio",
+ "tokio-stream",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
