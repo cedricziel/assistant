@@ -4177,4 +4177,238 @@ mod tests {
             .unwrap();
         assert_eq!(result.answer, "submitted answer");
     }
+
+    // ── Subagent integration tests ────────────────────────────────────────────
+
+    use assistant_core::{AgentReportStatus, AgentSpawn, SubagentRunner, DEFAULT_MAX_AGENT_DEPTH};
+
+    #[tokio::test]
+    async fn subagent_spawn_complete_round_trip() {
+        let server = MockServer::start().await;
+
+        // The subagent's LLM will return a final answer directly.
+        mount_answer(&server, "subagent result").await;
+
+        let (orch, storage) = build(&server.uri()).await;
+
+        let spawn = AgentSpawn {
+            agent_id: "test-agent-1".into(),
+            task: "What is 2+2?".into(),
+            system_prompt: None,
+            model: None,
+            allowed_tools: vec![],
+        };
+
+        let report = orch.run_subagent(spawn, 0).await.unwrap();
+
+        assert_eq!(report.status, AgentReportStatus::Completed);
+        assert_eq!(report.content, "subagent result");
+
+        // Verify lifecycle was recorded in the DB.
+        let agent_store = storage.agent_store();
+        let record = agent_store
+            .get("test-agent-1")
+            .await
+            .unwrap()
+            .expect("agent record should exist");
+        assert_eq!(record.status, assistant_storage::AgentStatus::Completed);
+        assert!(record.completed_at.is_some());
+        assert_eq!(record.task, "What is 2+2?");
+    }
+
+    #[tokio::test]
+    async fn subagent_nesting_depth_limit_enforced() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "should not reach here").await;
+
+        let (orch, _) = build(&server.uri()).await;
+
+        // Spawn at max depth — should be rejected.
+        let spawn = AgentSpawn {
+            agent_id: "deep-agent".into(),
+            task: "too deep".into(),
+            system_prompt: None,
+            model: None,
+            allowed_tools: vec![],
+        };
+
+        let report = orch
+            .run_subagent(spawn, DEFAULT_MAX_AGENT_DEPTH)
+            .await
+            .unwrap();
+
+        assert_eq!(report.status, AgentReportStatus::Failed);
+        assert!(
+            report.content.contains("depth"),
+            "error should mention depth: {}",
+            report.content
+        );
+
+        // No LLM call should have been made.
+        let reqs = server.received_requests().await.unwrap();
+        assert!(
+            reqs.is_empty(),
+            "no LLM calls should be made when depth limit is exceeded"
+        );
+    }
+
+    #[tokio::test]
+    async fn subagent_tool_filtering_restricts_tools() {
+        let server = MockServer::start().await;
+
+        // Subagent LLM tries to call "bash" which is NOT in the allowed list.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["bash"])))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Second call returns final answer.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _) = build(&server.uri()).await;
+
+        let spawn = AgentSpawn {
+            agent_id: "restricted-agent".into(),
+            task: "try to use bash".into(),
+            system_prompt: None,
+            model: None,
+            // Only allow file-read — bash should be rejected.
+            allowed_tools: vec!["file-read".into()],
+        };
+
+        let report = orch.run_subagent(spawn, 0).await.unwrap();
+
+        // The subagent should still complete (the LLM got a rejection
+        // observation and then returned a final answer).
+        assert_eq!(report.status, AgentReportStatus::Completed);
+        assert_eq!(report.content, "done");
+
+        // Verify the first LLM call had the restricted tool set —
+        // the request should only contain "file-read", not "bash".
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 2);
+        let body: Value = serde_json::from_slice(&reqs[0].body).unwrap();
+        let tool_names: Vec<String> = body["tools"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str().map(String::from))
+            .collect();
+        assert!(
+            tool_names.contains(&"file-read".to_string()),
+            "file-read should be in tool specs: {tool_names:?}"
+        );
+        assert!(
+            !tool_names.contains(&"bash".to_string()),
+            "bash should NOT be in tool specs: {tool_names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn subagent_cancellation_stops_loop() {
+        let server = MockServer::start().await;
+
+        // The subagent LLM returns tool calls indefinitely, so the subagent
+        // would loop forever if not cancelled.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(ollama_tool_calls(&["unknown-tool"]))
+                    // Add a small delay so the cancel has time to trigger
+                    .set_body_json(ollama_tool_calls(&["unknown-tool"])),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, storage) = build(&server.uri()).await;
+
+        let spawn = AgentSpawn {
+            agent_id: "cancel-me".into(),
+            task: "infinite loop task".into(),
+            system_prompt: None,
+            model: None,
+            allowed_tools: vec![],
+        };
+
+        // Cancel the agent before it starts by pre-cancelling.
+        // We can't easily cancel mid-loop in a unit test, but we can
+        // test that the cancel_agent mechanism works by:
+        // 1. Registering the token manually would require access to internals.
+        // Instead, test cancel_agent returns false for unknown agents.
+        let cancelled = orch.cancel_agent("nonexistent").await.unwrap();
+        assert!(
+            !cancelled,
+            "cancelling nonexistent agent should return false"
+        );
+
+        // Test the actual cancellation flow: spawn in a task, cancel shortly after.
+        let orch2 = orch.clone();
+        let handle = tokio::spawn(async move { orch2.run_subagent(spawn, 0).await.unwrap() });
+
+        // Give the subagent a moment to start and register the token.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let cancelled = orch.cancel_agent("cancel-me").await.unwrap();
+        assert!(cancelled, "should find and cancel the running agent");
+
+        // Wait for the subagent to finish.
+        let report = handle.await.unwrap();
+        assert_eq!(
+            report.status,
+            AgentReportStatus::Cancelled,
+            "subagent should report Cancelled status, got: {:?}",
+            report.status
+        );
+
+        // Verify lifecycle recorded as cancelled.
+        let agent_store = storage.agent_store();
+        let record = agent_store
+            .get("cancel-me")
+            .await
+            .unwrap()
+            .expect("agent record should exist");
+        assert_eq!(record.status, assistant_storage::AgentStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn subagent_llm_error_records_failed_status() {
+        let server = MockServer::start().await;
+
+        // LLM returns a 500 error.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let (orch, storage) = build(&server.uri()).await;
+
+        let spawn = AgentSpawn {
+            agent_id: "error-agent".into(),
+            task: "this will fail".into(),
+            system_prompt: None,
+            model: None,
+            allowed_tools: vec![],
+        };
+
+        let report = orch.run_subagent(spawn, 0).await.unwrap();
+
+        assert_eq!(report.status, AgentReportStatus::Failed);
+        assert!(report.content.contains("LLM error"));
+
+        let agent_store = storage.agent_store();
+        let record = agent_store
+            .get("error-agent")
+            .await
+            .unwrap()
+            .expect("agent record should exist");
+        assert_eq!(record.status, assistant_storage::AgentStatus::Failed);
+    }
 }
