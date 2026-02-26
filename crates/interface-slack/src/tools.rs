@@ -675,11 +675,31 @@ pub fn build_slack_tools(
 ///
 /// Returns `Ok(bytes)` on success, or an error string for
 /// `ToolOutput::error()`.
+///
+/// Handles the following real-world LLM encoding quirks:
+/// - Data-URI prefixes such as `data:image/png;base64,` are stripped.
+/// - ASCII whitespace (newlines, spaces) inserted for readability is stripped.
+/// - Missing trailing `=` padding is tolerated via a `STANDARD_NO_PAD`
+///   fallback so both padded and unpadded base64 are accepted.
 fn resolve_upload_bytes(params: &HashMap<String, Value>) -> Result<Vec<u8>, String> {
     if let Some(b64) = params.get("content_base64").and_then(|v| v.as_str()) {
         use base64::Engine as _;
+
+        // Strip "data:<mime>;base64," prefix produced by some callers.
+        let b64 = match b64.find(";base64,") {
+            Some(idx) => &b64[idx + ";base64,".len()..],
+            None => b64,
+        };
+
+        // Remove ASCII whitespace (newlines, spaces) that LLMs commonly
+        // insert into long base64 strings for readability.
+        let b64_clean: String = b64.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+
+        // Try padded decode first; fall back to no-pad for inputs where the
+        // trailing '=' characters have been omitted by the LLM.
         base64::engine::general_purpose::STANDARD
-            .decode(b64)
+            .decode(&b64_clean)
+            .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(&b64_clean))
             .map_err(|e| format!("Invalid base64 in content_base64: {e}"))
     } else if let Some(text) = params.get("content").and_then(|v| v.as_str()) {
         Ok(text.as_bytes().to_vec())
@@ -881,5 +901,52 @@ mod tests {
         let p = params(&[("content_base64", json!(""))]);
         let bytes = resolve_upload_bytes(&p).unwrap();
         assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn upload_bytes_base64_with_newlines_decodes_correctly() {
+        use base64::Engine as _;
+        let original = vec![0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]; // PNG magic
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&original);
+        // Simulate an LLM inserting a newline in the middle of the string.
+        let with_newline = format!("{}\n{}", &encoded[..4], &encoded[4..]);
+        let p = params(&[("content_base64", json!(with_newline))]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        assert_eq!(
+            bytes, original,
+            "whitespace in base64 should be stripped before decoding"
+        );
+    }
+
+    #[test]
+    fn upload_bytes_base64_without_padding_decodes_correctly() {
+        use base64::Engine as _;
+        let original = vec![1u8, 2, 3]; // 3 bytes → 4 base64 chars with no padding needed
+        let encoded = base64::engine::general_purpose::STANDARD_NO_PAD.encode(&original);
+        // Verify the encoded string has no '=' padding.
+        assert!(
+            !encoded.contains('='),
+            "test setup: encoded must lack padding"
+        );
+        let p = params(&[("content_base64", json!(encoded))]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        assert_eq!(
+            bytes, original,
+            "base64 without trailing '=' padding should decode correctly"
+        );
+    }
+
+    #[test]
+    fn upload_bytes_data_uri_prefix_stripped() {
+        use base64::Engine as _;
+        let original = vec![0x89u8, 0x50, 0x4E, 0x47]; // PNG magic bytes
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&original);
+        let data_uri = format!("data:image/png;base64,{encoded}");
+        let p = params(&[("content_base64", json!(data_uri))]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        assert_eq!(
+            bytes, original,
+            "data-URI prefix should be stripped before base64 decoding"
+        );
     }
 }
