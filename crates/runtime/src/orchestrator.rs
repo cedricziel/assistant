@@ -48,6 +48,17 @@ pub struct TurnResult {
     pub attachments: Vec<Attachment>,
 }
 
+/// Per-conversation extension tool registration consumed by the worker.
+///
+/// Interfaces (Slack, Mattermost) register their per-turn tools and
+/// attachments before publishing a [`TurnRequest`](bus_messages::TurnRequest)
+/// to the bus.  The worker removes the registration when processing the
+/// request.
+struct ExtensionRegistration {
+    tools: Vec<Arc<dyn ToolHandler>>,
+    attachments: Vec<ContentBlock>,
+}
+
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 
 // ── Built-in extension tools ──────────────────────────────────────────────────
@@ -122,6 +133,12 @@ pub struct Orchestrator {
     memory_loader: MemoryLoader,
     /// When true, record full message content on LLM spans (PII-sensitive).
     trace_content: bool,
+    /// Per-conversation token sinks for streaming turns dispatched through
+    /// the bus.  Consumed (removed) by the worker when processing.
+    token_sinks: tokio::sync::RwLock<HashMap<Uuid, mpsc::Sender<String>>>,
+    /// Per-conversation extension tool registrations for interface-specific
+    /// turns dispatched through the bus.  Consumed by the worker.
+    extension_registrations: tokio::sync::RwLock<HashMap<Uuid, ExtensionRegistration>>,
 }
 
 impl Orchestrator {
@@ -154,6 +171,8 @@ impl Orchestrator {
             confirmation_callback: None,
             memory_loader,
             trace_content: config.mirror.trace_content,
+            token_sinks: tokio::sync::RwLock::new(HashMap::new()),
+            extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
         }
     }
 
@@ -164,11 +183,45 @@ impl Orchestrator {
 
     // ── Bus-based turn processing ────────────────────────────────────────────
 
+    /// Register a token sink for a streaming turn.
+    ///
+    /// Call this *before* publishing the [`TurnRequest`](bus_messages::TurnRequest)
+    /// to the bus.  The worker will consume (remove) the sink when it processes
+    /// the request, routing tokens through it via
+    /// [`run_turn_streaming`](Self::run_turn_streaming).
+    pub async fn register_token_sink(&self, conversation_id: Uuid, sink: mpsc::Sender<String>) {
+        self.token_sinks.write().await.insert(conversation_id, sink);
+    }
+
+    /// Register extension tools and attachments for an interface-specific turn.
+    ///
+    /// Call this *before* publishing the [`TurnRequest`](bus_messages::TurnRequest)
+    /// to the bus.  The worker will consume the registration when it processes
+    /// the request, routing to
+    /// [`run_turn_with_tools`](Self::run_turn_with_tools).
+    pub async fn register_extensions(
+        &self,
+        conversation_id: Uuid,
+        tools: Vec<Arc<dyn ToolHandler>>,
+        attachments: Vec<ContentBlock>,
+    ) {
+        self.extension_registrations.write().await.insert(
+            conversation_id,
+            ExtensionRegistration { tools, attachments },
+        );
+    }
+
     /// Run the turn-processing worker loop.
     ///
-    /// Claims messages from the [`topic::TURN_REQUEST`] topic, processes them
-    /// via the internal [`run_turn`](Self::run_turn) method, and publishes
-    /// results to [`topic::TURN_RESULT`].
+    /// Claims messages from the [`topic::TURN_REQUEST`] topic and dispatches
+    /// them to the appropriate processing method:
+    ///
+    /// - **Extension tools registered** → [`run_turn_with_tools`](Self::run_turn_with_tools)
+    /// - **Token sink registered** → [`run_turn_streaming`](Self::run_turn_streaming)
+    /// - **Neither** → [`run_turn`](Self::run_turn)
+    ///
+    /// After processing, a [`TurnResult`](bus_messages::TurnResult) is
+    /// published to [`topic::TURN_RESULT`].
     ///
     /// This method runs indefinitely and should be spawned as a background
     /// task.  It exits when the tokio task is cancelled / dropped.
@@ -205,20 +258,49 @@ impl Orchestrator {
                         .map(parse_interface)
                         .unwrap_or(Interface::Cli);
 
+                    let conv_id = turn_req.conversation_id;
+
                     debug!(
-                        conversation_id = %turn_req.conversation_id,
+                        conversation_id = %conv_id,
                         worker_id,
                         "Processing turn request"
                     );
 
-                    match self
-                        .run_turn(&turn_req.prompt, turn_req.conversation_id, interface, None)
+                    // Check for registered side-channel resources.
+                    let ext = self.extension_registrations.write().await.remove(&conv_id);
+                    let token_sink = self.token_sinks.write().await.remove(&conv_id);
+
+                    // Dispatch to the appropriate processing method.
+                    let result: Result<TurnResult> = if let Some(reg) = ext {
+                        // Extension-tool turn (Slack, Mattermost).
+                        self.run_turn_with_tools(
+                            &turn_req.prompt,
+                            conv_id,
+                            interface,
+                            reg.tools,
+                            None,
+                            reg.attachments,
+                        )
                         .await
-                    {
-                        Ok(result) => {
+                        .map(|()| TurnResult {
+                            answer: String::new(),
+                            attachments: vec![],
+                        })
+                    } else if let Some(sink) = token_sink {
+                        // Streaming turn (CLI, Signal).
+                        self.run_turn_streaming(&turn_req.prompt, conv_id, interface, sink, None)
+                            .await
+                    } else {
+                        // Standard non-streaming turn.
+                        self.run_turn(&turn_req.prompt, conv_id, interface, None)
+                            .await
+                    };
+
+                    match result {
+                        Ok(turn_result) => {
                             let bus_result = bus_messages::TurnResult {
-                                conversation_id: turn_req.conversation_id,
-                                content: result.answer,
+                                conversation_id: conv_id,
+                                content: turn_result.answer,
                                 turn: 0,
                             };
 
@@ -229,7 +311,7 @@ impl Orchestrator {
                                         topic::TURN_RESULT,
                                         serde_json::to_value(&bus_result).unwrap_or_default(),
                                     )
-                                    .with_conversation_id(turn_req.conversation_id),
+                                    .with_conversation_id(conv_id),
                                 )
                                 .await
                             {
@@ -245,7 +327,7 @@ impl Orchestrator {
                             }
 
                             info!(
-                                conversation_id = %turn_req.conversation_id,
+                                conversation_id = %conv_id,
                                 worker_id,
                                 "Turn completed via worker"
                             );
@@ -253,7 +335,7 @@ impl Orchestrator {
                         Err(e) => {
                             warn!(
                                 error = %e,
-                                conversation_id = %turn_req.conversation_id,
+                                conversation_id = %conv_id,
                                 worker_id,
                                 "Turn failed in worker"
                             );
