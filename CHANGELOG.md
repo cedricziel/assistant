@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.10](https://github.com/cedricziel/assistant/compare/v0.1.9...v0.1.10) (2026-02-26)
+
+
+### Features
+
+* add attachment/file sending support across all interfaces ([#56](https://github.com/cedricziel/assistant/issues/56)) ([e5ae6f1](https://github.com/cedricziel/assistant/commit/e5ae6f14a42fc5b60bc176c82ee2238a41a54ea2))
+* **cli:** deliver file attachments from tool outputs to disk ([e5ae6f1](https://github.com/cedricziel/assistant/commit/e5ae6f14a42fc5b60bc176c82ee2238a41a54ea2))
+* **core:** add Attachment type and attachment support to ToolOutput ([e5ae6f1](https://github.com/cedricziel/assistant/commit/e5ae6f14a42fc5b60bc176c82ee2238a41a54ea2))
+* **mattermost:** add file upload tool with multipart support ([e5ae6f1](https://github.com/cedricziel/assistant/commit/e5ae6f14a42fc5b60bc176c82ee2238a41a54ea2))
+* **runtime:** collect attachments from tool outputs and add error recovery ([e5ae6f1](https://github.com/cedricziel/assistant/commit/e5ae6f14a42fc5b60bc176c82ee2238a41a54ea2))
+* **slack:** add binary/base64 upload support to upload tool ([e5ae6f1](https://github.com/cedricziel/assistant/commit/e5ae6f14a42fc5b60bc176c82ee2238a41a54ea2))
+
+
+### Bug Fixes
+
+* **runtime:** prevent empty FinalAnswer from poisoning conversation history ([e5ae6f1](https://github.com/cedricziel/assistant/commit/e5ae6f14a42fc5b60bc176c82ee2238a41a54ea2))
+* **runtime:** prevent empty FinalAnswer from poisoning conversation history ([#53](https://github.com/cedricziel/assistant/issues/53)) ([e11cf60](https://github.com/cedricziel/assistant/commit/e11cf60dc3851f06ff44e9f4afd68d3f8950e082))
+
 ## [0.1.9](https://github.com/cedricziel/assistant/compare/v0.1.8...v0.1.9) (2026-02-25)
 
 
