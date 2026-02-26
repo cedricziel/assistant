@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.12](https://github.com/cedricziel/assistant/compare/v0.1.11...v0.1.12) (2026-02-26)
+
+
+### Features
+
+* **core:** extract memory templates to .md files, add TOOLS/BOOTSTRAP/HEARTBEAT/BOOT ([#60](https://github.com/cedricziel/assistant/issues/60)) ([0837a23](https://github.com/cedricziel/assistant/commit/0837a23515dc60842ca7503a1e1d47c70c24c2d1))
+
+
+### Bug Fixes
+
+* **packaging:** use /run/systemd/users instead of loginctl for service restart ([#58](https://github.com/cedricziel/assistant/issues/58)) ([d4ff032](https://github.com/cedricziel/assistant/commit/d4ff032460acc6eb04b9ff72d9878a6dc9dc2db3))
+* **slack,mattermost:** handle whitespace, no-pad, and data-URI in base64 uploads ([#62](https://github.com/cedricziel/assistant/issues/62)) ([7f753ff](https://github.com/cedricziel/assistant/commit/7f753ff297ae8d9828d90c980a6173256884f680))
+
 ## [0.1.11](https://github.com/cedricziel/assistant/compare/v0.1.10...v0.1.11) (2026-02-26)
 
 
