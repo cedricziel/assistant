@@ -1,6 +1,6 @@
 [package]
 name = "assistant-core"
-version = "0.1.12"
+version = "0.1.13"
 license.workspace = true
 edition.workspace = true
 description = "Core types, skill definitions, and shared traits for the assistant workspace"
