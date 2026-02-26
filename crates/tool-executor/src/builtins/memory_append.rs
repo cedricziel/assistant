@@ -9,12 +9,40 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{
-    base_dir, resolve_dir, resolve_path, AssistantConfig, ExecutionContext, ToolHandler, ToolOutput,
-};
 use async_trait::async_trait;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
+
+use assistant_core::{
+    base_dir, resolve_dir, resolve_path, AssistantConfig, ExecutionContext, ToolHandler, ToolOutput,
+};
+
+/// Canonicalize as much of `p` as exists, then re-append non-existent tail
+/// components.  This allows security checks to work even when parent
+/// directories have not been created yet (cold-start scenario).
+fn canonicalize_prefix(p: &std::path::Path) -> PathBuf {
+    let mut components = vec![];
+    let mut cur = p.to_path_buf();
+    loop {
+        if let Ok(c) = cur.canonicalize() {
+            let mut result = c;
+            for comp in components.into_iter().rev() {
+                result = result.join(comp);
+            }
+            return result;
+        }
+        match (
+            cur.parent().map(|p| p.to_path_buf()),
+            cur.file_name().map(|n| n.to_owned()),
+        ) {
+            (Some(parent), Some(name)) => {
+                components.push(name);
+                cur = parent;
+            }
+            _ => return p.to_path_buf(),
+        }
+    }
+}
 
 pub struct MemoryAppendHandler {
     config: Arc<AssistantConfig>,
@@ -37,7 +65,16 @@ impl MemoryAppendHandler {
             "memory" => resolve_path(&mem.memory_path, &base, "MEMORY.md"),
             notes if notes.starts_with("notes/") => {
                 let date = &notes["notes/".len()..];
-                if date.len() != 10 || !date.chars().all(|c| c.is_ascii_digit() || c == '-') {
+                // Enforce YYYY-MM-DD: positions 4 and 7 must be '-', rest digits.
+                let valid_format = date.len() == 10
+                    && date.chars().enumerate().all(|(i, c)| {
+                        if i == 4 || i == 7 {
+                            c == '-'
+                        } else {
+                            c.is_ascii_digit()
+                        }
+                    });
+                if !valid_format {
                     return None;
                 }
                 let notes_dir = resolve_dir(&mem.notes_dir, &base, "memory");
@@ -47,14 +84,8 @@ impl MemoryAppendHandler {
         };
 
         // Security: verify the resolved path stays within ~/.assistant/.
-        let canonical_base = base.canonicalize().unwrap_or(base.clone());
-        let canonical_path = if path.exists() {
-            path.canonicalize().ok()?
-        } else if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
-            parent.canonicalize().ok()?.join(name)
-        } else {
-            return None;
-        };
+        let canonical_base = canonicalize_prefix(&base);
+        let canonical_path = canonicalize_prefix(&path);
         if !canonical_path.starts_with(&canonical_base) {
             return None;
         }
@@ -118,24 +149,164 @@ impl ToolHandler for MemoryAppendHandler {
 
         // Create parent directories if they don't exist yet (e.g. for a new notes/ day).
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                return Ok(ToolOutput::error(format!(
+                    "Failed to create directories for '{}': {}",
+                    path.display(),
+                    e
+                )));
+            }
         }
 
-        let mut file = OpenOptions::new()
+        let mut file = match OpenOptions::new()
             .create(true)
             .append(true)
             .open(&path)
-            .await?;
+            .await
+        {
+            Ok(f) => f,
+            Err(e) => {
+                return Ok(ToolOutput::error(format!(
+                    "Failed to open '{}': {}",
+                    path.display(),
+                    e
+                )))
+            }
+        };
 
         // Ensure entries start on their own line.
         let content = format!("\n{}", text);
-        file.write_all(content.as_bytes()).await?;
-        file.flush().await?;
+        if let Err(e) = file.write_all(content.as_bytes()).await {
+            return Ok(ToolOutput::error(format!(
+                "Failed to write to '{}': {}",
+                path.display(),
+                e
+            )));
+        }
+        if let Err(e) = file.flush().await {
+            return Ok(ToolOutput::error(format!(
+                "Failed to flush '{}': {}",
+                path.display(),
+                e
+            )));
+        }
 
         Ok(ToolOutput::success(format!(
             "Appended {} bytes to {}",
-            text.len(),
+            content.len(),
             path.display()
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonicalize_prefix_returns_input_when_nothing_exists() {
+        let p = PathBuf::from("/nonexistent/deeply/nested/path");
+        let result = canonicalize_prefix(&p);
+        // Should return the original path when nothing can be canonicalized.
+        assert_eq!(result, p);
+    }
+
+    #[test]
+    fn canonicalize_prefix_resolves_existing_ancestor() {
+        // /tmp always exists on macOS/Linux.
+        let p = PathBuf::from("/tmp/nonexistent_child/file.md");
+        let result = canonicalize_prefix(&p);
+        // The /tmp portion should be canonicalized, with the tail re-appended.
+        let canonical_tmp = PathBuf::from("/tmp")
+            .canonicalize()
+            .expect("/tmp must exist");
+        assert!(result.starts_with(&canonical_tmp));
+        assert!(result.ends_with("nonexistent_child/file.md"));
+    }
+
+    #[test]
+    fn date_validation_rejects_all_dashes() {
+        // "----------" is 10 chars of dashes — must be rejected.
+        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let result = handler.resolve_target("notes/----------");
+        assert!(result.is_none(), "all-dash string should be rejected");
+    }
+
+    #[test]
+    fn date_validation_rejects_bad_structure() {
+        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        // Digits in wrong positions.
+        assert!(
+            handler.resolve_target("notes/99-99-9999").is_none(),
+            "99-99-9999 should be rejected"
+        );
+        // Too short.
+        assert!(
+            handler.resolve_target("notes/2026-1-1").is_none(),
+            "short date should be rejected"
+        );
+    }
+
+    #[test]
+    fn date_validation_accepts_valid_date() {
+        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let result = handler.resolve_target("notes/2026-02-26");
+        assert!(result.is_some(), "valid ISO date should be accepted");
+    }
+
+    #[test]
+    fn unknown_target_returns_none() {
+        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        assert!(handler.resolve_target("bogus").is_none());
+        assert!(handler.resolve_target("").is_none());
+        assert!(handler.resolve_target("notes/").is_none());
+    }
+
+    fn test_ctx() -> ExecutionContext {
+        ExecutionContext {
+            conversation_id: uuid::Uuid::nil(),
+            turn: 0,
+            interface: assistant_core::Interface::Cli,
+            interactive: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn run_missing_params_returns_tool_error() {
+        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let ctx = test_ctx();
+
+        // Missing both params.
+        let out = handler.run(HashMap::new(), &ctx).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("target"));
+
+        // Missing text.
+        let mut params = HashMap::new();
+        params.insert(
+            "target".to_string(),
+            serde_json::Value::String("soul".to_string()),
+        );
+        let out = handler.run(params, &ctx).await.unwrap();
+        assert!(!out.success);
+        assert!(out.content.contains("text"));
+    }
+
+    #[tokio::test]
+    async fn run_unknown_target_returns_tool_error() {
+        let handler = MemoryAppendHandler::new(Arc::new(AssistantConfig::default()));
+        let ctx = test_ctx();
+        let mut params = HashMap::new();
+        params.insert(
+            "target".to_string(),
+            serde_json::Value::String("bogus".to_string()),
+        );
+        params.insert(
+            "text".to_string(),
+            serde_json::Value::String("hello".to_string()),
+        );
+        let out = handler.run(params, &ctx).await.unwrap();
+        assert!(!out.success, "unknown target should yield error ToolOutput");
+        assert!(out.content.contains("Unknown target"));
     }
 }
