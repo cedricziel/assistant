@@ -2,11 +2,13 @@
 //! LLM client, tool executor, and skill registry.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    Attachment, ExecutionContext, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
+    strip_html_comments, Attachment, ExecutionContext, Interface, MemoryLoader, Message,
+    MessageRole, ToolHandler,
 };
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
@@ -138,6 +140,66 @@ impl Orchestrator {
     pub fn with_confirmation_callback(mut self, cb: Arc<dyn ConfirmationCallback>) -> Self {
         self.confirmation_callback = Some(cb);
         self
+    }
+
+    /// Return the path to HEARTBEAT.md (used by the scheduler).
+    pub fn heartbeat_path(&self) -> &Path {
+        self.memory_loader.heartbeat_path()
+    }
+
+    /// Return the path to BOOT.md (per-session startup hook).
+    pub fn boot_path(&self) -> &Path {
+        self.memory_loader.boot_path()
+    }
+
+    /// Run the per-session startup hook (BOOT.md).
+    ///
+    /// Reads BOOT.md from the configured path.  If the file exists and contains
+    /// non-comment, non-empty content, its text is executed as a single silent
+    /// turn via [`run_turn`].  The result is logged but not displayed to the
+    /// user — BOOT.md is infrastructure, not conversation.
+    ///
+    /// Call this once per session, before the first interactive turn.  Returns
+    /// `Ok(true)` if a boot turn was executed, `Ok(false)` if skipped.
+    pub async fn run_boot(
+        &self,
+        conversation_id: uuid::Uuid,
+        interface: Interface,
+    ) -> Result<bool> {
+        let boot_path = self.memory_loader.boot_path();
+        if !boot_path.exists() {
+            debug!("No BOOT.md found, skipping startup hook");
+            return Ok(false);
+        }
+
+        let raw = std::fs::read_to_string(boot_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read BOOT.md: {e}"))?;
+
+        // Strip HTML comments and whitespace — an empty/comment-only file is
+        // treated as "no boot instructions".
+        let stripped = strip_html_comments(&raw);
+        if stripped.is_empty() {
+            debug!("BOOT.md is empty or comment-only, skipping startup hook");
+            return Ok(false);
+        }
+
+        info!(path = %boot_path.display(), "Running BOOT.md startup hook");
+        match self
+            .run_turn(&stripped, conversation_id, interface, None)
+            .await
+        {
+            Ok(turn) => {
+                info!(
+                    answer_len = turn.answer.len(),
+                    "BOOT.md startup hook completed"
+                );
+                Ok(true)
+            }
+            Err(e) => {
+                warn!(error = %e, "BOOT.md startup hook failed");
+                Err(e)
+            }
+        }
     }
 
     // ── Main entry point ──────────────────────────────────────────────────────

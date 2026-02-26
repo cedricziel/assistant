@@ -634,19 +634,30 @@ async fn main() -> Result<()> {
     let conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
     info!(conversation_id = %conversation_id, "Starting CLI session");
 
+    // 12. Run BOOT.md startup hook (if configured and non-empty).
+    match bs
+        .orchestrator
+        .run_boot(conversation_id, Interface::Cli)
+        .await
+    {
+        Ok(true) => info!("BOOT.md startup hook executed"),
+        Ok(false) => {}
+        Err(e) => warn!("BOOT.md startup hook failed: {e}"),
+    }
+
     println!(
         "Assistant ready. Model: {}  (type /help for commands)\n",
         bs.config.llm.model
     );
 
-    // 12. Build the reedline editor and prompt.
+    // 13. Build the reedline editor and prompt.
     let mut editor = Reedline::create();
     let prompt = DefaultPrompt::new(
         DefaultPromptSegment::Basic("assistant".to_string()),
         DefaultPromptSegment::Empty,
     );
 
-    // 13. REPL loop.
+    // 14. REPL loop.
     loop {
         let sig = editor.read_line(&prompt);
 

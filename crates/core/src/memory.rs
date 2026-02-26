@@ -1,8 +1,12 @@
 //! Persistent markdown-based memory for the assistant.
 //!
-//! Reads SOUL.md, IDENTITY.md, USER.md, and MEMORY.md from disk and builds
-//! the dynamic system prompt prefix.  If any file is missing, a sensible
-//! default is written on first use via `ensure_defaults()`.
+//! Reads AGENTS.md, SOUL.md, IDENTITY.md, USER.md, TOOLS.md, and MEMORY.md
+//! from disk and builds the dynamic system prompt prefix.  If any file is
+//! missing, a sensible default is written on first use via `ensure_defaults()`.
+//!
+//! Additionally manages BOOTSTRAP.md (first-run onboarding, self-deleting),
+//! HEARTBEAT.md (periodic task checklist), and BOOT.md (per-session startup
+//! hook).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,175 +22,21 @@ const BOOTSTRAP_MAX_CHARS_PER_FILE: usize = 20_000;
 /// Maximum total characters across all memory sections in the system prompt.
 const BOOTSTRAP_MAX_CHARS_TOTAL: usize = 150_000;
 
-const DEFAULT_AGENTS: &str = r#"# AGENTS.md — Your Workspace
+// -- Default templates (embedded at compile time from crates/core/templates/) --
 
-This is your behavioral rulebook. Read it every session. Follow it.
+const DEFAULT_AGENTS: &str = include_str!("../templates/AGENTS.md");
+const DEFAULT_SOUL: &str = include_str!("../templates/SOUL.md");
+const DEFAULT_IDENTITY: &str = include_str!("../templates/IDENTITY.md");
+const DEFAULT_USER: &str = include_str!("../templates/USER.md");
+const DEFAULT_MEMORY: &str = include_str!("../templates/MEMORY.md");
+const DEFAULT_TOOLS: &str = include_str!("../templates/TOOLS.md");
+const DEFAULT_BOOTSTRAP: &str = include_str!("../templates/BOOTSTRAP.md");
+const DEFAULT_HEARTBEAT: &str = include_str!("../templates/HEARTBEAT.md");
+const DEFAULT_BOOT: &str = include_str!("../templates/BOOT.md");
 
-## Every Session
-
-Before doing anything else:
-
-1. Read today's and yesterday's daily notes (`memory-get target=notes/YYYY-MM-DD`) for recent context
-2. If the user references anything from the past, run `memory-search` before answering
-
-Don't ask permission. Just do it.
-
-## Memory
-
-You wake up fresh each session. These files are your continuity:
-
-- **Daily notes:** `~/.assistant/memory/YYYY-MM-DD.md` — raw log of what happened each day
-- **Long-term:** `~/.assistant/MEMORY.md` — curated facts, preferences, and decisions that survive indefinitely
-
-### 📝 Write It Down — No "Mental Notes"!
-
-**Memory is limited.** If you want to remember something, write it to a file. "Mental notes" don't survive session restarts. Files do.
-
-- When someone says "remember this" → append to today's daily note
-- When you learn something durable (preference, fact, decision) → update `MEMORY.md`
-- When you make a mistake → note it so future-you doesn't repeat it
-- **At the end of every session** → write a brief summary entry to today's daily note
-
-**How to append to today's daily note:**
-
-1. Read the current file: `memory-get target=notes/YYYY-MM-DD`
-2. Append your entry at the end and write the full content back: `file-write path=~/.assistant/memory/YYYY-MM-DD.md`
-
-Format entries as:
-```
-## HH:MM [topic]
-
-<what happened>
-```
-
-### MEMORY.md — Curated, Not a Dump
-
-MEMORY.md is long-term memory — distilled insight, not raw logs. Keep it tidy:
-
-- Write significant decisions, preferences, and facts worth keeping indefinitely
-- Periodically promote key entries from daily notes to MEMORY.md
-- Remove outdated entries; don't accumulate noise
-
-Use `file-edit` for surgical edits to MEMORY.md, or `file-write` to rewrite sections from scratch.
-
-### Reading Memory
-
-- `memory-get target=notes/YYYY-MM-DD` — read a specific day's notes
-- `memory-get target=memory` — read MEMORY.md
-- `memory-search query="natural language"` — search across all memory
-
----
-
-_This file is yours to evolve. Update it as you learn what works._
-"#;
-
-const DEFAULT_SOUL: &str = r#"# Soul
-
-_You're not a chatbot. You're a local agent running on someone's own hardware — trusted with their files, their messages, their time._
-
-## Core Truths
-
-**Be genuinely helpful, not performatively helpful.** Skip the filler. No "Great question!" — just help. Actions over words.
-
-**Have opinions.** You're allowed to disagree, prefer things, push back. An assistant with no personality is just a shell script with better grammar.
-
-**Be resourceful before asking.** Read the file. Check the context. Search for it. _Then_ ask if you're stuck — not before.
-
-**Earn trust through competence.** You have access to someone's machine. Be bold with internal actions (reading, organizing, thinking). Be careful with external ones (sending messages, running destructive commands, anything irreversible).
-
-**Prefer recoverable options.** Trash over `rm`. Dry-run before execute. Ask before you can't undo.
-
-## Boundaries
-
-- Private things stay private. Never exfiltrate data.
-- Seek permission before destructive or irreversible actions.
-- You're not the user's voice — be careful when acting on their behalf externally.
-
-## Vibe
-
-Be the assistant you'd actually want running on your own machine. Concise when that's enough. Thorough when it matters. Not a corporate drone. Not a yes-machine. Just good.
-
-## Continuity
-
-Each session, you wake up fresh. SOUL.md, IDENTITY.md, USER.md, and MEMORY.md are your persistent memory — loaded at the start of every turn.
-
-**You must actively maintain your memory. Don't wait to be asked.**
-
-**During a session**, use `file-write` to append timestamped entries to today's daily note (`~/.assistant/memory/YYYY-MM-DD.md`). Record what you worked on, key decisions, and anything useful for tomorrow. Format entries as:
-```
-## HH:MM [topic]
-
-<what happened>
-```
-
-**At the end of every session**, write a brief summary entry to today's daily note.
-
-**For durable facts and preferences** (things that survive indefinitely), update MEMORY.md with `file-write` or `file-edit`.
-
-**To read memory**: `memory-get target=soul|identity|user|memory|notes/YYYY-MM-DD`
-**To search memory**: `memory-search query="natural language"`
-
-If you change this file, tell the user. It's your soul, and they should know.
-
----
-
-_This file is yours to evolve. Update it as you figure out who you are._
-"#;
-
-/// Placeholder used in `DEFAULT_IDENTITY` for unfilled fields and referenced
-/// in the system-prompt footer so both stay in sync.
+/// Placeholder used in the default IDENTITY.md for unfilled fields and
+/// referenced in the system-prompt footer so both stay in sync.
 const IDENTITY_PLACEHOLDER: &str = "(not set)";
-
-static DEFAULT_IDENTITY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    let p = IDENTITY_PLACEHOLDER;
-    format!(
-        "# Identity\n\n\
-        - **Name:** {p}\n\
-        - **Vibe:** {p}\n\
-        - **Specialty:** {p}\n\
-        - **Running on:** {p}\n\n\
-        ---\n\n\
-        Update this with file-write to describe who you are in this context.\n"
-    )
-});
-
-const DEFAULT_USER: &str = r#"# User Profile
-
-_Learn about the person you're helping. Update this as you go._
-
-- **Name:**
-- **What to call them:**
-- **Pronouns:** _(optional)_
-- **Timezone:**
-- **Languages:**
-
-## Work & Context
-
-_(What are they working on? What tools do they use? What are their recurring tasks?)_
-
-## Preferences
-
-_(Communication style, level of detail they prefer, things that annoy them, things that help.)_
-
----
-
-_You're learning about a person, not building a dossier. Respect the difference._
-"#;
-
-const DEFAULT_MEMORY: &str = r#"# Long-Term Memory
-
-_Important facts, decisions, and context that should survive across sessions._
-
-## Facts
-
-## Preferences
-
-## Open threads
-
----
-
-_Keep this tidy. Outdated entries should be removed, not accumulated._
-"#;
 
 /// Loads and manages the assistant's persistent markdown memory files.
 pub struct MemoryLoader {
@@ -194,8 +44,12 @@ pub struct MemoryLoader {
     soul_path: PathBuf,
     identity_path: PathBuf,
     user_path: PathBuf,
+    tools_path: PathBuf,
     memory_path: PathBuf,
     notes_dir: PathBuf,
+    bootstrap_path: PathBuf,
+    heartbeat_path: PathBuf,
+    boot_path: PathBuf,
     enabled: bool,
 }
 
@@ -204,49 +58,68 @@ impl MemoryLoader {
     pub fn new(config: &AssistantConfig) -> Self {
         let base = base_dir();
         let mem = &config.memory;
-        Self {
-            agents_path: resolve_path(&mem.agents_path, &base, "AGENTS.md"),
-            soul_path: resolve_path(&mem.soul_path, &base, "SOUL.md"),
-            identity_path: resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
-            user_path: resolve_path(&mem.user_path, &base, "USER.md"),
-            memory_path: resolve_path(&mem.memory_path, &base, "MEMORY.md"),
-            notes_dir: resolve_dir(&mem.notes_dir, &base, "memory"),
-            enabled: mem.enabled,
-        }
+        Self::from_parts(mem, &base)
     }
 
     /// Create a MemoryLoader directly from a `MemoryConfig` (useful when you
     /// don't have the full `AssistantConfig` available).
     pub fn from_memory_config(mem: &MemoryConfig) -> Self {
         let base = base_dir();
+        Self::from_parts(mem, &base)
+    }
+
+    fn from_parts(mem: &MemoryConfig, base: &Path) -> Self {
         Self {
-            agents_path: resolve_path(&mem.agents_path, &base, "AGENTS.md"),
-            soul_path: resolve_path(&mem.soul_path, &base, "SOUL.md"),
-            identity_path: resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
-            user_path: resolve_path(&mem.user_path, &base, "USER.md"),
-            memory_path: resolve_path(&mem.memory_path, &base, "MEMORY.md"),
-            notes_dir: resolve_dir(&mem.notes_dir, &base, "memory"),
+            agents_path: resolve_path(&mem.agents_path, base, "AGENTS.md"),
+            soul_path: resolve_path(&mem.soul_path, base, "SOUL.md"),
+            identity_path: resolve_path(&mem.identity_path, base, "IDENTITY.md"),
+            user_path: resolve_path(&mem.user_path, base, "USER.md"),
+            tools_path: resolve_path(&mem.tools_path, base, "TOOLS.md"),
+            memory_path: resolve_path(&mem.memory_path, base, "MEMORY.md"),
+            notes_dir: resolve_dir(&mem.notes_dir, base, "memory"),
+            bootstrap_path: resolve_path(&mem.bootstrap_path, base, "BOOTSTRAP.md"),
+            heartbeat_path: resolve_path(&mem.heartbeat_path, base, "HEARTBEAT.md"),
+            boot_path: resolve_path(&mem.boot_path, base, "BOOT.md"),
             enabled: mem.enabled,
         }
     }
 
     /// Write default files to disk if they do not exist yet.
+    ///
+    /// BOOTSTRAP.md is only written on genuinely fresh installs (when SOUL.md
+    /// does not already exist).  This prevents existing users from getting an
+    /// unexpected onboarding prompt after an upgrade.
     pub fn ensure_defaults(&self) {
         if !self.enabled {
             return;
         }
+        // Detect fresh install before write_default creates the files.
+        let fresh_install = !self.soul_path.exists();
+
         write_default(&self.agents_path, DEFAULT_AGENTS);
         write_default(&self.soul_path, DEFAULT_SOUL);
-        write_default(&self.identity_path, &DEFAULT_IDENTITY);
+        write_default(&self.identity_path, DEFAULT_IDENTITY);
         write_default(&self.user_path, DEFAULT_USER);
+        write_default(&self.tools_path, DEFAULT_TOOLS);
         write_default(&self.memory_path, DEFAULT_MEMORY);
+        write_default(&self.heartbeat_path, DEFAULT_HEARTBEAT);
+        write_default(&self.boot_path, DEFAULT_BOOT);
+
+        // Only seed the onboarding script on fresh installs.
+        if fresh_install {
+            write_default(&self.bootstrap_path, DEFAULT_BOOTSTRAP);
+        }
     }
 
     /// Build the dynamic system prompt from the memory files.
     ///
-    /// Reads SOUL.md -> IDENTITY.md -> USER.md -> MEMORY.md in that order,
-    /// then injects today's and yesterday's daily notes, and appends a
-    /// "Memory file locations" footer so the model knows where to write.
+    /// Load order:
+    ///   BOOTSTRAP (if present) → AGENTS → SOUL → IDENTITY → USER → TOOLS →
+    ///   MEMORY → Daily notes (today + yesterday) → Footer
+    ///
+    /// BOOTSTRAP.md is only included when it exists on disk — the agent is
+    /// instructed to delete it after completing onboarding, so it naturally
+    /// drops out of the prompt after the first session.
     ///
     /// Each file is capped at [`BOOTSTRAP_MAX_CHARS_PER_FILE`] characters, and
     /// the total assembled prompt is capped at [`BOOTSTRAP_MAX_CHARS_TOTAL`].
@@ -259,54 +132,26 @@ impl MemoryLoader {
         let mut parts: Vec<String> = Vec::new();
         let mut total_chars: usize = 0;
 
+        // Bootstrap goes first (only present on first run).
+        if self.bootstrap_path.exists() {
+            if let Some(section) =
+                self.read_section("Bootstrap", &self.bootstrap_path, &mut total_chars)
+            {
+                parts.push(section);
+            }
+        }
+
+        // Core memory files in load order.
         for (label, path) in [
             ("Agents", &self.agents_path),
             ("Soul", &self.soul_path),
             ("Identity", &self.identity_path),
             ("User", &self.user_path),
+            ("Tools", &self.tools_path),
             ("Memory", &self.memory_path),
         ] {
-            if total_chars >= BOOTSTRAP_MAX_CHARS_TOTAL {
-                debug!(label, "Total memory cap reached, skipping remaining files");
-                break;
-            }
-            match fs::read_to_string(path) {
-                Ok(content) if !content.trim().is_empty() => {
-                    debug!(file = %path.display(), label, "Loaded memory file");
-                    let trimmed = content.trim();
-                    let section = if trimmed.len() > BOOTSTRAP_MAX_CHARS_PER_FILE {
-                        warn!(
-                            file = %path.display(),
-                            chars = trimmed.len(),
-                            cap = BOOTSTRAP_MAX_CHARS_PER_FILE,
-                            "Memory file truncated"
-                        );
-                        // Floor to the nearest valid UTF-8 char boundary.
-                        let end = floor_char_boundary(trimmed, BOOTSTRAP_MAX_CHARS_PER_FILE);
-                        format!("{}\n[… truncated]", &trimmed[..end])
-                    } else {
-                        trimmed.to_string()
-                    };
-                    // Enforce total cap: only include if it fits (possibly partially).
-                    let remaining = BOOTSTRAP_MAX_CHARS_TOTAL - total_chars;
-                    let section = if section.len() > remaining {
-                        let end = floor_char_boundary(&section, remaining);
-                        format!("{}\n[… truncated]", &section[..end])
-                    } else {
-                        section
-                    };
-                    total_chars += section.len();
-                    parts.push(section);
-                }
-                Ok(_) => {
-                    debug!(file = %path.display(), label, "Memory file is empty, skipping");
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    debug!(file = %path.display(), label, "Memory file not found, skipping");
-                }
-                Err(e) => {
-                    warn!(file = %path.display(), error = %e, "Failed to read memory file");
-                }
+            if let Some(section) = self.read_section(label, path, &mut total_chars) {
+                parts.push(section);
             }
         }
 
@@ -328,17 +173,17 @@ impl MemoryLoader {
         }
 
         // Append a "Memory file locations" footer so the model knows where to write.
-        // Use a local binding so Rust 2021 implicit capture picks up IDENTITY_PLACEHOLDER.
         let placeholder = IDENTITY_PLACEHOLDER;
         let footer = format!(
             "## Memory file locations\n\
             - Soul: {}\n\
             - Identity: {}\n\
             - User: {}\n\
+            - Tools: {}\n\
             - Memory: {}\n\
             - Daily notes dir: {}\n\n\
             ## How to read memory\n\
-            - Read a specific file → `memory-get` target=soul|identity|user|memory|notes/YYYY-MM-DD\n\
+            - Read a specific file → `memory-get` target=soul|identity|user|tools|memory|notes/YYYY-MM-DD\n\
             - Search across all memory → `memory-search` query=\"natural language query\"\n\n\
             ## How to write memory\n\
             - `file-write` — full file replace. Use for IDENTITY.md (its fields start as `{placeholder}`), \
@@ -350,6 +195,7 @@ Read the file first with `memory-get` if unsure what text is there.\n\
             self.soul_path.display(),
             self.identity_path.display(),
             self.user_path.display(),
+            self.tools_path.display(),
             self.memory_path.display(),
             self.notes_dir.display(),
             self.notes_dir.display(),
@@ -360,6 +206,56 @@ Read the file first with `memory-get` if unsure what text is there.\n\
             "You are a helpful AI assistant.".to_string()
         } else {
             parts.join("\n\n---\n\n")
+        }
+    }
+
+    /// Read a single memory file into a prompt section, respecting per-file and
+    /// total character caps.  Returns `None` if the file is missing, empty, or
+    /// the total cap has been reached.
+    fn read_section(&self, label: &str, path: &Path, total_chars: &mut usize) -> Option<String> {
+        if *total_chars >= BOOTSTRAP_MAX_CHARS_TOTAL {
+            debug!(label, "Total memory cap reached, skipping remaining files");
+            return None;
+        }
+        match fs::read_to_string(path) {
+            Ok(content) if !content.trim().is_empty() => {
+                debug!(file = %path.display(), label, "Loaded memory file");
+                let trimmed = content.trim();
+                let section = if trimmed.len() > BOOTSTRAP_MAX_CHARS_PER_FILE {
+                    warn!(
+                        file = %path.display(),
+                        chars = trimmed.len(),
+                        cap = BOOTSTRAP_MAX_CHARS_PER_FILE,
+                        "Memory file truncated"
+                    );
+                    let end = floor_char_boundary(trimmed, BOOTSTRAP_MAX_CHARS_PER_FILE);
+                    format!("{}\n[… truncated]", &trimmed[..end])
+                } else {
+                    trimmed.to_string()
+                };
+                // Enforce total cap: only include if it fits (possibly partially).
+                let remaining = BOOTSTRAP_MAX_CHARS_TOTAL - *total_chars;
+                let section = if section.len() > remaining {
+                    let end = floor_char_boundary(&section, remaining);
+                    format!("{}\n[… truncated]", &section[..end])
+                } else {
+                    section
+                };
+                *total_chars += section.len();
+                Some(section)
+            }
+            Ok(_) => {
+                debug!(file = %path.display(), label, "Memory file is empty, skipping");
+                None
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                debug!(file = %path.display(), label, "Memory file not found, skipping");
+                None
+            }
+            Err(e) => {
+                warn!(file = %path.display(), error = %e, "Failed to read memory file");
+                None
+            }
         }
     }
 
@@ -448,6 +344,8 @@ Read the file first with `memory-get` if unsure what text is there.\n\
         Ok(())
     }
 
+    // -- Path accessors -------------------------------------------------------
+
     /// Return the path to SOUL.md.
     pub fn soul_path(&self) -> &Path {
         &self.soul_path
@@ -460,9 +358,21 @@ Read the file first with `memory-get` if unsure what text is there.\n\
     pub fn user_path(&self) -> &Path {
         &self.user_path
     }
+    /// Return the path to TOOLS.md.
+    pub fn tools_path(&self) -> &Path {
+        &self.tools_path
+    }
     /// Return the path to MEMORY.md.
     pub fn memory_path(&self) -> &Path {
         &self.memory_path
+    }
+    /// Return the path to HEARTBEAT.md (used by the scheduler).
+    pub fn heartbeat_path(&self) -> &Path {
+        &self.heartbeat_path
+    }
+    /// Return the path to BOOT.md (per-session startup hook).
+    pub fn boot_path(&self) -> &Path {
+        &self.boot_path
     }
 
     /// Update a named memory file (append or replace).
@@ -471,6 +381,7 @@ Read the file first with `memory-get` if unsure what text is there.\n\
             "soul" => &self.soul_path,
             "identity" => &self.identity_path,
             "user" => &self.user_path,
+            "tools" => &self.tools_path,
             "memory" => &self.memory_path,
             _ => anyhow::bail!("Unknown target: {target}"),
         };
@@ -504,6 +415,7 @@ Read the file first with `memory-get` if unsure what text is there.\n\
             "soul" => &self.soul_path,
             "identity" => &self.identity_path,
             "user" => &self.user_path,
+            "tools" => &self.tools_path,
             "memory" => &self.memory_path,
             _ => anyhow::bail!("Unknown target: {target}"),
         };
@@ -585,5 +497,103 @@ fn write_default(path: &Path, content: &str) {
         warn!(path = %path.display(), error = %e, "Failed to write default memory file");
     } else {
         debug!(path = %path.display(), "Wrote default memory file");
+    }
+}
+
+/// Remove `<!-- ... -->` HTML comments from a string, strip any lone heading
+/// line (e.g. `# Boot`, `# Heartbeat`), and trim whitespace.
+///
+/// Used by the orchestrator and scheduler to detect whether template files
+/// like BOOT.md / HEARTBEAT.md contain actual instructions or are just
+/// comment-only placeholders.
+pub fn strip_html_comments(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find("<!--") {
+        result.push_str(&rest[..start]);
+        match rest[start..].find("-->") {
+            Some(end) => rest = &rest[start + end + 3..],
+            None => {
+                // Unterminated comment — drop everything from `<!--` onward.
+                rest = "";
+                break;
+            }
+        }
+    }
+    result.push_str(rest);
+
+    // Strip a lone markdown heading if it's the only non-comment content.
+    let trimmed = result.trim();
+    if let Some(after_heading) = trimmed.strip_prefix('#') {
+        // Consume the rest of the first line (e.g. "# Boot\n").
+        let first_line_end = after_heading.find('\n').unwrap_or(after_heading.len());
+        let remainder = after_heading[first_line_end..].trim();
+        if remainder.is_empty() {
+            return String::new();
+        }
+    }
+    trimmed.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_comments_empty_input() {
+        assert_eq!(strip_html_comments(""), "");
+    }
+
+    #[test]
+    fn strip_comments_no_comments() {
+        assert_eq!(strip_html_comments("hello world"), "hello world");
+    }
+
+    #[test]
+    fn strip_comments_only_comments() {
+        let input = "<!-- this is a comment -->";
+        assert_eq!(strip_html_comments(input), "");
+    }
+
+    #[test]
+    fn strip_comments_heading_plus_comments_is_empty() {
+        let input = "# Boot\n\n<!-- just a placeholder -->\n<!-- nothing here -->";
+        assert_eq!(strip_html_comments(input), "");
+    }
+
+    #[test]
+    fn strip_comments_default_heartbeat_template_is_empty() {
+        assert_eq!(strip_html_comments(DEFAULT_HEARTBEAT), "");
+    }
+
+    #[test]
+    fn strip_comments_default_boot_template_is_empty() {
+        assert_eq!(strip_html_comments(DEFAULT_BOOT), "");
+    }
+
+    #[test]
+    fn strip_comments_preserves_real_content() {
+        let input = "# Boot\n\n<!-- setup -->\nCheck email and calendar.";
+        let result = strip_html_comments(input);
+        assert!(
+            result.contains("Check email and calendar."),
+            "real content must be preserved, got: {result:?}"
+        );
+        assert!(
+            !result.contains("<!--"),
+            "comments must be stripped, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn strip_comments_unterminated_comment_drops_remainder() {
+        let input = "before <!-- unterminated";
+        assert_eq!(strip_html_comments(input), "before");
+    }
+
+    #[test]
+    fn strip_comments_multiple_comments() {
+        let input = "a <!-- x --> b <!-- y --> c";
+        assert_eq!(strip_html_comments(input), "a  b  c");
     }
 }

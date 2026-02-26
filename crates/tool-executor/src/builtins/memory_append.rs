@@ -2,7 +2,8 @@
 //!
 //! Appends a timestamped entry to a persistent memory file without requiring
 //! a full read-edit-write cycle.  Particularly useful for daily notes.
-//! Accepted targets: `soul`, `identity`, `user`, `memory`, `notes/YYYY-MM-DD`.
+//! Accepted targets: `soul`, `identity`, `user`, `tools`, `memory`,
+//! `notes/YYYY-MM-DD`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -62,6 +63,7 @@ impl MemoryAppendHandler {
             "soul" => resolve_path(&mem.soul_path, &base, "SOUL.md"),
             "identity" => resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
             "user" => resolve_path(&mem.user_path, &base, "USER.md"),
+            "tools" => resolve_path(&mem.tools_path, &base, "TOOLS.md"),
             "memory" => resolve_path(&mem.memory_path, &base, "MEMORY.md"),
             notes if notes.starts_with("notes/") => {
                 let date = &notes["notes/".len()..];
@@ -104,7 +106,7 @@ impl ToolHandler for MemoryAppendHandler {
         "Append text to a persistent memory file without a full read-write cycle. \
          Ideal for adding timestamped entries to daily notes. \
          A newline is prepended automatically so entries don't run together. \
-         Accepted targets: soul, identity, user, memory, notes/YYYY-MM-DD."
+         Accepted targets: soul, identity, user, tools, memory, notes/YYYY-MM-DD."
     }
 
     fn params_schema(&self) -> serde_json::Value {
@@ -113,7 +115,7 @@ impl ToolHandler for MemoryAppendHandler {
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "Memory target: soul, identity, user, memory, or notes/YYYY-MM-DD"
+                    "description": "Memory target: soul, identity, user, tools, memory, or notes/YYYY-MM-DD"
                 },
                 "text": {
                     "type": "string",
@@ -142,7 +144,7 @@ impl ToolHandler for MemoryAppendHandler {
             Some(p) => p,
             None => {
                 return Ok(ToolOutput::error(format!(
-                "Unknown target '{target}'. Use: soul, identity, user, memory, or notes/YYYY-MM-DD"
+                "Unknown target '{target}'. Use: soul, identity, user, tools, memory, or notes/YYYY-MM-DD"
             )))
             }
         };

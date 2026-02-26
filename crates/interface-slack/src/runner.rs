@@ -1019,6 +1019,20 @@ impl SlackInterface {
             let _ = shutdown_tx.send(true);
         });
 
+        // Run BOOT.md startup hook (if configured and non-empty).
+        {
+            let boot_conversation_id = uuid::Uuid::new_v4();
+            match self
+                .orchestrator
+                .run_boot(boot_conversation_id, assistant_core::Interface::Slack)
+                .await
+            {
+                Ok(true) => info!("BOOT.md startup hook executed"),
+                Ok(false) => {}
+                Err(e) => warn!(error = %e, "BOOT.md startup hook failed"),
+            }
+        }
+
         let mut backoff = std::time::Duration::from_secs(1);
 
         loop {

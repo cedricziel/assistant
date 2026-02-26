@@ -1,12 +1,13 @@
 //! Background scheduler — polls for due scheduled tasks and runs them via the
-//! orchestrator. Also drives the heartbeat loop (`~/.assistant/HEARTBEAT.md`).
+//! orchestrator. Also drives the heartbeat loop (reads `HEARTBEAT.md` from the
+//! configured memory path).
 
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use assistant_core::Interface;
+use assistant_core::{strip_html_comments, Interface};
 use assistant_storage::StorageLayer;
 use chrono::Utc;
 use cron::Schedule;
@@ -22,8 +23,9 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 /// Spawn a background tokio task that:
 /// 1. Checks for due scheduled tasks every `poll_interval`.
-/// 2. Runs `~/.assistant/HEARTBEAT.md` as a prompt through the orchestrator every 30 minutes
-///    (if the file exists and is non-empty).
+/// 2. Reads `HEARTBEAT.md` (from the configured memory path) as a prompt
+///    through the orchestrator every 30 minutes (if the file exists and is
+///    non-empty).
 pub fn spawn_scheduler(
     storage: Arc<StorageLayer>,
     orchestrator: Arc<Orchestrator>,
@@ -103,21 +105,19 @@ fn compute_next_run(cron_expr: &str) -> Option<chrono::DateTime<Utc>> {
     schedule.upcoming(Utc).next()
 }
 
-/// Read `~/.assistant/HEARTBEAT.md` and run its contents through the orchestrator.
+/// Read `HEARTBEAT.md` (from the configured path) and run its contents through
+/// the orchestrator.
 ///
 /// Does nothing (silently) if the file does not exist or is empty.
 async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
-    let heartbeat_path = match dirs::home_dir() {
-        Some(h) => h.join(".assistant").join("HEARTBEAT.md"),
-        None => return Ok(()),
-    };
+    let heartbeat_path = orchestrator.heartbeat_path();
 
     if !heartbeat_path.exists() {
         return Ok(());
     }
 
-    let prompt = std::fs::read_to_string(&heartbeat_path)?;
-    let prompt = prompt.trim().to_string();
+    let raw = std::fs::read_to_string(heartbeat_path)?;
+    let prompt = strip_html_comments(&raw);
 
     if prompt.is_empty() {
         return Ok(());
