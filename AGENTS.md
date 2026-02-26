@@ -30,10 +30,10 @@ Install hooks after cloning: `make install-hooks`.
 
 | Crate (package name)             | Path                          | Purpose                                              |
 |----------------------------------|-------------------------------|------------------------------------------------------|
-| `assistant-core`                 | `crates/core`                 | Shared types, SkillDef, parser, ToolHandler trait     |
+| `assistant-core`                 | `crates/core`                 | Shared types, ToolHandler trait, MessageBus trait      |
 | `assistant-llm`                  | `crates/llm`                  | LlmProvider trait, LlmClient, prompt builder          |
 | `assistant-provider-ollama`      | `crates/provider-ollama`      | Ollama LlmProvider implementation                     |
-| `assistant-storage`              | `crates/storage`              | SQLite (sqlx), SkillRegistry, TraceStore, MemoryStore |
+| `assistant-storage`              | `crates/storage`              | SQLite (sqlx), SkillRegistry, TraceStore, MessageBus  |
 | `assistant-runtime`              | `crates/runtime`              | Orchestrator (main ReAct loop), SafetyGate, Scheduler |
 | `assistant-tool-executor`        | `crates/tool-executor`        | ToolHandler registry, builtin tools, dispatch         |
 | `assistant-mcp-server`           | `crates/mcp-server`           | stdio JSON-RPC 2.0 MCP server                        |
