@@ -148,11 +148,15 @@ impl WebsocketHandler for MattermostHandler {
 
         // Build per-turn Mattermost extension tools.
         let reply_root_id_for_err = reply_root_id.clone();
+        let server_url = self.config.resolved_server_url().unwrap_or_default();
+        let auth_token = self.config.resolved_token().unwrap_or_default();
         let extensions = build_mattermost_tools(
             channel_id.clone(),
             post_id,
             reply_root_id,
             self.bot_user_id.clone(),
+            server_url,
+            auth_token,
             self.api.clone(),
         );
 
