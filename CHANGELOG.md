@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15](https://github.com/cedricziel/assistant/compare/v0.1.14...v0.1.15) (2026-02-26)
+
+
+### Features
+
+* add subagent support with tool filtering, lifecycle tracking, and OTel observability ([#67](https://github.com/cedricziel/assistant/issues/67)) ([dba4255](https://github.com/cedricziel/assistant/commit/dba4255c7d57638fa30714bff8d99f01f3058e4c))
+
 ## [0.1.14](https://github.com/cedricziel/assistant/compare/v0.1.13...v0.1.14) (2026-02-26)
 
 
