@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/cedricziel/assistant/compare/v0.1.13...v0.1.14) (2026-02-26)
+
+
+### Bug Fixes
+
+* **cli:** spawn scheduler before interface branches so all modes get scheduled tasks ([#65](https://github.com/cedricziel/assistant/issues/65)) ([be929fb](https://github.com/cedricziel/assistant/commit/be929fb62cdf821d8df4c57e668092d6d27b2c8a))
+
 ## [0.1.13](https://github.com/cedricziel/assistant/compare/v0.1.12...v0.1.13) (2026-02-26)
 
 
