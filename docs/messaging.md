@@ -56,6 +56,98 @@ agents or users exist. Consumers filter what they care about at claim time.
 | `agent.terminate` | Supervisor     | Agent             | Shut down an agent                  |
 | `schedule.trigger`| Scheduler      | Orchestrator      | Cron task fired                     |
 
+## Typed Envelopes
+
+Each topic has a corresponding Rust struct in `assistant_core::bus_messages`
+that defines the payload shape at compile time. Topic names are constants in
+`assistant_core::topic`.
+
+| Topic               | Constant                | Envelope struct    |
+|----------------------|-------------------------|--------------------|
+| `turn.request`       | `topic::TURN_REQUEST`   | `TurnRequest`      |
+| `turn.result`        | `topic::TURN_RESULT`    | `TurnResult`       |
+| `turn.status`        | `topic::TURN_STATUS`    | `TurnStatus`       |
+| `tool.execute`       | `topic::TOOL_EXECUTE`   | `ToolExecute`      |
+| `tool.result`        | `topic::TOOL_RESULT`    | `ToolResult`       |
+| `agent.spawn`        | `topic::AGENT_SPAWN`    | `AgentSpawn`       |
+| `agent.report`       | `topic::AGENT_REPORT`   | `AgentReport`      |
+
+### Publishing with typed envelopes
+
+```rust
+use assistant_core::{topic, PublishRequest, TurnRequest};
+
+let envelope = TurnRequest {
+    prompt: "hello".into(),
+    conversation_id: conv_id,
+    extension_tools: vec!["reply".into()],
+};
+
+bus.publish(
+    PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&envelope)?)
+        .with_user_id("U123")
+        .with_agent_id("main")
+        .with_conversation_id(conv_id)
+        .with_interface("slack")
+).await?;
+```
+
+### Consuming with typed envelopes
+
+```rust
+use assistant_core::{TurnRequest, ToolExecute};
+
+if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
+    let req: TurnRequest = serde_json::from_value(msg.payload)?;
+    // req.prompt, req.conversation_id, req.extension_tools
+    // are all typed fields
+    bus.ack(msg.id).await?;
+}
+```
+
+### Available envelopes
+
+**`TurnRequest`** -- user or agent initiates a turn:
+- `prompt: String` -- the user's message
+- `conversation_id: Uuid`
+- `extension_tools: Vec<String>` -- interface-provided tools (default empty)
+
+**`TurnResult`** -- agent's final answer:
+- `conversation_id: Uuid`
+- `content: String`
+- `turn: i64`
+
+**`TurnStatus`** -- progress update during a turn:
+- `conversation_id: Uuid`
+- `phase: TurnPhase` -- `Thinking`, `CallingTools`, or `Responding`
+- `detail: Option<String>` -- e.g. which tool is running
+
+**`ToolExecute`** -- run a single tool:
+- `tool_name: String` -- kebab-case tool name
+- `call_id: String` -- LLM's tool call ID for correlation
+- `params: HashMap<String, Value>`
+- `conversation_id: Uuid`
+- `turn: i64`
+
+**`ToolResult`** -- output from a tool execution:
+- `tool_name: String`
+- `call_id: String` -- matches `ToolExecute::call_id`
+- `content: String`
+- `success: bool`
+- `data: Option<Value>`
+
+**`AgentSpawn`** -- create a sub-agent:
+- `agent_id: String`
+- `task: String`
+- `system_prompt: Option<String>`
+- `model: Option<String>`
+- `allowed_tools: Vec<String>` -- empty = all tools
+
+**`AgentReport`** -- sub-agent reports back:
+- `status: AgentReportStatus` -- `Completed`, `Failed`, or `Cancelled`
+- `content: String`
+- `data: Option<Value>`
+
 ## Message Envelope
 
 Every message carries three categories of metadata alongside the payload:
@@ -85,18 +177,25 @@ Every message carries three categories of metadata alongside the payload:
 
 ## Publishing
 
-Use `PublishRequest` with builder-style `with_*` methods:
+Use `PublishRequest` with builder-style `with_*` methods. Prefer typed
+envelopes (see above) for the payload:
 
 ```rust
-use assistant_core::PublishRequest;
+use assistant_core::{topic, PublishRequest, TurnRequest};
+
+let envelope = TurnRequest {
+    prompt: "hello".into(),
+    conversation_id: conv_id,
+    extension_tools: vec![],
+};
 
 let id = bus.publish(
-    PublishRequest::new("turn.request", json!({"prompt": "hello"}))
+    PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&envelope)?)
         .with_user_id("U123")
         .with_agent_id("main")
         .with_conversation_id(conv_id)
         .with_interface("slack")
-        .with_reply_to("turn.result")
+        .with_reply_to(topic::TURN_RESULT)
         .with_correlation_id(correlation_id)
 ).await?;
 ```
@@ -105,7 +204,7 @@ All metadata fields are optional. A minimal publish only needs a topic and
 payload:
 
 ```rust
-bus.publish(PublishRequest::new("turn.request", json!({"prompt": "hi"}))).await?;
+bus.publish(PublishRequest::new(topic::TURN_REQUEST, json!({"prompt": "hi"}))).await?;
 ```
 
 ## Claiming
@@ -191,40 +290,33 @@ let cutoff = Utc::now() - chrono::Duration::days(7);
 let count = bus.purge(cutoff).await?;
 ```
 
-## Parallel Tool Execution
+## Execution Model
 
-The bus enables parallel tool execution, which is currently the biggest
-latency bottleneck (tool calls execute sequentially in a `for` loop).
+Tool calls within a conversation execute **sequentially**, preserving the
+order the LLM emitted them. This is intentional — LLMs can and do rely on
+tool call ordering (e.g. write a file then read it back in the same
+response).
 
-With the bus, the orchestrator can fan out N tool calls and fan in the
-results:
+The bus still adds value through decoupling, crash recovery, observability,
+and the ability to run multiple conversations in parallel across agents.
 
 ```rust
-let batch_id = Uuid::new_v4();
+use assistant_core::{topic, PublishRequest, ToolExecute};
 
-// Fan out: publish N tool calls with the same batch_id
+// Publish tool calls in order
 for tool_call in tool_calls {
+    let envelope = ToolExecute {
+        tool_name: tool_call.name.clone(),
+        call_id: tool_call.id.clone(),
+        params: tool_call.params.clone(),
+        conversation_id: conv_id,
+        turn: current_turn,
+    };
     bus.publish(
-        PublishRequest::new("tool.execute", json!({
-            "tool_name": tool_call.name,
-            "params": tool_call.params,
-        }))
-        .with_batch_id(batch_id)
-        .with_agent_id("main")
-        .with_conversation_id(conv_id)
+        PublishRequest::new(topic::TOOL_EXECUTE, serde_json::to_value(&envelope)?)
+            .with_agent_id("main")
+            .with_conversation_id(conv_id)
     ).await?;
-}
-
-// Fan in: collect N results by batch_id
-let filter = ClaimFilter::new().with_batch_id(batch_id);
-let mut results = Vec::new();
-while results.len() < tool_calls.len() {
-    if let Some(msg) = bus.claim_filtered("tool.result", "orch", &filter).await? {
-        results.push(msg);
-        bus.ack(msg.id).await?;
-    } else {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 ```
 
