@@ -2,6 +2,7 @@ pub mod conversations;
 pub mod log_telemetry;
 pub mod logs;
 pub mod memory_chunks;
+pub mod message_bus;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
@@ -12,6 +13,7 @@ pub use conversations::{ConversationRecord, ConversationStore};
 pub use log_telemetry::SqliteLogExporter;
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
+pub use message_bus::SqliteMessageBus;
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
@@ -80,6 +82,11 @@ impl StorageLayer {
     /// Convenience: build a `MemoryChunkStore` backed by this pool.
     pub fn memory_chunks_store(&self) -> MemoryChunkStore {
         MemoryChunkStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`SqliteMessageBus`] backed by this pool.
+    pub fn message_bus(&self) -> SqliteMessageBus {
+        SqliteMessageBus::new(self.pool.clone())
     }
 }
 
@@ -156,6 +163,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "012_scheduled_tasks_once",
             include_str!("../../../migrations/012_scheduled_tasks_once.sql"),
+        ),
+        (
+            "013_bus_messages",
+            include_str!("../../../migrations/013_bus_messages.sql"),
         ),
     ];
 
