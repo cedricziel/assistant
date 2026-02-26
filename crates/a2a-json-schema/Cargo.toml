@@ -1,0 +1,10 @@
+[package]
+name = "assistant-a2a-json-schema"
+description = "A2A protocol JSON Schema definitions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]

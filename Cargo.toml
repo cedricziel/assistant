@@ -23,6 +23,8 @@ members = [
     "crates/interface-mattermost",
     "crates/integration-tests",
     "crates/web-ui",
+    "crates/a2a-proto",
+    "crates/a2a-json-schema",
 ]
 default-members = [
     "crates/interface-cli",
