@@ -107,11 +107,14 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     let orchestrator = Arc::new(Orchestrator::new(
         llm,
         storage,
-        executor,
+        executor.clone(),
         registry.clone(),
         bus,
         &config,
     ));
+
+    // Wire up subagent support.
+    executor.set_subagent_runner(orchestrator.clone());
 
     Ok(Fixture {
         orchestrator,

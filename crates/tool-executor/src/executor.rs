@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
-use assistant_core::{AssistantConfig, ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{AssistantConfig, ExecutionContext, SubagentRunner, ToolHandler, ToolOutput};
 use assistant_llm::{LlmProvider, ToolSpec};
 use assistant_storage::{SkillRegistry, StorageLayer};
 use tracing::warn;
@@ -74,6 +74,16 @@ impl ToolExecutor {
             .write()
             .unwrap()
             .insert(handler.name().to_string(), handler);
+    }
+
+    /// Inject the subagent runner and register the `agent-spawn` tool.
+    ///
+    /// This must be called *after* both [`ToolExecutor`] and the
+    /// [`SubagentRunner`] implementor (e.g. `Orchestrator`) have been
+    /// constructed, because they have a circular dependency at init time.
+    pub fn set_subagent_runner(&self, runner: Arc<dyn SubagentRunner>) {
+        use crate::builtins::AgentSpawnHandler;
+        self.register_ambient_tool(Arc::new(AgentSpawnHandler::new(runner)));
     }
 
     /// Returns all registered tool handlers.

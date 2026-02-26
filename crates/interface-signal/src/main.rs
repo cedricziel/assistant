@@ -100,7 +100,7 @@ fn load_config(config_path: &Path) -> Result<AssistantConfig> {
 /// Bootstrap the common stack shared by both subcommands.
 ///
 /// Returns `(orchestrator, signal_config, store_path)`.
-async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
+async fn bootstrap() -> Result<(Arc<Orchestrator>, SignalConfig, PathBuf)> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
     let config_path = assistant_dir.join("config.toml");
@@ -161,8 +161,20 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
     // Build message bus and orchestrator with auto-deny confirmation.
     let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(AutoDenyConfirmation);
-    let orchestrator = Orchestrator::new(llm, storage, executor, registry.clone(), bus, &config)
-        .with_confirmation_callback(confirmation_cb);
+    let orchestrator = Arc::new(
+        Orchestrator::new(
+            llm,
+            storage,
+            executor.clone(),
+            registry.clone(),
+            bus,
+            &config,
+        )
+        .with_confirmation_callback(confirmation_cb),
+    );
+
+    // Wire up subagent support (breaks the init-time circular dep).
+    executor.set_subagent_runner(orchestrator.clone());
 
     // Extract the [signal] section from config (or use defaults).
     let signal_config: SignalConfig = config.signal.clone().unwrap_or_default();
@@ -195,7 +207,6 @@ async fn main() -> Result<()> {
 
         Cmd::Run => {
             let (orchestrator, signal_config, _store_path) = bootstrap().await?;
-            let orchestrator = Arc::new(orchestrator);
 
             // Spawn the turn worker so bus-submitted turns get processed.
             let worker_orch = orchestrator.clone();

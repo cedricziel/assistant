@@ -2570,11 +2570,12 @@ mod tests {
         let orch = Arc::new(Orchestrator::new(
             llm,
             storage.clone(),
-            executor,
+            executor.clone(),
             registry.clone(),
             bus,
             &config,
         ));
+        executor.set_subagent_runner(orch.clone());
         (orch, storage)
     }
 
@@ -3540,6 +3541,7 @@ mod tests {
             bus,
             &config,
         ));
+        executor.set_subagent_runner(orch.clone());
         (orch, storage, executor)
     }
 
