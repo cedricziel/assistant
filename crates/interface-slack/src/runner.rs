@@ -840,6 +840,10 @@ async fn on_push_event(
 
     if let Err(e) = turn_result {
         error!(error = %e, elapsed_ms, batch_size, "orchestrator error");
+        // Note: the orchestrator already persists a synthetic assistant
+        // message on error (persist_error_recovery) so the conversation
+        // history keeps proper User→Assistant alternation.
+
         // Notify the user so they aren't left waiting silently.
         let err_req = SlackApiChatPostMessageRequest::new(
             channel_id.clone().into(),
