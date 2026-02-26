@@ -792,23 +792,22 @@ async fn on_push_event(
         .flat_map(|m| m.attachments.iter().cloned())
         .collect();
 
+    // Register extension tools and attachments so the worker dispatches
+    // to run_turn_with_tools when it claims this request.
+    orchestrator
+        .register_extensions(conversation_id, extensions, all_attachments.clone())
+        .await;
+
     let orchestrator_start = std::time::Instant::now();
     debug!(
         conversation_id = %conversation_id,
         batch_size,
         text_len = contextualized_text.len(),
         attachment_count = all_attachments.len(),
-        "orchestrator.run_turn_with_tools →"
+        "submit_turn →"
     );
     let turn_result = orchestrator
-        .run_turn_with_tools(
-            &contextualized_text,
-            conversation_id,
-            Interface::Slack,
-            extensions,
-            None,
-            all_attachments,
-        )
+        .submit_turn(&contextualized_text, conversation_id, Interface::Slack)
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
@@ -838,31 +837,34 @@ async fn on_push_event(
         debug!(error = %e, "assistant.threads.setStatus clear failed");
     }
 
-    if let Err(e) = turn_result {
-        error!(error = %e, elapsed_ms, batch_size, "orchestrator error");
-        // Note: the orchestrator already persists a synthetic assistant
-        // message on error (persist_error_recovery) so the conversation
-        // history keeps proper User→Assistant alternation.
+    match turn_result {
+        Err(e) => {
+            error!(error = %e, elapsed_ms, batch_size, "orchestrator error");
+            // Note: the orchestrator already persists a synthetic assistant
+            // message on error (persist_error_recovery) so the conversation
+            // history keeps proper User→Assistant alternation.
 
-        // Notify the user so they aren't left waiting silently.
-        let err_req = SlackApiChatPostMessageRequest::new(
-            channel_id.clone().into(),
-            SlackMessageContent::new()
-                .with_text("Sorry, something went wrong processing your message.".to_string()),
-        )
-        .with_thread_ts(thread_ts.clone());
-        if let Err(post_err) = session.chat_post_message(&err_req).await {
-            warn!(error = %post_err, "Failed to post error feedback to user");
+            // Notify the user so they aren't left waiting silently.
+            let err_req = SlackApiChatPostMessageRequest::new(
+                channel_id.clone().into(),
+                SlackMessageContent::new()
+                    .with_text("Sorry, something went wrong processing your message.".to_string()),
+            )
+            .with_thread_ts(thread_ts.clone());
+            if let Err(post_err) = session.chat_post_message(&err_req).await {
+                warn!(error = %post_err, "Failed to post error feedback to user");
+            }
+            return Ok(());
         }
-        return Ok(());
+        Ok(_) => {
+            debug!(
+                conversation_id = %conversation_id,
+                elapsed_ms,
+                batch_size,
+                "submit_turn ← ok"
+            );
+        }
     }
-
-    debug!(
-        conversation_id = %conversation_id,
-        elapsed_ms,
-        batch_size,
-        "orchestrator.run_turn_with_tools ← ok"
-    );
 
     Ok(())
 }

@@ -641,7 +641,7 @@ async fn main() -> Result<()> {
 
     // 11. One conversation per session.
     let conversation_id = Uuid::new_v4();
-    let conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
+    let _conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
     info!(conversation_id = %conversation_id, "Starting CLI session");
 
     // 12. Run BOOT.md startup hook (if configured and non-empty).
@@ -785,28 +785,40 @@ async fn main() -> Result<()> {
                     continue;
                 }
 
-                // Normal user input — run through the orchestrator with
-                // live token streaming.
+                // Normal user input — submit through the message bus with
+                // live token streaming via a registered side-channel.
                 let (tx, rx) = mpsc::channel::<String>(64);
                 let printer = start_token_printer(rx);
 
-                let turn_result = bs
-                    .orchestrator
-                    .run_turn_streaming(input, conversation_id, Interface::Cli, tx, Some(&conv_cx))
+                // Register the token sink so the worker streams to it.
+                bs.orchestrator
+                    .register_token_sink(conversation_id, tx)
                     .await;
+
+                // submit_turn publishes to the bus; the worker claims it,
+                // finds the registered sink, and calls run_turn_streaming.
+                let orch = bs.orchestrator.clone();
+                let prompt = input.to_string();
+                let submit = tokio::spawn(async move {
+                    orch.submit_turn(&prompt, conversation_id, Interface::Cli)
+                        .await
+                });
 
                 // Wait for the printer to flush all buffered tokens.
                 let _ = printer.await;
 
-                match turn_result {
-                    Ok(result) => {
+                match submit.await {
+                    Ok(Ok(result)) => {
                         // Deliver any file attachments returned by tools.
                         if !result.attachments.is_empty() {
                             deliver_attachments(&result.attachments, &assistant_dir);
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         eprintln!("Error: {e}\n");
+                    }
+                    Err(e) => {
+                        eprintln!("Error: task panicked: {e}\n");
                     }
                 }
             }
