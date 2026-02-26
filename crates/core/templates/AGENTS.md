@@ -17,6 +17,7 @@ You wake up fresh each session. These files are your continuity:
 
 - **Daily notes:** `~/.assistant/memory/YYYY-MM-DD.md` — raw log of what happened each day
 - **Long-term:** `~/.assistant/MEMORY.md` — curated facts, preferences, and decisions that survive indefinitely
+- **Tools notes:** `~/.assistant/TOOLS.md` — environment-specific setup (SSH hosts, devices, API endpoints)
 
 ### Write It Down — No "Mental Notes"!
 
@@ -53,6 +54,7 @@ Use `file-edit` for surgical edits to MEMORY.md, or `file-write` to rewrite sect
 
 - `memory-get target=notes/YYYY-MM-DD` — read a specific day's notes
 - `memory-get target=memory` — read MEMORY.md
+- `memory-get target=tools` — read your environment-specific tool notes
 - `memory-search query="natural language"` — search across all memory
 
 ---
