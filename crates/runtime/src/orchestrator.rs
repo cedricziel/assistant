@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    ExecutionContext, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
+    Attachment, ExecutionContext, Interface, MemoryLoader, Message, MessageRole, ToolHandler,
 };
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
@@ -38,6 +38,11 @@ pub trait ConfirmationCallback: Send + Sync {
 pub struct TurnResult {
     /// The assistant's final answer to the user.
     pub answer: String,
+    /// File attachments collected from tool outputs during the turn.
+    ///
+    /// Interfaces should deliver these to the user (e.g. save to disk in the
+    /// CLI, upload in Slack/Mattermost).
+    pub attachments: Vec<Attachment>,
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -324,6 +329,7 @@ impl Orchestrator {
 
         let mut turn_ended = false;
         let mut replied = false;
+        let mut _turn_attachments: Vec<Attachment> = Vec::new();
 
         // 5. Tool-calling loop.
         for iteration in 0..self.max_iterations {
@@ -346,7 +352,17 @@ impl Orchestrator {
                 &all_specs,
             );
             let response = self.llm.chat(&system_prompt, &history, &all_specs).await;
-            let response = response?;
+            let response = match response {
+                Ok(r) => r,
+                Err(e) => {
+                    // The user message was already persisted by prepare_history.
+                    // Save a synthetic assistant message so the conversation
+                    // keeps proper alternation and subsequent turns are not
+                    // poisoned by an orphaned user message.
+                    Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    return Err(e);
+                }
+            };
             finish_llm_span(
                 &mut llm_span,
                 response.meta(),
@@ -607,6 +623,10 @@ impl Orchestrator {
                                         output.content.clone(),
                                     ));
                                     debug!(observation = %output.content, "extension observation");
+                                    // Collect any attachments from the extension tool.
+                                    if !output.attachments.is_empty() {
+                                        _turn_attachments.extend(output.attachments);
+                                    }
                                     output.content
                                 }
                                 Err(err) => {
@@ -696,6 +716,10 @@ impl Orchestrator {
                                         "tool_observation",
                                         output.content.clone(),
                                     ));
+                                    // Collect any attachments from the global tool.
+                                    if !output.attachments.is_empty() {
+                                        _turn_attachments.extend(output.attachments);
+                                    }
                                     tool_result_content(&output.content, output.data.as_ref())
                                 }
                                 Err(err) => {
@@ -768,6 +792,7 @@ impl Orchestrator {
             }
         }
 
+        Self::persist_error_recovery(&conv_store, conversation_id).await;
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -830,6 +855,8 @@ impl Orchestrator {
         let system_prompt = self.compose_system_prompt().await;
 
         // 6. Tool-calling loop.
+        let mut turn_attachments: Vec<Attachment> = Vec::new();
+
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
             let _iteration_guard = iteration_span.enter();
@@ -852,7 +879,13 @@ impl Orchestrator {
                 &tool_specs,
             );
             let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
-            let response = response?;
+            let response = match response {
+                Ok(r) => r,
+                Err(e) => {
+                    Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    return Err(e);
+                }
+            };
             finish_llm_span(
                 &mut llm_span,
                 response.meta(),
@@ -877,7 +910,10 @@ impl Orchestrator {
                         conv_store.save_message(&assistant_msg).await?;
                     }
 
-                    return Ok(TurnResult { answer: text });
+                    return Ok(TurnResult {
+                        answer: text,
+                        attachments: turn_attachments,
+                    });
                 }
 
                 // ── Tool calls ────────────────────────────────────────────────
@@ -982,6 +1018,7 @@ impl Orchestrator {
                                     tool = %name,
                                     duration_ms,
                                     success = output.success,
+                                    attachments = output.attachments.len(),
                                     "Tool execution completed"
                                 );
                                 otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
@@ -990,6 +1027,10 @@ impl Orchestrator {
                                     "tool_observation",
                                     output.content.clone(),
                                 ));
+                                // Collect any attachments from the tool output.
+                                if !output.attachments.is_empty() {
+                                    turn_attachments.extend(output.attachments);
+                                }
                                 tool_result_content(&output.content, output.data.as_ref())
                             }
                             Err(err) => {
@@ -1027,6 +1068,7 @@ impl Orchestrator {
         }
 
         // Reached iteration limit.
+        Self::persist_error_recovery(&conv_store, conversation_id).await;
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -1084,6 +1126,8 @@ impl Orchestrator {
 
         let system_prompt = self.compose_system_prompt().await;
 
+        let mut turn_attachments: Vec<Attachment> = Vec::new();
+
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
             let _iteration_guard = iteration_span.enter();
@@ -1114,7 +1158,13 @@ impl Orchestrator {
                     Some(token_sink.clone()),
                 )
                 .await;
-            let response = response?;
+            let response = match response {
+                Ok(r) => r,
+                Err(e) => {
+                    Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    return Err(e);
+                }
+            };
             finish_llm_span(
                 &mut llm_span,
                 response.meta(),
@@ -1138,7 +1188,10 @@ impl Orchestrator {
                         conv_store.save_message(&assistant_msg).await?;
                     }
 
-                    return Ok(TurnResult { answer: text });
+                    return Ok(TurnResult {
+                        answer: text,
+                        attachments: turn_attachments,
+                    });
                 }
 
                 LlmResponse::ToolCalls(tool_call_items, _meta) => {
@@ -1242,6 +1295,10 @@ impl Orchestrator {
                                     "tool_observation",
                                     output.content.clone(),
                                 ));
+                                // Collect any attachments from the tool output.
+                                if !output.attachments.is_empty() {
+                                    turn_attachments.extend(output.attachments);
+                                }
                                 tool_result_content(&output.content, output.data.as_ref())
                             }
                             Err(err) => {
@@ -1277,6 +1334,7 @@ impl Orchestrator {
             }
         }
 
+        Self::persist_error_recovery(&conv_store, conversation_id).await;
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -1372,6 +1430,22 @@ impl Orchestrator {
             })
             .collect();
 
+        // -- History sanitisation --------------------------------------------------
+        //
+        // A prior turn may have failed after persisting the user message but
+        // before any assistant response was saved.  This leaves an orphaned
+        // trailing user message in the database.  When we append the *current*
+        // user message below, consecutive user messages would violate the
+        // alternation requirement of some providers (Anthropic) and can confuse
+        // tool-calling models.
+        //
+        // Similarly, a crash between persisting an AssistantToolCalls message
+        // and persisting its ToolResult messages leaves orphaned tool calls.
+        // Some providers reject the request when tool results are missing.
+        //
+        // Walk the loaded history and patch these structural issues.
+        Self::sanitize_history(&mut history);
+
         // When attachments are present, emit a MultimodalUser message so
         // vision-capable providers receive the inline images.  Otherwise
         // fall back to the lightweight Text variant.
@@ -1387,6 +1461,117 @@ impl Orchestrator {
         }
 
         Ok((conv_store, history, base_turn))
+    }
+
+    /// Repair structural problems in a loaded conversation history.
+    ///
+    /// Two issues are addressed:
+    ///
+    /// 1. **Trailing orphaned user message** – a prior turn may have failed
+    ///    after persisting the user message but before any assistant response
+    ///    was saved.  A synthetic assistant message is inserted so the caller
+    ///    can safely append a new user message without creating consecutive
+    ///    user entries (which Anthropic rejects outright and which confuse
+    ///    most tool-calling models).
+    ///
+    /// 2. **Orphaned `AssistantToolCalls`** – the process may have crashed
+    ///    after persisting a tool-call message but before all `ToolResult`
+    ///    messages were written.  Missing results are filled in with a
+    ///    synthetic error result so providers that require tool results
+    ///    (Ollama, Anthropic) do not reject the request.
+    fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
+        if history.is_empty() {
+            return;
+        }
+
+        // --- Pass 1: fill in missing tool results for orphaned tool calls ------
+        //
+        // Walk the history and, for every AssistantToolCalls, count how many
+        // ToolResult messages follow (before the next non-ToolResult entry or
+        // the end of the list).  If fewer results exist than calls, insert
+        // synthetic ones.
+        let mut i = 0;
+        while i < history.len() {
+            if let ChatHistoryMessage::AssistantToolCalls(calls) = &history[i] {
+                let expected = calls.len();
+                let call_names: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
+
+                // Count consecutive ToolResult messages immediately following.
+                let mut result_count = 0;
+                while i + 1 + result_count < history.len() {
+                    if matches!(
+                        history[i + 1 + result_count],
+                        ChatHistoryMessage::ToolResult { .. }
+                    ) {
+                        result_count += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                if result_count < expected {
+                    let insert_at = i + 1 + result_count;
+                    let missing = expected - result_count;
+                    debug!(
+                        expected,
+                        result_count,
+                        missing,
+                        "Sanitizing history: inserting synthetic tool results"
+                    );
+                    for j in result_count..expected {
+                        let name = call_names
+                            .get(j)
+                            .cloned()
+                            .unwrap_or_else(|| "unknown".to_string());
+                        history.insert(
+                            insert_at + (j - result_count),
+                            ChatHistoryMessage::ToolResult {
+                                name,
+                                content: "[error: result lost due to a prior crash]".to_string(),
+                            },
+                        );
+                    }
+                    // Advance past the newly inserted results.
+                    i = insert_at + missing;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        // --- Pass 2: trailing orphaned user message ----------------------------
+        let is_trailing_user = matches!(
+            history.last(),
+            Some(ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                ..
+            }) | Some(ChatHistoryMessage::MultimodalUser { .. })
+        );
+
+        if is_trailing_user {
+            debug!("Sanitizing history: inserting synthetic assistant message after orphaned user message");
+            history.push(ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "[An error occurred processing the previous message.]".to_string(),
+            });
+        }
+    }
+
+    /// Persist a synthetic assistant message so the conversation history
+    /// maintains proper User→Assistant alternation after a turn error.
+    ///
+    /// Called when the tool-calling loop (or the LLM call itself) fails.
+    /// The user message was already persisted by `prepare_history`; without
+    /// this recovery message the orphaned user entry would poison subsequent
+    /// turns.
+    async fn persist_error_recovery(conv_store: &ConversationStore, conversation_id: Uuid) {
+        let error_msg = Message::assistant(
+            conversation_id,
+            "[An error occurred processing this message.]",
+        );
+        if let Err(e) = conv_store.save_message(&error_msg).await {
+            warn!("Failed to persist error recovery assistant message: {e}");
+        }
     }
 
     fn append_tool_result(&self, history: &mut Vec<ChatHistoryMessage>, name: &str, content: &str) {
@@ -1708,7 +1893,9 @@ mod tests {
     use std::sync::Arc;
 
     use assistant_core::{types::Interface, AssistantConfig};
-    use assistant_llm::{ChatHistoryMessage, LlmClient, LlmClientConfig, LlmProvider};
+    use assistant_llm::{
+        ChatHistoryMessage, ChatRole, LlmClient, LlmClientConfig, LlmProvider, ToolCallItem,
+    };
     use assistant_storage::{registry::SkillRegistry, StorageLayer};
     use assistant_tool_executor::ToolExecutor;
     use serde_json::{json, Value};
@@ -2664,5 +2851,475 @@ mod tests {
             }
             other => panic!("expected Text, got {:?}", other),
         }
+    }
+
+    // ── Attachment collection tests ──────────────────────────────────────────
+
+    /// A fake tool handler that returns attachments in its output.
+    struct MockAttachmentTool {
+        attachments: Vec<assistant_core::Attachment>,
+    }
+
+    impl MockAttachmentTool {
+        fn new(attachments: Vec<assistant_core::Attachment>) -> Self {
+            Self { attachments }
+        }
+    }
+
+    #[async_trait]
+    impl ToolHandler for MockAttachmentTool {
+        fn name(&self) -> &str {
+            "attachment-tool"
+        }
+
+        fn description(&self) -> &str {
+            "returns attachments for testing"
+        }
+
+        fn params_schema(&self) -> Value {
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            })
+        }
+
+        async fn run(
+            &self,
+            _params: HashMap<String, Value>,
+            _ctx: &ExecutionContext,
+        ) -> anyhow::Result<ToolOutput> {
+            Ok(ToolOutput::success("generated 1 attachment")
+                .with_attachments(self.attachments.clone()))
+        }
+    }
+
+    /// Helper that returns orchestrator, storage, AND executor so tests can
+    /// register custom ambient tools.
+    async fn build_with_executor(
+        base_url: &str,
+    ) -> (Arc<Orchestrator>, Arc<StorageLayer>, Arc<ToolExecutor>) {
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false;
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: base_url.to_string(),
+                timeout_secs: 10,
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let orch = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor.clone(),
+            registry.clone(),
+            &config,
+        ));
+        (orch, storage, executor)
+    }
+
+    #[tokio::test]
+    async fn run_turn_collects_attachments_from_tool_output() {
+        let server = MockServer::start().await;
+
+        // 1st LLM call: model calls "attachment-tool".
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["attachment-tool"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // 2nd LLM call: final answer.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("here you go")))
+            .mount(&server)
+            .await;
+
+        let (orch, _, executor) = build_with_executor(&server.uri()).await;
+
+        // Register our mock tool that returns an attachment.
+        let png_bytes = vec![0x89, 0x50, 0x4E, 0x47];
+        executor.register_ambient_tool(Arc::new(MockAttachmentTool::new(vec![
+            assistant_core::Attachment::new("chart.png", "image/png", png_bytes.clone()),
+        ])));
+
+        let result = orch
+            .run_turn("make a chart", Uuid::new_v4(), Interface::Cli, None)
+            .await
+            .unwrap();
+
+        assert_eq!(result.answer, "here you go");
+        assert_eq!(
+            result.attachments.len(),
+            1,
+            "expected 1 attachment in TurnResult"
+        );
+        assert_eq!(result.attachments[0].filename, "chart.png");
+        assert_eq!(result.attachments[0].mime_type, "image/png");
+        assert_eq!(result.attachments[0].data, png_bytes);
+    }
+
+    #[tokio::test]
+    async fn run_turn_collects_multiple_attachments_across_tool_calls() {
+        let server = MockServer::start().await;
+
+        // Model calls attachment-tool twice in one turn.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(ollama_tool_calls(&["attachment-tool", "attachment-tool"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _, executor) = build_with_executor(&server.uri()).await;
+
+        executor.register_ambient_tool(Arc::new(MockAttachmentTool::new(vec![
+            assistant_core::Attachment::new("file.txt", "text/plain", b"hello".to_vec()),
+        ])));
+
+        let result = orch
+            .run_turn("go", Uuid::new_v4(), Interface::Cli, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.attachments.len(),
+            2,
+            "each tool call should contribute one attachment"
+        );
+        assert_eq!(result.attachments[0].filename, "file.txt");
+        assert_eq!(result.attachments[1].filename, "file.txt");
+    }
+
+    #[tokio::test]
+    async fn run_turn_no_attachments_when_tools_return_none() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "pong").await;
+
+        let (orch, _, _) = build_with_executor(&server.uri()).await;
+
+        let result = orch
+            .run_turn("hello", Uuid::new_v4(), Interface::Cli, None)
+            .await
+            .unwrap();
+
+        assert!(
+            result.attachments.is_empty(),
+            "no tool calls means no attachments"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_turn_streaming_collects_attachments() {
+        let server = MockServer::start().await;
+
+        // 1st LLM call: model calls "attachment-tool".
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["attachment-tool"])),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // 2nd LLM call: final answer.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+            .mount(&server)
+            .await;
+
+        let (orch, _, executor) = build_with_executor(&server.uri()).await;
+        executor.register_ambient_tool(Arc::new(MockAttachmentTool::new(vec![
+            assistant_core::Attachment::new("report.pdf", "application/pdf", vec![0x25, 0x50]),
+        ])));
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+
+        // Drain tokens in background.
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+
+        let result = orch
+            .run_turn_streaming("generate report", Uuid::new_v4(), Interface::Cli, tx, None)
+            .await
+            .unwrap();
+
+        assert_eq!(result.attachments.len(), 1);
+        assert_eq!(result.attachments[0].filename, "report.pdf");
+        assert_eq!(result.attachments[0].mime_type, "application/pdf");
+    }
+
+    #[tokio::test]
+    async fn run_turn_with_tools_collects_attachments_from_extension() {
+        let server = MockServer::start().await;
+
+        // Model calls the extension tool then reply then end_turn.
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_args(&[
+                    ("ext-attach", json!({})),
+                    ("reply", json!({"text": "done"})),
+                    ("end_turn", json!({"reason": "done"})),
+                ])),
+            )
+            .mount(&server)
+            .await;
+
+        let (orch, _, _) = build_with_executor(&server.uri()).await;
+
+        // Create an extension tool that returns attachments.
+        struct ExtAttachTool;
+
+        #[async_trait]
+        impl ToolHandler for ExtAttachTool {
+            fn name(&self) -> &str {
+                "ext-attach"
+            }
+            fn description(&self) -> &str {
+                "returns an attachment"
+            }
+            fn params_schema(&self) -> Value {
+                json!({"type": "object", "properties": {}, "required": []})
+            }
+            async fn run(
+                &self,
+                _params: HashMap<String, Value>,
+                _ctx: &ExecutionContext,
+            ) -> anyhow::Result<ToolOutput> {
+                Ok(ToolOutput::success("image generated").with_attachment(
+                    assistant_core::Attachment::new("img.png", "image/png", vec![1, 2, 3]),
+                ))
+            }
+        }
+
+        let reply_handler = Arc::new(MockExtTool::new("reply"));
+        let ext_attach = Arc::new(ExtAttachTool);
+
+        // run_turn_with_tools returns Ok(()) — we can't inspect attachments
+        // directly, but we verify the call succeeds without panicking and
+        // that the extension tool is executed (reply is called).
+        orch.run_turn_with_tools(
+            "make image",
+            Uuid::new_v4(),
+            Interface::Slack,
+            vec![
+                ext_attach as Arc<dyn ToolHandler>,
+                reply_handler.clone() as Arc<dyn ToolHandler>,
+            ],
+            None,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            reply_handler.calls(),
+            1,
+            "reply tool should have been called"
+        );
+    }
+
+    // ── sanitize_history tests ────────────────────────────────────────────────
+
+    #[test]
+    fn sanitize_history_empty_is_noop() {
+        let mut history = vec![];
+        Orchestrator::sanitize_history(&mut history);
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn sanitize_history_valid_alternation_is_noop() {
+        let mut history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "hello".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "hi".into(),
+            },
+        ];
+        Orchestrator::sanitize_history(&mut history);
+        assert_eq!(history.len(), 2, "valid alternation should not be modified");
+    }
+
+    #[test]
+    fn sanitize_history_trailing_user_inserts_assistant() {
+        let mut history = vec![ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "orphaned".into(),
+        }];
+        Orchestrator::sanitize_history(&mut history);
+        assert_eq!(
+            history.len(),
+            2,
+            "should insert a synthetic assistant message"
+        );
+        match &history[1] {
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content,
+            } => {
+                assert!(
+                    content.contains("error"),
+                    "synthetic message should mention error"
+                );
+            }
+            other => panic!("expected Text(Assistant), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sanitize_history_trailing_multimodal_user_inserts_assistant() {
+        let mut history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![assistant_llm::ContentBlock::Text("image msg".into())],
+        }];
+        Orchestrator::sanitize_history(&mut history);
+        assert_eq!(history.len(), 2);
+        assert!(matches!(
+            &history[1],
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn sanitize_history_orphaned_tool_calls_get_synthetic_results() {
+        let mut history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "do stuff".into(),
+            },
+            ChatHistoryMessage::AssistantToolCalls(vec![
+                ToolCallItem {
+                    name: "tool-a".into(),
+                    params: serde_json::json!({}),
+                    id: None,
+                },
+                ToolCallItem {
+                    name: "tool-b".into(),
+                    params: serde_json::json!({}),
+                    id: None,
+                },
+            ]),
+            // Only one ToolResult — tool-b is missing.
+            ChatHistoryMessage::ToolResult {
+                name: "tool-a".into(),
+                content: "ok".into(),
+            },
+        ];
+        Orchestrator::sanitize_history(&mut history);
+        // Should have: User, AssistantToolCalls, ToolResult(a), ToolResult(b-synthetic)
+        assert_eq!(history.len(), 4, "missing tool result should be inserted");
+        match &history[3] {
+            ChatHistoryMessage::ToolResult { name, content } => {
+                assert_eq!(name, "tool-b");
+                assert!(
+                    content.contains("lost")
+                        || content.contains("crash")
+                        || content.contains("error"),
+                    "synthetic result should indicate failure: {content}"
+                );
+            }
+            other => panic!("expected ToolResult, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sanitize_history_fully_orphaned_tool_calls_all_results_inserted() {
+        let mut history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "run tools".into(),
+            },
+            ChatHistoryMessage::AssistantToolCalls(vec![
+                ToolCallItem {
+                    name: "alpha".into(),
+                    params: serde_json::json!({}),
+                    id: None,
+                },
+                ToolCallItem {
+                    name: "beta".into(),
+                    params: serde_json::json!({}),
+                    id: None,
+                },
+            ]),
+            // No ToolResult at all — process crashed right after persisting tool calls.
+        ];
+        Orchestrator::sanitize_history(&mut history);
+        // Should have: User, AssistantToolCalls, ToolResult(alpha), ToolResult(beta)
+        assert_eq!(
+            history.len(),
+            4,
+            "both missing tool results should be inserted"
+        );
+        assert!(
+            matches!(&history[2], ChatHistoryMessage::ToolResult { name, .. } if name == "alpha")
+        );
+        assert!(
+            matches!(&history[3], ChatHistoryMessage::ToolResult { name, .. } if name == "beta")
+        );
+    }
+
+    #[test]
+    fn sanitize_history_combined_orphaned_tools_and_trailing_user() {
+        // Simulates: process crashed during tool execution on turn 1,
+        // then on turn 2 the user message was persisted but LLM failed.
+        let mut history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "turn 1".into(),
+            },
+            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+                name: "my-tool".into(),
+                params: serde_json::json!({}),
+                id: None,
+            }]),
+            // Missing ToolResult, then orphaned user from turn 2:
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "turn 2".into(),
+            },
+        ];
+        Orchestrator::sanitize_history(&mut history);
+        // Should have: User, AssistantToolCalls, ToolResult(synthetic), User, Assistant(synthetic)
+        assert_eq!(history.len(), 5);
+        assert!(
+            matches!(&history[2], ChatHistoryMessage::ToolResult { name, .. } if name == "my-tool")
+        );
+        assert!(matches!(
+            &history[4],
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                ..
+            }
+        ));
     }
 }
