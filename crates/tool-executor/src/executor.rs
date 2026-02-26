@@ -78,14 +78,16 @@ impl ToolExecutor {
             .insert(handler.name().to_string(), handler);
     }
 
-    /// Inject the subagent runner and register the `agent-spawn` tool.
+    /// Inject the subagent runner and register subagent tools.
     ///
-    /// This must be called *after* both [`ToolExecutor`] and the
-    /// [`SubagentRunner`] implementor (e.g. `Orchestrator`) have been
-    /// constructed, because they have a circular dependency at init time.
+    /// Registers `agent-spawn` and `agent-terminate`.  This must be called
+    /// *after* both [`ToolExecutor`] and the [`SubagentRunner`] implementor
+    /// (e.g. `Orchestrator`) have been constructed, because they have a
+    /// circular dependency at init time.
     pub fn set_subagent_runner(&self, runner: Arc<dyn SubagentRunner>) {
-        use crate::builtins::AgentSpawnHandler;
-        self.register_ambient_tool(Arc::new(AgentSpawnHandler::new(runner)));
+        use crate::builtins::{AgentSpawnHandler, AgentTerminateHandler};
+        self.register_ambient_tool(Arc::new(AgentSpawnHandler::new(runner.clone())));
+        self.register_ambient_tool(Arc::new(AgentTerminateHandler::new(runner)));
     }
 
     /// Returns all registered tool handlers.

@@ -26,6 +26,7 @@ use opentelemetry::{
     Context as OtelContext, KeyValue,
 };
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, info_span, warn};
 use uuid::Uuid;
 
@@ -142,6 +143,10 @@ pub struct Orchestrator {
     /// Per-conversation extension tool registrations for interface-specific
     /// turns dispatched through the bus.  Consumed by the worker.
     extension_registrations: tokio::sync::RwLock<HashMap<Uuid, ExtensionRegistration>>,
+    /// Cancellation tokens for running subagents, keyed by agent ID.
+    /// Inserting a token when a subagent starts and removing it when it finishes
+    /// allows external callers to cancel an in-progress subagent.
+    agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
 }
 
 impl Orchestrator {
@@ -176,6 +181,7 @@ impl Orchestrator {
             trace_content: config.mirror.trace_content,
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
+            agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
         }
     }
 
@@ -2037,7 +2043,9 @@ impl SubagentRunner for Orchestrator {
     ///
     /// Creates a fresh conversation, restricts the available tool set, and
     /// runs the normal tool-calling loop until the sub-agent produces a final
-    /// answer (or hits the iteration limit).
+    /// answer (or hits the iteration limit).  A [`CancellationToken`] is
+    /// registered for the lifetime of the subagent so that external callers
+    /// can cancel it via [`cancel_agent`].
     async fn run_subagent(&self, spawn: AgentSpawn, parent_depth: u32) -> Result<AgentReport> {
         let new_depth = parent_depth + 1;
         if new_depth > DEFAULT_MAX_AGENT_DEPTH {
@@ -2060,6 +2068,13 @@ impl SubagentRunner for Orchestrator {
             conversation_id = %conversation_id,
             "Spawning subagent"
         );
+
+        // Register a cancellation token for this agent.
+        let cancel_token = CancellationToken::new();
+        self.agent_cancellations
+            .write()
+            .await
+            .insert(spawn.agent_id.clone(), cancel_token.clone());
 
         // Build the tool allowlist.  An empty list in AgentSpawn means "all
         // tools", which maps to `None` in ExecutionContext.
@@ -2105,191 +2120,262 @@ impl SubagentRunner for Orchestrator {
         }
 
         // Tool-calling loop (same structure as run_turn, but with restricted context).
-        for iteration in 0..self.max_iterations {
-            let iteration_span = info_span!(
-                "subagent_iteration",
-                agent_id = %spawn.agent_id,
-                iteration
-            );
-            let _iteration_guard = iteration_span.enter();
-            debug!(iteration, agent_id = %spawn.agent_id, "Subagent tool-calling loop");
-
-            let _ctx = ExecutionContext {
-                conversation_id,
-                turn: iteration as i64,
-                interface: Interface::Scheduler, // non-interactive
-                interactive: false,
-                allowed_tools: allowed_tools.clone(),
-                depth: new_depth,
-            };
-
-            let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
-            let response = match response {
-                Ok(r) => r,
-                Err(e) => {
+        let report = 'outer: {
+            for iteration in 0..self.max_iterations {
+                // Check for cancellation before each iteration.
+                if cancel_token.is_cancelled() {
+                    info!(
+                        agent_id = %spawn.agent_id,
+                        iteration,
+                        "Subagent cancelled before iteration"
+                    );
                     Self::persist_error_recovery(&conv_store, conversation_id).await;
-                    let msg = format!("LLM error: {e}");
+                    let msg = format!("Subagent '{}' was cancelled", spawn.agent_id);
                     let _ = agent_store
                         .complete(
                             &spawn.agent_id,
-                            assistant_storage::AgentStatus::Failed,
+                            assistant_storage::AgentStatus::Cancelled,
                             Some(&msg),
                         )
                         .await;
-                    return Ok(AgentReport {
-                        status: AgentReportStatus::Failed,
+                    break 'outer AgentReport {
+                        status: AgentReportStatus::Cancelled,
                         content: msg,
                         data: None,
-                    });
+                    };
                 }
-            };
 
-            match response {
-                // ── Final answer ──────────────────────────────────────────
-                LlmResponse::FinalAnswer(text, _meta) => {
-                    info!(
-                        iteration,
-                        agent_id = %spawn.agent_id,
-                        "Subagent returned final answer"
-                    );
+                let iteration_span = info_span!(
+                    "subagent_iteration",
+                    agent_id = %spawn.agent_id,
+                    iteration
+                );
+                let _iteration_guard = iteration_span.enter();
+                debug!(iteration, agent_id = %spawn.agent_id, "Subagent tool-calling loop");
 
-                    if !text.trim().is_empty() {
-                        let assistant_msg = {
-                            let mut m = Message::assistant(conversation_id, &text);
-                            m.turn = base_turn + iteration as i64 + 1;
-                            m
+                let _ctx = ExecutionContext {
+                    conversation_id,
+                    turn: iteration as i64,
+                    interface: Interface::Scheduler, // non-interactive
+                    interactive: false,
+                    allowed_tools: allowed_tools.clone(),
+                    depth: new_depth,
+                };
+
+                let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
+                let response = match response {
+                    Ok(r) => r,
+                    Err(e) => {
+                        Self::persist_error_recovery(&conv_store, conversation_id).await;
+                        let msg = format!("LLM error: {e}");
+                        let _ = agent_store
+                            .complete(
+                                &spawn.agent_id,
+                                assistant_storage::AgentStatus::Failed,
+                                Some(&msg),
+                            )
+                            .await;
+                        break 'outer AgentReport {
+                            status: AgentReportStatus::Failed,
+                            content: msg,
+                            data: None,
                         };
-                        if let Err(e) = conv_store.save_message(&assistant_msg).await {
-                            warn!("Failed to persist subagent answer: {e}");
+                    }
+                };
+
+                match response {
+                    // ── Final answer ──────────────────────────────────────────
+                    LlmResponse::FinalAnswer(text, _meta) => {
+                        info!(
+                            iteration,
+                            agent_id = %spawn.agent_id,
+                            "Subagent returned final answer"
+                        );
+
+                        if !text.trim().is_empty() {
+                            let assistant_msg = {
+                                let mut m = Message::assistant(conversation_id, &text);
+                                m.turn = base_turn + iteration as i64 + 1;
+                                m
+                            };
+                            if let Err(e) = conv_store.save_message(&assistant_msg).await {
+                                warn!("Failed to persist subagent answer: {e}");
+                            }
                         }
+
+                        // Truncate for the summary column.
+                        let summary: String = text.chars().take(500).collect();
+                        let _ = agent_store
+                            .complete(
+                                &spawn.agent_id,
+                                assistant_storage::AgentStatus::Completed,
+                                Some(&summary),
+                            )
+                            .await;
+
+                        break 'outer AgentReport {
+                            status: AgentReportStatus::Completed,
+                            content: text,
+                            data: None,
+                        };
                     }
 
-                    // Truncate for the summary column.
-                    let summary: String = text.chars().take(500).collect();
-                    let _ = agent_store
-                        .complete(
-                            &spawn.agent_id,
-                            assistant_storage::AgentStatus::Completed,
-                            Some(&summary),
-                        )
-                        .await;
+                    // ── Tool calls ────────────────────────────────────────────
+                    LlmResponse::ToolCalls(tool_call_items, _meta) => {
+                        debug!(
+                            count = tool_call_items.len(),
+                            agent_id = %spawn.agent_id,
+                            "Subagent requested tool execution(s)"
+                        );
 
-                    return Ok(AgentReport {
-                        status: AgentReportStatus::Completed,
-                        content: text,
-                        data: None,
-                    });
-                }
+                        history.push(ChatHistoryMessage::AssistantToolCalls(
+                            tool_call_items.clone(),
+                        ));
+                        let tc_msg = Self::make_tool_call_message(
+                            conversation_id,
+                            base_turn + iteration as i64 + 1,
+                            &tool_call_items,
+                        );
+                        if let Err(e) = conv_store.save_message(&tc_msg).await {
+                            warn!("Failed to persist subagent tool-call message: {e}");
+                        }
 
-                // ── Tool calls ────────────────────────────────────────────
-                LlmResponse::ToolCalls(tool_call_items, _meta) => {
-                    debug!(
-                        count = tool_call_items.len(),
-                        agent_id = %spawn.agent_id,
-                        "Subagent requested tool execution(s)"
-                    );
+                        for tool_call_item in tool_call_items {
+                            // Check cancellation between individual tool executions.
+                            if cancel_token.is_cancelled() {
+                                info!(
+                                    agent_id = %spawn.agent_id,
+                                    "Subagent cancelled during tool execution"
+                                );
+                                break;
+                            }
 
-                    history.push(ChatHistoryMessage::AssistantToolCalls(
-                        tool_call_items.clone(),
-                    ));
-                    let tc_msg = Self::make_tool_call_message(
-                        conversation_id,
-                        base_turn + iteration as i64 + 1,
-                        &tool_call_items,
-                    );
-                    if let Err(e) = conv_store.save_message(&tc_msg).await {
-                        warn!("Failed to persist subagent tool-call message: {e}");
-                    }
+                            let name = tool_call_item.name;
+                            let params = tool_call_item.params;
+                            let turn_index = base_turn + iteration as i64 + 1;
 
-                    for tool_call_item in tool_call_items {
-                        let name = tool_call_item.name;
-                        let params = tool_call_item.params;
-                        let turn_index = base_turn + iteration as i64 + 1;
+                            let params_map: HashMap<String, serde_json::Value> =
+                                if let serde_json::Value::Object(map) = &params {
+                                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                                } else {
+                                    HashMap::new()
+                                };
 
-                        let params_map: HashMap<String, serde_json::Value> =
-                            if let serde_json::Value::Object(map) = &params {
-                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                            } else {
-                                HashMap::new()
+                            let ctx = ExecutionContext {
+                                conversation_id,
+                                turn: iteration as i64,
+                                interface: Interface::Scheduler,
+                                interactive: false,
+                                allowed_tools: allowed_tools.clone(),
+                                depth: new_depth,
                             };
 
-                        let ctx = ExecutionContext {
-                            conversation_id,
-                            turn: iteration as i64,
-                            interface: Interface::Scheduler,
-                            interactive: false,
-                            allowed_tools: allowed_tools.clone(),
-                            depth: new_depth,
-                        };
+                            let observation =
+                                match self.executor.execute(&name, params_map, &ctx).await {
+                                    Ok(output) => {
+                                        debug!(
+                                            tool = %name,
+                                            success = output.success,
+                                            agent_id = %spawn.agent_id,
+                                            "Subagent tool execution completed"
+                                        );
+                                        tool_result_content(&output.content, output.data.as_ref())
+                                    }
+                                    Err(err) => {
+                                        warn!(
+                                            tool = %name,
+                                            %err,
+                                            agent_id = %spawn.agent_id,
+                                            "Subagent tool execution failed"
+                                        );
+                                        format!("Error executing '{name}': {err}")
+                                    }
+                                };
 
-                        let observation = match self.executor.execute(&name, params_map, &ctx).await
-                        {
-                            Ok(output) => {
-                                debug!(
-                                    tool = %name,
-                                    success = output.success,
-                                    agent_id = %spawn.agent_id,
-                                    "Subagent tool execution completed"
-                                );
-                                tool_result_content(&output.content, output.data.as_ref())
+                            self.append_tool_result(&mut history, &name, &observation);
+                            let tr_msg = Self::make_tool_result_message(
+                                conversation_id,
+                                turn_index,
+                                &name,
+                                &observation,
+                            );
+                            if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                warn!("Failed to persist subagent tool-result: {e}");
                             }
-                            Err(err) => {
-                                warn!(
-                                    tool = %name,
-                                    %err,
-                                    agent_id = %spawn.agent_id,
-                                    "Subagent tool execution failed"
-                                );
-                                format!("Error executing '{name}': {err}")
-                            }
-                        };
-
-                        self.append_tool_result(&mut history, &name, &observation);
-                        let tr_msg = Self::make_tool_result_message(
-                            conversation_id,
-                            turn_index,
-                            &name,
-                            &observation,
-                        );
-                        if let Err(e) = conv_store.save_message(&tr_msg).await {
-                            warn!("Failed to persist subagent tool-result: {e}");
                         }
                     }
-                }
 
-                // ── Thinking ──────────────────────────────────────────────
-                LlmResponse::Thinking(text, _meta) => {
-                    debug!(
-                        iteration,
-                        agent_id = %spawn.agent_id,
-                        "Subagent emitted thinking step"
-                    );
-                    history.push(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: text,
-                    });
+                    // ── Thinking ──────────────────────────────────────────────
+                    LlmResponse::Thinking(text, _meta) => {
+                        debug!(
+                            iteration,
+                            agent_id = %spawn.agent_id,
+                            "Subagent emitted thinking step"
+                        );
+                        history.push(ChatHistoryMessage::Text {
+                            role: ChatRole::Assistant,
+                            content: text,
+                        });
+                    }
                 }
             }
-        }
 
-        // Reached iteration limit.
-        Self::persist_error_recovery(&conv_store, conversation_id).await;
-        let msg = format!(
-            "Subagent '{}' reached max iterations ({}) without a final answer",
-            spawn.agent_id, self.max_iterations
-        );
-        let _ = agent_store
-            .complete(
-                &spawn.agent_id,
-                assistant_storage::AgentStatus::Failed,
-                Some(&msg),
-            )
-            .await;
-        Ok(AgentReport {
-            status: AgentReportStatus::Failed,
-            content: msg,
-            data: None,
-        })
+            // Reached iteration limit.
+            Self::persist_error_recovery(&conv_store, conversation_id).await;
+            let msg = format!(
+                "Subagent '{}' reached max iterations ({}) without a final answer",
+                spawn.agent_id, self.max_iterations
+            );
+            let _ = agent_store
+                .complete(
+                    &spawn.agent_id,
+                    assistant_storage::AgentStatus::Failed,
+                    Some(&msg),
+                )
+                .await;
+            AgentReport {
+                status: AgentReportStatus::Failed,
+                content: msg,
+                data: None,
+            }
+        };
+
+        // Clean up the cancellation token registry.
+        self.agent_cancellations
+            .write()
+            .await
+            .remove(&spawn.agent_id);
+
+        Ok(report)
+    }
+
+    /// Request cancellation of a running sub-agent.
+    ///
+    /// Triggers the [`CancellationToken`] associated with the agent so the
+    /// subagent loop exits at the next check point.  Also marks the agent as
+    /// cancelled in the lifecycle database.
+    async fn cancel_agent(&self, agent_id: &str) -> Result<bool> {
+        let token = self.agent_cancellations.read().await.get(agent_id).cloned();
+        match token {
+            Some(t) => {
+                info!(agent_id, "Cancelling subagent");
+                t.cancel();
+                // Mark the agent as cancelled in the DB (the loop will also do
+                // this when it detects the token, but setting it here ensures
+                // the status is updated even if the loop is blocked on an LLM
+                // call).
+                let agent_store = self.storage.agent_store();
+                let _ = agent_store
+                    .complete(
+                        agent_id,
+                        assistant_storage::AgentStatus::Cancelled,
+                        Some("Cancelled by agent-terminate"),
+                    )
+                    .await;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 }
 

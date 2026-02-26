@@ -26,4 +26,13 @@ use crate::bus_messages::{AgentReport, AgentSpawn};
 #[async_trait]
 pub trait SubagentRunner: Send + Sync {
     async fn run_subagent(&self, spawn: AgentSpawn, parent_depth: u32) -> Result<AgentReport>;
+
+    /// Request cancellation of a running sub-agent by its ID.
+    ///
+    /// Returns `true` if a cancellation signal was sent, `false` if no
+    /// running agent with the given ID was found.
+    async fn cancel_agent(&self, agent_id: &str) -> Result<bool> {
+        let _ = agent_id;
+        Ok(false)
+    }
 }
