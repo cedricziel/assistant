@@ -85,19 +85,30 @@ impl MemoryLoader {
     }
 
     /// Write default files to disk if they do not exist yet.
+    ///
+    /// BOOTSTRAP.md is only written on genuinely fresh installs (when SOUL.md
+    /// does not already exist).  This prevents existing users from getting an
+    /// unexpected onboarding prompt after an upgrade.
     pub fn ensure_defaults(&self) {
         if !self.enabled {
             return;
         }
+        // Detect fresh install before write_default creates the files.
+        let fresh_install = !self.soul_path.exists();
+
         write_default(&self.agents_path, DEFAULT_AGENTS);
         write_default(&self.soul_path, DEFAULT_SOUL);
         write_default(&self.identity_path, DEFAULT_IDENTITY);
         write_default(&self.user_path, DEFAULT_USER);
         write_default(&self.tools_path, DEFAULT_TOOLS);
         write_default(&self.memory_path, DEFAULT_MEMORY);
-        write_default(&self.bootstrap_path, DEFAULT_BOOTSTRAP);
         write_default(&self.heartbeat_path, DEFAULT_HEARTBEAT);
         write_default(&self.boot_path, DEFAULT_BOOT);
+
+        // Only seed the onboarding script on fresh installs.
+        if fresh_install {
+            write_default(&self.bootstrap_path, DEFAULT_BOOTSTRAP);
+        }
     }
 
     /// Build the dynamic system prompt from the memory files.
