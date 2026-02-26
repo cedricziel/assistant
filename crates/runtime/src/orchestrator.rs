@@ -435,9 +435,12 @@ impl Orchestrator {
     /// Run the per-session startup hook (BOOT.md).
     ///
     /// Reads BOOT.md from the configured path.  If the file exists and contains
-    /// non-comment, non-empty content, its text is executed as a single silent
-    /// turn via [`run_turn`].  The result is logged but not displayed to the
-    /// user — BOOT.md is infrastructure, not conversation.
+    /// non-comment, non-empty content, its text is submitted as a single silent
+    /// turn through the message bus.  The result is logged but not displayed to
+    /// the user — BOOT.md is infrastructure, not conversation.
+    ///
+    /// Requires [`run_worker`](Self::run_worker) to be running in a background
+    /// task.
     ///
     /// Call this once per session, before the first interactive turn.  Returns
     /// `Ok(true)` if a boot turn was executed, `Ok(false)` if skipped.
@@ -465,7 +468,7 @@ impl Orchestrator {
 
         info!(path = %boot_path.display(), "Running BOOT.md startup hook");
         match self
-            .run_turn(&stripped, conversation_id, interface, None)
+            .submit_turn(&stripped, conversation_id, interface)
             .await
         {
             Ok(turn) => {
