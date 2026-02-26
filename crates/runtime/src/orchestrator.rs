@@ -703,9 +703,29 @@ impl Orchestrator {
                 String::new()
             };
 
+            let format_instruction = match &interface {
+                Interface::Slack => {
+                    "\n\
+                    IMPORTANT — Slack mrkdwn formatting:\n\
+                    All text you produce MUST use Slack mrkdwn syntax, NOT standard Markdown.\n\
+                    • Bold: *text* (NOT **text**)\n\
+                    • Italic: _text_ (NOT *text*)\n\
+                    • Strikethrough: ~text~ (NOT ~~text~~)\n\
+                    • Code: `code` and ```code block```\n\
+                    • Links: <https://example.com|link text> (NOT [text](url))\n\
+                    • Lists: use plain • or - characters (NOT numbered Markdown lists)\n\
+                    • Headings: use *Bold Text* on its own line (NOT # Heading)\n\
+                    • Emoji: :emoji_name:\n\
+                    Never use standard Markdown bold (**), italic (*single for italic*), \
+                    links ([text](url)), or ATX headings (# heading).\n"
+                }
+                _ => "",
+            };
+
             format!(
                 "{base_system_prompt}\n\n---\n\n\
                 You are operating inside a messaging interface. \
+                {format_instruction}\
                 {ack_instruction}\
                 When you have finished all work, call `end_turn` to signal completion."
             )
