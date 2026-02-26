@@ -16,5 +16,5 @@ pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
     AssistantConfig, ExecutionContext, Interface, LlmConfig, LlmProviderKind, MattermostConfig,
     McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, SignalConfig, SkillsConfig,
-    SlackConfig, StorageConfig,
+    SlackConfig, StorageConfig, DEFAULT_MAX_AGENT_DEPTH,
 };

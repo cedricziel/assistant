@@ -270,6 +270,8 @@ mod tests {
             turn: 0,
             interface: assistant_core::Interface::Cli,
             interactive: false,
+            allowed_tools: None,
+            depth: 0,
         }
     }
 

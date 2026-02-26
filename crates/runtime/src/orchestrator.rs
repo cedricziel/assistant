@@ -716,6 +716,8 @@ impl Orchestrator {
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: false,
+                allowed_tools: None,
+                depth: 0,
             };
 
             let mut llm_span = start_llm_span(
@@ -830,6 +832,8 @@ impl Orchestrator {
                             turn: iteration as i64,
                             interface: interface.clone(),
                             interactive: false,
+                            allowed_tools: None,
+                            depth: 0,
                         };
                         if let Err(e) = reply_handler.run(params_map, &ctx2).await {
                             warn!(tool = %reply_name, %e, "Auto-post via reply tool failed");
@@ -1243,6 +1247,8 @@ impl Orchestrator {
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: matches!(interface, Interface::Cli),
+                allowed_tools: None,
+                depth: 0,
             };
 
             let mut llm_span = start_llm_span(
@@ -1514,6 +1520,8 @@ impl Orchestrator {
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: matches!(interface, Interface::Cli),
+                allowed_tools: None,
+                depth: 0,
             };
 
             let mut llm_span = start_llm_span(

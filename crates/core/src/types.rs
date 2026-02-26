@@ -63,6 +63,9 @@ impl Message {
     }
 }
 
+/// Default maximum subagent nesting depth.
+pub const DEFAULT_MAX_AGENT_DEPTH: u32 = 5;
+
 /// Runtime context passed to every skill execution
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
@@ -72,6 +75,11 @@ pub struct ExecutionContext {
     pub interface: Interface,
     /// Whether the skill can prompt the user for confirmation
     pub interactive: bool,
+    /// When `Some`, only tools whose names appear in this list may be executed.
+    /// `None` means all registered tools are available (the default).
+    pub allowed_tools: Option<Vec<String>>,
+    /// Current subagent nesting depth.  The root agent has depth `0`.
+    pub depth: u32,
 }
 
 /// Which interface originated the request
