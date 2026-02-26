@@ -9,7 +9,16 @@ set -e
 # On full remove ($1 = "remove") we also disable.
 action="${1:-remove}"
 
-for user_id in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | sort -u); do
+for uid_path in /run/systemd/users/*; do
+    user_id=$(basename "$uid_path")
+    # Skip non-numeric entries
+    case "$user_id" in
+        *[!0-9]*) continue ;;
+    esac
+    # Skip root and system users (UID < 1000)
+    if [ "$user_id" -lt 1000 ] 2>/dev/null; then
+        continue
+    fi
     for svc in assistant-slack assistant-mattermost assistant-web-ui; do
         systemctl --user -M "${user_id}@.host" stop "$svc" 2>/dev/null || true
         if [ "$action" = "remove" ]; then
