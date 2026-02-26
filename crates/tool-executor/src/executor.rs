@@ -51,6 +51,7 @@ impl ToolExecutor {
             Arc::new(WebSearchHandler::new()),
             // Memory
             Arc::new(MemoryGetHandler::new(config.clone())),
+            Arc::new(MemoryAppendHandler::new(config.clone())),
             Arc::new(MemorySearchHandler::new(storage.clone(), llm.clone())),
             // Skills / meta
             Arc::new(ListSkillsHandler::new(registry.clone())),
