@@ -4,11 +4,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    strip_html_comments, Attachment, ExecutionContext, Interface, MemoryLoader, Message,
-    MessageBus, MessageRole, ToolHandler,
+    bus_messages, strip_html_comments, topic, Attachment, ClaimFilter, ExecutionContext, Interface,
+    MemoryLoader, Message, MessageBus, MessageRole, PublishRequest, ToolHandler,
 };
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
@@ -23,7 +24,7 @@ use opentelemetry::{
     Context as OtelContext, KeyValue,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, info, info_span, warn};
+use tracing::{debug, error, info, info_span, warn};
 use uuid::Uuid;
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -74,6 +75,22 @@ fn end_turn_spec() -> ToolSpec {
         }),
         is_mutating: false,
         requires_confirmation: false,
+    }
+}
+
+/// Parse an interface string back to the [`Interface`] enum.
+///
+/// Matches the `Debug` format that the codebase uses for serialisation
+/// (e.g. `"Cli"`, `"Slack"`).  Falls back to [`Interface::Cli`] for
+/// unknown values.
+fn parse_interface(s: &str) -> Interface {
+    match s.to_lowercase().as_str() {
+        "cli" => Interface::Cli,
+        "signal" => Interface::Signal,
+        "mcp" => Interface::Mcp,
+        "slack" => Interface::Slack,
+        "mattermost" => Interface::Mattermost,
+        _ => Interface::Cli,
     }
 }
 
@@ -143,6 +160,178 @@ impl Orchestrator {
     /// Return a reference to the message bus.
     pub fn bus(&self) -> &Arc<dyn MessageBus> {
         &self.bus
+    }
+
+    // ── Bus-based turn processing ────────────────────────────────────────────
+
+    /// Run the turn-processing worker loop.
+    ///
+    /// Claims messages from the [`topic::TURN_REQUEST`] topic, processes them
+    /// via the internal [`run_turn`](Self::run_turn) method, and publishes
+    /// results to [`topic::TURN_RESULT`].
+    ///
+    /// This method runs indefinitely and should be spawned as a background
+    /// task.  It exits when the tokio task is cancelled / dropped.
+    ///
+    /// ```rust,ignore
+    /// let orch = Arc::new(orchestrator);
+    /// tokio::spawn({
+    ///     let orch = orch.clone();
+    ///     async move { orch.run_worker("worker-1").await }
+    /// });
+    /// ```
+    pub async fn run_worker(&self, worker_id: &str) {
+        info!(worker_id, "Turn worker started");
+        loop {
+            match self.bus.claim(topic::TURN_REQUEST, worker_id).await {
+                Ok(Some(msg)) => {
+                    let turn_req: bus_messages::TurnRequest =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(req) => req,
+                            Err(e) => {
+                                warn!(
+                                    error = %e,
+                                    msg_id = %msg.id,
+                                    "Failed to deserialize TurnRequest"
+                                );
+                                let _ = self.bus.fail(msg.id).await;
+                                continue;
+                            }
+                        };
+
+                    let interface = msg
+                        .interface
+                        .as_deref()
+                        .map(parse_interface)
+                        .unwrap_or(Interface::Cli);
+
+                    debug!(
+                        conversation_id = %turn_req.conversation_id,
+                        worker_id,
+                        "Processing turn request"
+                    );
+
+                    match self
+                        .run_turn(&turn_req.prompt, turn_req.conversation_id, interface, None)
+                        .await
+                    {
+                        Ok(result) => {
+                            let bus_result = bus_messages::TurnResult {
+                                conversation_id: turn_req.conversation_id,
+                                content: result.answer,
+                                turn: 0,
+                            };
+
+                            if let Err(e) = self
+                                .bus
+                                .publish(
+                                    PublishRequest::new(
+                                        topic::TURN_RESULT,
+                                        serde_json::to_value(&bus_result).unwrap_or_default(),
+                                    )
+                                    .with_conversation_id(turn_req.conversation_id),
+                                )
+                                .await
+                            {
+                                warn!(error = %e, "Failed to publish TurnResult");
+                            }
+
+                            if let Err(e) = self.bus.ack(msg.id).await {
+                                warn!(
+                                    error = %e,
+                                    msg_id = %msg.id,
+                                    "Failed to ack bus message"
+                                );
+                            }
+
+                            info!(
+                                conversation_id = %turn_req.conversation_id,
+                                worker_id,
+                                "Turn completed via worker"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                conversation_id = %turn_req.conversation_id,
+                                worker_id,
+                                "Turn failed in worker"
+                            );
+                            let _ = self.bus.fail(msg.id).await;
+                        }
+                    }
+                }
+                Ok(None) => {
+                    // No pending messages — back off.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    error!(error = %e, worker_id, "Turn worker claim error");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+    }
+
+    /// Submit a turn through the message bus and wait for the result.
+    ///
+    /// Publishes a [`TurnRequest`](bus_messages::TurnRequest) to the bus and
+    /// polls for the corresponding [`TurnResult`](bus_messages::TurnResult).
+    /// Requires [`run_worker`](Self::run_worker) to be running in a
+    /// background task.
+    ///
+    /// # Parameters
+    /// * `prompt` — the user message
+    /// * `conversation_id` — conversation to continue (or start)
+    /// * `interface` — originating interface
+    pub async fn submit_turn(
+        &self,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+    ) -> Result<TurnResult> {
+        let turn_req = bus_messages::TurnRequest {
+            prompt: prompt.to_string(),
+            conversation_id,
+            extension_tools: vec![],
+        };
+
+        self.bus
+            .publish(
+                PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
+                    .with_conversation_id(conversation_id)
+                    .with_interface(format!("{:?}", interface))
+                    .with_reply_to(topic::TURN_RESULT),
+            )
+            .await?;
+
+        // Poll for the result with a 5-minute timeout.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+        loop {
+            if tokio::time::Instant::now() > deadline {
+                anyhow::bail!(
+                    "submit_turn timed out waiting for result \
+                     (conversation_id={conversation_id})"
+                );
+            }
+
+            let filter = ClaimFilter::new().with_conversation_id(conversation_id);
+            if let Some(msg) = self
+                .bus
+                .claim_filtered(topic::TURN_RESULT, "submit_turn", &filter)
+                .await?
+            {
+                let bus_result: bus_messages::TurnResult = serde_json::from_value(msg.payload)?;
+                self.bus.ack(msg.id).await?;
+                return Ok(TurnResult {
+                    answer: bus_result.content,
+                    // Attachments are not carried through the bus (yet).
+                    attachments: vec![],
+                });
+            }
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 
     /// Attach a confirmation callback (used by the CLI interface).
@@ -1963,7 +2152,11 @@ fn escape_xml(input: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use assistant_core::{types::Interface, AssistantConfig, MessageBus};
+    use std::time::Duration;
+
+    use assistant_core::{
+        bus_messages, topic, types::Interface, AssistantConfig, MessageBus, PublishRequest,
+    };
     use assistant_llm::{
         ChatHistoryMessage, ChatRole, LlmClient, LlmClientConfig, LlmProvider, ToolCallItem,
     };
@@ -3396,5 +3589,105 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    // ── Bus integration tests ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_interface_known_values() {
+        use super::parse_interface;
+        assert_eq!(parse_interface("Cli"), Interface::Cli);
+        assert_eq!(parse_interface("cli"), Interface::Cli);
+        assert_eq!(parse_interface("Slack"), Interface::Slack);
+        assert_eq!(parse_interface("MATTERMOST"), Interface::Mattermost);
+        assert_eq!(parse_interface("Signal"), Interface::Signal);
+        assert_eq!(parse_interface("mcp"), Interface::Mcp);
+    }
+
+    #[test]
+    fn parse_interface_unknown_falls_back_to_cli() {
+        use super::parse_interface;
+        assert_eq!(parse_interface("unknown"), Interface::Cli);
+        assert_eq!(parse_interface(""), Interface::Cli);
+    }
+
+    #[tokio::test]
+    async fn run_worker_processes_turn_request() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "bus response").await;
+
+        let (orch, _storage) = build(&server.uri()).await;
+
+        // Spawn the worker in the background.
+        let orch_worker = orch.clone();
+        let worker = tokio::spawn(async move {
+            orch_worker.run_worker("test-worker").await;
+        });
+
+        // Publish a TurnRequest to the bus.
+        let conv_id = Uuid::new_v4();
+        let turn_req = bus_messages::TurnRequest {
+            prompt: "hello from bus".to_string(),
+            conversation_id: conv_id,
+            extension_tools: vec![],
+        };
+        orch.bus()
+            .publish(
+                PublishRequest::new(
+                    topic::TURN_REQUEST,
+                    serde_json::to_value(&turn_req).unwrap(),
+                )
+                .with_conversation_id(conv_id)
+                .with_interface("Cli"),
+            )
+            .await
+            .unwrap();
+
+        // Wait for the worker to process and publish the result.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Verify a TurnResult was published.
+        let results = orch.bus().list(topic::TURN_RESULT, None, 10).await.unwrap();
+
+        assert_eq!(results.len(), 1, "expected one TurnResult on the bus");
+        let result: bus_messages::TurnResult =
+            serde_json::from_value(results[0].payload.clone()).unwrap();
+        assert_eq!(result.conversation_id, conv_id);
+        assert_eq!(result.content, "bus response");
+
+        // The original request should be acked (done).
+        let pending = orch
+            .bus()
+            .list(
+                topic::TURN_REQUEST,
+                Some(assistant_core::MessageStatus::Pending),
+                10,
+            )
+            .await
+            .unwrap();
+        assert!(pending.is_empty(), "turn request should be acked");
+
+        worker.abort();
+    }
+
+    #[tokio::test]
+    async fn submit_turn_publishes_and_waits_for_result() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "submitted answer").await;
+
+        let (orch, _storage) = build(&server.uri()).await;
+
+        // Spawn the worker so it can process the submitted turn.
+        let orch_worker = orch.clone();
+        tokio::spawn(async move {
+            orch_worker.run_worker("test-worker").await;
+        });
+
+        let conv_id = Uuid::new_v4();
+        let result = orch
+            .submit_turn("hello via submit", conv_id, Interface::Cli)
+            .await
+            .unwrap();
+        assert_eq!(result.answer, "submitted answer");
     }
 }
