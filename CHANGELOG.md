@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/cedricziel/assistant/compare/v0.1.12...v0.1.13) (2026-02-26)
+
+
+### Features
+
+* add durable topic-based message bus for inter-component communication ([#63](https://github.com/cedricziel/assistant/issues/63)) ([dd6a520](https://github.com/cedricziel/assistant/commit/dd6a52004206ab08843817089e4326f1a55af772))
+
 ## [0.1.12](https://github.com/cedricziel/assistant/compare/v0.1.11...v0.1.12) (2026-02-26)
 
 
