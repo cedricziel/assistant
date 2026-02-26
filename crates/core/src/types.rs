@@ -82,6 +82,8 @@ pub enum Interface {
     Mcp,
     Slack,
     Mattermost,
+    /// Background scheduled tasks and heartbeats — non-interactive.
+    Scheduler,
 }
 
 /// Top-level assistant configuration

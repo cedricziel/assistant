@@ -808,8 +808,13 @@ async fn main() -> Result<()> {
                 // printer to avoid hanging on a never-closed channel.
                 let submit_result = submit.await;
 
-                // Now flush any remaining buffered tokens.
-                let _ = printer.await;
+                // Flush remaining tokens on success; abort on failure to
+                // prevent blocking on a channel that may never close.
+                if matches!(&submit_result, Ok(Ok(_))) {
+                    let _ = printer.await;
+                } else {
+                    printer.abort();
+                }
 
                 match submit_result {
                     Ok(Ok(result)) => {

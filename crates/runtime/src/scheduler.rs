@@ -79,7 +79,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
             .publish(
                 PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
                     .with_conversation_id(conversation_id)
-                    .with_interface(format!("{:?}", Interface::Cli))
+                    .with_interface(format!("{:?}", Interface::Scheduler))
                     .with_user_id("scheduler"),
             )
             .await
@@ -162,7 +162,7 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         .publish(
             PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
                 .with_conversation_id(conversation_id)
-                .with_interface(format!("{:?}", Interface::Cli))
+                .with_interface(format!("{:?}", Interface::Scheduler))
                 .with_user_id("heartbeat"),
         )
         .await?;

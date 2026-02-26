@@ -101,6 +101,7 @@ fn parse_interface(s: &str) -> Interface {
         "mcp" => Interface::Mcp,
         "slack" => Interface::Slack,
         "mattermost" => Interface::Mattermost,
+        "scheduler" => Interface::Scheduler,
         _ => Interface::Cli,
     }
 }
@@ -344,6 +345,26 @@ impl Orchestrator {
                                 worker_id,
                                 "Turn failed in worker"
                             );
+
+                            // Publish a failure TurnResult so submit_turn
+                            // callers get an immediate error instead of
+                            // waiting until timeout.
+                            let err_result = bus_messages::TurnResult {
+                                conversation_id: conv_id,
+                                content: format!("Turn failed: {e}"),
+                                turn: 0,
+                                attachments: vec![],
+                            };
+                            let mut pub_req = PublishRequest::new(
+                                topic::TURN_RESULT,
+                                serde_json::to_value(&err_result).unwrap_or_default(),
+                            )
+                            .with_conversation_id(conv_id);
+                            if let Some(bid) = msg.batch_id {
+                                pub_req = pub_req.with_batch_id(bid);
+                            }
+                            let _ = self.bus.publish(pub_req).await;
+
                             let _ = self.bus.fail(msg.id).await;
                         }
                     }
@@ -3738,11 +3759,20 @@ mod tests {
             .await
             .unwrap();
 
-        // Wait for the worker to process and publish the result.
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        // Verify a TurnResult was published.
-        let results = orch.bus().list(topic::TURN_RESULT, None, 10).await.unwrap();
+        // Poll for the worker to process and publish the result instead of
+        // a fixed sleep, which can be flaky under CI load.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let results = loop {
+            let r = orch.bus().list(topic::TURN_RESULT, None, 10).await.unwrap();
+            if !r.is_empty() {
+                break r;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for TurnResult"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
 
         assert_eq!(results.len(), 1, "expected one TurnResult on the bus");
         let result: bus_messages::TurnResult =
