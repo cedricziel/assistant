@@ -3,18 +3,29 @@
 //! Uses a single `bus_messages` table as a durable, topic-based work queue.
 //! Claim semantics rely on SQLite's serialised writes — `BEGIN IMMEDIATE`
 //! ensures exactly one worker wins the race for a given message.
+//!
+//! Routing is handled via metadata columns (`agent_id`, `user_id`,
+//! `conversation_id`, `batch_id`) and dynamic WHERE-clause construction
+//! in [`claim_filtered`](MessageBus::claim_filtered).
 
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use serde_json::Value;
 use sqlx::{Row, SqlitePool};
 use tracing::debug;
 use uuid::Uuid;
 
-use assistant_core::{BusMessage, MessageBus, MessageStatus};
+use assistant_core::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
+
+/// All columns selected in queries — keeps SELECT lists consistent.
+const SELECT_COLS: &str = "\
+    id, topic, payload, status, \
+    user_id, agent_id, \
+    conversation_id, interface, reply_to, \
+    correlation_id, causation_id, batch_id, \
+    created_at, claimed_at, claimed_by";
 
 /// SQLite-backed message bus.
 pub struct SqliteMessageBus {
@@ -29,82 +40,109 @@ impl SqliteMessageBus {
 
 #[async_trait]
 impl MessageBus for SqliteMessageBus {
-    async fn publish(&self, topic: &str, payload: &Value) -> Result<Uuid> {
+    async fn publish(&self, req: PublishRequest) -> Result<Uuid> {
         let id = Uuid::new_v4();
         let id_str = id.to_string();
-        let payload_str = serde_json::to_string(payload)?;
+        let payload_str = serde_json::to_string(&req.payload)?;
         let now = Utc::now();
+        let conv_str = req.conversation_id.map(|c| c.to_string());
+        let corr_str = req.correlation_id.map(|c| c.to_string());
+        let cause_str = req.causation_id.map(|c| c.to_string());
+        let batch_str = req.batch_id.map(|b| b.to_string());
 
         sqlx::query(
-            "INSERT INTO bus_messages (id, topic, payload, status, created_at) \
-             VALUES (?1, ?2, ?3, 'pending', ?4)",
+            "INSERT INTO bus_messages \
+                (id, topic, payload, status, \
+                 user_id, agent_id, \
+                 conversation_id, interface, reply_to, \
+                 correlation_id, causation_id, batch_id, \
+                 created_at) \
+             VALUES (?1, ?2, ?3, 'pending', \
+                     ?4, ?5, \
+                     ?6, ?7, ?8, \
+                     ?9, ?10, ?11, \
+                     ?12)",
         )
         .bind(&id_str)
-        .bind(topic)
+        .bind(&req.topic)
         .bind(&payload_str)
+        .bind(&req.user_id)
+        .bind(&req.agent_id)
+        .bind(&conv_str)
+        .bind(&req.interface)
+        .bind(&req.reply_to)
+        .bind(&corr_str)
+        .bind(&cause_str)
+        .bind(&batch_str)
         .bind(now)
         .execute(&self.pool)
         .await?;
 
-        debug!(id = %id, topic = %topic, "published bus message");
+        debug!(id = %id, topic = %req.topic, "published bus message");
         Ok(id)
     }
 
-    async fn publish_for_conversation(
+    async fn claim_filtered(
         &self,
         topic: &str,
-        payload: &Value,
-        conversation_id: Uuid,
-    ) -> Result<Uuid> {
-        let id = Uuid::new_v4();
-        let id_str = id.to_string();
-        let payload_str = serde_json::to_string(payload)?;
-        let conv_str = conversation_id.to_string();
+        worker_id: &str,
+        filter: &ClaimFilter,
+    ) -> Result<Option<BusMessage>> {
         let now = Utc::now();
 
-        sqlx::query(
-            "INSERT INTO bus_messages (id, topic, payload, status, conversation_id, created_at) \
-             VALUES (?1, ?2, ?3, 'pending', ?4, ?5)",
-        )
-        .bind(&id_str)
-        .bind(topic)
-        .bind(&payload_str)
-        .bind(&conv_str)
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
+        // Build the inner SELECT with optional filter predicates.
+        let mut where_clauses = vec!["topic = ?3".to_string(), "status = 'pending'".to_string()];
+        // Track bind index — first 3 are: claimed_at, claimed_by, topic
+        let mut next_bind: u32 = 4;
+        let mut extra_binds: Vec<String> = Vec::new();
 
-        debug!(id = %id, topic = %topic, conversation_id = %conversation_id, "published bus message");
-        Ok(id)
-    }
+        if let Some(ref agent) = filter.agent_id {
+            where_clauses.push(format!("agent_id = ?{next_bind}"));
+            extra_binds.push(agent.clone());
+            next_bind += 1;
+        }
+        if let Some(ref user) = filter.user_id {
+            where_clauses.push(format!("user_id = ?{next_bind}"));
+            extra_binds.push(user.clone());
+            next_bind += 1;
+        }
+        if let Some(ref conv) = filter.conversation_id {
+            where_clauses.push(format!("conversation_id = ?{next_bind}"));
+            extra_binds.push(conv.to_string());
+            next_bind += 1;
+        }
+        if let Some(ref batch) = filter.batch_id {
+            where_clauses.push(format!("batch_id = ?{next_bind}"));
+            extra_binds.push(batch.to_string());
+            // next_bind not needed after last, but keep for consistency
+            let _ = next_bind;
+        }
 
-    async fn claim(&self, topic: &str, worker_id: &str) -> Result<Option<BusMessage>> {
-        let now = Utc::now();
+        let where_sql = where_clauses.join(" AND ");
+        let sql = format!(
+            "UPDATE bus_messages \
+             SET status = 'claimed', claimed_at = ?1, claimed_by = ?2 \
+             WHERE id = ( \
+                 SELECT id FROM bus_messages \
+                 WHERE {where_sql} \
+                 ORDER BY created_at ASC \
+                 LIMIT 1 \
+             ) \
+             RETURNING {SELECT_COLS}"
+        );
 
-        // Use a transaction with BEGIN IMMEDIATE to serialise claim attempts.
         let mut tx = self.pool.begin().await?;
         sqlx::query("PRAGMA busy_timeout = 5000;")
             .execute(&mut *tx)
             .await?;
 
-        let row = sqlx::query(
-            "UPDATE bus_messages \
-             SET status = 'claimed', claimed_at = ?1, claimed_by = ?2 \
-             WHERE id = ( \
-                 SELECT id FROM bus_messages \
-                 WHERE topic = ?3 AND status = 'pending' \
-                 ORDER BY created_at ASC \
-                 LIMIT 1 \
-             ) \
-             RETURNING id, topic, payload, status, conversation_id, \
-                       created_at, claimed_at, claimed_by",
-        )
-        .bind(now)
-        .bind(worker_id)
-        .bind(topic)
-        .fetch_optional(&mut *tx)
-        .await?;
+        let mut query = sqlx::query(&sql).bind(now).bind(worker_id).bind(topic);
 
+        for val in &extra_binds {
+            query = query.bind(val);
+        }
+
+        let row = query.fetch_optional(&mut *tx).await?;
         tx.commit().await?;
 
         match row {
@@ -155,33 +193,29 @@ impl MessageBus for SqliteMessageBus {
     ) -> Result<Vec<BusMessage>> {
         let rows = match status {
             Some(s) => {
-                sqlx::query(
-                    "SELECT id, topic, payload, status, conversation_id, \
-                            created_at, claimed_at, claimed_by \
-                     FROM bus_messages \
+                let sql = format!(
+                    "SELECT {SELECT_COLS} FROM bus_messages \
                      WHERE topic = ?1 AND status = ?2 \
-                     ORDER BY created_at ASC \
-                     LIMIT ?3",
-                )
-                .bind(topic)
-                .bind(s.to_string())
-                .bind(limit)
-                .fetch_all(&self.pool)
-                .await?
+                     ORDER BY created_at ASC LIMIT ?3"
+                );
+                sqlx::query(&sql)
+                    .bind(topic)
+                    .bind(s.to_string())
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await?
             }
             None => {
-                sqlx::query(
-                    "SELECT id, topic, payload, status, conversation_id, \
-                            created_at, claimed_at, claimed_by \
-                     FROM bus_messages \
+                let sql = format!(
+                    "SELECT {SELECT_COLS} FROM bus_messages \
                      WHERE topic = ?1 \
-                     ORDER BY created_at ASC \
-                     LIMIT ?2",
-                )
-                .bind(topic)
-                .bind(limit)
-                .fetch_all(&self.pool)
-                .await?
+                     ORDER BY created_at ASC LIMIT ?2"
+                );
+                sqlx::query(&sql)
+                    .bind(topic)
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await?
             }
         };
 
@@ -229,13 +263,23 @@ fn parse_row(r: sqlx::sqlite::SqliteRow) -> Result<BusMessage> {
     let raw_payload: String = r.get("payload");
     let raw_status: String = r.get("status");
     let raw_conv: Option<String> = r.get("conversation_id");
+    let raw_corr: Option<String> = r.get("correlation_id");
+    let raw_cause: Option<String> = r.get("causation_id");
+    let raw_batch: Option<String> = r.get("batch_id");
 
     Ok(BusMessage {
         id: Uuid::parse_str(&raw_id)?,
         topic: r.get("topic"),
         payload: serde_json::from_str(&raw_payload)?,
         status: MessageStatus::parse(&raw_status)?,
+        user_id: r.get("user_id"),
+        agent_id: r.get("agent_id"),
         conversation_id: raw_conv.map(|s| Uuid::parse_str(&s)).transpose()?,
+        interface: r.get("interface"),
+        reply_to: r.get("reply_to"),
+        correlation_id: raw_corr.map(|s| Uuid::parse_str(&s)).transpose()?,
+        causation_id: raw_cause.map(|s| Uuid::parse_str(&s)).transpose()?,
+        batch_id: raw_batch.map(|s| Uuid::parse_str(&s)).transpose()?,
         created_at: r.get("created_at"),
         claimed_at: r.get("claimed_at"),
         claimed_by: r.get("claimed_by"),
@@ -255,12 +299,17 @@ mod tests {
         (s, b)
     }
 
+    // -- publish & list -----------------------------------------------------
+
     #[tokio::test]
     async fn test_publish_and_list() {
         let (_s, bus) = bus().await;
-        let payload = serde_json::json!({"action": "greet", "name": "world"});
+        let payload = serde_json::json!({"action": "greet"});
 
-        let id = bus.publish("test.topic", &payload).await.unwrap();
+        let id = bus
+            .publish(PublishRequest::new("test.topic", payload.clone()))
+            .await
+            .unwrap();
 
         let msgs = bus.list("test.topic", None, 10).await.unwrap();
         assert_eq!(msgs.len(), 1, "should have one message");
@@ -269,31 +318,56 @@ mod tests {
         assert_eq!(msgs[0].status, MessageStatus::Pending);
         assert_eq!(msgs[0].payload, payload);
         assert!(msgs[0].conversation_id.is_none());
+        assert!(msgs[0].agent_id.is_none());
     }
 
     #[tokio::test]
-    async fn test_publish_for_conversation() {
+    async fn test_publish_with_full_metadata() {
         let (_s, bus) = bus().await;
         let conv_id = Uuid::new_v4();
-        let payload = serde_json::json!({"turn": 1});
+        let corr_id = Uuid::new_v4();
+        let cause_id = Uuid::new_v4();
+        let batch_id = Uuid::new_v4();
 
-        bus.publish_for_conversation("turn.request", &payload, conv_id)
+        let id = bus
+            .publish(
+                PublishRequest::new("turn.request", serde_json::json!({"prompt": "hi"}))
+                    .with_user_id("U123")
+                    .with_agent_id("main")
+                    .with_conversation_id(conv_id)
+                    .with_interface("slack")
+                    .with_reply_to("turn.result")
+                    .with_correlation_id(corr_id)
+                    .with_causation_id(cause_id)
+                    .with_batch_id(batch_id),
+            )
             .await
             .unwrap();
 
         let msgs = bus.list("turn.request", None, 10).await.unwrap();
         assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0].conversation_id, Some(conv_id));
+        let m = &msgs[0];
+        assert_eq!(m.id, id);
+        assert_eq!(m.user_id.as_deref(), Some("U123"));
+        assert_eq!(m.agent_id.as_deref(), Some("main"));
+        assert_eq!(m.conversation_id, Some(conv_id));
+        assert_eq!(m.interface.as_deref(), Some("slack"));
+        assert_eq!(m.reply_to.as_deref(), Some("turn.result"));
+        assert_eq!(m.correlation_id, Some(corr_id));
+        assert_eq!(m.causation_id, Some(cause_id));
+        assert_eq!(m.batch_id, Some(batch_id));
     }
+
+    // -- claim (unfiltered) -------------------------------------------------
 
     #[tokio::test]
     async fn test_claim_returns_oldest_first() {
         let (_s, bus) = bus().await;
 
-        bus.publish("q", &serde_json::json!({"seq": 1}))
+        bus.publish(PublishRequest::new("q", serde_json::json!({"seq": 1})))
             .await
             .unwrap();
-        bus.publish("q", &serde_json::json!({"seq": 2}))
+        bus.publish(PublishRequest::new("q", serde_json::json!({"seq": 2})))
             .await
             .unwrap();
 
@@ -317,7 +391,7 @@ mod tests {
     async fn test_claim_skips_already_claimed() {
         let (_s, bus) = bus().await;
 
-        bus.publish("q", &serde_json::json!({"only": true}))
+        bus.publish(PublishRequest::new("q", serde_json::json!({"only": true})))
             .await
             .unwrap();
 
@@ -330,11 +404,203 @@ mod tests {
         );
     }
 
+    // -- claim_filtered -----------------------------------------------------
+
+    #[tokio::test]
+    async fn test_claim_filtered_by_agent() {
+        let (_s, bus) = bus().await;
+
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"for": "alpha"}))
+                .with_agent_id("alpha"),
+        )
+        .await
+        .unwrap();
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"for": "beta"}))
+                .with_agent_id("beta"),
+        )
+        .await
+        .unwrap();
+
+        let beta_msg = bus
+            .claim_filtered(
+                "turn.request",
+                "w1",
+                &ClaimFilter::new().with_agent_id("beta"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(beta_msg.payload["for"], "beta");
+        assert_eq!(beta_msg.agent_id.as_deref(), Some("beta"));
+
+        // Alpha still available
+        let alpha_msg = bus
+            .claim_filtered(
+                "turn.request",
+                "w1",
+                &ClaimFilter::new().with_agent_id("alpha"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(alpha_msg.payload["for"], "alpha");
+    }
+
+    #[tokio::test]
+    async fn test_claim_filtered_by_batch() {
+        let (_s, bus) = bus().await;
+        let batch_a = Uuid::new_v4();
+        let batch_b = Uuid::new_v4();
+
+        bus.publish(
+            PublishRequest::new("tool.result", serde_json::json!({"tool": "bash"}))
+                .with_batch_id(batch_a),
+        )
+        .await
+        .unwrap();
+        bus.publish(
+            PublishRequest::new("tool.result", serde_json::json!({"tool": "web"}))
+                .with_batch_id(batch_b),
+        )
+        .await
+        .unwrap();
+
+        let msg = bus
+            .claim_filtered(
+                "tool.result",
+                "w1",
+                &ClaimFilter::new().with_batch_id(batch_b),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg.payload["tool"], "web");
+        assert_eq!(msg.batch_id, Some(batch_b));
+    }
+
+    #[tokio::test]
+    async fn test_claim_filtered_by_conversation() {
+        let (_s, bus) = bus().await;
+        let conv_a = Uuid::new_v4();
+        let conv_b = Uuid::new_v4();
+
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"conv": "a"}))
+                .with_conversation_id(conv_a),
+        )
+        .await
+        .unwrap();
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"conv": "b"}))
+                .with_conversation_id(conv_b),
+        )
+        .await
+        .unwrap();
+
+        let msg = bus
+            .claim_filtered(
+                "turn.request",
+                "w1",
+                &ClaimFilter::new().with_conversation_id(conv_b),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg.payload["conv"], "b");
+    }
+
+    #[tokio::test]
+    async fn test_claim_filtered_by_user() {
+        let (_s, bus) = bus().await;
+
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"u": 1})).with_user_id("alice"),
+        )
+        .await
+        .unwrap();
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"u": 2})).with_user_id("bob"),
+        )
+        .await
+        .unwrap();
+
+        let msg = bus
+            .claim_filtered(
+                "turn.request",
+                "w1",
+                &ClaimFilter::new().with_user_id("bob"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg.payload["u"], 2);
+        assert_eq!(msg.user_id.as_deref(), Some("bob"));
+    }
+
+    #[tokio::test]
+    async fn test_claim_filtered_combined() {
+        let (_s, bus) = bus().await;
+        let conv = Uuid::new_v4();
+
+        // Message for agent alpha, conv X
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"match": false}))
+                .with_agent_id("alpha")
+                .with_conversation_id(Uuid::new_v4()),
+        )
+        .await
+        .unwrap();
+
+        // Message for agent beta, conv X — the one we want
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"match": true}))
+                .with_agent_id("beta")
+                .with_conversation_id(conv),
+        )
+        .await
+        .unwrap();
+
+        let msg = bus
+            .claim_filtered(
+                "turn.request",
+                "w1",
+                &ClaimFilter::new()
+                    .with_agent_id("beta")
+                    .with_conversation_id(conv),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg.payload["match"], true);
+    }
+
+    #[tokio::test]
+    async fn test_claim_filtered_returns_none_when_no_match() {
+        let (_s, bus) = bus().await;
+
+        bus.publish(PublishRequest::new("q", serde_json::json!({})).with_agent_id("alpha"))
+            .await
+            .unwrap();
+
+        let result = bus
+            .claim_filtered("q", "w1", &ClaimFilter::new().with_agent_id("beta"))
+            .await
+            .unwrap();
+        assert!(result.is_none(), "should not match different agent");
+    }
+
+    // -- ack / nack / fail --------------------------------------------------
+
     #[tokio::test]
     async fn test_ack_sets_done() {
         let (_s, bus) = bus().await;
 
-        let id = bus.publish("q", &serde_json::json!({})).await.unwrap();
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
         bus.claim("q", "w1").await.unwrap();
         bus.ack(id).await.unwrap();
 
@@ -347,11 +613,13 @@ mod tests {
     async fn test_nack_releases_for_retry() {
         let (_s, bus) = bus().await;
 
-        let id = bus.publish("q", &serde_json::json!({})).await.unwrap();
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
         bus.claim("q", "w1").await.unwrap();
         bus.nack(id).await.unwrap();
 
-        // Should be claimable again
         let reclaimed = bus.claim("q", "w2").await.unwrap().unwrap();
         assert_eq!(reclaimed.id, id);
         assert_eq!(reclaimed.claimed_by.as_deref(), Some("w2"));
@@ -361,7 +629,10 @@ mod tests {
     async fn test_fail_marks_permanent() {
         let (_s, bus) = bus().await;
 
-        let id = bus.publish("q", &serde_json::json!({})).await.unwrap();
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
         bus.claim("q", "w1").await.unwrap();
         bus.fail(id).await.unwrap();
 
@@ -371,20 +642,21 @@ mod tests {
             .unwrap();
         assert_eq!(msgs.len(), 1);
 
-        // Should not be claimable
         let next = bus.claim("q", "w2").await.unwrap();
         assert!(next.is_none(), "failed messages must not be claimable");
     }
+
+    // -- list ---------------------------------------------------------------
 
     #[tokio::test]
     async fn test_list_filters_by_status() {
         let (_s, bus) = bus().await;
 
-        bus.publish("q", &serde_json::json!({"a": 1}))
+        bus.publish(PublishRequest::new("q", serde_json::json!({"a": 1})))
             .await
             .unwrap();
         let id2 = bus
-            .publish("q", &serde_json::json!({"a": 2}))
+            .publish(PublishRequest::new("q", serde_json::json!({"a": 2})))
             .await
             .unwrap();
         bus.claim("q", "w1").await.unwrap(); // claims first
@@ -412,10 +684,10 @@ mod tests {
     async fn test_list_different_topics_are_isolated() {
         let (_s, bus) = bus().await;
 
-        bus.publish("topic.a", &serde_json::json!({}))
+        bus.publish(PublishRequest::new("topic.a", serde_json::json!({})))
             .await
             .unwrap();
-        bus.publish("topic.b", &serde_json::json!({}))
+        bus.publish(PublishRequest::new("topic.b", serde_json::json!({})))
             .await
             .unwrap();
 
@@ -426,14 +698,19 @@ mod tests {
         assert_eq!(b.len(), 1);
     }
 
+    // -- reap & purge -------------------------------------------------------
+
     #[tokio::test]
     async fn test_reap_stale_reclaims_old_messages() {
         let (_s, bus) = bus().await;
 
-        let id = bus.publish("q", &serde_json::json!({})).await.unwrap();
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
         bus.claim("q", "w1").await.unwrap();
 
-        // Manually backdate the claimed_at to simulate staleness
+        // Backdate claimed_at
         sqlx::query(
             "UPDATE bus_messages SET claimed_at = datetime('now', '-1 hour') WHERE id = ?1",
         )
@@ -445,7 +722,6 @@ mod tests {
         let reaped = bus.reap_stale(Duration::from_secs(60)).await.unwrap();
         assert_eq!(reaped, 1, "should reap one stale message");
 
-        // Should be claimable again
         let reclaimed = bus.claim("q", "w2").await.unwrap();
         assert!(reclaimed.is_some(), "reaped message should be claimable");
     }
@@ -454,7 +730,9 @@ mod tests {
     async fn test_reap_stale_ignores_fresh_claims() {
         let (_s, bus) = bus().await;
 
-        bus.publish("q", &serde_json::json!({})).await.unwrap();
+        bus.publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
         bus.claim("q", "w1").await.unwrap();
 
         let reaped = bus.reap_stale(Duration::from_secs(3600)).await.unwrap();
@@ -465,11 +743,13 @@ mod tests {
     async fn test_purge_removes_old_done_messages() {
         let (_s, bus) = bus().await;
 
-        let id = bus.publish("q", &serde_json::json!({})).await.unwrap();
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
         bus.claim("q", "w1").await.unwrap();
         bus.ack(id).await.unwrap();
 
-        // Backdate the created_at
         sqlx::query(
             "UPDATE bus_messages SET created_at = datetime('now', '-2 days') WHERE id = ?1",
         )
@@ -490,7 +770,10 @@ mod tests {
     async fn test_purge_keeps_recent_done_messages() {
         let (_s, bus) = bus().await;
 
-        let id = bus.publish("q", &serde_json::json!({})).await.unwrap();
+        let id = bus
+            .publish(PublishRequest::new("q", serde_json::json!({})))
+            .await
+            .unwrap();
         bus.claim("q", "w1").await.unwrap();
         bus.ack(id).await.unwrap();
 

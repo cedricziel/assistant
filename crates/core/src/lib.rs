@@ -3,7 +3,7 @@ pub mod memory;
 pub mod tool;
 pub mod types;
 
-pub use bus::{BusMessage, MessageBus, MessageStatus};
+pub use bus::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
 pub use memory::{
     base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments, MemoryLoader,
 };
