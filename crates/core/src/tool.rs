@@ -15,7 +15,7 @@ use crate::types::ExecutionContext;
 /// the text content in [`ToolOutput`].  They flow through the orchestrator and
 /// are delivered to the user via the active interface (saved to disk in the CLI,
 /// uploaded in Slack/Mattermost, etc.).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Attachment {
     /// Suggested filename (e.g. `"chart.png"`, `"report.csv"`).
     pub filename: String,

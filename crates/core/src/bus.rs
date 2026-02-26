@@ -47,9 +47,10 @@ impl std::fmt::Display for MessageStatus {
     }
 }
 
-impl MessageStatus {
-    /// Parse a status string (case-insensitive).
-    pub fn parse(s: &str) -> Result<Self> {
+impl std::str::FromStr for MessageStatus {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
             "pending" => Ok(Self::Pending),
             "claimed" => Ok(Self::Claimed),
@@ -60,6 +61,13 @@ impl MessageStatus {
     }
 }
 
+impl MessageStatus {
+    /// Parse a status string (case-insensitive).
+    pub fn parse(s: &str) -> Result<Self> {
+        s.parse()
+    }
+}
+
 // -- Bus Message ------------------------------------------------------------
 
 /// A single message on the bus.
@@ -67,7 +75,7 @@ impl MessageStatus {
 /// Carries identity, routing, and correlation metadata alongside the payload
 /// so that consumers can filter by agent, user, conversation, or batch
 /// without inspecting the payload body.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BusMessage {
     pub id: Uuid,
     pub topic: String,

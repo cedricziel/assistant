@@ -235,12 +235,13 @@ impl SignalInterface {
                         .await;
                     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
-                    let reply = collector.await.unwrap_or_default();
-
                     if let Err(e) = turn_result {
+                        collector.abort();
                         tracing::error!(error = %e, elapsed_ms, "Orchestrator error");
                         continue;
                     }
+
+                    let reply = collector.await.unwrap_or_default();
 
                     if reply.is_empty() {
                         continue;

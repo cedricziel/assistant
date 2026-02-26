@@ -302,35 +302,40 @@ impl Orchestrator {
                                 conversation_id: conv_id,
                                 content: turn_result.answer,
                                 turn: 0,
+                                attachments: turn_result.attachments,
                             };
 
-                            if let Err(e) = self
-                                .bus
-                                .publish(
-                                    PublishRequest::new(
-                                        topic::TURN_RESULT,
-                                        serde_json::to_value(&bus_result).unwrap_or_default(),
-                                    )
-                                    .with_conversation_id(conv_id),
-                                )
-                                .await
-                            {
-                                warn!(error = %e, "Failed to publish TurnResult");
+                            // Propagate batch_id from the request so submit_turn
+                            // can match the result to its specific request.
+                            let mut pub_req = PublishRequest::new(
+                                topic::TURN_RESULT,
+                                serde_json::to_value(&bus_result).unwrap_or_default(),
+                            )
+                            .with_conversation_id(conv_id);
+                            if let Some(bid) = msg.batch_id {
+                                pub_req = pub_req.with_batch_id(bid);
                             }
 
-                            if let Err(e) = self.bus.ack(msg.id).await {
-                                warn!(
-                                    error = %e,
-                                    msg_id = %msg.id,
-                                    "Failed to ack bus message"
-                                );
+                            match self.bus.publish(pub_req).await {
+                                Ok(_) => {
+                                    if let Err(e) = self.bus.ack(msg.id).await {
+                                        warn!(
+                                            error = %e,
+                                            msg_id = %msg.id,
+                                            "Failed to ack bus message"
+                                        );
+                                    }
+                                    info!(
+                                        conversation_id = %conv_id,
+                                        worker_id,
+                                        "Turn completed via worker"
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Failed to publish TurnResult, nacking request");
+                                    let _ = self.bus.nack(msg.id).await;
+                                }
                             }
-
-                            info!(
-                                conversation_id = %conv_id,
-                                worker_id,
-                                "Turn completed via worker"
-                            );
                         }
                         Err(e) => {
                             warn!(
@@ -372,6 +377,7 @@ impl Orchestrator {
         conversation_id: Uuid,
         interface: Interface,
     ) -> Result<TurnResult> {
+        let request_id = Uuid::new_v4();
         let turn_req = bus_messages::TurnRequest {
             prompt: prompt.to_string(),
             conversation_id,
@@ -383,21 +389,26 @@ impl Orchestrator {
                 PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
                     .with_conversation_id(conversation_id)
                     .with_interface(format!("{:?}", interface))
-                    .with_reply_to(topic::TURN_RESULT),
+                    .with_reply_to(topic::TURN_RESULT)
+                    .with_batch_id(request_id),
             )
             .await?;
 
         // Poll for the result with a 5-minute timeout.
+        // Match by both conversation_id and batch_id (request_id) so
+        // overlapping turns for the same conversation don't collide.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
         loop {
             if tokio::time::Instant::now() > deadline {
                 anyhow::bail!(
                     "submit_turn timed out waiting for result \
-                     (conversation_id={conversation_id})"
+                     (conversation_id={conversation_id}, request_id={request_id})"
                 );
             }
 
-            let filter = ClaimFilter::new().with_conversation_id(conversation_id);
+            let filter = ClaimFilter::new()
+                .with_conversation_id(conversation_id)
+                .with_batch_id(request_id);
             if let Some(msg) = self
                 .bus
                 .claim_filtered(topic::TURN_RESULT, "submit_turn", &filter)
@@ -407,8 +418,7 @@ impl Orchestrator {
                 self.bus.ack(msg.id).await?;
                 return Ok(TurnResult {
                     answer: bus_result.content,
-                    // Attachments are not carried through the bus (yet).
-                    attachments: vec![],
+                    attachments: bus_result.attachments,
                 });
             }
 

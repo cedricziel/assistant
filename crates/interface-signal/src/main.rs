@@ -195,7 +195,15 @@ async fn main() -> Result<()> {
 
         Cmd::Run => {
             let (orchestrator, signal_config, _store_path) = bootstrap().await?;
-            let interface = SignalInterface::new(signal_config, Arc::new(orchestrator));
+            let orchestrator = Arc::new(orchestrator);
+
+            // Spawn the turn worker so bus-submitted turns get processed.
+            let worker_orch = orchestrator.clone();
+            let _worker = tokio::spawn(async move {
+                worker_orch.run_worker("signal-worker").await;
+            });
+
+            let interface = SignalInterface::new(signal_config, orchestrator);
             info!("Starting Signal interface");
             interface.run().await?;
         }

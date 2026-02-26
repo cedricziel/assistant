@@ -10,7 +10,7 @@ The bus is defined as a backend-agnostic trait (`MessageBus`) in
 `assistant-storage`. The trait can be swapped for NATS, Redis Streams,
 or any other broker without changing consumers.
 
-```
+```text
                          +-----------+
                          | MessageBus|  (trait in assistant-core)
                          +-----+-----+
@@ -26,7 +26,7 @@ or any other broker without changing consumers.
 
 Components interact through the bus via `Arc<dyn MessageBus>`:
 
-```
+```text
 Interface ──publish──> [bus_messages] ──claim──> Orchestrator
 Orchestrator ──publish──> [bus_messages] ──claim──> Tool Executor
 Tool Executor ──publish──> [bus_messages] ──claim──> Orchestrator
@@ -116,6 +116,7 @@ if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
 - `conversation_id: Uuid`
 - `content: String`
 - `turn: i64`
+- `attachments: Vec<Attachment>` -- file attachments from tool outputs (default empty)
 
 **`TurnStatus`** -- progress update during a turn:
 - `conversation_id: Uuid`
@@ -247,7 +248,7 @@ let filter = ClaimFilter::new()
 
 ## Message Lifecycle
 
-```
+```text
   publish        claim          ack
  ---------> [Pending] -----> [Claimed] -----> [Done]
                  ^               |
@@ -324,7 +325,7 @@ for tool_call in tool_calls {
 
 Agents can delegate work to sub-agents through the bus:
 
-```
+```text
 User -> turn.request (agent_id=main, correlation_id=C1)
   Main agent claims it, decides to delegate
   Main -> agent.spawn (agent_id=research, correlation_id=C1, causation_id=<turn_req_id>)

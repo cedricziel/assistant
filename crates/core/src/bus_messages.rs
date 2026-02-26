@@ -73,6 +73,9 @@ pub struct TurnResult {
     pub content: String,
     /// Turn number within the conversation.
     pub turn: i64,
+    /// File attachments collected from tool outputs during the turn.
+    #[serde(default)]
+    pub attachments: Vec<crate::Attachment>,
 }
 
 /// A status update emitted during turn processing.
@@ -235,6 +238,7 @@ mod tests {
             conversation_id: Uuid::new_v4(),
             content: "the answer is 42".into(),
             turn: 3,
+            attachments: vec![],
         };
         let json = serde_json::to_value(&res).unwrap();
         let back: TurnResult = serde_json::from_value(json).unwrap();

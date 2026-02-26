@@ -48,10 +48,10 @@ pub fn spawn_scheduler(
             }
 
             if last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
-                if let Err(e) = run_heartbeat(&orchestrator).await {
-                    error!("Heartbeat error: {e}");
+                match run_heartbeat(&orchestrator).await {
+                    Ok(()) => last_heartbeat = Instant::now(),
+                    Err(e) => error!("Heartbeat error: {e}"),
                 }
-                last_heartbeat = Instant::now();
             }
         }
     })
@@ -75,7 +75,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
             extension_tools: vec![],
         };
 
-        match bus
+        let dispatched = match bus
             .publish(
                 PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
                     .with_conversation_id(conversation_id)
@@ -90,6 +90,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
                     conversation_id = %conversation_id,
                     "Scheduled task dispatched to bus"
                 );
+                true
             }
             Err(e) => {
                 error!(
@@ -97,7 +98,12 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
                     error = %e,
                     "Failed to dispatch scheduled task"
                 );
+                false
             }
+        };
+
+        if !dispatched {
+            continue;
         }
 
         if task.once {

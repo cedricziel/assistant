@@ -804,10 +804,14 @@ async fn main() -> Result<()> {
                         .await
                 });
 
-                // Wait for the printer to flush all buffered tokens.
+                // Await the submit result first — if it fails, abort the
+                // printer to avoid hanging on a never-closed channel.
+                let submit_result = submit.await;
+
+                // Now flush any remaining buffered tokens.
                 let _ = printer.await;
 
-                match submit.await {
+                match submit_result {
                     Ok(Ok(result)) => {
                         // Deliver any file attachments returned by tools.
                         if !result.attachments.is_empty() {
