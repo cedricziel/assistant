@@ -91,16 +91,21 @@ analysis_window = 50
 
 [memory]
 # Persistent markdown memory files.
-# When enabled, SOUL.md / IDENTITY.md / USER.md / MEMORY.md are read at the
-# start of every turn and injected as the system prompt.
-# Defaults are written to ~/.assistant/ on first run.
+# When enabled, AGENTS.md / SOUL.md / IDENTITY.md / USER.md / TOOLS.md /
+# MEMORY.md are read at the start of every turn and injected as the system
+# prompt. Defaults are written to ~/.assistant/ on first run.
 
 # enabled = true
+# agents_path = "~/.assistant/AGENTS.md"
 # soul_path = "~/.assistant/SOUL.md"
 # identity_path = "~/.assistant/IDENTITY.md"
 # user_path = "~/.assistant/USER.md"
+# tools_path = "~/.assistant/TOOLS.md"
 # memory_path = "~/.assistant/MEMORY.md"
 # notes_dir = "~/.assistant/memory"
+# bootstrap_path = "~/.assistant/BOOTSTRAP.md"
+# heartbeat_path = "~/.assistant/HEARTBEAT.md"
+# boot_path = "~/.assistant/BOOT.md"
 
 [signal]
 # Signal interface settings (only used if compiled with --features signal)

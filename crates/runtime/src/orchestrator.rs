@@ -2,6 +2,7 @@
 //! LLM client, tool executor, and skill registry.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -138,6 +139,16 @@ impl Orchestrator {
     pub fn with_confirmation_callback(mut self, cb: Arc<dyn ConfirmationCallback>) -> Self {
         self.confirmation_callback = Some(cb);
         self
+    }
+
+    /// Return the path to HEARTBEAT.md (used by the scheduler).
+    pub fn heartbeat_path(&self) -> &Path {
+        self.memory_loader.heartbeat_path()
+    }
+
+    /// Return the path to BOOT.md (per-session startup hook).
+    pub fn boot_path(&self) -> &Path {
+        self.memory_loader.boot_path()
     }
 
     // ── Main entry point ──────────────────────────────────────────────────────

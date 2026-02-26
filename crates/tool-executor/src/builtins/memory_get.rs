@@ -1,7 +1,8 @@
 //! Builtin handler for the `memory-get` tool.
 //!
 //! Reads one of the persistent memory files and returns its content.
-//! Accepted targets: `soul`, `identity`, `user`, `memory`, `notes/YYYY-MM-DD`.
+//! Accepted targets: `soul`, `identity`, `user`, `tools`, `memory`,
+//! `notes/YYYY-MM-DD`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -31,6 +32,7 @@ impl MemoryGetHandler {
             "soul" => resolve_path(&mem.soul_path, &base, "SOUL.md"),
             "identity" => resolve_path(&mem.identity_path, &base, "IDENTITY.md"),
             "user" => resolve_path(&mem.user_path, &base, "USER.md"),
+            "tools" => resolve_path(&mem.tools_path, &base, "TOOLS.md"),
             "memory" => resolve_path(&mem.memory_path, &base, "MEMORY.md"),
             notes if notes.starts_with("notes/") => {
                 let date = &notes["notes/".len()..];
@@ -67,7 +69,7 @@ impl ToolHandler for MemoryGetHandler {
     }
 
     fn description(&self) -> &str {
-        "Read the contents of a persistent memory file. Supported targets: soul, identity, user, memory, notes/YYYY-MM-DD."
+        "Read the contents of a persistent memory file. Supported targets: soul, identity, user, tools, memory, notes/YYYY-MM-DD."
     }
 
     fn params_schema(&self) -> serde_json::Value {
@@ -76,7 +78,7 @@ impl ToolHandler for MemoryGetHandler {
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "Memory target: soul, identity, user, memory, or notes/YYYY-MM-DD"
+                    "description": "Memory target: soul, identity, user, tools, memory, or notes/YYYY-MM-DD"
                 }
             },
             "required": ["target"]
@@ -97,7 +99,7 @@ impl ToolHandler for MemoryGetHandler {
             Some(p) => p,
             None => {
                 return Ok(ToolOutput::error(format!(
-                "Unknown target '{target}'. Use: soul, identity, user, memory, or notes/YYYY-MM-DD"
+                "Unknown target '{target}'. Use: soul, identity, user, tools, memory, or notes/YYYY-MM-DD"
             )))
             }
         };

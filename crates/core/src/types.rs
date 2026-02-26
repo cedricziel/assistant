@@ -394,10 +394,18 @@ pub struct MemoryConfig {
     pub identity_path: Option<String>,
     /// Path to USER.md — user profile, preferences, timezone
     pub user_path: Option<String>,
+    /// Path to TOOLS.md — environment-specific tool notes (SSH hosts, devices, etc.)
+    pub tools_path: Option<String>,
     /// Path to MEMORY.md — curated long-term memory
     pub memory_path: Option<String>,
     /// Directory for daily append-only notes (YYYY-MM-DD.md)
     pub notes_dir: Option<String>,
+    /// Path to BOOTSTRAP.md — first-run onboarding ritual (self-deleting)
+    pub bootstrap_path: Option<String>,
+    /// Path to HEARTBEAT.md — periodic task checklist for the scheduler
+    pub heartbeat_path: Option<String>,
+    /// Path to BOOT.md — per-session startup hook
+    pub boot_path: Option<String>,
 }
 
 impl Default for MemoryConfig {
@@ -408,8 +416,12 @@ impl Default for MemoryConfig {
             soul_path: None,
             identity_path: None,
             user_path: None,
+            tools_path: None,
             memory_path: None,
             notes_dir: None,
+            bootstrap_path: None,
+            heartbeat_path: None,
+            boot_path: None,
         }
     }
 }
