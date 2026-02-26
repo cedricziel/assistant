@@ -539,6 +539,12 @@ async fn main() -> Result<()> {
 
     let bs = bootstrap(&home, confirmation_cb, storage.clone(), config).await?;
 
+    // 5b. Spawn the turn worker (processes bus messages from scheduler, MCP, etc.).
+    let worker_orch = bs.orchestrator.clone();
+    let _worker = tokio::spawn(async move {
+        worker_orch.run_worker("main-worker").await;
+    });
+
     // 6. MCP mode — run the stdio JSON-RPC server and exit.
     #[cfg(feature = "mcp")]
     if let Some(Command::Mcp) = &cli.command {
