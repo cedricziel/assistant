@@ -13,7 +13,20 @@ action="${1:-configure}"
 
 if [ "$action" = "configure" ] && [ -n "$2" ]; then
     # $2 is set to the old version on upgrade — restart services.
-    for user_id in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | sort -u); do
+    #
+    # loginctl list-sessions is unreliable in non-interactive dpkg contexts
+    # (e.g. during a self-triggered apt upgrade). Instead, iterate over
+    # /run/systemd/users/ which lists UIDs of all active user manager instances.
+    for uid_path in /run/systemd/users/*; do
+        user_id=$(basename "$uid_path")
+        # Skip non-numeric entries (e.g. root = 0 is fine, but skip any stray files)
+        case "$user_id" in
+            *[!0-9]*) continue ;;
+        esac
+        # Skip root and system users (UID < 1000)
+        if [ "$user_id" -lt 1000 ] 2>/dev/null; then
+            continue
+        fi
         for svc in assistant-slack assistant-mattermost assistant-web-ui; do
             # Only restart if the unit file exists and was previously enabled.
             if systemctl --user -M "${user_id}@.host" is-enabled "$svc" 2>/dev/null | grep -q enabled; then
