@@ -2046,6 +2046,15 @@ impl SubagentRunner for Orchestrator {
     /// answer (or hits the iteration limit).  A [`CancellationToken`] is
     /// registered for the lifetime of the subagent so that external callers
     /// can cancel it via [`cancel_agent`].
+    ///
+    /// # Observability
+    ///
+    /// A root `subagent` OTel span is created as a child of the **current**
+    /// context (typically the parent turn's `agent-spawn` tool span).  This
+    /// links the subagent's trace tree to the parent conversation's trace,
+    /// giving end-to-end visibility across agent boundaries.  Inside the
+    /// subagent span, per-iteration LLM and tool spans mirror the structure
+    /// of [`run_turn`].
     async fn run_subagent(&self, spawn: AgentSpawn, parent_depth: u32) -> Result<AgentReport> {
         let new_depth = parent_depth + 1;
         if new_depth > DEFAULT_MAX_AGENT_DEPTH {
@@ -2061,6 +2070,21 @@ impl SubagentRunner for Orchestrator {
         }
 
         let conversation_id = Uuid::new_v4();
+
+        // -- OTel: root subagent span (child of current context) ---------------
+        let tracer = global::tracer("assistant.orchestrator");
+        let parent_cx = OtelContext::current();
+        let mut agent_span =
+            tracer.start_with_context(format!("subagent {}", spawn.agent_id), &parent_cx);
+        agent_span.set_attribute(KeyValue::new("agent_id", spawn.agent_id.clone()));
+        agent_span.set_attribute(KeyValue::new(
+            "conversation_id",
+            conversation_id.to_string(),
+        ));
+        agent_span.set_attribute(KeyValue::new("agent.depth", new_depth as i64));
+        agent_span.set_attribute(KeyValue::new("agent.task", spawn.task.clone()));
+        let agent_cx = parent_cx.with_span(agent_span);
+
         info!(
             agent_id = %spawn.agent_id,
             task = %spawn.task,
@@ -2138,6 +2162,10 @@ impl SubagentRunner for Orchestrator {
                             Some(&msg),
                         )
                         .await;
+                    // Record cancellation on the agent span.
+                    let span = agent_cx.span();
+                    span.set_attribute(KeyValue::new("agent.status", "cancelled"));
+                    span.end();
                     break 'outer AgentReport {
                         status: AgentReportStatus::Cancelled,
                         content: msg,
@@ -2162,10 +2190,23 @@ impl SubagentRunner for Orchestrator {
                     depth: new_depth,
                 };
 
+                // -- OTel: LLM span (child of agent span) ---------------------
+                let mut llm_span = start_llm_span(
+                    self.llm.as_ref(),
+                    iteration,
+                    &agent_cx,
+                    self.trace_content,
+                    &system_prompt,
+                    &history,
+                    &tool_specs,
+                );
                 let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
                 let response = match response {
                     Ok(r) => r,
                     Err(e) => {
+                        llm_span.set_attribute(KeyValue::new("error", true));
+                        llm_span.set_attribute(KeyValue::new("error.message", e.to_string()));
+                        llm_span.end();
                         Self::persist_error_recovery(&conv_store, conversation_id).await;
                         let msg = format!("LLM error: {e}");
                         let _ = agent_store
@@ -2175,6 +2216,9 @@ impl SubagentRunner for Orchestrator {
                                 Some(&msg),
                             )
                             .await;
+                        let span = agent_cx.span();
+                        span.set_attribute(KeyValue::new("agent.status", "failed"));
+                        span.end();
                         break 'outer AgentReport {
                             status: AgentReportStatus::Failed,
                             content: msg,
@@ -2182,6 +2226,12 @@ impl SubagentRunner for Orchestrator {
                         };
                     }
                 };
+                finish_llm_span(
+                    &mut llm_span,
+                    response.meta(),
+                    &response,
+                    self.trace_content,
+                );
 
                 match response {
                     // ── Final answer ──────────────────────────────────────────
@@ -2212,6 +2262,15 @@ impl SubagentRunner for Orchestrator {
                                 Some(&summary),
                             )
                             .await;
+
+                        // Finalize the agent span with success.
+                        let span = agent_cx.span();
+                        span.set_attribute(KeyValue::new("agent.status", "completed"));
+                        span.set_attribute(KeyValue::new(
+                            "agent.iterations",
+                            (iteration + 1) as i64,
+                        ));
+                        span.end();
 
                         break 'outer AgentReport {
                             status: AgentReportStatus::Completed,
@@ -2254,6 +2313,17 @@ impl SubagentRunner for Orchestrator {
                             let params = tool_call_item.params;
                             let turn_index = base_turn + iteration as i64 + 1;
 
+                            // -- OTel: tool span (child of agent span) ---------
+                            let mut otel_span = start_tool_span(
+                                conversation_id,
+                                iteration,
+                                turn_index,
+                                &Interface::Scheduler,
+                                &name,
+                                &params,
+                                &agent_cx,
+                            );
+
                             let params_map: HashMap<String, serde_json::Value> =
                                 if let serde_json::Value::Object(map) = &params {
                                     map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
@@ -2270,27 +2340,50 @@ impl SubagentRunner for Orchestrator {
                                 depth: new_depth,
                             };
 
-                            let observation =
-                                match self.executor.execute(&name, params_map, &ctx).await {
-                                    Ok(output) => {
-                                        debug!(
-                                            tool = %name,
-                                            success = output.success,
-                                            agent_id = %spawn.agent_id,
-                                            "Subagent tool execution completed"
-                                        );
-                                        tool_result_content(&output.content, output.data.as_ref())
-                                    }
-                                    Err(err) => {
-                                        warn!(
-                                            tool = %name,
-                                            %err,
-                                            agent_id = %spawn.agent_id,
-                                            "Subagent tool execution failed"
-                                        );
-                                        format!("Error executing '{name}': {err}")
-                                    }
-                                };
+                            let start = std::time::Instant::now();
+                            let observation = match self
+                                .executor
+                                .execute(&name, params_map, &ctx)
+                                .await
+                            {
+                                Ok(output) => {
+                                    let duration_ms = start.elapsed().as_millis() as i64;
+                                    debug!(
+                                        tool = %name,
+                                        success = output.success,
+                                        agent_id = %spawn.agent_id,
+                                        duration_ms,
+                                        "Subagent tool execution completed"
+                                    );
+                                    otel_span
+                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
+                                    otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                                    otel_span.set_attribute(KeyValue::new(
+                                        "tool_observation",
+                                        output.content.clone(),
+                                    ));
+                                    tool_result_content(&output.content, output.data.as_ref())
+                                }
+                                Err(err) => {
+                                    let duration_ms = start.elapsed().as_millis() as i64;
+                                    warn!(
+                                        tool = %name,
+                                        %err,
+                                        agent_id = %spawn.agent_id,
+                                        "Subagent tool execution failed"
+                                    );
+                                    otel_span
+                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
+                                    otel_span.set_attribute(KeyValue::new("tool_status", "error"));
+                                    otel_span.set_attribute(KeyValue::new(
+                                        "tool_error",
+                                        err.to_string(),
+                                    ));
+                                    format!("Error executing '{name}': {err}")
+                                }
+                            };
+
+                            otel_span.end();
 
                             self.append_tool_result(&mut history, &name, &observation);
                             let tr_msg = Self::make_tool_result_message(
@@ -2333,6 +2426,13 @@ impl SubagentRunner for Orchestrator {
                     Some(&msg),
                 )
                 .await;
+            let span = agent_cx.span();
+            span.set_attribute(KeyValue::new("agent.status", "failed"));
+            span.set_attribute(KeyValue::new(
+                "agent.iterations",
+                self.max_iterations as i64,
+            ));
+            span.end();
             AgentReport {
                 status: AgentReportStatus::Failed,
                 content: msg,
