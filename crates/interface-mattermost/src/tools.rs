@@ -509,8 +509,9 @@ mod tests {
     #[test]
     fn upload_bytes_base64_without_padding_decodes_correctly() {
         use base64::Engine as _;
-        let original = vec![1u8, 2, 3]; // 3 bytes → 4 base64 chars with no padding needed
-        let encoded = base64::engine::general_purpose::STANDARD_NO_PAD.encode(&original);
+        let original = vec![1u8, 2]; // canonical base64 requires '=' padding
+        let padded = base64::engine::general_purpose::STANDARD.encode(&original);
+        let encoded = padded.trim_end_matches('=').to_string();
         assert!(
             !encoded.contains('='),
             "test setup: encoded must lack padding"
