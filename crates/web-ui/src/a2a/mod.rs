@@ -35,17 +35,17 @@ pub fn router() -> Router<A2AState> {
         .route("/message/stream", post(handlers::send_message_streaming))
         // -- Task operations --
         .route("/tasks", get(handlers::list_tasks))
-        .route("/tasks/:id", get(handlers::get_task))
-        .route("/tasks/:id/cancel", post(handlers::cancel_task))
-        .route("/tasks/:id/subscribe", get(handlers::subscribe_to_task))
+        .route("/tasks/{id}", get(handlers::get_task))
+        .route("/tasks/{id}/cancel", post(handlers::cancel_task))
+        .route("/tasks/{id}/subscribe", get(handlers::subscribe_to_task))
         // -- Push notification config operations --
         .route(
-            "/tasks/:task_id/pushNotificationConfigs",
+            "/tasks/{task_id}/pushNotificationConfigs",
             get(handlers::list_push_notification_configs)
                 .post(handlers::create_push_notification_config),
         )
         .route(
-            "/tasks/:task_id/pushNotificationConfigs/:config_id",
+            "/tasks/{task_id}/pushNotificationConfigs/{config_id}",
             get(handlers::get_push_notification_config)
                 .delete(handlers::delete_push_notification_config),
         )
