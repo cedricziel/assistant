@@ -23,6 +23,8 @@ members = [
     "crates/interface-mattermost",
     "crates/integration-tests",
     "crates/web-ui",
+    "crates/a2a-proto",
+    "crates/a2a-json-schema",
 ]
 default-members = [
     "crates/interface-cli",
@@ -78,8 +80,10 @@ futures = "0.3"
 reedline = "0.45"
 # QR code terminal rendering
 qr2term = "0.3"
-# YAML frontmatter parser (serde_yaml is deprecated)
+# YAML frontmatter parser
 gray_matter = "0.3"
+# YAML serialization (for writing agent card frontmatter)
+serde_yaml = "0.9"
 # Embed static file trees into the binary at compile time
 include_dir = "0.7"
 # SQL persistence

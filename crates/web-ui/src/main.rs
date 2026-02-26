@@ -1,3 +1,5 @@
+mod a2a;
+
 use std::collections::{HashMap, HashSet};
 use std::{net::SocketAddr, path::PathBuf};
 
@@ -20,6 +22,11 @@ use sqlx::SqlitePool;
 use tower_http::trace::TraceLayer;
 use tracing::{info, Level};
 use tracing_subscriber::EnvFilter;
+
+use a2a::agent_store::AgentStore;
+use a2a::handlers::{build_default_agent_card, A2AState};
+use a2a::pages::AgentPagesState;
+use a2a::task_store::TaskStore;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -86,17 +93,48 @@ async fn main() -> Result<()> {
         log_limit: args.log_limit,
     };
 
+    // -- Agent store (filesystem-backed) --
+    let agent_store = AgentStore::default_dir()?;
+
+    // -- A2A protocol state --
+    let base_url = format!("http://{}", args.listen);
+
+    // Resolve the agent card from the store, falling back to a built-in default.
+    let agent_card = match agent_store.get_default().await {
+        Some(agent) => agent.card,
+        None => build_default_agent_card(&base_url),
+    };
+
+    let a2a_state = A2AState {
+        task_store: TaskStore::new(),
+        agent_card,
+    };
+
+    let agent_pages_state = AgentPagesState {
+        agent_store,
+        base_url: base_url.clone(),
+    };
+
+    let a2a_router = a2a::router().with_state(a2a_state);
+    let agent_pages_router = a2a::agent_pages_router().with_state(agent_pages_state);
+
     let router = Router::new()
+        // Trace/log UI routes.
         .route("/", get(show_dashboard))
         .route("/traces", get(show_dashboard))
         .route("/trace/{trace_id}", get(show_trace_detail))
         .route("/logs", get(show_logs))
         .route("/log/{log_id}", get(show_log_detail))
         .with_state(state)
+        // A2A protocol routes (merged at root).
+        .merge(a2a_router)
+        // Agent management UI pages.
+        .merge(agent_pages_router)
         .layer(TraceLayer::new_for_http());
 
     let addr: SocketAddr = args.listen.parse()?;
     info!("Listening on http://{}", addr);
+    info!("A2A agent card: http://{}/.well-known/agent.json", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router.into_make_service()).await?;
     Ok(())
@@ -339,6 +377,7 @@ fn render_logs_sidebar(
         <ul>\
         <li><a class=\"facet-link\" href=\"/traces\"><span>Traces</span></a></li>\
         <li><a class=\"facet-link active\" href=\"/logs\"><span>Logs</span></a></li>\
+        <li><a class=\"facet-link\" href=\"/agents\"><span>Agents</span></a></li>\
         </ul></div>";
 
     // Severity facets
@@ -778,6 +817,7 @@ fn render_sidebar(
         <ul>\
         <li><a class=\"facet-link active\" href=\"/traces\"><span>Traces</span></a></li>\
         <li><a class=\"facet-link\" href=\"/logs\"><span>Logs</span></a></li>\
+        <li><a class=\"facet-link\" href=\"/agents\"><span>Agents</span></a></li>\
         </ul></div>";
 
     format!(

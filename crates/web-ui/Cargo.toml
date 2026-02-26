@@ -3,18 +3,27 @@ name = "assistant-web-ui"
 version = "0.1.15"
 edition.workspace = true
 license.workspace = true
-description = "Web-based trace analysis UI for the assistant"
+description = "Web-based trace analysis UI and A2A protocol server for the assistant"
 
 [dependencies]
 anyhow = { workspace = true }
+assistant-a2a-json-schema = { path = "../a2a-json-schema" }
 assistant-storage = { path = "../storage" }
 axum = { version = "0.8", features = ["macros"] }
 clap = { workspace = true, features = ["derive"] }
+futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-tower-http = { version = "0.6", features = ["trace"] }
+tokio-stream = "0.1"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 sqlx = { workspace = true, features = ["sqlite", "runtime-tokio", "macros"] }
+uuid = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

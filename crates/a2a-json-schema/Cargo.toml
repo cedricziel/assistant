@@ -1,0 +1,17 @@
+[package]
+name = "assistant-a2a-json-schema"
+description = "A2A protocol JSON Schema definitions and Rust types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
