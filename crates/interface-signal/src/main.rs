@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::AssistantConfig;
+use assistant_core::{AssistantConfig, MessageBus};
 use assistant_provider_ollama::OllamaProvider;
 use assistant_runtime::{orchestrator::ConfirmationCallback, Orchestrator};
 use assistant_skills::SkillSource;
@@ -158,9 +158,10 @@ async fn bootstrap() -> Result<(Orchestrator, SignalConfig, PathBuf)> {
         Arc::new(config.clone()),
     ));
 
-    // Build orchestrator with auto-deny confirmation.
+    // Build message bus and orchestrator with auto-deny confirmation.
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(AutoDenyConfirmation);
-    let orchestrator = Orchestrator::new(llm, storage, executor, registry.clone(), &config)
+    let orchestrator = Orchestrator::new(llm, storage, executor, registry.clone(), bus, &config)
         .with_confirmation_callback(confirmation_cb);
 
     // Extract the [signal] section from config (or use defaults).
@@ -194,7 +195,15 @@ async fn main() -> Result<()> {
 
         Cmd::Run => {
             let (orchestrator, signal_config, _store_path) = bootstrap().await?;
-            let interface = SignalInterface::new(signal_config, Arc::new(orchestrator));
+            let orchestrator = Arc::new(orchestrator);
+
+            // Spawn the turn worker so bus-submitted turns get processed.
+            let worker_orch = orchestrator.clone();
+            let _worker = tokio::spawn(async move {
+                worker_orch.run_worker("signal-worker").await;
+            });
+
+            let interface = SignalInterface::new(signal_config, orchestrator);
             info!("Starting Signal interface");
             interface.run().await?;
         }

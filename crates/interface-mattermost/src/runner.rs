@@ -160,37 +160,39 @@ impl WebsocketHandler for MattermostHandler {
             self.api.clone(),
         );
 
+        // Register extension tools so the worker dispatches to
+        // run_turn_with_tools when it claims this request.
+        self.orchestrator
+            .register_extensions(conversation_id, extensions, vec![])
+            .await;
+
         let orchestrator_start = std::time::Instant::now();
         let turn_result = self
             .orchestrator
-            .run_turn_with_tools(
-                &text,
-                conversation_id,
-                Interface::Mattermost,
-                extensions,
-                None,
-                vec![],
-            )
+            .submit_turn(&text, conversation_id, Interface::Mattermost)
             .await;
         let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
-        if let Err(e) = turn_result {
-            tracing::error!(error = %e, elapsed_ms, "Orchestrator error");
-            // Notify the user so they aren't left waiting silently.
-            let err_body = mattermost_api::models::PostBody {
-                channel_id: channel_id.clone(),
-                message: "Sorry, something went wrong processing your message.".to_string(),
-                root_id: reply_root_id_for_err,
-            };
-            if let Err(post_err) = self.api.create_post(&err_body).await {
-                warn!(error = %post_err, "Failed to post error feedback to user");
+        match turn_result {
+            Err(e) => {
+                tracing::error!(error = %e, elapsed_ms, "Orchestrator error");
+                // Notify the user so they aren't left waiting silently.
+                let err_body = mattermost_api::models::PostBody {
+                    channel_id: channel_id.clone(),
+                    message: "Sorry, something went wrong processing your message.".to_string(),
+                    root_id: reply_root_id_for_err,
+                };
+                if let Err(post_err) = self.api.create_post(&err_body).await {
+                    warn!(error = %post_err, "Failed to post error feedback to user");
+                }
             }
-        } else {
-            info!(
-                channel = %channel_id,
-                elapsed_ms,
-                "orchestrator.run_turn_with_tools ← ok"
-            );
+            Ok(_) => {
+                info!(
+                    channel = %channel_id,
+                    elapsed_ms,
+                    "submit_turn ← ok"
+                );
+            }
         }
     }
 }

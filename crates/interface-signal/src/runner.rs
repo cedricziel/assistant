@@ -204,11 +204,10 @@ impl SignalInterface {
                         "Dispatching to orchestrator"
                     );
 
-                    // Run the orchestrator synchronously — this keeps the
-                    // borrow structure simple and avoids sharing the manager
-                    // across tasks.
+                    // Submit through the message bus with token streaming via
+                    // a registered side-channel.
                     let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<String>(64);
-                    let (conversation_id, conv_cx) =
+                    let (conversation_id, _conv_cx) =
                         conversations.entry(sender_str.clone()).or_insert_with(|| {
                             let id = Uuid::new_v4();
                             let cx = start_conversation_context(id, &Interface::Signal);
@@ -224,25 +223,25 @@ impl SignalInterface {
                         buf
                     });
 
+                    // Register the token sink so the worker streams to it.
+                    self.orchestrator
+                        .register_token_sink(conversation_id, tok_tx)
+                        .await;
+
                     let orchestrator_start = std::time::Instant::now();
                     let turn_result = self
                         .orchestrator
-                        .run_turn_streaming(
-                            &text,
-                            conversation_id,
-                            Interface::Signal,
-                            tok_tx,
-                            Some(conv_cx),
-                        )
+                        .submit_turn(&text, conversation_id, Interface::Signal)
                         .await;
                     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 
-                    let reply = collector.await.unwrap_or_default();
-
                     if let Err(e) = turn_result {
+                        collector.abort();
                         tracing::error!(error = %e, elapsed_ms, "Orchestrator error");
                         continue;
                     }
+
+                    let reply = collector.await.unwrap_or_default();
 
                     if reply.is_empty() {
                         continue;

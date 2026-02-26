@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{AssistantConfig, Interface, LlmProviderKind, MemoryLoader};
+use assistant_core::{AssistantConfig, Interface, LlmProviderKind, MemoryLoader, MessageBus};
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_ollama::OllamaProvider;
@@ -439,6 +439,9 @@ async fn bootstrap(
         Arc::new(config.clone()),
     ));
 
+    // Build message bus.
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+
     // Build orchestrator.
     let orchestrator = Arc::new(
         Orchestrator::new(
@@ -446,6 +449,7 @@ async fn bootstrap(
             storage.clone(),
             executor.clone(),
             registry.clone(),
+            bus,
             &config,
         )
         .with_confirmation_callback(confirmation_cb),
@@ -534,6 +538,12 @@ async fn main() -> Result<()> {
     }
 
     let bs = bootstrap(&home, confirmation_cb, storage.clone(), config).await?;
+
+    // 5b. Spawn the turn worker (processes bus messages from scheduler, MCP, etc.).
+    let worker_orch = bs.orchestrator.clone();
+    let _worker = tokio::spawn(async move {
+        worker_orch.run_worker("main-worker").await;
+    });
 
     // 6. MCP mode — run the stdio JSON-RPC server and exit.
     #[cfg(feature = "mcp")]
@@ -631,7 +641,7 @@ async fn main() -> Result<()> {
 
     // 11. One conversation per session.
     let conversation_id = Uuid::new_v4();
-    let conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
+    let _conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
     info!(conversation_id = %conversation_id, "Starting CLI session");
 
     // 12. Run BOOT.md startup hook (if configured and non-empty).
@@ -775,28 +785,49 @@ async fn main() -> Result<()> {
                     continue;
                 }
 
-                // Normal user input — run through the orchestrator with
-                // live token streaming.
+                // Normal user input — submit through the message bus with
+                // live token streaming via a registered side-channel.
                 let (tx, rx) = mpsc::channel::<String>(64);
                 let printer = start_token_printer(rx);
 
-                let turn_result = bs
-                    .orchestrator
-                    .run_turn_streaming(input, conversation_id, Interface::Cli, tx, Some(&conv_cx))
+                // Register the token sink so the worker streams to it.
+                bs.orchestrator
+                    .register_token_sink(conversation_id, tx)
                     .await;
 
-                // Wait for the printer to flush all buffered tokens.
-                let _ = printer.await;
+                // submit_turn publishes to the bus; the worker claims it,
+                // finds the registered sink, and calls run_turn_streaming.
+                let orch = bs.orchestrator.clone();
+                let prompt = input.to_string();
+                let submit = tokio::spawn(async move {
+                    orch.submit_turn(&prompt, conversation_id, Interface::Cli)
+                        .await
+                });
 
-                match turn_result {
-                    Ok(result) => {
+                // Await the submit result first — if it fails, abort the
+                // printer to avoid hanging on a never-closed channel.
+                let submit_result = submit.await;
+
+                // Flush remaining tokens on success; abort on failure to
+                // prevent blocking on a channel that may never close.
+                if matches!(&submit_result, Ok(Ok(_))) {
+                    let _ = printer.await;
+                } else {
+                    printer.abort();
+                }
+
+                match submit_result {
+                    Ok(Ok(result)) => {
                         // Deliver any file attachments returned by tools.
                         if !result.attachments.is_empty() {
                             deliver_attachments(&result.attachments, &assistant_dir);
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         eprintln!("Error: {e}\n");
+                    }
+                    Err(e) => {
+                        eprintln!("Error: task panicked: {e}\n");
                     }
                 }
             }

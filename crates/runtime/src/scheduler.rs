@@ -1,18 +1,20 @@
-//! Background scheduler — polls for due scheduled tasks and runs them via the
-//! orchestrator. Also drives the heartbeat loop (reads `HEARTBEAT.md` from the
-//! configured memory path).
+//! Background scheduler — polls for due scheduled tasks and dispatches them
+//! through the message bus.  Also drives the heartbeat loop (reads
+//! `HEARTBEAT.md` from the configured memory path).
+//!
+//! Tasks and heartbeats are published as [`TurnRequest`] messages on the bus.
+//! The orchestrator's [`run_worker`](crate::Orchestrator::run_worker) loop
+//! claims and processes them asynchronously.
 
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use assistant_core::{strip_html_comments, Interface};
+use assistant_core::{bus_messages, strip_html_comments, topic, Interface, PublishRequest};
 use assistant_storage::StorageLayer;
 use chrono::Utc;
 use cron::Schedule;
-use opentelemetry::trace::{Span, TraceContextExt, Tracer};
-use opentelemetry::{global, Context as OtelContext, KeyValue};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -24,8 +26,8 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30 * 60);
 /// Spawn a background tokio task that:
 /// 1. Checks for due scheduled tasks every `poll_interval`.
 /// 2. Reads `HEARTBEAT.md` (from the configured memory path) as a prompt
-///    through the orchestrator every 30 minutes (if the file exists and is
-///    non-empty).
+///    dispatched through the message bus every 30 minutes (if the file exists
+///    and is non-empty).
 pub fn spawn_scheduler(
     storage: Arc<StorageLayer>,
     orchestrator: Arc<Orchestrator>,
@@ -46,46 +48,69 @@ pub fn spawn_scheduler(
             }
 
             if last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
-                if let Err(e) = run_heartbeat(&orchestrator).await {
-                    error!("Heartbeat error: {e}");
+                match run_heartbeat(&orchestrator).await {
+                    Ok(()) => last_heartbeat = Instant::now(),
+                    Err(e) => error!("Heartbeat error: {e}"),
                 }
-                last_heartbeat = Instant::now();
             }
         }
     })
 }
 
+/// Dispatch due scheduled tasks by publishing [`TurnRequest`] messages to the
+/// bus.  The worker loop processes them asynchronously.
 async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> Result<()> {
     let now = Utc::now();
     let task_store = storage.scheduled_task_store();
     let due = task_store.due_tasks(now).await?;
+    let bus = orchestrator.bus();
 
     for task in due {
-        info!(task_name = %task.name, "Running scheduled task");
+        info!(task_name = %task.name, "Dispatching scheduled task");
 
         let conversation_id = Uuid::new_v4();
-        let result = orchestrator
-            .run_turn(&task.prompt, conversation_id, Interface::Cli, None)
-            .await;
+        let turn_req = bus_messages::TurnRequest {
+            prompt: task.prompt.clone(),
+            conversation_id,
+            extension_tools: vec![],
+        };
 
-        match result {
-            Ok(turn) => {
+        let dispatched = match bus
+            .publish(
+                PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
+                    .with_conversation_id(conversation_id)
+                    .with_interface(format!("{:?}", Interface::Scheduler))
+                    .with_user_id("scheduler"),
+            )
+            .await
+        {
+            Ok(_) => {
                 info!(
                     task_name = %task.name,
-                    answer_len = turn.answer.len(),
-                    "Scheduled task completed"
+                    conversation_id = %conversation_id,
+                    "Scheduled task dispatched to bus"
                 );
+                true
             }
             Err(e) => {
-                error!(task_name = %task.name, error = %e, "Scheduled task failed");
+                error!(
+                    task_name = %task.name,
+                    error = %e,
+                    "Failed to dispatch scheduled task"
+                );
+                false
             }
+        };
+
+        if !dispatched {
+            continue;
         }
 
         if task.once {
             // One-shot task: record the run and disable it.
             task_store.record_run(task.id, now, None).await?;
             task_store.disable(task.id).await?;
-            info!(task_name = %task.name, "One-shot task disabled after execution");
+            info!(task_name = %task.name, "One-shot task disabled after dispatch");
         } else {
             // Recurring task: compute the next run from the cron expression.
             let next_run = compute_next_run(&task.cron_expr);
@@ -105,8 +130,8 @@ fn compute_next_run(cron_expr: &str) -> Option<chrono::DateTime<Utc>> {
     schedule.upcoming(Utc).next()
 }
 
-/// Read `HEARTBEAT.md` (from the configured path) and run its contents through
-/// the orchestrator.
+/// Read `HEARTBEAT.md` (from the configured path) and dispatch its contents
+/// as a [`TurnRequest`] through the message bus.
 ///
 /// Does nothing (silently) if the file does not exist or is empty.
 async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
@@ -123,34 +148,29 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         return Ok(());
     }
 
-    info!("Running heartbeat from {}", heartbeat_path.display());
+    info!("Dispatching heartbeat from {}", heartbeat_path.display());
 
-    // Start a root span so heartbeat traces are easily identifiable.
-    let tracer = global::tracer("sysiphos.heartbeat");
     let conversation_id = Uuid::new_v4();
-    let mut span = tracer.start("heartbeat");
-    span.set_attribute(KeyValue::new(
-        "conversation_id",
-        conversation_id.to_string(),
-    ));
-    let heartbeat_cx = OtelContext::current().with_span(span);
+    let turn_req = bus_messages::TurnRequest {
+        prompt,
+        conversation_id,
+        extension_tools: vec![],
+    };
 
-    match orchestrator
-        .run_turn(
-            &prompt,
-            conversation_id,
-            Interface::Cli,
-            Some(&heartbeat_cx),
+    orchestrator
+        .bus()
+        .publish(
+            PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
+                .with_conversation_id(conversation_id)
+                .with_interface(format!("{:?}", Interface::Scheduler))
+                .with_user_id("heartbeat"),
         )
-        .await
-    {
-        Ok(turn) => {
-            info!(answer_len = turn.answer.len(), "Heartbeat completed");
-        }
-        Err(e) => {
-            error!(error = %e, "Heartbeat failed");
-        }
-    }
+        .await?;
+
+    info!(
+        conversation_id = %conversation_id,
+        "Heartbeat dispatched to bus"
+    );
 
     Ok(())
 }

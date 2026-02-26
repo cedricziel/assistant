@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{types::Interface, AssistantConfig};
+use assistant_core::{types::Interface, AssistantConfig, MessageBus};
 use assistant_llm::{LlmClient, LlmClientConfig};
 use assistant_runtime::Orchestrator;
 use assistant_skills::SkillSource;
@@ -103,11 +103,13 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
         Arc::new(config.clone()),
     ));
 
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
     let orchestrator = Arc::new(Orchestrator::new(
         llm,
         storage,
         executor,
         registry.clone(),
+        bus,
         &config,
     ));
 
