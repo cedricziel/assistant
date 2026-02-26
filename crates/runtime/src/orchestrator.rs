@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    bus_messages, strip_html_comments, topic, Attachment, ClaimFilter, ExecutionContext, Interface,
-    MemoryLoader, Message, MessageBus, MessageRole, PublishRequest, ToolHandler,
+    bus_messages, strip_html_comments, topic, AgentReport, AgentReportStatus, AgentSpawn,
+    Attachment, ClaimFilter, ExecutionContext, Interface, MemoryLoader, Message, MessageBus,
+    MessageRole, PublishRequest, SubagentRunner, ToolHandler, DEFAULT_MAX_AGENT_DEPTH,
 };
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
@@ -18,6 +19,7 @@ use assistant_llm::{
 use assistant_skills::SkillDef as SpecSkillDef;
 use assistant_storage::{conversations::ConversationStore, SkillRegistry, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
+use async_trait::async_trait;
 use opentelemetry::{
     global,
     trace::{Span as _, TraceContextExt, Tracer as _},
@@ -2024,6 +2026,228 @@ impl Orchestrator {
         m.turn = turn;
         m.skill_name = Some(tool_name.to_string());
         m
+    }
+}
+
+// ── SubagentRunner ────────────────────────────────────────────────────────────
+
+#[async_trait]
+impl SubagentRunner for Orchestrator {
+    /// Run an isolated sub-agent turn synchronously.
+    ///
+    /// Creates a fresh conversation, restricts the available tool set, and
+    /// runs the normal tool-calling loop until the sub-agent produces a final
+    /// answer (or hits the iteration limit).
+    async fn run_subagent(&self, spawn: AgentSpawn, parent_depth: u32) -> Result<AgentReport> {
+        let new_depth = parent_depth + 1;
+        if new_depth > DEFAULT_MAX_AGENT_DEPTH {
+            return Ok(AgentReport {
+                status: AgentReportStatus::Failed,
+                content: format!(
+                    "Maximum subagent nesting depth ({}) exceeded. \
+                     Cannot spawn agent '{}'.",
+                    DEFAULT_MAX_AGENT_DEPTH, spawn.agent_id
+                ),
+                data: None,
+            });
+        }
+
+        let conversation_id = Uuid::new_v4();
+        info!(
+            agent_id = %spawn.agent_id,
+            task = %spawn.task,
+            depth = new_depth,
+            conversation_id = %conversation_id,
+            "Spawning subagent"
+        );
+
+        // Build the tool allowlist.  An empty list in AgentSpawn means "all
+        // tools", which maps to `None` in ExecutionContext.
+        let allowed_tools = if spawn.allowed_tools.is_empty() {
+            None
+        } else {
+            Some(spawn.allowed_tools.clone())
+        };
+
+        // Determine the tool specs to advertise to the LLM for this subagent.
+        let provider_caps = self.llm.capabilities();
+        let tool_specs = Self::filter_tool_specs(
+            self.executor.to_specs_filtered(&allowed_tools),
+            &provider_caps,
+        );
+
+        // Build the system prompt.  If the spawn request provides one, use it;
+        // otherwise fall back to the default composed prompt.
+        let system_prompt = match spawn.system_prompt {
+            Some(ref prompt) if !prompt.is_empty() => prompt.clone(),
+            _ => self.compose_system_prompt().await,
+        };
+
+        // Set up the conversation and history with the task as the user message.
+        let (conv_store, mut history, base_turn) = self
+            .prepare_history(&spawn.task, conversation_id, Vec::new())
+            .await?;
+
+        // Tool-calling loop (same structure as run_turn, but with restricted context).
+        for iteration in 0..self.max_iterations {
+            let iteration_span = info_span!(
+                "subagent_iteration",
+                agent_id = %spawn.agent_id,
+                iteration
+            );
+            let _iteration_guard = iteration_span.enter();
+            debug!(iteration, agent_id = %spawn.agent_id, "Subagent tool-calling loop");
+
+            let _ctx = ExecutionContext {
+                conversation_id,
+                turn: iteration as i64,
+                interface: Interface::Scheduler, // non-interactive
+                interactive: false,
+                allowed_tools: allowed_tools.clone(),
+                depth: new_depth,
+            };
+
+            let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
+            let response = match response {
+                Ok(r) => r,
+                Err(e) => {
+                    Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    return Ok(AgentReport {
+                        status: AgentReportStatus::Failed,
+                        content: format!("LLM error: {e}"),
+                        data: None,
+                    });
+                }
+            };
+
+            match response {
+                // ── Final answer ──────────────────────────────────────────
+                LlmResponse::FinalAnswer(text, _meta) => {
+                    info!(
+                        iteration,
+                        agent_id = %spawn.agent_id,
+                        "Subagent returned final answer"
+                    );
+
+                    if !text.trim().is_empty() {
+                        let assistant_msg = {
+                            let mut m = Message::assistant(conversation_id, &text);
+                            m.turn = base_turn + iteration as i64 + 1;
+                            m
+                        };
+                        if let Err(e) = conv_store.save_message(&assistant_msg).await {
+                            warn!("Failed to persist subagent answer: {e}");
+                        }
+                    }
+
+                    return Ok(AgentReport {
+                        status: AgentReportStatus::Completed,
+                        content: text,
+                        data: None,
+                    });
+                }
+
+                // ── Tool calls ────────────────────────────────────────────
+                LlmResponse::ToolCalls(tool_call_items, _meta) => {
+                    debug!(
+                        count = tool_call_items.len(),
+                        agent_id = %spawn.agent_id,
+                        "Subagent requested tool execution(s)"
+                    );
+
+                    history.push(ChatHistoryMessage::AssistantToolCalls(
+                        tool_call_items.clone(),
+                    ));
+                    let tc_msg = Self::make_tool_call_message(
+                        conversation_id,
+                        base_turn + iteration as i64 + 1,
+                        &tool_call_items,
+                    );
+                    if let Err(e) = conv_store.save_message(&tc_msg).await {
+                        warn!("Failed to persist subagent tool-call message: {e}");
+                    }
+
+                    for tool_call_item in tool_call_items {
+                        let name = tool_call_item.name;
+                        let params = tool_call_item.params;
+                        let turn_index = base_turn + iteration as i64 + 1;
+
+                        let params_map: HashMap<String, serde_json::Value> =
+                            if let serde_json::Value::Object(map) = &params {
+                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                            } else {
+                                HashMap::new()
+                            };
+
+                        let ctx = ExecutionContext {
+                            conversation_id,
+                            turn: iteration as i64,
+                            interface: Interface::Scheduler,
+                            interactive: false,
+                            allowed_tools: allowed_tools.clone(),
+                            depth: new_depth,
+                        };
+
+                        let observation = match self.executor.execute(&name, params_map, &ctx).await
+                        {
+                            Ok(output) => {
+                                debug!(
+                                    tool = %name,
+                                    success = output.success,
+                                    agent_id = %spawn.agent_id,
+                                    "Subagent tool execution completed"
+                                );
+                                tool_result_content(&output.content, output.data.as_ref())
+                            }
+                            Err(err) => {
+                                warn!(
+                                    tool = %name,
+                                    %err,
+                                    agent_id = %spawn.agent_id,
+                                    "Subagent tool execution failed"
+                                );
+                                format!("Error executing '{name}': {err}")
+                            }
+                        };
+
+                        self.append_tool_result(&mut history, &name, &observation);
+                        let tr_msg = Self::make_tool_result_message(
+                            conversation_id,
+                            turn_index,
+                            &name,
+                            &observation,
+                        );
+                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                            warn!("Failed to persist subagent tool-result: {e}");
+                        }
+                    }
+                }
+
+                // ── Thinking ──────────────────────────────────────────────
+                LlmResponse::Thinking(text, _meta) => {
+                    debug!(
+                        iteration,
+                        agent_id = %spawn.agent_id,
+                        "Subagent emitted thinking step"
+                    );
+                    history.push(ChatHistoryMessage::Text {
+                        role: ChatRole::Assistant,
+                        content: text,
+                    });
+                }
+            }
+        }
+
+        // Reached iteration limit.
+        Self::persist_error_recovery(&conv_store, conversation_id).await;
+        Ok(AgentReport {
+            status: AgentReportStatus::Failed,
+            content: format!(
+                "Subagent '{}' reached max iterations ({}) without a final answer",
+                spawn.agent_id, self.max_iterations
+            ),
+            data: None,
+        })
     }
 }
 
