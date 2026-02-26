@@ -1,3 +1,6 @@
+pub mod agent_spawn;
+pub mod agent_status;
+pub mod agent_terminate;
 pub mod bash;
 pub mod cancel_task;
 pub mod file_edit;
@@ -15,6 +18,9 @@ pub mod self_analyze;
 pub mod web_fetch;
 pub mod web_search;
 
+pub use agent_spawn::AgentSpawnHandler;
+pub use agent_status::AgentStatusHandler;
+pub use agent_terminate::AgentTerminateHandler;
 pub use bash::BashHandler;
 pub use cancel_task::CancelTaskHandler;
 pub use file_edit::FileEditHandler;

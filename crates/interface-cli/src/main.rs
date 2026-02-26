@@ -455,6 +455,9 @@ async fn bootstrap(
         .with_confirmation_callback(confirmation_cb),
     );
 
+    // Wire up subagent support (breaks the init-time circular dep).
+    executor.set_subagent_runner(orchestrator.clone());
+
     Ok(Bootstrap {
         config,
         storage,

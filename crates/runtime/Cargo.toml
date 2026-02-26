@@ -11,7 +11,9 @@ assistant-llm = { path = "../llm" }
 assistant-storage = { path = "../storage" }
 assistant-skills = { path = "../skills" }
 assistant-tool-executor = { path = "../tool-executor" }
+async-trait = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
@@ -30,5 +32,4 @@ toml = { workspace = true }
 sqlx = { workspace = true }
 
 [dev-dependencies]
-async-trait = { workspace = true }
 wiremock = { workspace = true }

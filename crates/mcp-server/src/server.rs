@@ -155,6 +155,8 @@ pub async fn handle_request(
                 turn: 0,
                 interface: Interface::Mcp,
                 interactive: false,
+                allowed_tools: None,
+                depth: 0,
             };
 
             match executor.execute(&tool_name, params, &ctx).await {

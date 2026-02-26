@@ -113,6 +113,8 @@ mod tests {
             turn: 1,
             interface: Interface::Cli,
             interactive: false,
+            allowed_tools: None,
+            depth: 0,
         }
     }
 
