@@ -2088,6 +2088,22 @@ impl SubagentRunner for Orchestrator {
             .prepare_history(&spawn.task, conversation_id, Vec::new())
             .await?;
 
+        // Record the agent in the lifecycle table.
+        let agent_store = self.storage.agent_store();
+        if let Err(e) = agent_store
+            .create(
+                &spawn.agent_id,
+                None,
+                &conversation_id.to_string(),
+                &conversation_id.to_string(),
+                &spawn.task,
+                new_depth,
+            )
+            .await
+        {
+            warn!(agent_id = %spawn.agent_id, %e, "Failed to persist agent record");
+        }
+
         // Tool-calling loop (same structure as run_turn, but with restricted context).
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!(
@@ -2112,9 +2128,17 @@ impl SubagentRunner for Orchestrator {
                 Ok(r) => r,
                 Err(e) => {
                     Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    let msg = format!("LLM error: {e}");
+                    let _ = agent_store
+                        .complete(
+                            &spawn.agent_id,
+                            assistant_storage::AgentStatus::Failed,
+                            Some(&msg),
+                        )
+                        .await;
                     return Ok(AgentReport {
                         status: AgentReportStatus::Failed,
-                        content: format!("LLM error: {e}"),
+                        content: msg,
                         data: None,
                     });
                 }
@@ -2139,6 +2163,16 @@ impl SubagentRunner for Orchestrator {
                             warn!("Failed to persist subagent answer: {e}");
                         }
                     }
+
+                    // Truncate for the summary column.
+                    let summary: String = text.chars().take(500).collect();
+                    let _ = agent_store
+                        .complete(
+                            &spawn.agent_id,
+                            assistant_storage::AgentStatus::Completed,
+                            Some(&summary),
+                        )
+                        .await;
 
                     return Ok(AgentReport {
                         status: AgentReportStatus::Completed,
@@ -2240,12 +2274,20 @@ impl SubagentRunner for Orchestrator {
 
         // Reached iteration limit.
         Self::persist_error_recovery(&conv_store, conversation_id).await;
+        let msg = format!(
+            "Subagent '{}' reached max iterations ({}) without a final answer",
+            spawn.agent_id, self.max_iterations
+        );
+        let _ = agent_store
+            .complete(
+                &spawn.agent_id,
+                assistant_storage::AgentStatus::Failed,
+                Some(&msg),
+            )
+            .await;
         Ok(AgentReport {
             status: AgentReportStatus::Failed,
-            content: format!(
-                "Subagent '{}' reached max iterations ({}) without a final answer",
-                spawn.agent_id, self.max_iterations
-            ),
+            content: msg,
             data: None,
         })
     }

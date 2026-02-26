@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod conversations;
 pub mod log_telemetry;
 pub mod logs;
@@ -9,6 +10,7 @@ pub mod scheduled_tasks;
 pub mod telemetry;
 pub mod traces;
 
+pub use agents::{AgentRecord, AgentStatus, AgentStore};
 pub use conversations::{ConversationRecord, ConversationStore};
 pub use log_telemetry::SqliteLogExporter;
 pub use logs::{LogStats, LogStore, RecordedLog};
@@ -82,6 +84,11 @@ impl StorageLayer {
     /// Convenience: build a `MemoryChunkStore` backed by this pool.
     pub fn memory_chunks_store(&self) -> MemoryChunkStore {
         MemoryChunkStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build an [`AgentStore`] backed by this pool.
+    pub fn agent_store(&self) -> AgentStore {
+        AgentStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`SqliteMessageBus`] backed by this pool.
@@ -167,6 +174,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "013_bus_messages",
             include_str!("../../../migrations/013_bus_messages.sql"),
+        ),
+        (
+            "014_agents",
+            include_str!("../../../migrations/014_agents.sql"),
         ),
     ];
 
