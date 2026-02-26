@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/cedricziel/assistant/compare/v0.1.10...v0.1.11) (2026-02-26)
+
+
+### Features
+
+* **tool-executor:** add memory-append builtin tool ([#55](https://github.com/cedricziel/assistant/issues/55)) ([4bf16ed](https://github.com/cedricziel/assistant/commit/4bf16eda5f63f6b30086b3d50a5c357f5d99c312))
+
 ## [0.1.10](https://github.com/cedricziel/assistant/compare/v0.1.9...v0.1.10) (2026-02-26)
 
 
