@@ -3,7 +3,7 @@ pub mod tool;
 pub mod types;
 
 pub use memory::{base_dir, expand_tilde, resolve_dir, resolve_path, MemoryLoader};
-pub use tool::{ToolHandler, ToolOutput};
+pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
     AssistantConfig, ExecutionContext, Interface, LlmConfig, LlmProviderKind, MattermostConfig,
     McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, SignalConfig, SkillsConfig,

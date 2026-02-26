@@ -233,6 +233,47 @@ async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Result<
     Ok(())
 }
 
+// ── Attachment delivery ───────────────────────────────────────────────────────
+
+/// Save attachments from a turn result to `~/.assistant/attachments/` and print
+/// their file paths so the user knows where to find them.
+fn deliver_attachments(attachments: &[assistant_core::Attachment], assistant_dir: &Path) {
+    let attach_dir = assistant_dir.join("attachments");
+    if let Err(e) = std::fs::create_dir_all(&attach_dir) {
+        eprintln!("Failed to create attachments directory: {e}");
+        return;
+    }
+
+    for attachment in attachments {
+        // Disambiguate filenames by prepending a short UUID prefix.
+        let unique_name = format!(
+            "{}_{}",
+            &Uuid::new_v4().to_string()[..8],
+            attachment.filename
+        );
+        let dest = attach_dir.join(&unique_name);
+
+        match std::fs::write(&dest, &attachment.data) {
+            Ok(()) => {
+                let size = attachment.data.len();
+                let kind = if attachment.is_image() {
+                    "image"
+                } else {
+                    "file"
+                };
+                println!(
+                    "  [{kind}] {} ({}, {size} bytes)",
+                    dest.display(),
+                    attachment.mime_type,
+                );
+            }
+            Err(e) => {
+                eprintln!("Failed to save attachment '{}': {e}", attachment.filename);
+            }
+        }
+    }
+}
+
 // ── Token streaming ───────────────────────────────────────────────────────────
 
 /// Spawn a background task that prints tokens from `rx` to stdout as they
@@ -736,8 +777,16 @@ async fn main() -> Result<()> {
                 // Wait for the printer to flush all buffered tokens.
                 let _ = printer.await;
 
-                if let Err(e) = turn_result {
-                    eprintln!("Error: {e}\n");
+                match turn_result {
+                    Ok(result) => {
+                        // Deliver any file attachments returned by tools.
+                        if !result.attachments.is_empty() {
+                            deliver_attachments(&result.attachments, &assistant_dir);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {e}\n");
+                    }
                 }
             }
 

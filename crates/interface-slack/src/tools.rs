@@ -248,25 +248,36 @@ impl ToolHandler for SlackUploadHandler {
     }
 
     fn description(&self) -> &str {
-        "Upload a file or text snippet to the current Slack channel."
+        "Upload a file, image, or text snippet to the current Slack channel. \
+         For text content, set `content` directly. \
+         For binary files (images, PDFs, etc.), set `content_base64` with the \
+         base64-encoded data and specify the `content_type` MIME type."
     }
 
     fn params_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["content", "filename"],
+            "required": ["filename"],
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "File content"
+                    "description": "Text file content (mutually exclusive with content_base64)"
+                },
+                "content_base64": {
+                    "type": "string",
+                    "description": "Base64-encoded binary content for images, PDFs, etc. (mutually exclusive with content)"
                 },
                 "filename": {
                     "type": "string",
-                    "description": "Filename including extension"
+                    "description": "Filename including extension (e.g. chart.png, report.pdf)"
                 },
                 "title": {
                     "type": "string",
                     "description": "Optional file title"
+                },
+                "content_type": {
+                    "type": "string",
+                    "description": "MIME type of the file (e.g. image/png, application/pdf). Defaults to application/octet-stream"
                 }
             }
         })
@@ -281,10 +292,6 @@ impl ToolHandler for SlackUploadHandler {
         params: HashMap<String, Value>,
         _ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
-        let content = match params.get("content").and_then(|v| v.as_str()) {
-            Some(c) => c.to_string(),
-            None => return Ok(ToolOutput::error("Missing required parameter 'content'")),
-        };
         let filename = match params.get("filename").and_then(|v| v.as_str()) {
             Some(f) => f.to_string(),
             None => return Ok(ToolOutput::error("Missing required parameter 'filename'")),
@@ -293,10 +300,19 @@ impl ToolHandler for SlackUploadHandler {
             .get("title")
             .and_then(|v| v.as_str())
             .map(|t| t.to_string());
+        let content_type = params
+            .get("content_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("application/octet-stream")
+            .to_string();
 
-        let bytes = content.into_bytes();
+        // Accept either text `content` or base64-encoded `content_base64`.
+        let bytes = match resolve_upload_bytes(&params) {
+            Ok(b) => b,
+            Err(msg) => return Ok(ToolOutput::error(msg)),
+        };
+
         let length = bytes.len();
-
         let session = self.client.open_session(&self.token);
 
         // Step 1: request an upload URL from Slack.
@@ -315,7 +331,7 @@ impl ToolHandler for SlackUploadHandler {
         let upload_req = SlackApiFilesUploadViaUrlRequest {
             upload_url: url_resp.upload_url,
             content: bytes,
-            content_type: "application/octet-stream".to_string(),
+            content_type,
         };
         if let Err(e) = session.files_upload_via_url(&upload_req).await {
             return Ok(ToolOutput::error(format!(
@@ -654,9 +670,27 @@ pub fn build_slack_tools(
     ]
 }
 
+/// Resolve file content bytes from either a `content` (text) or
+/// `content_base64` (base64-encoded binary) parameter.
+///
+/// Returns `Ok(bytes)` on success, or an error string for
+/// `ToolOutput::error()`.
+fn resolve_upload_bytes(params: &HashMap<String, Value>) -> Result<Vec<u8>, String> {
+    if let Some(b64) = params.get("content_base64").and_then(|v| v.as_str()) {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|e| format!("Invalid base64 in content_base64: {e}"))
+    } else if let Some(text) = params.get("content").and_then(|v| v.as_str()) {
+        Ok(text.as_bytes().to_vec())
+    } else {
+        Err("Either 'content' or 'content_base64' must be provided".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{markdown_to_mrkdwn, strip_think_tags};
+    use super::{markdown_to_mrkdwn, resolve_upload_bytes, strip_think_tags};
 
     #[test]
     fn think_tags_stripped() {
@@ -768,5 +802,84 @@ mod tests {
         // Slack emoji syntax :name: must pass through the converter untouched.
         let input = "Hello! How can I assist you today? :wave:";
         assert_eq!(markdown_to_mrkdwn(input), input);
+    }
+
+    // ── resolve_upload_bytes tests ───────────────────────────────────────────
+
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    fn params(pairs: &[(&str, Value)]) -> HashMap<String, Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn upload_bytes_from_text_content() {
+        let p = params(&[("content", json!("hello world"))]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        assert_eq!(bytes, b"hello world");
+    }
+
+    #[test]
+    fn upload_bytes_from_base64_content() {
+        use base64::Engine as _;
+        let original = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]; // PNG header
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&original);
+        let p = params(&[("content_base64", json!(encoded))]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        assert_eq!(bytes, original);
+    }
+
+    #[test]
+    fn upload_bytes_base64_takes_priority_over_text() {
+        use base64::Engine as _;
+        let binary = vec![1, 2, 3];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&binary);
+        let p = params(&[
+            ("content", json!("text fallback")),
+            ("content_base64", json!(encoded)),
+        ]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        assert_eq!(
+            bytes, binary,
+            "base64 should take priority when both present"
+        );
+    }
+
+    #[test]
+    fn upload_bytes_missing_both_returns_error() {
+        let p = params(&[("filename", json!("test.txt"))]);
+        let err = resolve_upload_bytes(&p).unwrap_err();
+        assert!(
+            err.contains("content"),
+            "error should mention content: {err}"
+        );
+    }
+
+    #[test]
+    fn upload_bytes_invalid_base64_returns_error() {
+        let p = params(&[("content_base64", json!("not-valid-base64!!!"))]);
+        let err = resolve_upload_bytes(&p).unwrap_err();
+        assert!(
+            err.contains("Invalid base64"),
+            "error should mention invalid base64: {err}"
+        );
+    }
+
+    #[test]
+    fn upload_bytes_empty_text_returns_empty_vec() {
+        let p = params(&[("content", json!(""))]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn upload_bytes_empty_base64_returns_empty_vec() {
+        let p = params(&[("content_base64", json!(""))]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        assert!(bytes.is_empty());
     }
 }
