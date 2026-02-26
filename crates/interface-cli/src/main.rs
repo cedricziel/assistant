@@ -559,7 +559,16 @@ async fn main() -> Result<()> {
         .await;
     }
 
-    // 7. Slack-only mode.
+    // 7. Start the background scheduler (polls every 60 seconds).
+    //    Spawned before interface-specific branches so that scheduled tasks
+    //    fire regardless of the active interface (Slack, Mattermost, REPL).
+    let _scheduler = spawn_scheduler(
+        bs.storage.clone(),
+        bs.orchestrator.clone(),
+        Duration::from_secs(60),
+    );
+
+    // 8. Slack-only mode.
     #[cfg(feature = "slack")]
     if let Some(Command::Slack) = &cli.command {
         use assistant_interface_slack::SlackInterface;
@@ -580,7 +589,7 @@ async fn main() -> Result<()> {
         return iface.run().await;
     }
 
-    // 8. Mattermost-only mode.
+    // 9. Mattermost-only mode.
     #[cfg(feature = "mattermost")]
     if let Some(Command::Mattermost) = &cli.command {
         use assistant_interface_mattermost::MattermostInterface;
@@ -592,12 +601,12 @@ async fn main() -> Result<()> {
         return iface.run().await;
     }
 
-    // 9. Default mode: interactive REPL + background interfaces.
+    // 10. Default mode: interactive REPL + background interfaces.
     //
-    //    Register ambient tools from configured interfaces first, then spawn
-    //    background tasks for those interfaces.
+    //     Register ambient tools from configured interfaces first, then spawn
+    //     background tasks for those interfaces.
 
-    // 9a. Slack — register slack-post as an ambient tool and start in background.
+    // 10a. Slack — register slack-post as an ambient tool and start in background.
     #[cfg(feature = "slack")]
     if bs.config.slack.is_some() {
         use assistant_interface_slack::SlackInterface;
@@ -619,7 +628,7 @@ async fn main() -> Result<()> {
         });
     }
 
-    // 9b. Mattermost — start in background if configured.
+    // 10b. Mattermost — start in background if configured.
     #[cfg(feature = "mattermost")]
     if bs.config.mattermost.is_some() {
         use assistant_interface_mattermost::MattermostInterface;
@@ -631,13 +640,6 @@ async fn main() -> Result<()> {
             }
         });
     }
-
-    // 10. Start the background scheduler (polls every 60 seconds).
-    let _scheduler = spawn_scheduler(
-        bs.storage.clone(),
-        bs.orchestrator.clone(),
-        Duration::from_secs(60),
-    );
 
     // 11. One conversation per session.
     let conversation_id = Uuid::new_v4();
