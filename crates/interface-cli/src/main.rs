@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{AssistantConfig, Interface, LlmProviderKind, MemoryLoader};
+use assistant_core::{AssistantConfig, Interface, LlmProviderKind, MemoryLoader, MessageBus};
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_ollama::OllamaProvider;
@@ -439,6 +439,9 @@ async fn bootstrap(
         Arc::new(config.clone()),
     ));
 
+    // Build message bus.
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+
     // Build orchestrator.
     let orchestrator = Arc::new(
         Orchestrator::new(
@@ -446,6 +449,7 @@ async fn bootstrap(
             storage.clone(),
             executor.clone(),
             registry.clone(),
+            bus,
             &config,
         )
         .with_confirmation_callback(confirmation_cb),

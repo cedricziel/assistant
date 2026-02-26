@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::{
     strip_html_comments, Attachment, ExecutionContext, Interface, MemoryLoader, Message,
-    MessageRole, ToolHandler,
+    MessageBus, MessageRole, ToolHandler,
 };
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
@@ -95,6 +95,8 @@ pub struct Orchestrator {
     storage: Arc<StorageLayer>,
     executor: Arc<ToolExecutor>,
     registry: Arc<SkillRegistry>,
+    /// Durable message bus for decoupled inter-component communication.
+    bus: Arc<dyn MessageBus>,
     max_iterations: usize,
     disabled_skills: Vec<String>,
     confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
@@ -119,6 +121,7 @@ impl Orchestrator {
         storage: Arc<StorageLayer>,
         executor: Arc<ToolExecutor>,
         registry: Arc<SkillRegistry>,
+        bus: Arc<dyn MessageBus>,
         config: &assistant_core::AssistantConfig,
     ) -> Self {
         let memory_loader = MemoryLoader::new(config);
@@ -128,12 +131,18 @@ impl Orchestrator {
             storage,
             executor,
             registry,
+            bus,
             max_iterations: config.llm.max_iterations,
             disabled_skills: config.skills.disabled.clone(),
             confirmation_callback: None,
             memory_loader,
             trace_content: config.mirror.trace_content,
         }
+    }
+
+    /// Return a reference to the message bus.
+    pub fn bus(&self) -> &Arc<dyn MessageBus> {
+        &self.bus
     }
 
     /// Attach a confirmation callback (used by the CLI interface).
@@ -1954,7 +1963,7 @@ fn escape_xml(input: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use assistant_core::{types::Interface, AssistantConfig};
+    use assistant_core::{types::Interface, AssistantConfig, MessageBus};
     use assistant_llm::{
         ChatHistoryMessage, ChatRole, LlmClient, LlmClientConfig, LlmProvider, ToolCallItem,
     };
@@ -2016,11 +2025,13 @@ mod tests {
             registry.clone(),
             Arc::new(config.clone()),
         ));
+        let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
         let orch = Arc::new(Orchestrator::new(
             llm,
             storage.clone(),
             executor,
             registry.clone(),
+            bus,
             &config,
         ));
         (orch, storage)
@@ -2979,11 +2990,13 @@ mod tests {
             registry.clone(),
             Arc::new(config.clone()),
         ));
+        let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
         let orch = Arc::new(Orchestrator::new(
             llm,
             storage.clone(),
             executor.clone(),
             registry.clone(),
+            bus,
             &config,
         ));
         (orch, storage, executor)
