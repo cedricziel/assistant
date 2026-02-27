@@ -10,7 +10,7 @@ anyhow = { workspace = true }
 assistant-a2a-json-schema = { path = "../a2a-json-schema" }
 assistant-storage = { path = "../storage" }
 axum = { version = "0.8", features = ["macros"] }
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

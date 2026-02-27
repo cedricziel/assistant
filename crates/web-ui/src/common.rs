@@ -50,6 +50,11 @@ pub fn render_sidebar(active: &str) -> String {
          <h3>Navigation</h3>\
          <ul>{links}</ul>\
          </div>\
+         <div class=\"facet-footer\">\
+         <form method=\"POST\" action=\"/logout\" style=\"margin:0\">\
+         <button type=\"submit\" class=\"logout-btn\">Sign out</button>\
+         </form>\
+         </div>\
          </div>",
         links = links,
     )
