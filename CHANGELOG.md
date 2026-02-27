@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.16](https://github.com/cedricziel/assistant/compare/v0.1.15...v0.1.16) (2026-02-27)
+
+
+### Features
+
+* add A2A protocol support with agent management UI ([#69](https://github.com/cedricziel/assistant/issues/69)) ([58c68e5](https://github.com/cedricziel/assistant/commit/58c68e556f263ee9359f890959d4d27da2abf8b3))
+* add OpenTelemetry metrics with SQLite persistence and analytics dashboard ([#76](https://github.com/cedricziel/assistant/issues/76)) ([6d1364c](https://github.com/cedricziel/assistant/commit/6d1364c5bbd206ff73c3da273b0ece8362d77b3a))
+* **skill:** add claude-code-agent skill with async tmux support ([#75](https://github.com/cedricziel/assistant/issues/75)) ([4a052a1](https://github.com/cedricziel/assistant/commit/4a052a147b68a572c62581a5fdb466039703b9f3))
+
+
+### Bug Fixes
+
+* sync Cargo.lock versions for a2a crates after release bump ([d0dd77e](https://github.com/cedricziel/assistant/commit/d0dd77e50ac60451503944655022643c7cfffaf8))
+* use literal version strings in a2a crates for release-please compatibility ([#84](https://github.com/cedricziel/assistant/issues/84)) ([7231c50](https://github.com/cedricziel/assistant/commit/7231c5022081761ba5d555f7aee3d3248f5c4331))
+
 ## [0.1.15](https://github.com/cedricziel/assistant/compare/v0.1.14...v0.1.15) (2026-02-26)
 
 
