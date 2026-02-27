@@ -15,17 +15,24 @@ use axum::Router;
 use crate::a2a::handlers::A2AState;
 use crate::a2a::pages::AgentPagesState;
 
-/// Builds the axum [`Router`] for all A2A protocol endpoints.
+/// Public A2A routes that do **not** require authentication.
 ///
-/// Mount this under a prefix (e.g., `/a2a`) or at the root, depending on your
-/// deployment topology.
-pub fn router() -> Router<A2AState> {
+/// Per the A2A spec the agent card must be publicly discoverable so that
+/// callers can learn the auth requirements before making authenticated calls.
+pub fn public_router() -> Router<A2AState> {
+    Router::new().route(
+        "/.well-known/agent.json",
+        get(handlers::get_agent_card_well_known),
+    )
+}
+
+/// Protected A2A routes that **require** authentication.
+///
+/// Includes the authenticated extended card, message operations, task
+/// operations, and push notification configuration.
+pub fn protected_router() -> Router<A2AState> {
     Router::new()
-        // -- Agent Card discovery --
-        .route(
-            "/.well-known/agent.json",
-            get(handlers::get_agent_card_well_known),
-        )
+        // -- Agent Card (authenticated) --
         .route(
             "/agent/authenticatedExtendedCard",
             get(handlers::get_extended_agent_card),

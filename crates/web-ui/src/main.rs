@@ -1,9 +1,11 @@
 mod a2a;
+pub mod auth;
 pub mod common;
 mod webhooks;
 
 use std::collections::{HashMap, HashSet};
-use std::{net::SocketAddr, path::PathBuf};
+use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use assistant_storage::{
@@ -14,16 +16,18 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::Html,
-    routing::get,
-    Router,
+    routing::{get, post},
+    Extension, Router,
 };
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 use tower_http::trace::TraceLayer;
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber::EnvFilter;
+
+use auth::AuthConfig;
 
 use a2a::agent_store::AgentStore;
 use a2a::handlers::{build_default_agent_card, A2AState};
@@ -39,6 +43,11 @@ struct Args {
     /// Path to the SQLite database (defaults to ~/.assistant/assistant.db)
     #[arg(long)]
     db_path: Option<PathBuf>,
+
+    /// Authentication token.  Falls back to ASSISTANT_WEB_TOKEN env var.
+    /// The server will refuse to start without a token.
+    #[arg(long, env = "ASSISTANT_WEB_TOKEN")]
+    auth_token: Option<String>,
 
     /// Maximum number of traces to show on the traces page
     #[arg(long, default_value_t = 200)]
@@ -89,6 +98,22 @@ async fn main() -> Result<()> {
         )
         .init();
 
+    // -- Auth token (required) -----------------------------------------------
+    let auth_token = match args.auth_token.map(|t| t.trim().to_string()) {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            anyhow::bail!(
+                "No authentication token configured.\n\
+                 Set --auth-token <TOKEN> or the ASSISTANT_WEB_TOKEN environment variable.\n\
+                 The web UI refuses to start without authentication."
+            );
+        }
+    };
+
+    // Parse listen address early so we can pass `is_loopback` to AuthConfig.
+    let addr: SocketAddr = args.listen.parse()?;
+    let auth_config = AuthConfig::new(auth_token, !addr.ip().is_loopback());
+
     let db_path = match args.db_path.or_else(default_db_path) {
         Some(p) => p,
         None => anyhow::bail!("Cannot determine default DB path. Specify --db-path."),
@@ -108,10 +133,14 @@ async fn main() -> Result<()> {
     let base_url = format!("http://{}", args.listen);
 
     // Resolve the agent card from the store, falling back to a built-in default.
-    let agent_card = match agent_store.get_default().await {
+    let mut agent_card = match agent_store.get_default().await {
         Some(agent) => agent.card,
         None => build_default_agent_card(&base_url),
     };
+
+    // Auto-harden: inject Bearer auth into the agent card so A2A callers
+    // know they need to present a token.
+    harden_agent_card(&mut agent_card);
 
     let a2a_state = A2AState {
         task_store: TaskStore::new(),
@@ -123,16 +152,20 @@ async fn main() -> Result<()> {
         base_url: base_url.clone(),
     };
 
-    let a2a_router = a2a::router().with_state(a2a_state);
-    let agent_pages_router = a2a::agent_pages_router().with_state(agent_pages_state);
-
     let webhook_pages_state = webhooks::pages::WebhookPagesState {
         pool: storage.pool.clone(),
     };
-    let webhook_pages_router = webhooks::webhook_pages_router().with_state(webhook_pages_state);
 
-    let router = Router::new()
-        // Trace/log UI routes.
+    // -- Router: public routes (no auth required) --------------------------
+    let public_routes = Router::new()
+        .route("/login", get(auth::login_page).post(auth::login_submit))
+        .route("/logout", post(auth::logout))
+        // A2A agent card is public per spec — callers need it to discover auth.
+        .merge(a2a::public_router().with_state(a2a_state.clone()));
+
+    // -- Router: protected routes (auth required) --------------------------
+    let protected_routes = Router::new()
+        // Trace / log UI routes.
         .route("/", get(show_dashboard))
         .route("/traces", get(show_dashboard))
         .route("/trace/{trace_id}", get(show_trace_detail))
@@ -140,20 +173,89 @@ async fn main() -> Result<()> {
         .route("/log/{log_id}", get(show_log_detail))
         .route("/analytics", get(show_analytics))
         .with_state(state)
-        // A2A protocol routes (merged at root).
-        .merge(a2a_router)
+        // A2A protocol routes (auth-protected endpoints only).
+        .merge(a2a::protected_router().with_state(a2a_state))
         // Agent management UI pages.
-        .merge(agent_pages_router)
+        .merge(a2a::agent_pages_router().with_state(agent_pages_state))
         // Webhook management UI pages.
-        .merge(webhook_pages_router)
+        .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
+        .route_layer(axum::middleware::from_fn(auth::require_auth));
+
+    let router = public_routes
+        .merge(protected_routes)
+        .layer(Extension(auth_config))
         .layer(TraceLayer::new_for_http());
 
-    let addr: SocketAddr = args.listen.parse()?;
+    // Warn when binding to a non-loopback address.
+    if !addr.ip().is_loopback() {
+        warn!(
+            "Listening on non-loopback address {}. Ensure network access is intentional.",
+            addr
+        );
+    }
+
     info!("Listening on http://{}", addr);
     info!("A2A agent card: http://{}/.well-known/agent.json", addr);
+    info!("Authentication enabled — login at http://{}/login", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router.into_make_service()).await?;
     Ok(())
+}
+
+// -- Auto-hardening ---------------------------------------------------------
+
+/// Inject Bearer authentication metadata into an [`AgentCard`] so that A2A
+/// callers discover the auth requirement via the public card endpoint.
+fn harden_agent_card(card: &mut assistant_a2a_json_schema::agent_card::AgentCard) {
+    use assistant_a2a_json_schema::security::{
+        HttpAuthSecurityScheme, SecurityRequirement, SecurityScheme,
+    };
+    use assistant_a2a_json_schema::types::StringList;
+
+    let scheme_name = "bearer_token".to_string();
+
+    // Ensure the security scheme exists.
+    if !card.security_schemes.contains_key(&scheme_name) {
+        card.security_schemes.insert(
+            scheme_name.clone(),
+            SecurityScheme {
+                http_auth_security_scheme: Some(HttpAuthSecurityScheme {
+                    description: Some(
+                        "Bearer token authentication. Pass the token via \
+                         Authorization: Bearer <token>."
+                            .to_string(),
+                    ),
+                    scheme: "Bearer".to_string(),
+                    bearer_format: None,
+                }),
+                api_key_security_scheme: None,
+                oauth2_security_scheme: None,
+                open_id_connect_security_scheme: None,
+                mtls_security_scheme: None,
+            },
+        );
+    }
+
+    // Ensure a matching security requirement exists (checked independently
+    // so that a card with the scheme but a missing requirement still gets
+    // hardened).
+    let has_requirement = card
+        .security_requirements
+        .iter()
+        .any(|req| req.schemes.contains_key(&scheme_name));
+
+    if !has_requirement {
+        card.security_requirements.push(SecurityRequirement {
+            schemes: HashMap::from([(
+                scheme_name,
+                StringList {
+                    list: vec![], // no scopes required
+                },
+            )]),
+        });
+    }
+
+    info!("Auto-hardened agent card with Bearer auth security scheme");
 }
 
 async fn show_dashboard(
@@ -1659,6 +1761,22 @@ fn default_css() -> &'static str {
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
+    }
+    .logout-btn {
+        background: transparent;
+        border: 1px solid #1a2744;
+        border-radius: 8px;
+        color: #8aa5d8;
+        padding: 0.45rem 0.8rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+        width: 100%;
+        transition: background 0.15s, color 0.15s;
+    }
+    .logout-btn:hover {
+        background: rgba(239, 68, 68, 0.12);
+        color: #fca5a5;
+        border-color: rgba(239, 68, 68, 0.3);
     }
     .trace-count {
         font-size: 0.8rem;

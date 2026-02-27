@@ -216,25 +216,34 @@ make run            # cargo run -p assistant-cli  (REPL + background interfaces)
 make run-mcp        # cargo run -p assistant-cli -- mcp
 make run-slack      # cargo run -p assistant-cli -- slack
 make run-mattermost # cargo run -p assistant-cli -- mattermost
-# Trace analysis UI
-cargo run -p assistant-web-ui -- --listen 127.0.0.1:8080
+# Trace analysis UI (auth token required)
+ASSISTANT_WEB_TOKEN=changeme cargo run -p assistant-web-ui -- --listen 127.0.0.1:8080
 ```
 
 ## Observability
 
-The runtime emits [tracing](https://docs.rs/tracing/) spans for every turn and
-tool execution. To forward them to an OpenTelemetry backend (Jaeger, Tempo,
-Honeycomb, etc.), set the standard OTLP endpoint before starting the assistant:
+The runtime emits OpenTelemetry **traces, logs, and metrics** for every
+conversation turn, LLM call, and tool invocation. All three signals are
+persisted to a local SQLite database (powering the built-in web UI) and can
+optionally be exported to any OTLP-compatible collector.
 
 ```sh
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-cargo run -p assistant-cli -- slack
+# Send all signals to an OTLP collector (Jaeger, Tempo, Grafana, Honeycomb, …)
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 assistant
+
+# Per-signal endpoints
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://tempo:4317 \
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:4317 \
+  assistant
+
+# Auth headers for managed backends
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer token" assistant
 ```
 
-When the environment variable is present the CLI automatically installs an OTLP
-exporter (batching on the Tokio runtime) and attaches span metadata such as the
-conversation ID, iteration number, and tool name. Remove the variable to fall
-back to local logging only.
+The `opentelemetry-otlp` crate reads the standard `OTEL_EXPORTER_OTLP_*` env
+vars (endpoint, headers, timeout, compression) with per-signal overrides — see
+[docs/opentelemetry.md](docs/opentelemetry.md) for the full reference of
+emitted spans, metrics, and supported environment variables.
 
 ### Pre-commit hooks
 
