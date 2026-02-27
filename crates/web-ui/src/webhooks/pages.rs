@@ -502,10 +502,21 @@ pub struct WebhookFormData {
 
 impl WebhookFormData {
     fn selected_event_types(&self) -> Vec<String> {
-        self.event_types
+        let known: std::collections::HashSet<&str> = EVENT_TYPES.iter().map(|(k, _)| *k).collect();
+        let candidates: Vec<String> = self
+            .event_types
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
+            .collect();
+        for c in &candidates {
+            if !known.contains(c.as_str()) {
+                warn!(event_type = %c, "Ignoring unrecognized event type");
+            }
+        }
+        candidates
+            .into_iter()
+            .filter(|s| known.contains(s.as_str()))
             .collect()
     }
 }
@@ -857,6 +868,35 @@ mod tests {
             active: None,
         };
         assert_eq!(form.selected_event_types(), vec!["turn.result"]);
+    }
+
+    #[test]
+    fn selected_event_types_filters_unknown() {
+        let form = WebhookFormData {
+            name: "x".into(),
+            url: "https://x.test".into(),
+            event_types: "turn.result, bogus.event, tool.result".into(),
+            active: None,
+        };
+        assert_eq!(
+            form.selected_event_types(),
+            vec!["turn.result".to_string(), "tool.result".to_string()],
+            "unknown event types should be filtered out",
+        );
+    }
+
+    #[test]
+    fn selected_event_types_all_unknown_returns_empty() {
+        let form = WebhookFormData {
+            name: "x".into(),
+            url: "https://x.test".into(),
+            event_types: "not.real, also.fake".into(),
+            active: None,
+        };
+        assert!(
+            form.selected_event_types().is_empty(),
+            "all-unknown input should produce empty vec",
+        );
     }
 
     // -- render_sidebar --
