@@ -99,6 +99,8 @@ fn build_batch_prompt(batch: &[PendingMessage]) -> String {
         .join("\n\n")
 }
 
+use assistant_core::SlackListenMode;
+
 use crate::config::{SlackConfig, SlackConfigExt};
 use crate::skills::{
     SlackDeleteMessageSkill, SlackGetHistorySkill, SlackListChannelsSkill, SlackLookupUserSkill,
@@ -115,6 +117,9 @@ struct SlackCallbackState {
     orchestrator: Arc<Orchestrator>,
     /// Bot token used to post replies via the Web API.
     bot_token: SlackApiToken,
+    /// The bot's own Slack user ID (e.g. `"U0ABC123"`), resolved via `auth.test`
+    /// at startup.  Used for mention detection in [`SlackListenMode::Mention`].
+    bot_user_id: String,
     /// One conversation UUID per `(channel_id, thread_ts)` pair.
     /// Using `thread_ts` (instead of `user_id`) ensures every message in the
     /// same thread shares a single LLM conversation.
@@ -394,6 +399,42 @@ fn incoming_from_reaction_event(event: &SlackReactionAddedEvent) -> Option<Slack
     })
 }
 
+// ── Listen-mode filtering ─────────────────────────────────────────────────────
+
+/// Returns `true` when the message should be **processed** under the given
+/// listen mode.
+///
+/// In [`SlackListenMode::Mention`]:
+/// - DMs (channel starts with `"D"`) are always accepted.
+/// - Thread replies (`thread_ts != msg_ts`) are always accepted.
+/// - Top-level channel messages must contain `<@bot_user_id>`.
+/// - Reactions are always rejected (no mention concept).
+///
+/// In [`SlackListenMode::All`] everything passes.
+fn should_process(
+    mode: &SlackListenMode,
+    channel_id: &str,
+    thread_ts: &str,
+    msg_ts: &str,
+    text: &str,
+    bot_user_id: &str,
+    is_reaction: bool,
+) -> bool {
+    match mode {
+        SlackListenMode::All => true,
+        SlackListenMode::Mention => {
+            if is_reaction {
+                return false;
+            }
+            let is_dm = channel_id.starts_with('D');
+            let is_thread_reply = thread_ts != msg_ts;
+            let is_mentioned =
+                !bot_user_id.is_empty() && text.contains(&format!("<@{bot_user_id}>"));
+            is_dm || is_thread_reply || is_mentioned
+        }
+    }
+}
+
 // ── Push-event callback (free async fn — function pointer, not closure) ───────
 
 async fn on_push_event(
@@ -406,6 +447,7 @@ async fn on_push_event(
         config,
         orchestrator,
         bot_token,
+        bot_user_id,
         conversations,
         processed_ts,
         started_at,
@@ -425,6 +467,7 @@ async fn on_push_event(
             s.config.clone(),
             s.orchestrator.clone(),
             s.bot_token.clone(),
+            s.bot_user_id.clone(),
             s.conversations.clone(),
             s.processed_ts.clone(),
             s.started_at,
@@ -485,6 +528,28 @@ async fn on_push_event(
     if !config.allowed_users.is_empty() && !config.allowed_users.contains(&user_id) {
         warn!(user = %user_id, "Ignoring message from non-allowlisted user");
         return Ok(());
+    }
+
+    // Listen-mode filtering — see `should_process()` for the full rule set.
+    {
+        let is_reaction = matches!(incoming.kind, SlackIncomingKind::Reaction { .. });
+        if !should_process(
+            &config.mode,
+            &channel_id,
+            &thread_ts.0,
+            &msg_ts.0,
+            &text,
+            &bot_user_id,
+            is_reaction,
+        ) {
+            debug!(
+                channel = %channel_id,
+                user = %user_id,
+                mode = ?config.mode,
+                "Listen-mode filter: skipping event"
+            );
+            return Ok(());
+        }
     }
 
     // Deduplicate: slack-morphism opens two WebSocket connections; both deliver
@@ -976,17 +1041,28 @@ impl SlackInterface {
 
         // Mark the bot as active. This may silently fail for some bot token
         // configurations; that is acceptable.
+        let session = client.open_session(&bot_token);
+        if let Err(e) = session
+            .users_set_presence(&SlackApiUsersSetPresenceRequest::new("auto".to_string()))
+            .await
         {
-            let session = client.open_session(&bot_token);
-            if let Err(e) = session
-                .users_set_presence(&SlackApiUsersSetPresenceRequest::new("auto".to_string()))
-                .await
-            {
-                debug!(error = %e, "users.setPresence(auto) failed (missing_scope is expected for most bot tokens)");
-            } else {
-                info!("Presence set to auto");
-            }
+            debug!(error = %e, "users.setPresence(auto) failed (missing_scope is expected for most bot tokens)");
+        } else {
+            info!("Presence set to auto");
         }
+
+        // Resolve the bot's own user ID via auth.test so we can detect @-mentions.
+        let bot_user_id = match session.auth_test().await {
+            Ok(resp) => {
+                let uid = resp.user_id.to_string();
+                info!(bot_user_id = %uid, "Resolved bot identity via auth.test");
+                uid
+            }
+            Err(e) => {
+                warn!(error = %e, "auth.test failed; mention filtering will not work");
+                String::new()
+            }
+        };
 
         // Conversation map persists across reconnects so in-flight context is not lost.
         let conversations = Arc::new(Mutex::new(HashMap::new()));
@@ -1054,6 +1130,7 @@ impl SlackInterface {
                 config: self.config.clone(),
                 orchestrator: self.orchestrator.clone(),
                 bot_token: bot_token.clone(),
+                bot_user_id: bot_user_id.clone(),
                 conversations: conversations.clone(),
                 processed_ts: processed_ts.clone(),
                 started_at,
@@ -1851,6 +1928,131 @@ mod tests {
             classify_history_msg(&msg),
             Some(MessageRole::User),
             "FileShare from a human should classify as User"
+        );
+    }
+
+    // ── Listen-mode (should_process) tests ───────────────────────────────────
+
+    use super::should_process;
+    use assistant_core::SlackListenMode;
+
+    #[test]
+    fn all_mode_accepts_everything() {
+        assert!(should_process(
+            &SlackListenMode::All,
+            "C001",
+            "1.0",
+            "1.0",
+            "hello",
+            "UBOT",
+            false,
+        ));
+        // Even reactions pass in All mode.
+        assert!(should_process(
+            &SlackListenMode::All,
+            "C001",
+            "1.0",
+            "1.0",
+            "hello",
+            "UBOT",
+            true,
+        ));
+    }
+
+    #[test]
+    fn mention_mode_rejects_plain_channel_message() {
+        assert!(
+            !should_process(
+                &SlackListenMode::Mention,
+                "C001",
+                "1.0", // thread_ts == msg_ts → top-level
+                "1.0",
+                "hello everyone",
+                "UBOT",
+                false,
+            ),
+            "top-level message without mention must be rejected"
+        );
+    }
+
+    #[test]
+    fn mention_mode_accepts_mention() {
+        assert!(
+            should_process(
+                &SlackListenMode::Mention,
+                "C001",
+                "1.0",
+                "1.0",
+                "hey <@UBOT> what's up?",
+                "UBOT",
+                false,
+            ),
+            "message containing <@UBOT> must be accepted"
+        );
+    }
+
+    #[test]
+    fn mention_mode_accepts_dm() {
+        assert!(
+            should_process(
+                &SlackListenMode::Mention,
+                "D001", // DM channel prefix
+                "1.0",
+                "1.0",
+                "hello",
+                "UBOT",
+                false,
+            ),
+            "DMs must always be accepted in mention mode"
+        );
+    }
+
+    #[test]
+    fn mention_mode_accepts_thread_reply() {
+        assert!(
+            should_process(
+                &SlackListenMode::Mention,
+                "C001",
+                "1.0", // thread_ts
+                "2.0", // msg_ts != thread_ts → reply
+                "follow-up without mention",
+                "UBOT",
+                false,
+            ),
+            "thread replies must be accepted in mention mode"
+        );
+    }
+
+    #[test]
+    fn mention_mode_rejects_reaction() {
+        assert!(
+            !should_process(
+                &SlackListenMode::Mention,
+                "C001",
+                "1.0",
+                "1.0",
+                "Reaction :eyes:",
+                "UBOT",
+                true,
+            ),
+            "reactions must be rejected in mention mode"
+        );
+    }
+
+    #[test]
+    fn mention_mode_empty_bot_id_rejects() {
+        // If auth.test failed and bot_user_id is empty, mentions can never match.
+        assert!(
+            !should_process(
+                &SlackListenMode::Mention,
+                "C001",
+                "1.0",
+                "1.0",
+                "hey <@UBOT> ping",
+                "", // empty bot_user_id
+                false,
+            ),
+            "empty bot_user_id means mention detection is disabled"
         );
     }
 }

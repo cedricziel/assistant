@@ -137,6 +137,21 @@ pub struct SignalConfig {
     pub store_path: Option<String>,
 }
 
+/// Controls which messages the Slack bot reacts to.
+///
+/// - `Mention` (default) — respond only when `@`-mentioned, in DMs, or in
+///   threads the bot is already participating in.
+/// - `All` — respond to every message in allowed channels (previous default).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SlackListenMode {
+    /// Respond only to `@`-mentions, DMs, and thread replies.
+    #[default]
+    Mention,
+    /// Respond to every message in allowed channels.
+    All,
+}
+
 /// Configuration for the Slack interface.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SlackConfig {
@@ -150,6 +165,9 @@ pub struct SlackConfig {
     /// If non-empty, only dispatch messages from these Slack user IDs.
     #[serde(default)]
     pub allowed_users: Vec<String>,
+    /// Which messages the bot should react to.
+    #[serde(default)]
+    pub mode: SlackListenMode,
 }
 
 /// Configuration for the Mattermost interface.
