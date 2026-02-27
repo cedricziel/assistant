@@ -4,6 +4,8 @@ pub mod log_telemetry;
 pub mod logs;
 pub mod memory_chunks;
 pub mod message_bus;
+pub mod metric_telemetry;
+pub mod metrics;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
@@ -16,6 +18,10 @@ pub use log_telemetry::SqliteLogExporter;
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
 pub use message_bus::SqliteMessageBus;
+pub use metric_telemetry::SqliteMetricExporter;
+pub use metrics::{
+    MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord, TimeSeriesPoint, ToolUsageStats,
+};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
@@ -94,6 +100,11 @@ impl StorageLayer {
     /// Convenience: build a [`SqliteMessageBus`] backed by this pool.
     pub fn message_bus(&self) -> SqliteMessageBus {
         SqliteMessageBus::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`MetricsStore`] backed by this pool.
+    pub fn metrics_store(&self) -> MetricsStore {
+        MetricsStore::new(self.pool.clone())
     }
 }
 
@@ -178,6 +189,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "014_agents",
             include_str!("../../../migrations/014_agents.sql"),
+        ),
+        (
+            "015_metrics",
+            include_str!("../../../migrations/015_metrics.sql"),
         ),
     ];
 

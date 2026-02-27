@@ -20,6 +20,8 @@ opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
+sha2 = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -1,10 +1,13 @@
+use std::time::Duration;
+
 use anyhow::Result;
-use assistant_storage::{SqliteLogExporter, SqliteSpanExporter};
+use assistant_storage::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry::{global, KeyValue};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     logs::{BatchLogProcessor, LoggerProvider},
+    metrics::{PeriodicReader, SdkMeterProvider},
     resource::Resource,
     runtime::Tokio,
     trace::{self, BatchSpanProcessor},
@@ -14,15 +17,18 @@ use tracing_subscriber::{
     filter::Targets, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
 };
 
-/// Guard that shuts down the global tracer provider and logger provider when
-/// dropped.
+/// Guard that shuts down all OTel providers when dropped.
 pub struct OtelGuard {
     logger_provider: Option<LoggerProvider>,
+    meter_provider: Option<SdkMeterProvider>,
 }
 
 impl Drop for OtelGuard {
     fn drop(&mut self) {
         if let Some(ref provider) = self.logger_provider {
+            let _ = provider.shutdown();
+        }
+        if let Some(ref provider) = self.meter_provider {
             let _ = provider.shutdown();
         }
         global::shutdown_tracer_provider();
@@ -61,9 +67,10 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
     let fmt_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
 
-    // -- Trace provider --
-    let resource = Resource::new(vec![KeyValue::new("service.name", "assistant")]);
+    // -- Shared resource (used by traces, logs, and metrics) --
+    let resource = build_resource();
 
+    // -- Trace provider --
     let mut trace_provider_builder = trace::TracerProvider::builder()
         .with_config(trace::Config::default().with_resource(resource.clone()));
     let mut have_trace_exporter = false;
@@ -88,18 +95,34 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
     // -- Logger provider (OTel logs) --
     let mut logger_provider: Option<LoggerProvider> = None;
 
+    // -- Meter provider (OTel metrics) --
+    let mut meter_provider: Option<SdkMeterProvider> = None;
+
     if enable_sqlite_export {
-        let sqlite_log_exporter = SqliteLogExporter::new(pool);
+        // Logs
+        let sqlite_log_exporter = SqliteLogExporter::new(pool.clone());
         let log_processor = BatchLogProcessor::builder(sqlite_log_exporter, Tokio).build();
-        let provider = LoggerProvider::builder()
+        let log_prov = LoggerProvider::builder()
             .with_log_processor(log_processor)
-            .with_resource(resource)
+            .with_resource(resource.clone())
             .build();
 
         // Bridge tracing events → OTel log records with the anti-stampede filter.
         let otel_filter = otel_log_bridge_filter();
-        let otel_log_layer = OpenTelemetryTracingBridge::new(&provider).with_filter(otel_filter);
-        logger_provider = Some(provider);
+        let otel_log_layer = OpenTelemetryTracingBridge::new(&log_prov).with_filter(otel_filter);
+        logger_provider = Some(log_prov);
+
+        // Metrics — export every 60 s to SQLite.
+        let sqlite_metric_exporter = SqliteMetricExporter::new(pool);
+        let reader = PeriodicReader::builder(sqlite_metric_exporter, Tokio)
+            .with_interval(Duration::from_secs(60))
+            .build();
+        let meter_prov = SdkMeterProvider::builder()
+            .with_resource(resource)
+            .with_reader(reader)
+            .build();
+        global::set_meter_provider(meter_prov.clone());
+        meter_provider = Some(meter_prov);
 
         tracing_subscriber::registry()
             .with(fmt_layer.with_filter(fmt_filter))
@@ -114,12 +137,48 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
     if have_trace_exporter {
         let provider = trace_provider_builder.build();
         global::set_tracer_provider(provider);
-        Ok(Some(OtelGuard { logger_provider }))
-    } else if logger_provider.is_some() {
-        Ok(Some(OtelGuard { logger_provider }))
+        Ok(Some(OtelGuard {
+            logger_provider,
+            meter_provider,
+        }))
+    } else if logger_provider.is_some() || meter_provider.is_some() {
+        Ok(Some(OtelGuard {
+            logger_provider,
+            meter_provider,
+        }))
     } else {
         Ok(None)
     }
+}
+
+/// Build a shared OTel [`Resource`] with service, OS, process, and SDK
+/// attributes.  The same resource is attached to traces, logs, and metrics
+/// so all signals can be correlated.
+fn build_resource() -> Resource {
+    let mut attrs = vec![
+        KeyValue::new(
+            "service.name",
+            std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "assistant".to_string()),
+        ),
+        KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+        KeyValue::new("os.type", std::env::consts::OS),
+        KeyValue::new("host.arch", std::env::consts::ARCH),
+        KeyValue::new("process.pid", std::process::id() as i64),
+        KeyValue::new("process.runtime.name", "rust"),
+        KeyValue::new("telemetry.sdk.name", "opentelemetry"),
+        KeyValue::new("telemetry.sdk.language", "rust"),
+    ];
+
+    // Parse OTEL_RESOURCE_ATTRIBUTES (key1=val1,key2=val2,…) per the spec.
+    if let Ok(env_attrs) = std::env::var("OTEL_RESOURCE_ATTRIBUTES") {
+        for pair in env_attrs.split(',') {
+            if let Some((key, val)) = pair.trim().split_once('=') {
+                attrs.push(KeyValue::new(key.to_string(), val.to_string()));
+            }
+        }
+    }
+
+    Resource::new(attrs)
 }
 
 #[cfg(test)]

@@ -147,6 +147,8 @@ pub struct Orchestrator {
     /// Inserting a token when a subagent starts and removing it when it finishes
     /// allows external callers to cancel an in-progress subagent.
     agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
+    /// OTel metric instruments for GenAI and operational metrics.
+    metrics: crate::MetricsRecorder,
 }
 
 impl Orchestrator {
@@ -182,6 +184,7 @@ impl Orchestrator {
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
+            metrics: crate::MetricsRecorder::new(),
         }
     }
 
@@ -561,6 +564,7 @@ impl Orchestrator {
             extension_tools = extensions.len()
         );
         let _turn_guard = turn_span.enter();
+        self.metrics.record_turn(None, &format!("{interface:?}"));
         info!("Starting turn with extension tools");
 
         // -- OTel trace hierarchy --
@@ -737,7 +741,9 @@ impl Orchestrator {
                 &history,
                 &all_specs,
             );
+            let llm_start = std::time::Instant::now();
             let response = self.llm.chat(&system_prompt, &history, &all_specs).await;
+            let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
@@ -746,6 +752,8 @@ impl Orchestrator {
                     // keeps proper alternation and subsequent turns are not
                     // poisoned by an orphaned user message.
                     Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    self.metrics
+                        .record_error("llm_error", "run_turn_with_tools");
                     return Err(e);
                 }
             };
@@ -754,6 +762,7 @@ impl Orchestrator {
                 response.meta(),
                 &response,
                 self.trace_content,
+                Some((&self.metrics, self.llm.provider_name(), llm_elapsed)),
             );
 
             match response {
@@ -1000,6 +1009,9 @@ impl Orchestrator {
                             let start = std::time::Instant::now();
                             let exec_result = handler.run(params_map, &ctx).await;
                             let duration_ms = start.elapsed().as_millis() as i64;
+                            self.metrics.record_tool_invocation(&name);
+                            self.metrics
+                                .record_tool_duration(&name, duration_ms as f64 / 1000.0);
 
                             let obs = match exec_result {
                                 Ok(output) => {
@@ -1093,6 +1105,9 @@ impl Orchestrator {
                             let start = std::time::Instant::now();
                             let exec_result = self.executor.execute(&name, params_map, &ctx).await;
                             let duration_ms = start.elapsed().as_millis() as i64;
+                            self.metrics.record_tool_invocation(&name);
+                            self.metrics
+                                .record_tool_duration(&name, duration_ms as f64 / 1000.0);
 
                             let obs = match exec_result {
                                 Ok(output) => {
@@ -1202,6 +1217,7 @@ impl Orchestrator {
         interface: Interface,
         trace_cx: Option<&OtelContext>,
     ) -> Result<TurnResult> {
+        self.metrics.record_turn(None, &format!("{interface:?}"));
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
@@ -1268,11 +1284,14 @@ impl Orchestrator {
                 &history,
                 &tool_specs,
             );
+            let llm_start = std::time::Instant::now();
             let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
+            let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
                     Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    self.metrics.record_error("llm_error", "run_turn");
                     return Err(e);
                 }
             };
@@ -1281,6 +1300,7 @@ impl Orchestrator {
                 response.meta(),
                 &response,
                 self.trace_content,
+                Some((&self.metrics, self.llm.provider_name(), llm_elapsed)),
             );
 
             match response {
@@ -1401,6 +1421,9 @@ impl Orchestrator {
                         let start = std::time::Instant::now();
                         let exec_result = self.executor.execute(&name, params_map, &ctx).await;
                         let duration_ms = start.elapsed().as_millis() as i64;
+                        self.metrics.record_tool_invocation(&name);
+                        self.metrics
+                            .record_tool_duration(&name, duration_ms as f64 / 1000.0);
 
                         let observation = match exec_result {
                             Ok(output) => {
@@ -1479,6 +1502,7 @@ impl Orchestrator {
         token_sink: mpsc::Sender<String>,
         trace_cx: Option<&OtelContext>,
     ) -> Result<TurnResult> {
+        self.metrics.record_turn(None, &format!("{interface:?}"));
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
@@ -1541,6 +1565,7 @@ impl Orchestrator {
                 &history,
                 &tool_specs,
             );
+            let llm_start = std::time::Instant::now();
             let response = self
                 .llm
                 .chat_streaming(
@@ -1550,10 +1575,12 @@ impl Orchestrator {
                     Some(token_sink.clone()),
                 )
                 .await;
+            let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
                     Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    self.metrics.record_error("llm_error", "run_turn_streaming");
                     return Err(e);
                 }
             };
@@ -1562,6 +1589,7 @@ impl Orchestrator {
                 response.meta(),
                 &response,
                 self.trace_content,
+                Some((&self.metrics, self.llm.provider_name(), llm_elapsed)),
             );
 
             match response {
@@ -1678,6 +1706,9 @@ impl Orchestrator {
                         let start = std::time::Instant::now();
                         let exec_result = self.executor.execute(&name, params_map, &ctx).await;
                         let duration_ms = start.elapsed().as_millis() as i64;
+                        self.metrics.record_tool_invocation(&name);
+                        self.metrics
+                            .record_tool_duration(&name, duration_ms as f64 / 1000.0);
 
                         let observation = match exec_result {
                             Ok(output) => {
@@ -1784,6 +1815,10 @@ impl Orchestrator {
 
         let prior = conv_store.load_history(conversation_id).await?;
         let base_turn = prior.len() as i64;
+
+        if base_turn == 0 {
+            self.metrics.conversation_count.add(1, &[]);
+        }
 
         let user_msg = {
             let mut m = Message::user(conversation_id, user_message);
@@ -2092,6 +2127,7 @@ impl SubagentRunner for Orchestrator {
             conversation_id = %conversation_id,
             "Spawning subagent"
         );
+        self.metrics.agent_spawn_count.add(1, &[]);
 
         // Register a cancellation token for this agent.
         let cancel_token = CancellationToken::new();
@@ -2200,7 +2236,9 @@ impl SubagentRunner for Orchestrator {
                     &history,
                     &tool_specs,
                 );
+                let llm_start = std::time::Instant::now();
                 let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
+                let llm_elapsed = llm_start.elapsed();
                 let response = match response {
                     Ok(r) => r,
                     Err(e) => {
@@ -2208,6 +2246,7 @@ impl SubagentRunner for Orchestrator {
                         llm_span.set_attribute(KeyValue::new("error.message", e.to_string()));
                         llm_span.end();
                         Self::persist_error_recovery(&conv_store, conversation_id).await;
+                        self.metrics.record_error("llm_error", "run_subagent");
                         let msg = format!("LLM error: {e}");
                         let _ = agent_store
                             .complete(
@@ -2231,6 +2270,7 @@ impl SubagentRunner for Orchestrator {
                     response.meta(),
                     &response,
                     self.trace_content,
+                    Some((&self.metrics, self.llm.provider_name(), llm_elapsed)),
                 );
 
                 match response {
@@ -2348,6 +2388,9 @@ impl SubagentRunner for Orchestrator {
                             {
                                 Ok(output) => {
                                     let duration_ms = start.elapsed().as_millis() as i64;
+                                    self.metrics.record_tool_invocation(&name);
+                                    self.metrics
+                                        .record_tool_duration(&name, duration_ms as f64 / 1000.0);
                                     debug!(
                                         tool = %name,
                                         success = output.success,
@@ -2366,6 +2409,10 @@ impl SubagentRunner for Orchestrator {
                                 }
                                 Err(err) => {
                                     let duration_ms = start.elapsed().as_millis() as i64;
+                                    self.metrics.record_tool_invocation(&name);
+                                    self.metrics
+                                        .record_tool_duration(&name, duration_ms as f64 / 1000.0);
+                                    self.metrics.record_error("tool_error", &name);
                                     warn!(
                                         tool = %name,
                                         %err,
@@ -2604,6 +2651,7 @@ fn finish_llm_span(
     meta: &LlmResponseMeta,
     response: &LlmResponse,
     trace_content: bool,
+    metrics: Option<(&crate::MetricsRecorder, &str, std::time::Duration)>,
 ) {
     if let Some(model) = &meta.model {
         span.set_attribute(KeyValue::new("gen_ai.response.model", model.clone()));
@@ -2647,6 +2695,22 @@ fn finish_llm_span(
             }
         };
         span.set_attribute(KeyValue::new("gen_ai.output.messages", output_json));
+    }
+
+    // -- Record OTel metrics alongside the span ---------------------------------
+    if let Some((recorder, provider_name, duration)) = metrics {
+        let model = meta.model.as_deref().unwrap_or("unknown");
+        let input = meta.input_tokens.unwrap_or(0);
+        let output = meta.output_tokens.unwrap_or(0);
+
+        recorder.record_token_usage(model, provider_name, "chat", input, output);
+        recorder.record_operation_duration(
+            model,
+            provider_name,
+            "chat",
+            duration.as_secs_f64(),
+            None,
+        );
     }
 
     span.end();
