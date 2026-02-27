@@ -4,7 +4,6 @@ use anyhow::Result;
 use assistant_storage::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry::{global, KeyValue};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     logs::{BatchLogProcessor, LoggerProvider},
     metrics::{PeriodicReader, SdkMeterProvider},
@@ -13,6 +12,7 @@ use opentelemetry_sdk::{
     trace::{self, BatchSpanProcessor},
 };
 use sqlx::SqlitePool;
+use tracing::info;
 use tracing_subscriber::{
     filter::Targets, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
 };
@@ -57,10 +57,20 @@ pub(crate) fn otel_log_bridge_filter() -> Targets {
 /// `enable_sqlite_export` controls whether spans, logs, and metrics are
 /// persisted locally via SQLite exporters.
 ///
-/// Setting the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable
-/// additionally wires up remote OTLP gRPC exporters for **all three signals**
-/// (traces, logs, and metrics).  Both backends can run side-by-side — each
-/// OTel provider simply gets multiple processors/readers.
+/// Setting **any** `OTEL_EXPORTER_OTLP_*` environment variable wires up
+/// remote OTLP exporters for all three signals (traces, logs, metrics).
+/// The `opentelemetry-otlp` crate reads the standard env vars internally,
+/// so all of the following are supported without additional code:
+///
+/// | Variable | Per-signal overrides |
+/// |----------|---------------------|
+/// | `OTEL_EXPORTER_OTLP_ENDPOINT` | `_TRACES_ENDPOINT`, `_LOGS_ENDPOINT`, `_METRICS_ENDPOINT` |
+/// | `OTEL_EXPORTER_OTLP_HEADERS` | `_TRACES_HEADERS`, `_LOGS_HEADERS`, `_METRICS_HEADERS` |
+/// | `OTEL_EXPORTER_OTLP_TIMEOUT` | `_TRACES_TIMEOUT`, `_LOGS_TIMEOUT`, `_METRICS_TIMEOUT` |
+/// | `OTEL_EXPORTER_OTLP_COMPRESSION` | `_TRACES_COMPRESSION`, `_LOGS_COMPRESSION`, `_METRICS_COMPRESSION` |
+///
+/// Both SQLite and OTLP backends can run side-by-side — each OTel
+/// provider simply gets multiple processors/readers.
 ///
 /// The OTel log bridge uses a dedicated per-layer filter (see
 /// [`otel_log_bridge_filter`]) that suppresses all `sqlx` targets. Without
@@ -73,8 +83,16 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
     // -- Shared resource (used by traces, logs, and metrics) --
     let resource = build_resource();
 
-    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
-    let need_otel = enable_sqlite_export || otlp_endpoint.is_some();
+    // Detect whether the user wants OTLP export by checking for any of the
+    // standard `OTEL_EXPORTER_OTLP_*` env vars.  We intentionally do NOT
+    // read the endpoint value ourselves — the crate resolves per-signal
+    // overrides, timeouts, headers, and compression internally.
+    let enable_otlp = otlp_env_is_set();
+    let need_otel = enable_sqlite_export || enable_otlp;
+
+    if enable_otlp {
+        info!("OTLP export enabled — the opentelemetry-otlp crate will read endpoint, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars");
+    }
 
     // -- Trace provider --------------------------------------------------
     let mut trace_provider_builder = trace::TracerProvider::builder()
@@ -88,10 +106,11 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
         have_trace_exporter = true;
     }
 
-    if let Some(ref endpoint) = otlp_endpoint {
+    if enable_otlp {
+        // Let the crate resolve OTEL_EXPORTER_OTLP_TRACES_ENDPOINT (or the
+        // generic fallback), headers, timeout, and compression from env vars.
         let otlp_exporter = opentelemetry_otlp::new_exporter()
             .tonic()
-            .with_endpoint(endpoint)
             .build_span_exporter()?;
         let processor = BatchSpanProcessor::builder(otlp_exporter, Tokio).build();
         trace_provider_builder = trace_provider_builder.with_span_processor(processor);
@@ -114,10 +133,9 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
             log_builder = log_builder.with_log_processor(processor);
         }
 
-        if let Some(ref endpoint) = otlp_endpoint {
+        if enable_otlp {
             let otlp_log_exporter = opentelemetry_otlp::new_exporter()
                 .tonic()
-                .with_endpoint(endpoint)
                 .build_log_exporter()?;
             let processor = BatchLogProcessor::builder(otlp_log_exporter, Tokio).build();
             log_builder = log_builder.with_log_processor(processor);
@@ -141,13 +159,12 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
             meter_builder = meter_builder.with_reader(reader);
         }
 
-        if let Some(ref endpoint) = otlp_endpoint {
+        if enable_otlp {
             use opentelemetry_sdk::metrics::reader::{
                 DefaultAggregationSelector, DefaultTemporalitySelector,
             };
             let otlp_metric_exporter = opentelemetry_otlp::new_exporter()
                 .tonic()
-                .with_endpoint(endpoint)
                 .build_metrics_exporter(
                     Box::new(DefaultAggregationSelector::new()),
                     Box::new(DefaultTemporalitySelector::new()),
@@ -187,6 +204,30 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
     } else {
         Ok(None)
     }
+}
+
+/// Returns `true` when any `OTEL_EXPORTER_OTLP_*` env var is set, indicating
+/// the user wants remote OTLP export.
+///
+/// We check the generic endpoint plus per-signal overrides so that setting
+/// *only* `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (without the generic one)
+/// still activates the OTLP pipeline.
+fn otlp_env_is_set() -> bool {
+    const VARS: &[&str] = &[
+        // Generic
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        // Per-signal endpoints
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        // Headers (sometimes the only thing set, e.g. for auth tokens)
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+        "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+        "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+    ];
+    VARS.iter()
+        .any(|var| std::env::var_os(var).is_some_and(|v| !v.is_empty()))
 }
 
 /// Build a shared OTel [`Resource`] with service, OS, process, and SDK
