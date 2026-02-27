@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.18](https://github.com/cedricziel/assistant/compare/v0.1.17...v0.1.18) (2026-02-27)
+
+
+### Features
+
+* **web-ui:** add token-based authentication ([#98](https://github.com/cedricziel/assistant/issues/98)) ([bf479d4](https://github.com/cedricziel/assistant/commit/bf479d4fcd34c25f4059455a4c26018454ebe718))
+* **web-ui:** add webhook management with HMAC-SHA256 verification ([#95](https://github.com/cedricziel/assistant/issues/95)) ([0d3af9b](https://github.com/cedricziel/assistant/commit/0d3af9b2fb27e9ecaa8c457d86953d3b6bbd413c))
+
 ## [0.1.17](https://github.com/cedricziel/assistant/compare/v0.1.16...v0.1.17) (2026-02-27)
 
 
