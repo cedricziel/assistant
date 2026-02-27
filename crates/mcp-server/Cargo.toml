@@ -1,6 +1,6 @@
 [package]
 name = "assistant-mcp-server"
-version = "0.1.16"
+version = "0.1.17"
 license.workspace = true
 edition.workspace = true
 description = "stdio MCP server library exposing assistant skills via JSON-RPC 2.0"
