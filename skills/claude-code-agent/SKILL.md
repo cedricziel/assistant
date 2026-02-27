@@ -57,30 +57,44 @@ Parse the JSON result:
 
 ## Mode B — Async (long-running tasks, non-blocking)
 
+Async mode always uses `--dangerously-skip-permissions` because there is no TTY
+for interactive prompts inside a detached tmux session. The `skip_permissions`
+parameter is only relevant for blocking mode (Mode A).
+
 ### Step 1: Start the agent
+
+Write the command to a temp script to avoid shell injection from `$prompt`:
 
 ```bash
 SESSION="cca-$(date +%s)"
 OUTFILE="/tmp/${SESSION}.json"
+SCRIPT="/tmp/${SESSION}.sh"
 WORKDIR="${workdir:-$HOME}"
 
 mkdir -p /tmp/cca-sessions
 echo "$SESSION" > /tmp/cca-sessions/latest
 
-tmux new-session -d -s "$SESSION" -x 220 -y 50
+# Build command args safely — avoid inline interpolation of $prompt
+CMD_ARGS=(
+  --print
+  --output-format json
+  --model "${model:-sonnet}"
+  --max-budget-usd "${budget_usd:-2.0}"
+  --dangerously-skip-permissions
+  --allowedTools "Bash,Edit,Read,Write,Glob,Grep,LS,Task,TodoRead,TodoWrite,WebFetch,WebSearch"
+)
+[ -n "${session_id:-}" ] && CMD_ARGS+=(--resume "$session_id")
+[ -n "${worktree:-}" ]   && CMD_ARGS+=(-w "$worktree")
 
-tmux send-keys -t "$SESSION" \
-  "cd '$WORKDIR' && claude \
-    --print \
-    --output-format json \
-    --model '${model:-sonnet}' \
-    --max-budget-usd '${budget_usd:-2.0}' \
-    ${session_id:+--resume '$session_id'} \
-    --dangerously-skip-permissions \
-    ${worktree:+-w '$worktree'} \
-    --allowedTools 'Bash,Edit,Read,Write,Glob,Grep,LS,Task,TodoRead,TodoWrite,WebFetch,WebSearch' \
-    '$prompt' > '$OUTFILE' 2>&1; echo '___CLAUDE_DONE___'" \
-  Enter
+# Write to a script file so tmux doesn't see raw $prompt
+printf '%s\n' "#!/usr/bin/env bash" \
+  "cd $(printf '%q' "$WORKDIR")" \
+  "claude $(printf '%q ' "${CMD_ARGS[@]}") $(printf '%q' "$prompt") > $(printf '%q' "$OUTFILE") 2>&1" \
+  "echo '___CLAUDE_DONE___'" > "$SCRIPT"
+chmod +x "$SCRIPT"
+
+tmux new-session -d -s "$SESSION" -x 220 -y 50
+tmux send-keys -t "$SESSION" "bash $(printf '%q' "$SCRIPT")" Enter
 
 echo "✅ Agent started async"
 echo "tmux_session: $SESSION"
@@ -115,7 +129,7 @@ Parse `$OUTFILE` as JSON once done (same fields as blocking mode).
 
 ```bash
 tmux kill-session -t "$SESSION" 2>/dev/null
-rm -f "/tmp/${SESSION}.json"
+rm -f "/tmp/${SESSION}.json" "/tmp/${SESSION}.sh"
 ```
 
 ---
@@ -129,16 +143,22 @@ REPO_DIR=~/code/myproject
 SESSION_A="cca-issue-42-$(date +%s)"
 SESSION_B="cca-issue-99-$(date +%s)"
 
-tmux new-session -d -s "$SESSION_A" -x 220 -y 50
-tmux new-session -d -s "$SESSION_B" -x 220 -y 50
-
-tmux send-keys -t "$SESSION_A" \
-  "cd '$REPO_DIR' && claude -w fix-issue-42 --print --output-format json --dangerously-skip-permissions \
-   'Fix issue #42: <description>' > /tmp/${SESSION_A}.json 2>&1; echo '___CLAUDE_DONE___'" Enter
-
-tmux send-keys -t "$SESSION_B" \
-  "cd '$REPO_DIR' && claude -w fix-issue-99 --print --output-format json --dangerously-skip-permissions \
-   'Fix issue #99: <description>' > /tmp/${SESSION_B}.json 2>&1; echo '___CLAUDE_DONE___'" Enter
+for SESSION in "$SESSION_A" "$SESSION_B"; do
+  OUTFILE="/tmp/${SESSION}.json"
+  SCRIPT="/tmp/${SESSION}.sh"
+  if [ "$SESSION" = "$SESSION_A" ]; then
+    WT="fix-issue-42"; DESC="Fix issue #42: <description>"
+  else
+    WT="fix-issue-99"; DESC="Fix issue #99: <description>"
+  fi
+  printf '%s\n' "#!/usr/bin/env bash" \
+    "cd $(printf '%q' "$REPO_DIR")" \
+    "claude -w $(printf '%q' "$WT") --print --output-format json --dangerously-skip-permissions $(printf '%q' "$DESC") > $(printf '%q' "$OUTFILE") 2>&1" \
+    "echo '___CLAUDE_DONE___'" > "$SCRIPT"
+  chmod +x "$SCRIPT"
+  tmux new-session -d -s "$SESSION" -x 220 -y 50
+  tmux send-keys -t "$SESSION" "bash $(printf '%q' "$SCRIPT")" Enter
+done
 
 echo "Both agents running:"
 echo "  Session A: $SESSION_A"
@@ -151,45 +171,44 @@ echo "  Session B: $SESSION_B"
 
 - Default to `--model sonnet` (faster, cheaper); use `opus` only if the user asks or the task is very complex.
 - Keep `--max-budget-usd` at 2.0 unless the user explicitly requests more.
-- **Always use `--dangerously-skip-permissions` in async/tmux mode** (no TTY for interactive prompts).
+- **Async mode always skips permissions** — no TTY available in detached tmux sessions.
 - Always report `tmux_session` and `session_id` back to the user so they can follow up.
 - If `is_error` is true, show the error and suggest a fix.
-- Clean up tmux sessions after results are collected.
+- Clean up tmux sessions and script files after results are collected.
 
 ---
 
 ## Example invocations
 
 **Quick one-shot (blocking):**
-```
+```yaml
 prompt: "What's the largest file in ~/code/assistant?"
 workdir: "~/code/assistant"
 async: false
 ```
 
 **Long build (async):**
-```
+```yaml
 prompt: "Run cargo build --release and fix any errors"
 workdir: "~/code/assistant"
 async: true
-skip_permissions: true
 ```
 
 **Resume a Claude session:**
-```
+```yaml
 prompt: "Now also add tests for the function you wrote"
 session_id: "3153e086-80f2-4937-afa3-80a922ef1bdc"
 async: false
 ```
 
 **Poll async session:**
-```
+```yaml
 tmux_session: "cca-1772179451"
 prompt: "(check status)"
 ```
 
 **Parallel worktree agents:**
-```
+```yaml
 prompt: "Fix issue #42: login button broken"
 workdir: "~/code/myproject"
 worktree: "fix-issue-42"
