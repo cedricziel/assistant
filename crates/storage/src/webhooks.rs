@@ -1,6 +1,6 @@
 //! Outgoing webhook persistence — CRUD and verification tracking.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
@@ -165,7 +165,8 @@ impl WebhookStore {
 
 fn parse_row(row: sqlx::sqlite::SqliteRow) -> Result<WebhookRecord> {
     let events_json: String = row.try_get("event_types")?;
-    let event_types: Vec<String> = serde_json::from_str(&events_json).unwrap_or_default();
+    let event_types: Vec<String> = serde_json::from_str(&events_json)
+        .with_context(|| format!("malformed event_types JSON: {events_json}"))?;
     let active_int: i32 = row.try_get("active")?;
 
     Ok(WebhookRecord {

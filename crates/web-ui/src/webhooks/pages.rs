@@ -3,6 +3,8 @@
 //! Follows the same patterns as the agent pages: dark theme, sidebar layout,
 //! `format!()` string assembly, `default_css()`.
 
+use std::net::IpAddr;
+
 use axum::extract::{Form, Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -40,9 +42,11 @@ const EVENT_TYPES: &[(&str, &str)] = &[
 // -- Page handlers --
 
 /// `GET /webhooks` -- Lists all configured webhooks.
-pub async fn list_webhooks(State(state): State<WebhookPagesState>) -> Html<String> {
+pub async fn list_webhooks(
+    State(state): State<WebhookPagesState>,
+) -> Result<Html<String>, (StatusCode, String)> {
     let store = WebhookStore::new(state.pool);
-    let webhooks = store.list().await.unwrap_or_default();
+    let webhooks = store.list().await.map_err(internal_error)?;
     let count = webhooks.len();
 
     let mut rows = String::new();
@@ -111,7 +115,7 @@ pub async fn list_webhooks(State(state): State<WebhookPagesState>) -> Html<Strin
 
     let sidebar = render_sidebar("webhooks");
     let body = page_shell("Webhooks", &sidebar, &content);
-    Html(body)
+    Ok(Html(body))
 }
 
 /// `GET /webhooks/new` -- Form to create a new webhook.
@@ -127,6 +131,10 @@ pub async fn create_webhook(
     State(state): State<WebhookPagesState>,
     Form(form): Form<WebhookFormData>,
 ) -> Response {
+    if let Err(e) = validate_webhook_url(&form.url) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+
     let store = WebhookStore::new(state.pool);
     let id = uuid::Uuid::new_v4().to_string();
     let secret = generate_secret();
@@ -322,6 +330,10 @@ pub async fn update_webhook(
     Path(id): Path<String>,
     Form(form): Form<WebhookFormData>,
 ) -> Response {
+    if let Err(e) = validate_webhook_url(&form.url) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+
     let store = WebhookStore::new(state.pool);
     let event_types = form.selected_event_types();
     let active = form.active.is_some();
@@ -342,8 +354,11 @@ pub async fn delete_webhook(
     Path(id): Path<String>,
 ) -> Response {
     let store = WebhookStore::new(state.pool);
-    let _ = store.delete(&id).await;
-    Redirect::to("/webhooks").into_response()
+    match store.delete(&id).await {
+        Ok(true) => Redirect::to("/webhooks").into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 /// `POST /webhooks/:id/toggle` -- Toggles the active state.
@@ -352,8 +367,11 @@ pub async fn toggle_webhook(
     Path(id): Path<String>,
 ) -> Response {
     let store = WebhookStore::new(state.pool);
-    let _ = store.toggle_active(&id).await;
-    Redirect::to(&format!("/webhooks/{id}")).into_response()
+    match store.toggle_active(&id).await {
+        Ok(true) => Redirect::to(&format!("/webhooks/{id}")).into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 /// `POST /webhooks/:id/rotate-secret` -- Regenerates the signing secret.
@@ -363,8 +381,11 @@ pub async fn rotate_secret(
 ) -> Response {
     let store = WebhookStore::new(state.pool);
     let new_secret = generate_secret();
-    let _ = store.rotate_secret(&id, &new_secret).await;
-    Redirect::to(&format!("/webhooks/{id}")).into_response()
+    match store.rotate_secret(&id, &new_secret).await {
+        Ok(true) => Redirect::to(&format!("/webhooks/{id}")).into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 /// `POST /webhooks/:id/verify` -- Sends a signed test payload to the webhook URL.
@@ -382,6 +403,9 @@ pub async fn verify_webhook(
         .await
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")))?;
+
+    // SSRF protection: validate the destination URL before making the request.
+    validate_webhook_url(&wh.url).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
     let payload = serde_json::json!({
         "type": "webhook.verify",
@@ -411,7 +435,7 @@ pub async fn verify_webhook(
             let status = resp.status();
             if status.is_success() {
                 info!(webhook_id = %wh.id, "Webhook verified successfully");
-                let _ = store.mark_verified(&wh.id).await;
+                store.mark_verified(&wh.id).await.map_err(internal_error)?;
                 (true, format!("Remote responded with {status}"))
             } else {
                 warn!(webhook_id = %wh.id, %status, "Webhook verification failed: non-2xx");
@@ -481,6 +505,72 @@ impl WebhookFormData {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect()
+    }
+}
+
+// -- URL validation (SSRF protection) --
+
+/// Validate that a webhook URL is safe for server-side requests.
+///
+/// Rejects non-HTTP(S) schemes, loopback addresses, and private/link-local
+/// CIDRs to prevent SSRF attacks against internal services.
+fn validate_webhook_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
+
+    // Enforce HTTP(S) scheme only.
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(format!(
+                "Unsupported scheme '{other}': only http and https are allowed"
+            ))
+        }
+    }
+
+    let host = parsed.host_str().ok_or("URL has no host")?;
+
+    // Block well-known loopback hostnames.
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost" || lower == "127.0.0.1" || lower == "::1" || lower == "[::1]" {
+        return Err("Loopback addresses are not allowed".to_string());
+    }
+
+    // If the host parses as an IP address, check for private/link-local ranges.
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err(format!("Private/reserved IP address {ip} is not allowed"));
+        }
+    }
+    // Also handle bracket-wrapped IPv6 (e.g. "[::1]").
+    let trimmed = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = trimmed.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err(format!("Private/reserved IP address {ip} is not allowed"));
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns `true` if the IP is loopback, private (RFC 1918 / RFC 4193), or
+/// link-local.
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()            // 127.0.0.0/8
+                || v4.is_private()      // 10/8, 172.16/12, 192.168/16
+                || v4.is_link_local()   // 169.254/16
+                || v4.is_unspecified()  // 0.0.0.0
+                || v4.is_broadcast() // 255.255.255.255
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()            // ::1
+                || v6.is_unspecified()  // ::
+                // ULA (fc00::/7)
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // Link-local (fe80::/10)
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
     }
 }
 
@@ -879,6 +969,83 @@ mod tests {
         assert!(!html.contains("name=\"active\" value=\"on\" checked"));
         // The event types input should contain the comma-separated value.
         assert!(html.contains("turn.result"));
+    }
+
+    // -- validate_webhook_url (SSRF protection) --
+
+    #[test]
+    fn validate_url_accepts_https() {
+        assert!(validate_webhook_url("https://example.com/hook").is_ok());
+    }
+
+    #[test]
+    fn validate_url_accepts_http() {
+        assert!(validate_webhook_url("http://example.com/hook").is_ok());
+    }
+
+    #[test]
+    fn validate_url_rejects_ftp() {
+        let err = validate_webhook_url("ftp://example.com/file").unwrap_err();
+        assert!(err.contains("Unsupported scheme"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_file_scheme() {
+        let err = validate_webhook_url("file:///etc/passwd").unwrap_err();
+        assert!(err.contains("Unsupported scheme"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_localhost() {
+        let err = validate_webhook_url("http://localhost:8080/hook").unwrap_err();
+        assert!(err.contains("Loopback"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_127_0_0_1() {
+        let err = validate_webhook_url("http://127.0.0.1/hook").unwrap_err();
+        assert!(err.contains("not allowed"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_ipv6_loopback() {
+        let err = validate_webhook_url("http://[::1]:8080/hook").unwrap_err();
+        assert!(err.contains("not allowed"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_private_10_network() {
+        let err = validate_webhook_url("http://10.0.0.1/hook").unwrap_err();
+        assert!(err.contains("Private"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_private_172_16() {
+        let err = validate_webhook_url("http://172.16.0.1/hook").unwrap_err();
+        assert!(err.contains("Private"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_private_192_168() {
+        let err = validate_webhook_url("http://192.168.1.1/hook").unwrap_err();
+        assert!(err.contains("Private"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_link_local() {
+        let err = validate_webhook_url("http://169.254.1.1/hook").unwrap_err();
+        assert!(err.contains("Private"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_rejects_invalid_url() {
+        let err = validate_webhook_url("not a url").unwrap_err();
+        assert!(err.contains("Invalid URL"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_url_accepts_public_ip() {
+        assert!(validate_webhook_url("https://203.0.113.1/hook").is_ok());
     }
 }
 
