@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.17](https://github.com/cedricziel/assistant/compare/v0.1.16...v0.1.17) (2026-02-27)
+
+
+### Features
+
+* **skill:** add coding-agent skill for multi-agent background orchestration ([#92](https://github.com/cedricziel/assistant/issues/92)) ([60d73c8](https://github.com/cedricziel/assistant/commit/60d73c847f53b2e766f5909dbaf0c53fedfd08a7))
+* **skills:** add playwright-cli skill ([#70](https://github.com/cedricziel/assistant/issues/70)) ([4c48d9c](https://github.com/cedricziel/assistant/commit/4c48d9c947130b2269b32737d72fe493038be212))
+* **slack:** add listen mode to control which messages the bot reacts to ([#93](https://github.com/cedricziel/assistant/issues/93)) ([3cea363](https://github.com/cedricziel/assistant/commit/3cea363cd85972dbd3e677b5fc685d18a4de8b0a))
+* **tool-executor:** add native process tool for background process management ([#88](https://github.com/cedricziel/assistant/issues/88)) ([0ca39c6](https://github.com/cedricziel/assistant/commit/0ca39c62df3387b01baa8ca974ea532b37907167))
+
+
+### Bug Fixes
+
+* **skill:** use stdin for prompt delivery to avoid shell escaping issues ([#86](https://github.com/cedricziel/assistant/issues/86)) ([c3757dd](https://github.com/cedricziel/assistant/commit/c3757dd8ae9fb7d318ad1a806af72a243b1b327b))
+
 ## [0.1.16](https://github.com/cedricziel/assistant/compare/v0.1.15...v0.1.16) (2026-02-27)
 
 
