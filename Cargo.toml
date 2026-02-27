@@ -98,6 +98,8 @@ glob = "0.3"
 jsonschema = "0.42"
 # SHA-256 hashing for memory chunk change detection
 sha2 = "0.10"
+# HMAC message authentication (webhook signature verification)
+hmac = "0.12"
 # WASM plugin execution
 extism = "1"
 # Integration testing

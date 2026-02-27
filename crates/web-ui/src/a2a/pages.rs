@@ -564,6 +564,7 @@ fn render_sidebar(active: &str) -> String {
         ("Traces", "/traces"),
         ("Logs", "/logs"),
         ("Agents", "/agents"),
+        ("Webhooks", "/webhooks"),
     ];
     let mut links = String::new();
     for (label, href) in &items {
