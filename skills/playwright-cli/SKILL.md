@@ -10,14 +10,6 @@ metadata:
   tier: bash
   mutating: "true"
   confirmation-required: "false"
-  params: >
-    {
-      "url":             {"type": "string",  "description": "Starting URL to navigate to", "default": ""},
-      "headless":        {"type": "boolean", "description": "Run browser without visible window (default: true)", "default": true},
-      "browser":         {"type": "string",  "description": "Browser to use: chromium, firefox, webkit (default: chromium)", "default": "chromium"},
-      "allowed_origins": {"type": "string",  "description": "Restrict access to specific origins, e.g. https://example.com (default: all)", "default": ""},
-      "port":            {"type": "number",  "description": "Port for the MCP server (default: 0 = random)", "default": 0}
-    }
 ---
 
 # playwright-cli
@@ -27,8 +19,7 @@ fill forms, take screenshots, and run complex web automation workflows.
 
 ## Setup
 
-`@playwright/mcp` is globally installed (`v0.0.68`).
-Chromium is available at `/usr/bin/chromium-browser` (v145, snap).
+`@playwright/mcp` is available via npx. No global install required.
 
 ## When to use this skill
 
@@ -41,14 +32,6 @@ Chromium is available at `/usr/bin/chromium-browser` (v145, snap).
 ## Execution
 
 Start the MCP server:
-
-```bash
-playwright-mcp --headless --browser "${browser:-chromium}" \
-  ${allowed_origins:+--allowed-origins "$allowed_origins"} \
-  ${port:+--port "$port"}
-```
-
-Or directly via npx:
 
 ```bash
 npx @playwright/mcp@latest --headless
@@ -78,24 +61,20 @@ npx @playwright/mcp@latest --headless
 
 ## Example invocations
 
-**Headless browser session:**
+**Headless browser session (chromium):**
 
-```
-browser: "chromium"
-headless: true
-url: "https://example.com"
+```bash
+npx @playwright/mcp@latest --headless --browser chromium
 ```
 
 **Restricted origin:**
 
-```
-headless: true
-allowed_origins: "https://example.com"
+```bash
+npx @playwright/mcp@latest --headless --allowed-origins https://example.com
 ```
 
 **With visible browser (local dev):**
 
-```
-headless: false
-browser: "chromium"
+```bash
+npx @playwright/mcp@latest --browser chromium
 ```
