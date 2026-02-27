@@ -30,7 +30,7 @@ tokio-tungstenite = { workspace = true }
 # cert-store feature, leaving wss:// connections broken without this override).
 [dev-dependencies]
 toml = { workspace = true }
-url = "2"
+url = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = ["tokio-tungstenite"]

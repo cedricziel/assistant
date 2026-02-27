@@ -1,4 +1,6 @@
 mod a2a;
+pub mod common;
+mod webhooks;
 
 use std::collections::{HashMap, HashSet};
 use std::{net::SocketAddr, path::PathBuf};
@@ -124,6 +126,11 @@ async fn main() -> Result<()> {
     let a2a_router = a2a::router().with_state(a2a_state);
     let agent_pages_router = a2a::agent_pages_router().with_state(agent_pages_state);
 
+    let webhook_pages_state = webhooks::pages::WebhookPagesState {
+        pool: storage.pool.clone(),
+    };
+    let webhook_pages_router = webhooks::webhook_pages_router().with_state(webhook_pages_state);
+
     let router = Router::new()
         // Trace/log UI routes.
         .route("/", get(show_dashboard))
@@ -137,6 +144,8 @@ async fn main() -> Result<()> {
         .merge(a2a_router)
         // Agent management UI pages.
         .merge(agent_pages_router)
+        // Webhook management UI pages.
+        .merge(webhook_pages_router)
         .layer(TraceLayer::new_for_http());
 
     let addr: SocketAddr = args.listen.parse()?;
@@ -1279,12 +1288,7 @@ fn format_duration(ms: i64) -> String {
 }
 
 fn html_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
+    common::html_escape(input)
 }
 
 // -- Analytics dashboard -------------------------------------------------------
@@ -2063,5 +2067,5 @@ fn default_css() -> &'static str {
 }
 
 fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    common::internal_error(err)
 }

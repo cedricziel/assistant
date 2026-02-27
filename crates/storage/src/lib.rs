@@ -11,6 +11,7 @@ pub mod registry;
 pub mod scheduled_tasks;
 pub mod telemetry;
 pub mod traces;
+pub mod webhooks;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
 pub use conversations::{ConversationRecord, ConversationStore};
@@ -27,6 +28,7 @@ pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
 pub use telemetry::SqliteSpanExporter;
 pub use traces::{RecordedSpan, TraceStats, TraceStore, TraceSummary};
+pub use webhooks::{WebhookRecord, WebhookStore};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -105,6 +107,11 @@ impl StorageLayer {
     /// Convenience: build a [`MetricsStore`] backed by this pool.
     pub fn metrics_store(&self) -> MetricsStore {
         MetricsStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`WebhookStore`] backed by this pool.
+    pub fn webhook_store(&self) -> WebhookStore {
+        WebhookStore::new(self.pool.clone())
     }
 }
 
@@ -193,6 +200,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "015_metrics",
             include_str!("../../../migrations/015_metrics.sql"),
+        ),
+        (
+            "016_webhooks",
+            include_str!("../../../migrations/016_webhooks.sql"),
         ),
     ];
 

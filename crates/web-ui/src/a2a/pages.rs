@@ -13,6 +13,7 @@ use serde::Deserialize;
 use assistant_a2a_json_schema::agent_card::*;
 
 use super::agent_store::AgentStore;
+use crate::common::{html_escape, render_sidebar};
 
 // -- Shared state for the pages --
 
@@ -542,54 +543,12 @@ impl AgentFormData {
 
 // -- Rendering helpers --
 
-fn html_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 fn bool_badge(val: Option<bool>) -> &'static str {
     match val {
         Some(true) => "<span class=\"status-ok\">&#x2713;</span>",
         Some(false) => "<span class=\"muted\">&#x2717;</span>",
         None => "<span class=\"muted\">&mdash;</span>",
     }
-}
-
-fn render_sidebar(active: &str) -> String {
-    let items = [
-        ("Traces", "/traces"),
-        ("Logs", "/logs"),
-        ("Agents", "/agents"),
-    ];
-    let mut links = String::new();
-    for (label, href) in &items {
-        let class = if *label.to_ascii_lowercase() == *active {
-            "facet-link active"
-        } else {
-            "facet-link"
-        };
-        links.push_str(&format!(
-            "<li><a class=\"{class}\" href=\"{href}\"><span>{label}</span></a></li>",
-            class = class,
-            href = href,
-            label = label,
-        ));
-    }
-
-    format!(
-        "<div class=\"sidebar-inner\">\
-         <div class=\"brand\"><p>assistant</p><h2>Agent Manager</h2></div>\
-         <div class=\"facet-group\">\
-         <h3>Navigation</h3>\
-         <ul>{links}</ul>\
-         </div>\
-         </div>",
-        links = links,
-    )
 }
 
 fn page_shell(title: &str, sidebar: &str, content: &str) -> String {
