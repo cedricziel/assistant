@@ -1,4 +1,0 @@
-# Run integration tests sequentially to avoid exhausting CI runner resources
-# when multiple tests would otherwise spin up Docker containers in parallel.
-[env]
-RUST_TEST_THREADS = "1"
