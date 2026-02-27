@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
         .init();
 
     // -- Auth token (required) -----------------------------------------------
-    let auth_token = match args.auth_token {
+    let auth_token = match args.auth_token.map(|t| t.trim().to_string()) {
         Some(t) if !t.is_empty() => t,
         _ => {
             anyhow::bail!(
@@ -109,7 +109,10 @@ async fn main() -> Result<()> {
             );
         }
     };
-    let auth_config = AuthConfig::new(auth_token);
+
+    // Parse listen address early so we can pass `is_loopback` to AuthConfig.
+    let addr: SocketAddr = args.listen.parse()?;
+    let auth_config = AuthConfig::new(auth_token, !addr.ip().is_loopback());
 
     let db_path = match args.db_path.or_else(default_db_path) {
         Some(p) => p,
@@ -184,7 +187,6 @@ async fn main() -> Result<()> {
         .layer(TraceLayer::new_for_http());
 
     // Warn when binding to a non-loopback address.
-    let addr: SocketAddr = args.listen.parse()?;
     if !addr.ip().is_loopback() {
         warn!(
             "Listening on non-loopback address {}. Ensure network access is intentional.",
@@ -212,38 +214,46 @@ fn harden_agent_card(card: &mut assistant_a2a_json_schema::agent_card::AgentCard
 
     let scheme_name = "bearer_token".to_string();
 
-    // Only add if not already present.
-    if card.security_schemes.contains_key(&scheme_name) {
-        return;
+    // Ensure the security scheme exists.
+    if !card.security_schemes.contains_key(&scheme_name) {
+        card.security_schemes.insert(
+            scheme_name.clone(),
+            SecurityScheme {
+                http_auth_security_scheme: Some(HttpAuthSecurityScheme {
+                    description: Some(
+                        "Bearer token authentication. Pass the token via \
+                         Authorization: Bearer <token>."
+                            .to_string(),
+                    ),
+                    scheme: "Bearer".to_string(),
+                    bearer_format: None,
+                }),
+                api_key_security_scheme: None,
+                oauth2_security_scheme: None,
+                open_id_connect_security_scheme: None,
+                mtls_security_scheme: None,
+            },
+        );
     }
 
-    card.security_schemes.insert(
-        scheme_name.clone(),
-        SecurityScheme {
-            http_auth_security_scheme: Some(HttpAuthSecurityScheme {
-                description: Some(
-                    "Bearer token authentication. Pass the token via \
-                     Authorization: Bearer <token>."
-                        .to_string(),
-                ),
-                scheme: "Bearer".to_string(),
-                bearer_format: None,
-            }),
-            api_key_security_scheme: None,
-            oauth2_security_scheme: None,
-            open_id_connect_security_scheme: None,
-            mtls_security_scheme: None,
-        },
-    );
+    // Ensure a matching security requirement exists (checked independently
+    // so that a card with the scheme but a missing requirement still gets
+    // hardened).
+    let has_requirement = card
+        .security_requirements
+        .iter()
+        .any(|req| req.schemes.contains_key(&scheme_name));
 
-    card.security_requirements.push(SecurityRequirement {
-        schemes: HashMap::from([(
-            scheme_name,
-            StringList {
-                list: vec![], // no scopes required
-            },
-        )]),
-    });
+    if !has_requirement {
+        card.security_requirements.push(SecurityRequirement {
+            schemes: HashMap::from([(
+                scheme_name,
+                StringList {
+                    list: vec![], // no scopes required
+                },
+            )]),
+        });
+    }
 
     info!("Auto-hardened agent card with Bearer auth security scheme");
 }

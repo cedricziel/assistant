@@ -36,15 +36,23 @@ pub struct AuthConfig {
     token: Arc<String>,
     /// Pre-computed HMAC-SHA256 hex digest used as the session cookie value.
     session_value: Arc<String>,
+    /// When `true`, the `Secure` attribute is added to session cookies.
+    /// Should be `true` whenever the server is *not* bound to a loopback
+    /// address (cookies must only travel over HTTPS in that case).
+    secure_cookie: bool,
 }
 
 impl AuthConfig {
     /// Create a new [`AuthConfig`] from the raw token string.
-    pub fn new(token: String) -> Self {
+    ///
+    /// Set `secure_cookie` to `true` when the server binds to a non-loopback
+    /// address so that the session cookie gets the `Secure` attribute.
+    pub fn new(token: String, secure_cookie: bool) -> Self {
         let session_value = compute_session_value(&token);
         Self {
             token: Arc::new(token),
             session_value: Arc::new(session_value),
+            secure_cookie,
         }
     }
 }
@@ -158,9 +166,10 @@ pub async fn login_submit(
 ) -> Response {
     if constant_time_eq(form.token.as_bytes(), auth.token.as_bytes()) {
         // Set session cookie and redirect to dashboard.
+        let secure = if auth.secure_cookie { "; Secure" } else { "" };
         let cookie = format!(
-            "{}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800",
-            SESSION_COOKIE, auth.session_value
+            "{}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800{}",
+            SESSION_COOKIE, auth.session_value, secure,
         );
         Response::builder()
             .status(StatusCode::SEE_OTHER)
@@ -174,10 +183,11 @@ pub async fn login_submit(
 }
 
 /// `POST /logout` — clear the session cookie and redirect to login.
-pub async fn logout() -> Response {
+pub async fn logout(Extension(auth): Extension<AuthConfig>) -> Response {
+    let secure = if auth.secure_cookie { "; Secure" } else { "" };
     let cookie = format!(
-        "{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        SESSION_COOKIE
+        "{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{}",
+        SESSION_COOKIE, secure,
     );
     Response::builder()
         .status(StatusCode::SEE_OTHER)
