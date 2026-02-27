@@ -229,15 +229,15 @@ optionally be exported to any OTLP-compatible collector.
 
 ```sh
 # Send all signals to an OTLP collector (Jaeger, Tempo, Grafana, Honeycomb, …)
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 assistant chat
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 assistant
 
 # Per-signal endpoints
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://tempo:4317 \
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:4317 \
-  assistant chat
+  assistant
 
 # Auth headers for managed backends
-OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer token" assistant chat
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer token" assistant
 ```
 
 The `opentelemetry-otlp` crate reads the standard `OTEL_EXPORTER_OTLP_*` env

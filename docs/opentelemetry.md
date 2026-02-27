@@ -9,21 +9,21 @@ OTLP-compatible collector.
 
 ```sh
 # Local SQLite only (default when mirror.trace_enabled = true)
-assistant chat
+assistant
 
 # Send all signals to an OTLP collector
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 assistant chat
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 assistant
 
 # Per-signal endpoints (traces to Tempo, logs to Loki, metrics to Prometheus)
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://tempo:4317 \
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://loki:4317 \
 OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://prometheus:4317 \
-  assistant chat
+  assistant
 
 # Auth header for a managed backend (e.g. Grafana Cloud, Honeycomb)
 OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.example.com:4317 \
 OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer my-token" \
-  assistant chat
+  assistant
 ```
 
 ## Environment variables
