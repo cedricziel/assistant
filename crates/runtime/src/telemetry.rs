@@ -54,10 +54,13 @@ pub(crate) fn otel_log_bridge_filter() -> Targets {
 
 /// Install tracing subscribers and OpenTelemetry exporters.
 ///
-/// `enable_sqlite_export` controls whether spans **and logs** are persisted
-/// locally via SQLite exporters. Setting the `OTEL_EXPORTER_OTLP_ENDPOINT`
-/// environment variable additionally wires up a remote OTLP exporter for
-/// traces.
+/// `enable_sqlite_export` controls whether spans, logs, and metrics are
+/// persisted locally via SQLite exporters.
+///
+/// Setting the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable
+/// additionally wires up remote OTLP gRPC exporters for **all three signals**
+/// (traces, logs, and metrics).  Both backends can run side-by-side — each
+/// OTel provider simply gets multiple processors/readers.
 ///
 /// The OTel log bridge uses a dedicated per-layer filter (see
 /// [`otel_log_bridge_filter`]) that suppresses all `sqlx` targets. Without
@@ -70,7 +73,10 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
     // -- Shared resource (used by traces, logs, and metrics) --
     let resource = build_resource();
 
-    // -- Trace provider --
+    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
+    let need_otel = enable_sqlite_export || otlp_endpoint.is_some();
+
+    // -- Trace provider --------------------------------------------------
     let mut trace_provider_builder = trace::TracerProvider::builder()
         .with_config(trace::Config::default().with_resource(resource.clone()));
     let mut have_trace_exporter = false;
@@ -82,7 +88,7 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
         have_trace_exporter = true;
     }
 
-    if let Ok(endpoint) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
+    if let Some(ref endpoint) = otlp_endpoint {
         let otlp_exporter = opentelemetry_otlp::new_exporter()
             .tonic()
             .with_endpoint(endpoint)
@@ -92,35 +98,67 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
         have_trace_exporter = true;
     }
 
-    // -- Logger provider (OTel logs) --
+    // -- Logger provider (OTel logs) -------------------------------------
     let mut logger_provider: Option<LoggerProvider> = None;
 
-    // -- Meter provider (OTel metrics) --
+    // -- Meter provider (OTel metrics) -----------------------------------
     let mut meter_provider: Option<SdkMeterProvider> = None;
 
-    if enable_sqlite_export {
-        // Logs
-        let sqlite_log_exporter = SqliteLogExporter::new(pool.clone());
-        let log_processor = BatchLogProcessor::builder(sqlite_log_exporter, Tokio).build();
-        let log_prov = LoggerProvider::builder()
-            .with_log_processor(log_processor)
-            .with_resource(resource.clone())
-            .build();
+    if need_otel {
+        // Logs — attach SQLite and/or OTLP processors to the same provider.
+        let mut log_builder = LoggerProvider::builder().with_resource(resource.clone());
+
+        if enable_sqlite_export {
+            let sqlite_log_exporter = SqliteLogExporter::new(pool.clone());
+            let processor = BatchLogProcessor::builder(sqlite_log_exporter, Tokio).build();
+            log_builder = log_builder.with_log_processor(processor);
+        }
+
+        if let Some(ref endpoint) = otlp_endpoint {
+            let otlp_log_exporter = opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(endpoint)
+                .build_log_exporter()?;
+            let processor = BatchLogProcessor::builder(otlp_log_exporter, Tokio).build();
+            log_builder = log_builder.with_log_processor(processor);
+        }
+
+        let log_prov = log_builder.build();
 
         // Bridge tracing events → OTel log records with the anti-stampede filter.
         let otel_filter = otel_log_bridge_filter();
         let otel_log_layer = OpenTelemetryTracingBridge::new(&log_prov).with_filter(otel_filter);
         logger_provider = Some(log_prov);
 
-        // Metrics — export every 60 s to SQLite.
-        let sqlite_metric_exporter = SqliteMetricExporter::new(pool);
-        let reader = PeriodicReader::builder(sqlite_metric_exporter, Tokio)
-            .with_interval(Duration::from_secs(60))
-            .build();
-        let meter_prov = SdkMeterProvider::builder()
-            .with_resource(resource)
-            .with_reader(reader)
-            .build();
+        // Metrics — attach SQLite and/or OTLP readers to the same provider.
+        let mut meter_builder = SdkMeterProvider::builder().with_resource(resource);
+
+        if enable_sqlite_export {
+            let sqlite_metric_exporter = SqliteMetricExporter::new(pool);
+            let reader = PeriodicReader::builder(sqlite_metric_exporter, Tokio)
+                .with_interval(Duration::from_secs(60))
+                .build();
+            meter_builder = meter_builder.with_reader(reader);
+        }
+
+        if let Some(ref endpoint) = otlp_endpoint {
+            use opentelemetry_sdk::metrics::reader::{
+                DefaultAggregationSelector, DefaultTemporalitySelector,
+            };
+            let otlp_metric_exporter = opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(endpoint)
+                .build_metrics_exporter(
+                    Box::new(DefaultAggregationSelector::new()),
+                    Box::new(DefaultTemporalitySelector::new()),
+                )?;
+            let reader = PeriodicReader::builder(otlp_metric_exporter, Tokio)
+                .with_interval(Duration::from_secs(60))
+                .build();
+            meter_builder = meter_builder.with_reader(reader);
+        }
+
+        let meter_prov = meter_builder.build();
         global::set_meter_provider(meter_prov.clone());
         meter_provider = Some(meter_prov);
 

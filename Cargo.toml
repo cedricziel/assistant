@@ -67,7 +67,7 @@ rustls = { version = "0.23", features = ["ring"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 opentelemetry = { version = "0.24", features = ["trace", "logs", "metrics"] }
-opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic", "tls"] }
+opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic", "tls", "logs", "metrics"] }
 opentelemetry_sdk = { version = "0.24", features = ["trace", "logs", "metrics", "rt-tokio"] }
 opentelemetry-appender-tracing = "0.5"
 # CLI / config
