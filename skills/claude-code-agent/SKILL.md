@@ -12,18 +12,7 @@ metadata:
   tier: bash
   mutating: "true"
   confirmation-required: "false"
-  params: >
-    {
-      "prompt":        {"type": "string",  "description": "What Claude Code should do"},
-      "workdir":       {"type": "string",  "description": "Working directory (default: ~)", "default": "~"},
-      "session_id":    {"type": "string",  "description": "Resume an existing Claude session (UUID)", "default": ""},
-      "tmux_session":  {"type": "string",  "description": "Poll/resume an async tmux session by name", "default": ""},
-      "model":         {"type": "string",  "description": "Model alias: sonnet or opus (default: sonnet)", "default": "sonnet"},
-      "budget_usd":    {"type": "number",  "description": "Max USD to spend (default: 2.0)", "default": 2.0},
-      "skip_permissions": {"type": "boolean", "description": "Bypass all permission checks — only for trusted tasks (default: false)", "default": false},
-      "async":         {"type": "boolean", "description": "Run non-blocking in tmux (default: false for short tasks, true for long ones)", "default": false},
-      "worktree":      {"type": "string",  "description": "Create a git worktree with this name (requires git repo in workdir)", "default": ""}
-    }
+
 ---
 
 # Claude Code Agent Skill
