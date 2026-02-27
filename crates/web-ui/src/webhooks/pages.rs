@@ -17,6 +17,8 @@ use tracing::{info, warn};
 
 use assistant_storage::WebhookStore;
 
+use crate::common::{html_escape, internal_error, render_sidebar};
+
 // -- Shared state --
 
 /// State required by the webhook management pages.
@@ -514,6 +516,12 @@ impl WebhookFormData {
 ///
 /// Rejects non-HTTP(S) schemes, loopback addresses, and private/link-local
 /// CIDRs to prevent SSRF attacks against internal services.
+///
+/// **Limitation**: This validates the URL at parse time, not after DNS resolution.
+/// DNS rebinding attacks (where a hostname initially resolves to a public IP but
+/// later resolves to a private IP) are not mitigated. For high-security
+/// deployments, consider using a DNS-resolving validation library or
+/// network-level controls.
 fn validate_webhook_url(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
 
@@ -587,15 +595,10 @@ fn generate_secret() -> String {
     s
 }
 
-/// Collect 32 random bytes from the OS.
+/// Collect 32 random bytes from the OS CSPRNG.
 fn rand_bytes() -> [u8; 32] {
     let mut buf = [0u8; 32];
-    // Use getrandom via uuid's transitive dep, or fall back to timestamp-based entropy.
-    // For simplicity, we use uuid::Uuid::new_v4() bytes doubled.
-    let u1 = uuid::Uuid::new_v4();
-    let u2 = uuid::Uuid::new_v4();
-    buf[..16].copy_from_slice(u1.as_bytes());
-    buf[16..].copy_from_slice(u2.as_bytes());
+    getrandom::getrandom(&mut buf).expect("OS RNG should be available");
     buf
 }
 
@@ -611,55 +614,8 @@ fn compute_signature(secret: &str, body: &str) -> String {
 
 // -- Rendering helpers --
 
-fn html_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 fn format_ts(ts: DateTime<Utc>) -> String {
     ts.format("%Y-%m-%d %H:%M:%S UTC").to_string()
-}
-
-fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-}
-
-fn render_sidebar(active: &str) -> String {
-    let items = [
-        ("Traces", "/traces"),
-        ("Logs", "/logs"),
-        ("Agents", "/agents"),
-        ("Webhooks", "/webhooks"),
-    ];
-    let mut links = String::new();
-    for (label, href) in &items {
-        let class = if label.to_ascii_lowercase() == active {
-            "facet-link active"
-        } else {
-            "facet-link"
-        };
-        links.push_str(&format!(
-            "<li><a class=\"{class}\" href=\"{href}\"><span>{label}</span></a></li>",
-            class = class,
-            href = href,
-            label = label,
-        ));
-    }
-
-    format!(
-        "<div class=\"sidebar-inner\">\
-         <div class=\"brand\"><p>assistant</p><h2>Agent Manager</h2></div>\
-         <div class=\"facet-group\">\
-         <h3>Navigation</h3>\
-         <ul>{links}</ul>\
-         </div>\
-         </div>",
-        links = links,
-    )
 }
 
 fn page_shell(title: &str, sidebar: &str, content: &str) -> String {

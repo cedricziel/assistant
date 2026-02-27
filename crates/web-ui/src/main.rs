@@ -1,4 +1,5 @@
 mod a2a;
+pub mod common;
 mod webhooks;
 
 use std::collections::{HashMap, HashSet};
@@ -1287,12 +1288,7 @@ fn format_duration(ms: i64) -> String {
 }
 
 fn html_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
+    common::html_escape(input)
 }
 
 // -- Analytics dashboard -------------------------------------------------------
@@ -2071,5 +2067,5 @@ fn default_css() -> &'static str {
 }
 
 fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    common::internal_error(err)
 }

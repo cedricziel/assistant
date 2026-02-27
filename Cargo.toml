@@ -100,6 +100,12 @@ jsonschema = "0.42"
 sha2 = "0.10"
 # HMAC message authentication (webhook signature verification)
 hmac = "0.12"
+# Hex encoding
+hex = "0.4"
+# URL parsing
+url = "2"
+# OS-level CSPRNG
+getrandom = "0.2"
 # WASM plugin execution
 extism = "1"
 # Integration testing
