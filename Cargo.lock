@@ -188,7 +188,7 @@ version = "0.1.15"
 
 [[package]]
 name = "assistant-a2a-json-schema"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "chrono",
  "serde",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-a2a-proto"
-version = "0.1.14"
+version = "0.1.15"
 
 [[package]]
 name = "assistant-cli"
