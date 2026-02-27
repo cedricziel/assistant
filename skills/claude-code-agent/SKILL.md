@@ -63,43 +63,47 @@ parameter is only relevant for blocking mode (Mode A).
 
 ### Step 1: Start the agent
 
-Write the command to a temp script to avoid shell injection from `$prompt`:
+Write the prompt to a file and pass it via stdin — this avoids all shell
+escaping/injection issues with multi-line or quote-heavy prompts:
 
 ```bash
 SESSION="cca-$(date +%s)"
 OUTFILE="/tmp/${SESSION}.json"
-SCRIPT="/tmp/${SESSION}.sh"
+PROMPT_FILE="/tmp/${SESSION}.prompt"
 WORKDIR="${workdir:-$HOME}"
 
 mkdir -p /tmp/cca-sessions
 echo "$SESSION" > /tmp/cca-sessions/latest
 
-# Build command args safely — avoid inline interpolation of $prompt
-CMD_ARGS=(
-  --print
-  --output-format json
-  --model "${model:-sonnet}"
-  --max-budget-usd "${budget_usd:-2.0}"
-  --dangerously-skip-permissions
-  --allowedTools "Bash,Edit,Read,Write,Glob,Grep,LS,Task,TodoRead,TodoWrite,WebFetch,WebSearch"
-)
-[ -n "${session_id:-}" ] && CMD_ARGS+=(--resume "$session_id")
-[ -n "${worktree:-}" ]   && CMD_ARGS+=(-w "$worktree")
+# Write prompt to file — no escaping needed, handles any content safely
+cat > "$PROMPT_FILE" << 'PROMPT_EOF'
+${prompt}
+PROMPT_EOF
 
-# Write to a script file so tmux doesn't see raw $prompt
-printf '%s\n' "#!/usr/bin/env bash" \
-  "cd $(printf '%q' "$WORKDIR")" \
-  "claude $(printf '%q ' "${CMD_ARGS[@]}") $(printf '%q' "$prompt") > $(printf '%q' "$OUTFILE") 2>&1" \
-  "echo '___CLAUDE_DONE___'" > "$SCRIPT"
-chmod +x "$SCRIPT"
+# Build script — prompt fed via stdin to avoid argument length limits
+cat > "/tmp/${SESSION}.sh" << SCRIPT_EOF
+#!/usr/bin/env bash
+cd $(printf '%q' "$WORKDIR")
+cat $(printf '%q' "$PROMPT_FILE") | claude \\
+  --print \\
+  --output-format json \\
+  --model "${model:-sonnet}" \\
+  --max-budget-usd "${budget_usd:-2.0}" \\
+  --dangerously-skip-permissions \\
+  ${session_id:+--resume "${session_id}"} \\
+  ${worktree:+-w "${worktree}"} \\
+  --allowedTools "Bash,Edit,Read,Write,Glob,Grep,LS,Task,TodoRead,TodoWrite,WebFetch,WebSearch" \\
+  > $(printf '%q' "$OUTFILE") 2>&1
+echo '___CLAUDE_DONE___'
+SCRIPT_EOF
+chmod +x "/tmp/${SESSION}.sh"
 
 tmux new-session -d -s "$SESSION" -x 220 -y 50
-tmux send-keys -t "$SESSION" "bash $(printf '%q' "$SCRIPT")" Enter
+tmux send-keys -t "$SESSION" "bash /tmp/${SESSION}.sh" Enter
 
 echo "✅ Agent started async"
 echo "tmux_session: $SESSION"
 echo "output_file:  $OUTFILE"
-echo "Check progress: tmux capture-pane -t $SESSION -p -S -20"
 ```
 
 → Report `tmux_session` and `output_file` to the user immediately. Do NOT wait.
@@ -112,13 +116,11 @@ When the user asks for a status update (or after a reasonable wait), check:
 SESSION="${tmux_session}"
 OUTFILE="/tmp/${SESSION}.json"
 
-# Is it done?
 if tmux capture-pane -t "$SESSION" -p -S -5 2>/dev/null | grep -q "___CLAUDE_DONE___"; then
   echo "✅ Done"
   cat "$OUTFILE"
 else
   echo "⏳ Still running..."
-  # Show last few lines of live output
   tmux capture-pane -t "$SESSION" -p -S -15
 fi
 ```
@@ -129,7 +131,7 @@ Parse `$OUTFILE` as JSON once done (same fields as blocking mode).
 
 ```bash
 tmux kill-session -t "$SESSION" 2>/dev/null
-rm -f "/tmp/${SESSION}.json" "/tmp/${SESSION}.sh"
+rm -f "/tmp/${SESSION}.json" "/tmp/${SESSION}.sh" "/tmp/${SESSION}.prompt"
 ```
 
 ---
@@ -137,32 +139,28 @@ rm -f "/tmp/${SESSION}.json" "/tmp/${SESSION}.sh"
 ## Parallel worktrees (multiple agents at once)
 
 ```bash
-# Fix two issues in parallel, each in its own git worktree
 REPO_DIR=~/code/myproject
 
-SESSION_A="cca-issue-42-$(date +%s)"
-SESSION_B="cca-issue-99-$(date +%s)"
-
-for SESSION in "$SESSION_A" "$SESSION_B"; do
+for ISSUE in 42 99; do
+  SESSION="cca-issue-${ISSUE}-$(date +%s)"
   OUTFILE="/tmp/${SESSION}.json"
-  SCRIPT="/tmp/${SESSION}.sh"
-  if [ "$SESSION" = "$SESSION_A" ]; then
-    WT="fix-issue-42"; DESC="Fix issue #42: <description>"
-  else
-    WT="fix-issue-99"; DESC="Fix issue #99: <description>"
-  fi
-  printf '%s\n' "#!/usr/bin/env bash" \
-    "cd $(printf '%q' "$REPO_DIR")" \
-    "claude -w $(printf '%q' "$WT") --print --output-format json --dangerously-skip-permissions $(printf '%q' "$DESC") > $(printf '%q' "$OUTFILE") 2>&1" \
-    "echo '___CLAUDE_DONE___'" > "$SCRIPT"
-  chmod +x "$SCRIPT"
-  tmux new-session -d -s "$SESSION" -x 220 -y 50
-  tmux send-keys -t "$SESSION" "bash $(printf '%q' "$SCRIPT")" Enter
-done
+  PROMPT_FILE="/tmp/${SESSION}.prompt"
 
-echo "Both agents running:"
-echo "  Session A: $SESSION_A"
-echo "  Session B: $SESSION_B"
+  echo "Fix issue #${ISSUE}: <description>" > "$PROMPT_FILE"
+
+  cat > "/tmp/${SESSION}.sh" << SCRIPT_EOF
+#!/usr/bin/env bash
+cd $(printf '%q' "$REPO_DIR")
+cat $(printf '%q' "$PROMPT_FILE") | claude -w fix-issue-${ISSUE} \\
+  --print --output-format json --dangerously-skip-permissions \\
+  > $(printf '%q' "$OUTFILE") 2>&1
+echo '___CLAUDE_DONE___'
+SCRIPT_EOF
+  chmod +x "/tmp/${SESSION}.sh"
+  tmux new-session -d -s "$SESSION" -x 220 -y 50
+  tmux send-keys -t "$SESSION" "bash /tmp/${SESSION}.sh" Enter
+  echo "Started: $SESSION"
+done
 ```
 
 ---
@@ -171,10 +169,11 @@ echo "  Session B: $SESSION_B"
 
 - Default to `--model sonnet` (faster, cheaper); use `opus` only if the user asks or the task is very complex.
 - Keep `--max-budget-usd` at 2.0 unless the user explicitly requests more.
+- **Always write the prompt to a file and pipe it via stdin** — never interpolate `$prompt` directly into shell strings.
 - **Async mode always skips permissions** — no TTY available in detached tmux sessions.
 - Always report `tmux_session` and `session_id` back to the user so they can follow up.
 - If `is_error` is true, show the error and suggest a fix.
-- Clean up tmux sessions and script files after results are collected.
+- Clean up all temp files (`.json`, `.sh`, `.prompt`) after results are collected.
 
 ---
 
