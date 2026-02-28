@@ -5,11 +5,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{AssistantConfig, Interface, LlmProviderKind, MemoryLoader, MessageBus};
-use assistant_llm::LlmProvider;
+use assistant_core::{
+    AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, Interface, LlmProviderKind,
+    MemoryLoader, MessageBus,
+};
+use assistant_llm::{
+    EmbeddingProvider, LlmEmbedder, LlmProvider, VoyageConfig, VoyageEmbedder,
+    WithEmbeddingOverride,
+};
 use assistant_provider_anthropic::AnthropicProvider;
-use assistant_provider_ollama::OllamaProvider;
-use assistant_provider_openai::OpenAIProvider;
+use assistant_provider_ollama::{OllamaConfig, OllamaProvider};
+use assistant_provider_openai::{OpenAIProvider, OpenAIProviderConfig};
 use assistant_runtime::{
     init_tracing, orchestrator::ConfirmationCallback, scheduler::spawn_scheduler,
     start_conversation_context, Orchestrator,
@@ -376,6 +382,86 @@ fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Re
     Ok(())
 }
 
+// ── Embedding provider factory ────────────────────────────────────────────────
+
+/// Build a dedicated [`EmbeddingProvider`] from an [`EmbeddingConfig`].
+///
+/// Falls back to provider-specific env vars for API keys.
+fn build_embedding_provider(
+    emb_cfg: &EmbeddingConfig,
+    main_cfg: &assistant_core::LlmConfig,
+) -> Result<Arc<dyn EmbeddingProvider>> {
+    match emb_cfg.provider {
+        EmbeddingProviderKind::Ollama => {
+            let ollama_cfg = OllamaConfig {
+                model: "unused".to_string(),
+                base_url: emb_cfg
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| main_cfg.base_url.clone()),
+                timeout_secs: main_cfg.timeout_secs,
+                embedding_model: emb_cfg
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| "nomic-embed-text".to_string()),
+            };
+            let provider = OllamaProvider::new(ollama_cfg)
+                .context("Failed to create Ollama embedding provider")?;
+            Ok(Arc::new(LlmEmbedder(Arc::new(provider))))
+        }
+        EmbeddingProviderKind::OpenAI => {
+            let api_key = emb_cfg
+                .api_key
+                .clone()
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "OpenAI embedding provider requires an API key. \
+                         Set api_key in [llm.embeddings] or OPENAI_API_KEY env var."
+                    )
+                })?;
+            let provider_cfg = OpenAIProviderConfig {
+                model: "unused".to_string(),
+                base_url: emb_cfg
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+                timeout_secs: main_cfg.timeout_secs,
+                max_tokens: 8192,
+                embedding_model: emb_cfg
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| "text-embedding-3-small".to_string()),
+            };
+            let provider = OpenAIProvider::new(provider_cfg, &api_key)
+                .context("Failed to create OpenAI embedding provider")?;
+            Ok(Arc::new(LlmEmbedder(Arc::new(provider))))
+        }
+        EmbeddingProviderKind::Voyage => {
+            let api_key = emb_cfg
+                .api_key
+                .clone()
+                .or_else(|| std::env::var("VOYAGE_API_KEY").ok())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Voyage AI embedding provider requires an API key. \
+                         Set api_key in [llm.embeddings] or VOYAGE_API_KEY env var."
+                    )
+                })?;
+            let mut voyage_cfg = VoyageConfig::new(api_key);
+            if let Some(ref url) = emb_cfg.base_url {
+                voyage_cfg = voyage_cfg.with_base_url(url.clone());
+            }
+            if let Some(ref model) = emb_cfg.model {
+                voyage_cfg = voyage_cfg.with_model(model.clone());
+            }
+            let embedder = VoyageEmbedder::new(voyage_cfg)
+                .context("Failed to create Voyage AI embedding provider")?;
+            Ok(Arc::new(embedder))
+        }
+    }
+}
+
 // ── Common bootstrap ──────────────────────────────────────────────────────────
 
 struct Bootstrap {
@@ -434,6 +520,20 @@ async fn bootstrap(
             OpenAIProvider::from_llm_config(&config.llm)
                 .context("Failed to create OpenAI LLM client")?,
         ),
+    };
+
+    // Optionally wrap with a dedicated embedding provider.
+    let llm: Arc<dyn LlmProvider> = if let Some(ref emb_cfg) = config.llm.embeddings {
+        let embedder = build_embedding_provider(emb_cfg, &config.llm)
+            .context("Failed to build dedicated embedding provider")?;
+        info!(
+            provider = ?emb_cfg.provider,
+            model = emb_cfg.model.as_deref().unwrap_or("(default)"),
+            "Using dedicated embedding provider"
+        );
+        Arc::new(WithEmbeddingOverride::new(llm, embedder))
+    } else {
+        llm
     };
 
     // Build tool executor.
