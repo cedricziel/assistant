@@ -1,7 +1,7 @@
 [package]
 name = "assistant-a2a-proto"
 description = "A2A protocol protobuf definitions"
-version = "0.1.18"
+version = "0.1.19"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
