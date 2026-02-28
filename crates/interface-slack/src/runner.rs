@@ -921,13 +921,22 @@ async fn on_push_event(
             }
             return Ok(());
         }
-        Ok(_) => {
+        Ok(turn) => {
             debug!(
                 conversation_id = %conversation_id,
                 elapsed_ms,
                 batch_size,
+                attachments = turn.attachments.len(),
                 "submit_turn ← ok"
             );
+
+            // Upload any file attachments produced by tools during the turn
+            // (e.g. images auto-detected by the bash handler).
+            if !turn.attachments.is_empty() {
+                let uploader = SlackSessionUploader::new(client.open_session(&bot_token));
+                upload_attachments(&uploader, &turn.attachments, &channel_id, Some(&thread_ts))
+                    .await;
+            }
         }
     }
 
@@ -1204,6 +1213,115 @@ impl SlackInterface {
 
         info!("Slack interface stopped");
         Ok(())
+    }
+}
+
+// ── Attachment upload ─────────────────────────────────────────────────────────
+
+/// Abstraction over the Slack file-upload API so the upload logic can be
+/// tested with a mock client.
+#[async_trait::async_trait]
+pub(crate) trait SlackFileUploader: Send + Sync {
+    /// Upload a single file to a Slack channel (optionally in a thread).
+    async fn upload_file(
+        &self,
+        filename: &str,
+        content_type: &str,
+        data: &[u8],
+        channel_id: &str,
+        thread_ts: Option<&SlackTs>,
+    ) -> Result<()>;
+}
+
+/// Real implementation backed by a [`SlackClientSession`].
+pub(crate) struct SlackSessionUploader<'a> {
+    session: SlackClientSession<'a, SlackClientHyperHttpsConnector>,
+}
+
+impl<'a> SlackSessionUploader<'a> {
+    pub(crate) fn new(session: SlackClientSession<'a, SlackClientHyperHttpsConnector>) -> Self {
+        Self { session }
+    }
+}
+
+#[async_trait::async_trait]
+impl SlackFileUploader for SlackSessionUploader<'_> {
+    async fn upload_file(
+        &self,
+        filename: &str,
+        content_type: &str,
+        data: &[u8],
+        channel_id: &str,
+        thread_ts: Option<&SlackTs>,
+    ) -> Result<()> {
+        // Step 1: request an upload URL from Slack.
+        let url_req = SlackApiFilesGetUploadUrlExternalRequest {
+            filename: filename.to_string(),
+            length: data.len(),
+            alt_txt: None,
+            snippet_type: None,
+        };
+        let url_resp = self.session.get_upload_url_external(&url_req).await?;
+
+        // Step 2: upload the file bytes.
+        let upload_req = SlackApiFilesUploadViaUrlRequest {
+            upload_url: url_resp.upload_url,
+            content: data.to_vec(),
+            content_type: content_type.to_string(),
+        };
+        self.session.files_upload_via_url(&upload_req).await?;
+
+        // Step 3: complete the upload and share to the channel.
+        let complete_req = SlackApiFilesCompleteUploadExternalRequest {
+            files: vec![SlackApiFilesComplete {
+                id: url_resp.file_id,
+                title: Some(filename.to_string()),
+            }],
+            channel_id: Some(channel_id.to_string().into()),
+            initial_comment: None,
+            thread_ts: thread_ts.cloned(),
+        };
+        self.session
+            .files_complete_upload_external(&complete_req)
+            .await?;
+
+        Ok(())
+    }
+}
+
+/// Upload all [`Attachment`]s from a turn result to Slack.
+///
+/// Errors are logged but do not abort the remaining uploads — a single failed
+/// file should not prevent the others from being delivered.
+pub(crate) async fn upload_attachments(
+    uploader: &dyn SlackFileUploader,
+    attachments: &[assistant_core::Attachment],
+    channel_id: &str,
+    thread_ts: Option<&SlackTs>,
+) {
+    for att in attachments {
+        debug!(
+            filename = %att.filename,
+            mime_type = %att.mime_type,
+            size = att.data.len(),
+            "Uploading turn attachment to Slack"
+        );
+        if let Err(e) = uploader
+            .upload_file(
+                &att.filename,
+                &att.mime_type,
+                &att.data,
+                channel_id,
+                thread_ts,
+            )
+            .await
+        {
+            warn!(
+                filename = %att.filename,
+                error = %e,
+                "Failed to upload turn attachment"
+            );
+        }
     }
 }
 
@@ -2054,5 +2172,158 @@ mod tests {
             ),
             "empty bot_user_id means mention detection is disabled"
         );
+    }
+
+    // ── upload_attachments tests ──────────────────────────────────────────────
+
+    use super::upload_attachments;
+    use super::SlackFileUploader;
+    use assistant_core::Attachment;
+
+    /// Mock uploader that records every upload it receives.
+    #[derive(Clone)]
+    struct MockUploader {
+        uploads: Arc<Mutex<Vec<(String, String, Vec<u8>)>>>,
+        fail_on: Option<String>,
+    }
+
+    impl MockUploader {
+        fn new() -> Self {
+            Self {
+                uploads: Arc::new(Mutex::new(Vec::new())),
+                fail_on: None,
+            }
+        }
+
+        fn failing_on(filename: &str) -> Self {
+            Self {
+                uploads: Arc::new(Mutex::new(Vec::new())),
+                fail_on: Some(filename.to_string()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SlackFileUploader for MockUploader {
+        async fn upload_file(
+            &self,
+            filename: &str,
+            content_type: &str,
+            data: &[u8],
+            _channel_id: &str,
+            _thread_ts: Option<&SlackTs>,
+        ) -> anyhow::Result<()> {
+            if self.fail_on.as_deref() == Some(filename) {
+                anyhow::bail!("upload failed for {filename}");
+            }
+            self.uploads.lock().await.push((
+                filename.to_string(),
+                content_type.to_string(),
+                data.to_vec(),
+            ));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_attachments_sends_each_file() {
+        let uploader = MockUploader::new();
+        let attachments = vec![
+            Attachment::new("chart.png", "image/png", vec![0x89, 0x50, 0x4E, 0x47]),
+            Attachment::new("report.csv", "text/csv", b"a,b\n1,2".to_vec()),
+        ];
+        upload_attachments(
+            &uploader,
+            &attachments,
+            "C001",
+            Some(&SlackTs("1700000000.000000".to_string())),
+        )
+        .await;
+
+        let uploads = uploader.uploads.lock().await;
+        assert_eq!(uploads.len(), 2, "both attachments should be uploaded");
+        assert_eq!(uploads[0].0, "chart.png");
+        assert_eq!(uploads[0].1, "image/png");
+        assert_eq!(uploads[0].2, vec![0x89, 0x50, 0x4E, 0x47]);
+        assert_eq!(uploads[1].0, "report.csv");
+        assert_eq!(uploads[1].1, "text/csv");
+        assert_eq!(uploads[1].2, b"a,b\n1,2");
+    }
+
+    #[tokio::test]
+    async fn upload_attachments_empty_list_is_noop() {
+        let uploader = MockUploader::new();
+        upload_attachments(&uploader, &[], "C001", Some(&SlackTs("1.0".to_string()))).await;
+
+        let uploads = uploader.uploads.lock().await;
+        assert!(uploads.is_empty());
+    }
+
+    #[tokio::test]
+    async fn upload_attachments_continues_after_failure() {
+        let uploader = MockUploader::failing_on("bad.txt");
+        let attachments = vec![
+            Attachment::new("bad.txt", "text/plain", b"oops".to_vec()),
+            Attachment::new("good.png", "image/png", vec![1, 2, 3]),
+        ];
+        upload_attachments(
+            &uploader,
+            &attachments,
+            "C001",
+            Some(&SlackTs("1.0".to_string())),
+        )
+        .await;
+
+        let uploads = uploader.uploads.lock().await;
+        assert_eq!(
+            uploads.len(),
+            1,
+            "should continue uploading after one failure"
+        );
+        assert_eq!(uploads[0].0, "good.png");
+    }
+
+    #[tokio::test]
+    async fn upload_attachments_passes_channel_and_thread() {
+        // Use a custom mock that captures channel/thread args.
+        #[derive(Clone)]
+        struct ChannelCapture {
+            calls: Arc<Mutex<Vec<(String, Option<String>)>>>,
+        }
+        #[async_trait::async_trait]
+        impl SlackFileUploader for ChannelCapture {
+            async fn upload_file(
+                &self,
+                _filename: &str,
+                _content_type: &str,
+                _data: &[u8],
+                channel_id: &str,
+                thread_ts: Option<&SlackTs>,
+            ) -> anyhow::Result<()> {
+                self.calls
+                    .lock()
+                    .await
+                    .push((channel_id.to_string(), thread_ts.map(|ts| ts.0.clone())));
+                Ok(())
+            }
+        }
+
+        let capture = ChannelCapture {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let attachments = vec![Attachment::new("f.txt", "text/plain", vec![42])];
+
+        upload_attachments(
+            &capture,
+            &attachments,
+            "C_MY_CHANNEL",
+            Some(&SlackTs("1700000000.123456".to_string())),
+        )
+        .await;
+
+        let calls = capture.calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "C_MY_CHANNEL");
+        assert_eq!(calls[0].1.as_deref(), Some("1700000000.123456"),);
     }
 }
