@@ -552,23 +552,23 @@ fn bool_badge(val: Option<bool>) -> &'static str {
 }
 
 fn page_shell(title: &str, sidebar: &str, content: &str) -> String {
-    format!(
-        "<!DOCTYPE html>\
-         <html><head>\
-         <meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <title>{title} - Assistant</title>\
-         <style>{css}\n{extra_css}</style>\
-         </head><body>\
-         <div class=\"layout\">\
+    let content_html = format!(
+        "<div class=\"layout\">\
          <aside class=\"sidebar\">{sidebar}</aside>\
          <main class=\"main\">{content}</main>\
-         </div></body></html>",
-        title = html_escape(title),
-        css = crate::default_css(),
-        extra_css = agents_css(),
+         </div>",
         sidebar = sidebar,
         content = content,
+    );
+    let page_css = format!("{}\n{}", crate::default_css(), agents_css());
+    crate::legacy::render_page(
+        "agents",
+        title,
+        "Management",
+        title,
+        &page_css,
+        &content_html,
+        "",
     )
 }
 

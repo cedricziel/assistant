@@ -2,6 +2,7 @@ mod a2a;
 pub mod auth;
 mod chat;
 pub mod common;
+mod legacy;
 mod webhooks;
 
 use std::collections::{HashMap, HashSet};
@@ -16,7 +17,7 @@ use assistant_storage::{
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::Html,
+    response::{Html, Redirect},
     routing::{get, post},
     Extension, Router,
 };
@@ -179,7 +180,7 @@ async fn main() -> Result<()> {
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()
         // Trace / log UI routes.
-        .route("/", get(show_dashboard))
+        .route("/", get(|| async { Redirect::to("/chat") }))
         .route("/traces", get(show_dashboard))
         .route("/trace/{trace_id}", get(show_trace_detail))
         .route("/logs", get(show_logs))
@@ -359,15 +360,23 @@ async fn show_dashboard(
     );
     let trace_panel = render_trace_list(&traces, total_count);
 
-    let body = format!(
-        "<html><head><title>Agent Trace Analytics</title><style>{css}</style></head>\
-         <body><div class=\"layout\">\
+    let content_html = format!(
+        "<div class=\"layout\">\
          <aside class=\"sidebar\">{sidebar}</aside>\
          <main class=\"main\">{sections}</main>\
-         </div></body></html>",
-        css = default_css(),
+         </div>",
         sidebar = sidebar,
         sections = trace_panel,
+    );
+
+    let body = legacy::render_page(
+        "traces",
+        "Traces",
+        "Observability",
+        "Traces",
+        default_css(),
+        &content_html,
+        "",
     );
 
     Ok(Html(body))
@@ -387,14 +396,21 @@ async fn show_trace_detail(
     }
 
     let detail_html = render_trace_detail(&trace_id, &spans);
-    let js = detail_js();
-    let body = format!(
-        "<html><head><title>Trace {trace_id}</title><style>{css}</style></head>\
-         <body><div class=\"page\">{detail}</div><script>{js}</script></body></html>",
-        trace_id = html_escape(&trace_id),
-        css = default_css(),
-        detail = detail_html,
-        js = js,
+    let content_html = format!("<div class=\"page\">{detail}</div>", detail = detail_html);
+
+    let short_id = if trace_id.len() >= 8 {
+        &trace_id[..8]
+    } else {
+        &trace_id
+    };
+    let body = legacy::render_page(
+        "traces",
+        &format!("Trace {}", html_escape(&trace_id)),
+        "Observability",
+        &format!("Trace {short_id}..."),
+        default_css(),
+        &content_html,
+        &format!("<script>{}</script>", detail_js()),
     );
 
     Ok(Html(body))
@@ -458,15 +474,23 @@ async fn show_logs(
     );
     let log_panel = render_log_list(&logs);
 
-    let body = format!(
-        "<html><head><title>Logs</title><style>{css}</style></head>\
-         <body><div class=\"layout\">\
+    let content_html = format!(
+        "<div class=\"layout\">\
          <aside class=\"sidebar\">{sidebar}</aside>\
          <main class=\"main\">{panel}</main>\
-         </div></body></html>",
-        css = default_css(),
+         </div>",
         sidebar = sidebar,
         panel = log_panel,
+    );
+
+    let body = legacy::render_page(
+        "logs",
+        "Logs",
+        "Observability",
+        "Logs",
+        default_css(),
+        &content_html,
+        "",
     );
 
     Ok(Html(body))
@@ -484,12 +508,21 @@ async fn show_log_detail(
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Log {} not found", log_id)))?;
 
     let detail = render_log_detail_page(&log);
-    let body = format!(
-        "<html><head><title>Log {id}</title><style>{css}</style></head>\
-         <body><div class=\"page\">{detail}</div></body></html>",
-        id = html_escape(&log.id),
-        css = default_css(),
-        detail = detail,
+    let content_html = format!("<div class=\"page\">{detail}</div>", detail = detail);
+
+    let short_id = if log.id.len() >= 8 {
+        &log.id[..8]
+    } else {
+        &log.id
+    };
+    let body = legacy::render_page(
+        "logs",
+        &format!("Log {}", html_escape(&log.id)),
+        "Observability",
+        &format!("Log {short_id}..."),
+        default_css(),
+        &content_html,
+        "",
     );
 
     Ok(Html(body))
@@ -964,7 +997,7 @@ fn render_sidebar(
          <div class=\"facet-group\"><h3>Min Duration</h3>{min_dur_form}</div>\
          <div class=\"facet-footer\">\
            <span class=\"trace-count\">Showing {filtered} of {total} traces</span>\
-           <a href=\"/\">Reset filters</a>\
+           <a href=\"/traces\">Reset filters</a>\
          </div>\
          </div>",
         nav = nav,
@@ -1107,9 +1140,9 @@ fn build_query_url(
         parts.push(format!("min_duration_ms={value}"));
     }
     if parts.is_empty() {
-        "/".to_string()
+        "/traces".to_string()
     } else {
-        format!("/?{}", parts.join("&"))
+        format!("/traces?{}", parts.join("&"))
     }
 }
 
@@ -1165,7 +1198,7 @@ fn render_trace_detail(trace_id: &str, spans: &[RecordedSpan]) -> String {
 
     let header_bar = format!(
         "<div class=\"trace-header-bar\">\
-         <a class=\"hdr-back\" href=\"/\">&larr; Back</a>\
+         <a class=\"hdr-back\" href=\"/traces\">&larr; Back</a>\
          <span class=\"hdr-sep\">|</span>\
          <span class=\"hdr-trace-id\">Trace {short_id}&hellip;</span>\
          <span class=\"hdr-sep\">|</span>\
@@ -1554,15 +1587,22 @@ async fn show_analytics(
          {model_table}{tool_table}"
     );
 
-    let body = format!(
-        "<html><head><title>Analytics Dashboard</title>\
-         <style>{css}{analytics_css}</style></head>\
-         <body><div class=\"layout\">\
+    let content_html = format!(
+        "<div class=\"layout\">\
          <aside class=\"sidebar\">{sidebar}</aside>\
          <main class=\"main\">{sections}</main>\
-         </div></body></html>",
-        css = default_css(),
-        analytics_css = analytics_css(),
+         </div>",
+    );
+
+    let page_css = format!("{}\n{}", default_css(), analytics_css());
+    let body = legacy::render_page(
+        "analytics",
+        "Analytics",
+        "Observability",
+        "Analytics",
+        &page_css,
+        &content_html,
+        "",
     );
 
     Ok(Html(body))
