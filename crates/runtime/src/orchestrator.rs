@@ -294,10 +294,6 @@ impl Orchestrator {
                             reg.attachments,
                         )
                         .await
-                        .map(|()| TurnResult {
-                            answer: String::new(),
-                            attachments: vec![],
-                        })
                     } else if let Some(sink) = token_sink {
                         // Streaming turn (CLI, Signal).
                         self.run_turn_streaming(&turn_req.prompt, conv_id, interface, sink, None)
@@ -556,7 +552,7 @@ impl Orchestrator {
         extensions: Vec<Arc<dyn ToolHandler>>,
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
-    ) -> Result<()> {
+    ) -> Result<TurnResult> {
         let turn_span = info_span!(
             "conversation_turn",
             %conversation_id,
@@ -717,7 +713,7 @@ impl Orchestrator {
 
         let mut turn_ended = false;
         let mut replied = false;
-        let mut _turn_attachments: Vec<Attachment> = Vec::new();
+        let mut turn_attachments: Vec<Attachment> = Vec::new();
 
         // 5. Tool-calling loop.
         for iteration in 0..self.max_iterations {
@@ -782,7 +778,10 @@ impl Orchestrator {
                                 warn!("Failed to persist post-reply assistant message: {e}");
                             }
                         }
-                        return Ok(());
+                        return Ok(TurnResult {
+                            answer: String::new(),
+                            attachments: turn_attachments,
+                        });
                     }
 
                     // Empty final answer with no reply sent yet — the user would
@@ -838,7 +837,10 @@ impl Orchestrator {
                                 tool = %reply_name,
                                 "Auto-post skipped: reply tool requires multiple or non-text params"
                             );
-                            return Ok(());
+                            return Ok(TurnResult {
+                                answer: String::new(),
+                                attachments: turn_attachments,
+                            });
                         };
                         params_map.insert(
                             text_param.to_string(),
@@ -862,7 +864,10 @@ impl Orchestrator {
                         );
                     }
 
-                    return Ok(());
+                    return Ok(TurnResult {
+                        answer: String::new(),
+                        attachments: turn_attachments,
+                    });
                 }
 
                 // ── Tool calls ────────────────────────────────────────────────
@@ -1025,7 +1030,7 @@ impl Orchestrator {
                                     debug!(observation = %output.content, "extension observation");
                                     // Collect any attachments from the extension tool.
                                     if !output.attachments.is_empty() {
-                                        _turn_attachments.extend(output.attachments);
+                                        turn_attachments.extend(output.attachments);
                                     }
                                     output.content
                                 }
@@ -1121,7 +1126,7 @@ impl Orchestrator {
                                     ));
                                     // Collect any attachments from the global tool.
                                     if !output.attachments.is_empty() {
-                                        _turn_attachments.extend(output.attachments);
+                                        turn_attachments.extend(output.attachments);
                                     }
                                     tool_result_content(&output.content, output.data.as_ref())
                                 }
@@ -1167,7 +1172,10 @@ impl Orchestrator {
                     }
 
                     if turn_ended || replied {
-                        return Ok(());
+                        return Ok(TurnResult {
+                            answer: String::new(),
+                            attachments: turn_attachments,
+                        });
                     }
                 }
 
