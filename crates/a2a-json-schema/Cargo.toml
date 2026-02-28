@@ -1,7 +1,7 @@
 [package]
 name = "assistant-a2a-json-schema"
 description = "A2A protocol JSON Schema definitions and Rust types"
-version = "0.1.20"
+version = "0.1.21"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

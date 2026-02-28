@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.21](https://github.com/cedricziel/assistant/compare/v0.1.20...v0.1.21) (2026-02-28)
+
+
+### Features
+
+* **web-ui:** add --no-secure-cookie flag for plain HTTP on non-loopback ([#103](https://github.com/cedricziel/assistant/issues/103)) ([901db66](https://github.com/cedricziel/assistant/commit/901db660b79d7baa46972402639b5996c0b4b622))
+
 ## [0.1.20](https://github.com/cedricziel/assistant/compare/v0.1.19...v0.1.20) (2026-02-28)
 
 
