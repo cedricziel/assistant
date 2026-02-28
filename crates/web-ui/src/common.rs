@@ -17,46 +17,22 @@ pub fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
 
-/// Render the sidebar navigation shared by agent and webhook management pages.
+/// Render the sidebar for agent and webhook management pages.
 ///
-/// `active` should be the lowercase label of the currently active page
-/// (e.g. `"agents"`, `"webhooks"`).
+/// Navigation links have been removed — the icon rail handles cross-page
+/// navigation.  The sidebar retains the brand heading and section title
+/// derived from `active`.
 pub fn render_sidebar(active: &str) -> String {
-    let items = [
-        ("Chat", "/chat"),
-        ("Traces", "/traces"),
-        ("Logs", "/logs"),
-        ("Agents", "/agents"),
-        ("Webhooks", "/webhooks"),
-    ];
-    let mut links = String::new();
-    for (label, href) in &items {
-        let class = if label.to_ascii_lowercase() == active {
-            "facet-link active"
-        } else {
-            "facet-link"
-        };
-        links.push_str(&format!(
-            "<li><a class=\"{class}\" href=\"{href}\"><span>{label}</span></a></li>",
-            class = class,
-            href = href,
-            label = label,
-        ));
-    }
+    let heading = match active {
+        "agents" => "Agents",
+        "webhooks" => "Webhooks",
+        _ => "Management",
+    };
 
     format!(
         "<div class=\"sidebar-inner\">\
-         <div class=\"brand\"><p>assistant</p><h2>Agent Manager</h2></div>\
-         <div class=\"facet-group\">\
-         <h3>Navigation</h3>\
-         <ul>{links}</ul>\
-         </div>\
-         <div class=\"facet-footer\">\
-         <form method=\"POST\" action=\"/logout\" style=\"margin:0\">\
-         <button type=\"submit\" class=\"logout-btn\">Sign out</button>\
-         </form>\
-         </div>\
+         <div class=\"brand\"><p>assistant</p><h2>{heading}</h2></div>\
          </div>",
-        links = links,
+        heading = heading,
     )
 }

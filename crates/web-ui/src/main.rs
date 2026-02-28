@@ -537,16 +537,6 @@ fn render_logs_sidebar(
     trace_id: Option<&str>,
     shown: usize,
 ) -> String {
-    // Navigation
-    let nav = "<div class=\"facet-group\">\
-        <h3>Navigation</h3>\
-        <ul>\
-        <li><a class=\"facet-link\" href=\"/traces\"><span>Traces</span></a></li>\
-        <li><a class=\"facet-link active\" href=\"/logs\"><span>Logs</span></a></li>\
-        <li><a class=\"facet-link\" href=\"/agents\"><span>Agents</span></a></li>\
-        <li><a class=\"facet-link\" href=\"/analytics\"><span>Analytics</span></a></li>\
-        </ul></div>";
-
     // Severity facets
     let severity_options: &[(&str, &str, i64)] = &[
         ("", "All", stats.total),
@@ -662,7 +652,6 @@ fn render_logs_sidebar(
     format!(
         "<div class=\"sidebar-inner\">\
          <div class=\"brand\"><p>assistant</p><h2>Logs</h2></div>\
-         {nav}\
          <div class=\"facet-group\"><h3>Severity</h3>{severity_form}</div>\
          <div class=\"facet-group\"><h3>Target</h3><ul>{targets}</ul></div>\
          <div class=\"facet-group\"><h3>Search</h3>{search_form}</div>\
@@ -671,7 +660,6 @@ fn render_logs_sidebar(
            <a href=\"/logs\">Reset filters</a>\
          </div>\
          </div>",
-        nav = nav,
         severity_form = severity_form,
         targets = target_items,
         search_form = search_form,
@@ -979,19 +967,9 @@ fn render_sidebar(
         val = html_escape(&min_dur_val),
     );
 
-    let nav = "<div class=\"facet-group\">\
-        <h3>Navigation</h3>\
-        <ul>\
-        <li><a class=\"facet-link active\" href=\"/traces\"><span>Traces</span></a></li>\
-        <li><a class=\"facet-link\" href=\"/logs\"><span>Logs</span></a></li>\
-        <li><a class=\"facet-link\" href=\"/agents\"><span>Agents</span></a></li>\
-        <li><a class=\"facet-link\" href=\"/analytics\"><span>Analytics</span></a></li>\
-        </ul></div>";
-
     format!(
         "<div class=\"sidebar-inner\">\
          <div class=\"brand\"><p>assistant</p><h2>Telemetry</h2></div>\
-         {nav}\
          <div class=\"facet-group\"><h3>Service</h3><ul>{skills}</ul></div>\
          <div class=\"facet-group\"><h3>Status</h3>{status_form}</div>\
          <div class=\"facet-group\"><h3>Min Duration</h3>{min_dur_form}</div>\
@@ -1000,7 +978,6 @@ fn render_sidebar(
            <a href=\"/traces\">Reset filters</a>\
          </div>\
          </div>",
-        nav = nav,
         skills = skill_items,
         status_form = status_form,
         min_dur_form = min_dur_form,
@@ -1561,24 +1538,13 @@ async fn show_analytics(
         })
         .collect();
 
-    let nav = format!(
-        "<div class=\"facet-group\">\
-         <h3>Navigation</h3>\
-         <ul>\
-         <li><a class=\"facet-link\" href=\"/traces\"><span>Traces</span></a></li>\
-         <li><a class=\"facet-link\" href=\"/logs\"><span>Logs</span></a></li>\
-         <li><a class=\"facet-link\" href=\"/agents\"><span>Agents</span></a></li>\
-         <li><a class=\"facet-link active\" href=\"/analytics\"><span>Analytics</span></a></li>\
-         </ul></div>\
-         <div class=\"facet-group\">\
-         <h3>Time Window</h3>\
-         <ul>{window_links}</ul></div>"
-    );
-
     let sidebar = format!(
         "<div class=\"sidebar-inner\">\
          <div class=\"brand\"><p>assistant</p><h2>Analytics</h2></div>\
-         {nav}</div>"
+         <div class=\"facet-group\">\
+         <h3>Time Window</h3>\
+         <ul>{window_links}</ul></div>\
+         </div>"
     );
 
     let sections = format!(
