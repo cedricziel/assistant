@@ -236,11 +236,11 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
 name = "assistant"
-version = "0.1.21"
+version = "0.1.22"
 
 [[package]]
 name = "assistant-a2a-json-schema"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "chrono",
  "serde",
@@ -250,11 +250,11 @@ dependencies = [
 
 [[package]]
 name = "assistant-a2a-proto"
-version = "0.1.21"
+version = "0.1.22"
 
 [[package]]
 name = "assistant-cli"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-core"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-integration-tests"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-mattermost"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-signal"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-slack"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-llm"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-server"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-anthropic"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-ollama"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-openai"
-version = "0.1.19"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-runtime"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -498,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-skills"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "gray_matter",
@@ -510,7 +510,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-storage"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -532,7 +532,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-tool-executor"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -555,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-web-ui"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "askama",
