@@ -6,7 +6,10 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/assistant web-ui
+# Load token and optional overrides from user config.
+# Create this file with: echo 'ASSISTANT_WEB_TOKEN=<your-token>' > ~/.config/assistant/web-ui.env
+EnvironmentFile=-%h/.config/assistant/web-ui.env
+ExecStart=/usr/local/bin/assistant-web-ui
 Restart=always
 RestartSec=5
 
