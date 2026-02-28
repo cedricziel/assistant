@@ -638,7 +638,7 @@ fn page_shell(title: &str, sidebar: &str, content: &str) -> String {
         sidebar = sidebar,
         content = content,
     );
-    let page_css = format!("{}\n{}", crate::default_css(), webhooks_css());
+    let page_css = format!("{}\n{}", crate::common::default_css(), webhooks_css());
     crate::legacy::render_page(
         "webhooks",
         title,

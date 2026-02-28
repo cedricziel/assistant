@@ -560,7 +560,7 @@ fn page_shell(title: &str, sidebar: &str, content: &str) -> String {
         sidebar = sidebar,
         content = content,
     );
-    let page_css = format!("{}\n{}", crate::default_css(), agents_css());
+    let page_css = format!("{}\n{}", crate::common::default_css(), agents_css());
     crate::legacy::render_page(
         "agents",
         title,
