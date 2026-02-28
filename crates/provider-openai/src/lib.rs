@@ -9,4 +9,4 @@ mod oauth;
 mod provider;
 
 pub use oauth::OAuthManager;
-pub use provider::OpenAIProvider;
+pub use provider::{OpenAIProvider, OpenAIProviderConfig};
