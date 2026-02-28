@@ -18,6 +18,12 @@ contents:
     file_info:
       mode: 0755
 
+  # Web UI binary
+  - src: BIN_DIR_PLACEHOLDER/assistant-web-ui
+    dst: /usr/local/bin/assistant-web-ui
+    file_info:
+      mode: 0755
+
   # Default config template — never overwritten on upgrade
   - src: BIN_DIR_PLACEHOLDER/config.toml.example
     dst: /etc/assistant/config.toml.example
