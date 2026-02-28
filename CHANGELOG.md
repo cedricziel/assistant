@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.20](https://github.com/cedricziel/assistant/compare/v0.1.19...v0.1.20) (2026-02-28)
+
+
+### Bug Fixes
+
+* **ci:** build and ship assistant-web-ui binary in release ([#101](https://github.com/cedricziel/assistant/issues/101)) ([06c55cc](https://github.com/cedricziel/assistant/commit/06c55cc9eeca9e860b4275900671fc54903e3889))
+
 ## [0.1.19](https://github.com/cedricziel/assistant/compare/v0.1.18...v0.1.19) (2026-02-28)
 
 

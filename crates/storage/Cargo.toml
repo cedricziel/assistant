@@ -1,6 +1,6 @@
 [package]
 name = "assistant-storage"
-version = "0.1.19"
+version = "0.1.20"
 license.workspace = true
 edition.workspace = true
 description = "SQLite-backed storage layer: skill registry, traces, memory, and scheduled tasks"
