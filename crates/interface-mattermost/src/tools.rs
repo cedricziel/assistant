@@ -206,8 +206,7 @@ impl ToolHandler for MattermostUploadHandler {
     fn description(&self) -> &str {
         "Upload a file, image, or document to the current Mattermost channel. \
          For text content, set `content` directly. \
-         For binary files (images, PDFs, etc.), set `content_base64` with the \
-         base64-encoded data."
+         For binary files (images, PDFs, etc.), set `path` to the absolute file path on disk."
     }
 
     fn params_schema(&self) -> Value {
@@ -215,13 +214,13 @@ impl ToolHandler for MattermostUploadHandler {
             "type": "object",
             "required": ["filename"],
             "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to a local file to upload (for images, PDFs, etc.)"
+                },
                 "content": {
                     "type": "string",
-                    "description": "Text file content (mutually exclusive with content_base64)"
-                },
-                "content_base64": {
-                    "type": "string",
-                    "description": "Base64-encoded binary content for images, PDFs, etc. (mutually exclusive with content)"
+                    "description": "Text file content (mutually exclusive with path)"
                 },
                 "filename": {
                     "type": "string",
@@ -379,18 +378,25 @@ pub fn build_mattermost_tools(
     ]
 }
 
-/// Resolve file content bytes from either a `content` (text) or
-/// `content_base64` (base64-encoded binary) parameter.
+/// Resolve file content bytes from `path`, `content` (text), or
+/// `content_base64` (base64-encoded binary, kept for backward compatibility).
+///
+/// Priority: `path` > `content_base64` > `content`.
 ///
 /// Returns `Ok(bytes)` on success, or an error string for
 /// `ToolOutput::error()`.
 ///
-/// Handles the following real-world LLM encoding quirks:
+/// Handles the following real-world LLM encoding quirks for `content_base64`:
 /// - Data-URI prefixes such as `data:image/png;base64,` are stripped.
 /// - ASCII whitespace (newlines, spaces) inserted for readability is stripped.
 /// - Missing trailing `=` padding is tolerated via a `STANDARD_NO_PAD`
 ///   fallback so both padded and unpadded base64 are accepted.
 fn resolve_upload_bytes(params: &HashMap<String, Value>) -> Result<Vec<u8>, String> {
+    // path → read file from disk (highest priority, LLM should always use this for binary)
+    if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+        return std::fs::read(path).map_err(|e| format!("Cannot read file at path '{path}': {e}"));
+    }
+
     if let Some(b64) = params.get("content_base64").and_then(|v| v.as_str()) {
         use base64::Engine as _;
 
@@ -413,7 +419,7 @@ fn resolve_upload_bytes(params: &HashMap<String, Value>) -> Result<Vec<u8>, Stri
     } else if let Some(text) = params.get("content").and_then(|v| v.as_str()) {
         Ok(text.as_bytes().to_vec())
     } else {
-        Err("Either 'content' or 'content_base64' must be provided".to_string())
+        Err("Either 'path', 'content', or 'content_base64' must be provided".to_string())
     }
 }
 
@@ -460,6 +466,42 @@ mod tests {
         assert_eq!(
             bytes, binary,
             "base64 should take priority when both present"
+        );
+    }
+
+    #[test]
+    fn upload_bytes_from_path() {
+        let tmp_path = std::env::temp_dir().join("mm_upload_test_path.bin");
+        std::fs::write(&tmp_path, b"file from path").unwrap();
+        let p = params(&[("path", json!(tmp_path.to_str().unwrap()))]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        let _ = std::fs::remove_file(&tmp_path);
+        assert_eq!(bytes, b"file from path");
+    }
+
+    #[test]
+    fn upload_bytes_path_takes_priority_over_content() {
+        let tmp_path = std::env::temp_dir().join("mm_upload_test_priority.bin");
+        std::fs::write(&tmp_path, b"from path").unwrap();
+        let p = params(&[
+            ("path", json!(tmp_path.to_str().unwrap())),
+            ("content", json!("from content")),
+        ]);
+        let bytes = resolve_upload_bytes(&p).unwrap();
+        let _ = std::fs::remove_file(&tmp_path);
+        assert_eq!(
+            bytes, b"from path",
+            "path should take priority over content"
+        );
+    }
+
+    #[test]
+    fn upload_bytes_path_nonexistent_returns_error() {
+        let p = params(&[("path", json!("/nonexistent/file/path.bin"))]);
+        let err = resolve_upload_bytes(&p).unwrap_err();
+        assert!(
+            err.contains("Cannot read file at path"),
+            "error should mention path: {err}"
         );
     }
 
