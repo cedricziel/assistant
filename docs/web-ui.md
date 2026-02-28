@@ -23,6 +23,22 @@ Open <http://127.0.0.1:8080/login> and enter the token to sign in.
 | `--db-path` | | `~/.assistant/assistant.db` | Path to the SQLite database |
 | `--trace-limit` | | `200` | Max traces shown on the dashboard |
 | `--log-limit` | | `500` | Max logs shown on the logs page |
+| `--no-secure-cookie` | | `false` | Disable `Secure` attribute on session cookies (see below) |
+
+### Plain HTTP on non-loopback addresses
+
+When the server binds to a non-loopback address (e.g. `0.0.0.0`), it
+automatically sets the `Secure` attribute on session cookies.  This
+means browsers will only send the cookie over HTTPS — if you access the
+UI over plain HTTP, login will appear to succeed but the session cookie
+is silently rejected.
+
+If you are running behind a VPN or firewall where plain HTTP is
+acceptable, pass `--no-secure-cookie` to disable this behaviour:
+
+```sh
+assistant-web-ui --listen 0.0.0.0:8080 --no-secure-cookie
+```
 
 ## Pages
 
