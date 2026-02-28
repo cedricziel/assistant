@@ -411,6 +411,23 @@ fn strip_cite_tags(input: &str) -> String {
         match input[pos..].find("<cite") {
             Some(open_rel) => {
                 let open_abs = pos + open_rel;
+                // The character right after `<cite` must be a tag boundary
+                // (whitespace, `>`, or `/`) so we don't match `<cited>` etc.
+                let after = open_abs + "<cite".len();
+                if after < input.len() {
+                    let boundary = input.as_bytes()[after];
+                    if boundary != b' '
+                        && boundary != b'>'
+                        && boundary != b'/'
+                        && boundary != b'\t'
+                        && boundary != b'\n'
+                    {
+                        // Not a real `<cite` tag — copy the `<` and keep scanning.
+                        result.push_str(&input[pos..open_abs + 1]);
+                        pos = open_abs + 1;
+                        continue;
+                    }
+                }
                 // Copy everything before the tag.
                 result.push_str(&input[pos..open_abs]);
 
@@ -846,6 +863,13 @@ mod tests {
     #[test]
     fn no_cite_tags_unchanged() {
         assert_eq!(strip_cite_tags("Hello world"), "Hello world");
+    }
+
+    #[test]
+    fn cited_tag_not_stripped() {
+        // `<cited>` is not `<cite …>` — must not be treated as a cite tag.
+        let input = "<cited>foo</cited>";
+        assert_eq!(strip_cite_tags(input), input);
     }
 
     #[test]
