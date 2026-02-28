@@ -50,18 +50,18 @@
 </div>
 
 <div class="chat-input">
-  <form class="chat-input-form"
+  <form id="chat-form" class="chat-input-form"
         hx-post="/chat/{{ id }}/send"
         hx-target="#messages"
         hx-swap="beforeend scroll:#messages:bottom"
-        hx-on::after-request="this.reset()">
+        hx-on::after-request="this.reset(); if(typeof chatStreamStarted==='function') chatStreamStarted()">
     <textarea class="chat-input-field"
             name="message"
             placeholder="Type a message..."
             rows="1"
             required
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.form.requestSubmit()}"></textarea>
-    <button type="submit" class="btn-send">Send</button>
+    <button type="submit" class="btn-send" id="btn-send">Send</button>
   </form>
   <div class="chat-input-meta">
     <span>Shift+Enter for new line</span>

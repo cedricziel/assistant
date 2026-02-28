@@ -517,18 +517,18 @@
         </div>
 
         <div class="chat-input">
-          <form class="chat-input-form"
+          <form id="chat-form" class="chat-input-form"
                 hx-post="/chat/{{ active.id }}/send"
                 hx-target="#messages"
                 hx-swap="beforeend scroll:#messages:bottom"
-                hx-on::after-request="this.reset()">
+                hx-on::after-request="this.reset(); chatStreamStarted()">
             <textarea class="chat-input-field"
                     name="message"
                     placeholder="Type a message..."
                     rows="1"
                     required
                     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.form.requestSubmit()}"></textarea>
-            <button type="submit" class="btn-send">Send</button>
+            <button type="submit" class="btn-send" id="btn-send">Send</button>
           </form>
           <div class="chat-input-meta">
             <span>Shift+Enter for new line</span>
@@ -568,7 +568,7 @@
 
   // Scroll messages to bottom on page load
   document.addEventListener('DOMContentLoaded', function() {
-    const msgs = document.getElementById('messages');
+    var msgs = document.getElementById('messages');
     if (msgs) msgs.scrollTop = msgs.scrollHeight;
   });
 
@@ -577,6 +577,49 @@
     if (e.detail.target.id === 'messages') {
       e.detail.target.scrollTop = e.detail.target.scrollHeight;
     }
+  });
+
+  // -- Streaming UX ---------------------------------------------------------
+
+  // Called after the send request returns (user bubble + streaming skeleton)
+  function chatStreamStarted() {
+    var btn = document.getElementById('btn-send');
+    var field = document.querySelector('.chat-input-field');
+    if (btn) { btn.disabled = true; btn.textContent = 'Thinking...'; }
+    if (field) field.disabled = true;
+  }
+
+  // Re-enable the form when the streaming skeleton is replaced by the final
+  // message (the "done" SSE event triggers an outerHTML swap that removes
+  // #streaming-msg from the DOM).
+  function chatStreamEnded() {
+    var btn = document.getElementById('btn-send');
+    var field = document.querySelector('.chat-input-field');
+    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+    if (field) { field.disabled = false; field.focus(); }
+  }
+
+  // Detect when the streaming skeleton is removed (done event fired).
+  // We use a MutationObserver on #messages to watch for the removal of
+  // #streaming-msg (which happens on the outerHTML swap from the "done" event).
+  document.addEventListener('DOMContentLoaded', function() {
+    var msgs = document.getElementById('messages');
+    if (!msgs) return;
+
+    var observer = new MutationObserver(function() {
+      // If #streaming-msg no longer exists, streaming is done
+      if (!document.getElementById('streaming-msg')) {
+        chatStreamEnded();
+      }
+    });
+    observer.observe(msgs, { childList: true, subtree: true });
+  });
+
+  // Auto-scroll during streaming — whenever a token event swaps new content
+  // into the streaming message, scroll the messages container to the bottom.
+  document.addEventListener('htmx:sseMessage', function(e) {
+    var msgs = document.getElementById('messages');
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
   });
 </script>
 {% endblock %}

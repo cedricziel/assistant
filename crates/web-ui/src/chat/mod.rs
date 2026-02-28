@@ -4,6 +4,7 @@
 //! Dynamic interactions use htmx 2 — the server returns HTML fragments
 //! for partial page updates.
 
+use std::convert::Infallible;
 use std::sync::Arc;
 
 use askama::Template;
@@ -13,15 +14,22 @@ use assistant_storage::{ConversationRecord, ConversationStore};
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{
+        sse::{Event, Sse},
+        Html, IntoResponse, Redirect, Response,
+    },
     routing::{delete, get, post},
     Form, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sqlx::SqlitePool;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 use uuid::Uuid;
+
+use crate::common;
 
 // -- State -------------------------------------------------------------------
 
@@ -103,6 +111,17 @@ struct ConversationListTemplate {
     active_id: Option<String>,
 }
 
+/// htmx partial: streaming assistant response skeleton.
+///
+/// Contains SSE connection attributes so the browser opens a server-sent
+/// events stream that progressively fills in the assistant's reply.
+#[derive(Template)]
+#[template(path = "chat/streaming.html")]
+struct StreamingTemplate {
+    id: String,
+    turn: i64,
+}
+
 // -- Router ------------------------------------------------------------------
 
 /// Build the chat sub-router.  Mounted under the auth-protected scope.
@@ -113,6 +132,7 @@ pub fn chat_router() -> Router<ChatState> {
         .route("/chat/new", post(new_conversation))
         .route("/chat/{id}", get(load_conversation))
         .route("/chat/{id}/send", post(send_message))
+        .route("/chat/{id}/stream", get(stream_response))
         .route("/chat/{id}", delete(delete_conversation))
 }
 
@@ -326,48 +346,143 @@ async fn send_message(
             .await;
     }
 
-    // Render the user message fragment immediately
+    // Render the user message fragment
     let user_view = msg_to_view(&user_msg);
     let user_html = MessageTemplate { msg: user_view }
         .render()
         .unwrap_or_default();
 
-    // -- Call the LLM for an assistant response ------------------------------
-    let assistant_html = match generate_llm_response(&state, &store, conv_id, next_turn).await {
-        Ok(html) => html,
+    // Render the streaming skeleton — the browser will open an SSE connection
+    // to progressively fill in the assistant's reply.
+    let streaming_html = StreamingTemplate {
+        id: id.clone(),
+        turn: next_turn,
+    }
+    .render()
+    .unwrap_or_default();
+
+    // Return user bubble + streaming skeleton so htmx appends both
+    Html(format!("{user_html}{streaming_html}")).into_response()
+}
+
+// -- SSE streaming -----------------------------------------------------------
+
+/// Query parameters for the streaming endpoint.
+#[derive(Deserialize)]
+struct StreamQuery {
+    turn: i64,
+}
+
+/// `GET /chat/{id}/stream?turn=N` — SSE endpoint that streams the assistant's
+/// response token-by-token.
+///
+/// The client connects via the htmx SSE extension.  Each token is sent as an
+/// `event: token` with the HTML-escaped text as data.  When generation is
+/// complete, the full rendered message HTML is sent as `event: done`, which
+/// replaces the streaming skeleton via `outerHTML` swap.
+async fn stream_response(
+    State(state): State<ChatState>,
+    Path(id): Path<String>,
+    Query(params): Query<StreamQuery>,
+) -> Response {
+    let conv_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
+    };
+
+    let store = ConversationStore::new(state.pool.clone());
+
+    // Load full conversation history (includes the just-saved user message)
+    let history = match store.load_history(conv_id).await {
+        Ok(h) => h,
         Err(e) => {
-            warn!("LLM response failed: {}", e);
-            // Return an error message as the assistant reply so the user sees it
-            let error_view = MessageView {
-                role_class: "msg-assistant",
-                role_label: "Assistant",
-                content: format!("Sorry, I couldn't generate a response: {e}"),
-                time: format_time(Utc::now()),
-                tool_calls: vec![],
-            };
-            MessageTemplate { msg: error_view }
-                .render()
-                .unwrap_or_default()
+            warn!("Failed to load history for streaming: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
     };
 
-    // Return both fragments concatenated so htmx appends user + assistant
-    Html(format!("{user_html}{assistant_html}")).into_response()
+    let chat_history = build_chat_history(&history);
+    let user_turn = params.turn;
+
+    // Channel for SSE events sent to the client.
+    let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+
+    // Channel for LLM tokens.
+    let (token_tx, mut token_rx) = mpsc::channel::<String>(64);
+
+    // Spawn the LLM streaming call.
+    let llm = state.llm.clone();
+    let result_tx = {
+        let (tx, rx) = tokio::sync::oneshot::channel::<anyhow::Result<LlmResponse>>();
+        tokio::spawn(async move {
+            let result = llm
+                .chat_streaming(SYSTEM_PROMPT, &chat_history, &[], Some(token_tx))
+                .await;
+            let _ = tx.send(result);
+        });
+        rx
+    };
+
+    // Spawn a task that reads tokens from the LLM, sends SSE events, and
+    // emits the final "done" event with the rendered message.
+    let pool = state.pool.clone();
+    tokio::spawn(async move {
+        let mut full_text = String::new();
+
+        // Forward each token as an SSE event.
+        while let Some(token) = token_rx.recv().await {
+            full_text.push_str(&token);
+            let escaped = common::html_escape(&token);
+            let event = Event::default().event("token").data(escaped);
+            if sse_tx.send(Ok(event)).await.is_err() {
+                // Client disconnected
+                return;
+            }
+        }
+
+        // Get the authoritative response text from the LLM result.
+        let reply_text = match result_tx.await {
+            Ok(Ok(LlmResponse::FinalAnswer(text, _))) => text,
+            Ok(Ok(LlmResponse::Thinking(text, _))) => text,
+            Ok(Ok(LlmResponse::ToolCalls(_, _))) => {
+                "(The model tried to use tools, but none are available in chat mode.)".to_string()
+            }
+            Ok(Err(e)) => {
+                // LLM call failed — use whatever we collected, or an error msg
+                if full_text.is_empty() {
+                    format!("Sorry, I couldn't generate a response: {e}")
+                } else {
+                    full_text.clone()
+                }
+            }
+            Err(_) => {
+                // Oneshot dropped — use collected tokens
+                full_text.clone()
+            }
+        };
+
+        // Save the assistant message to the database.
+        let mut assistant_msg = Message::assistant(conv_id, &reply_text);
+        assistant_msg.turn = user_turn + 1;
+        let save_store = ConversationStore::new(pool);
+        if let Err(e) = save_store.save_message(&assistant_msg).await {
+            warn!("Failed to save assistant message: {}", e);
+        }
+
+        // Render the final message HTML and send as the "done" event.
+        // This replaces the streaming skeleton via outerHTML swap.
+        let view = msg_to_view(&assistant_msg);
+        let html = MessageTemplate { msg: view }.render().unwrap_or_default();
+        let done = Event::default().event("done").data(html);
+        let _ = sse_tx.send(Ok(done)).await;
+    });
+
+    Sse::new(ReceiverStream::new(sse_rx)).into_response()
 }
 
-/// Call the LLM provider with the conversation history and save + render the
-/// assistant's reply.
-async fn generate_llm_response(
-    state: &ChatState,
-    store: &ConversationStore,
-    conv_id: Uuid,
-    user_turn: i64,
-) -> anyhow::Result<String> {
-    // Load full conversation history (includes the just-saved user message)
-    let history = store.load_history(conv_id).await?;
-
-    // Convert Message list to ChatHistoryMessage list for the LLM
-    let chat_history: Vec<ChatHistoryMessage> = history
+/// Convert stored [`Message`] history to [`ChatHistoryMessage`] for the LLM.
+fn build_chat_history(messages: &[Message]) -> Vec<ChatHistoryMessage> {
+    messages
         .iter()
         .filter_map(|m| match m.role {
             MessageRole::User => Some(ChatHistoryMessage::Text {
@@ -385,33 +500,7 @@ async fn generate_llm_response(
             // Skip tool messages — not relevant for simple chat
             MessageRole::Tool => None,
         })
-        .collect();
-
-    // Call the LLM (no tools — simple chat)
-    let response = state
-        .llm
-        .chat(SYSTEM_PROMPT, &chat_history, &[])
-        .await
-        .map_err(|e| anyhow::anyhow!("LLM call failed: {e}"))?;
-
-    // Extract the text from the response
-    let reply_text = match response {
-        LlmResponse::FinalAnswer(text, _) => text,
-        LlmResponse::Thinking(text, _) => text,
-        LlmResponse::ToolCalls(_, _) => {
-            "(The model tried to use tools, but none are available in chat mode.)".to_string()
-        }
-    };
-
-    // Save assistant message
-    let mut assistant_msg = Message::assistant(conv_id, &reply_text);
-    assistant_msg.turn = user_turn + 1;
-    store.save_message(&assistant_msg).await?;
-
-    // Render the assistant message fragment
-    let view = msg_to_view(&assistant_msg);
-    let html = MessageTemplate { msg: view }.render()?;
-    Ok(html)
+        .collect()
 }
 
 /// `DELETE /chat/{id}` — delete a conversation and redirect to chat.
