@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.23](https://github.com/cedricziel/assistant/compare/v0.1.22...v0.1.23) (2026-02-28)
+
+
+### Bug Fixes
+
+* **upload:** replace content_base64 with path param to prevent binary data in LLM context ([#118](https://github.com/cedricziel/assistant/issues/118)) ([84f08c6](https://github.com/cedricziel/assistant/commit/84f08c6b87786126514a5eb5beea7ccaac2427a0))
+
 ## [0.1.22](https://github.com/cedricziel/assistant/compare/v0.1.21...v0.1.22) (2026-02-28)
 
 
