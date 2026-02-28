@@ -1,0 +1,26 @@
+{
+  "name": "Assistant",
+  "short_name": "Assistant",
+  "description": "AI Assistant - Chat, Traces, Logs & Analytics",
+  "start_url": "/chat",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#030712",
+  "theme_color": "#020611",
+  "orientation": "any",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/pwa/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

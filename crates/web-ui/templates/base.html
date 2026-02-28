@@ -2,8 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}{% endblock %} - Assistant</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/pwa/manifest.webmanifest">
+  <meta name="theme-color" content="#020611">
+  <meta name="color-scheme" content="dark">
+
+  <!-- Apple PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Assistant">
+  <link rel="apple-touch-icon" href="/pwa/icon.svg">
+
   <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
   <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
   <style>
@@ -471,6 +483,17 @@
     function toggleDrawer() {
       document.getElementById('drawer').classList.toggle('open');
       document.getElementById('drawerBackdrop').classList.toggle('open');
+    }
+
+    // -- Service Worker registration --
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then(function(reg) {
+            // Check for updates periodically (every 60s)
+            setInterval(function() { reg.update(); }, 60000);
+          });
+      });
     }
   </script>
   {% block extra_js %}{% endblock %}

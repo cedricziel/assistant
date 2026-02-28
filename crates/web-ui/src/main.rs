@@ -5,6 +5,7 @@ mod chat;
 pub mod common;
 mod legacy;
 mod logs;
+mod pwa;
 mod traces;
 mod webhooks;
 
@@ -216,7 +217,9 @@ async fn main() -> Result<()> {
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
         // A2A agent card is public per spec — callers need it to discover auth.
-        .merge(a2a::public_router().with_state(a2a_state.clone()));
+        .merge(a2a::public_router().with_state(a2a_state.clone()))
+        // PWA assets must be public so the browser can fetch them before auth.
+        .merge(pwa::pwa_router());
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()
