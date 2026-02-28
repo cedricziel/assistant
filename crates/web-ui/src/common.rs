@@ -23,6 +23,7 @@ pub fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, String) {
 /// (e.g. `"agents"`, `"webhooks"`).
 pub fn render_sidebar(active: &str) -> String {
     let items = [
+        ("Chat", "/chat"),
         ("Traces", "/traces"),
         ("Logs", "/logs"),
         ("Agents", "/agents"),

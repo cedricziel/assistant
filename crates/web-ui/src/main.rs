@@ -1,5 +1,6 @@
 mod a2a;
 pub mod auth;
+mod chat;
 pub mod common;
 mod webhooks;
 
@@ -164,6 +165,10 @@ async fn main() -> Result<()> {
         pool: storage.pool.clone(),
     };
 
+    let chat_state = chat::ChatState {
+        pool: storage.pool.clone(),
+    };
+
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
         .route("/login", get(auth::login_page).post(auth::login_submit))
@@ -187,6 +192,8 @@ async fn main() -> Result<()> {
         .merge(a2a::agent_pages_router().with_state(agent_pages_state))
         // Webhook management UI pages.
         .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
+        // Chat interface.
+        .merge(chat::chat_router().with_state(chat_state))
         .route_layer(axum::middleware::from_fn(auth::require_auth));
 
     let router = public_routes

@@ -7,7 +7,9 @@ description = "Web-based trace analysis UI and A2A protocol server for the assis
 
 [dependencies]
 anyhow = { workspace = true }
+askama = { workspace = true }
 assistant-a2a-json-schema = { path = "../a2a-json-schema" }
+assistant-core = { path = "../core" }
 assistant-storage = { path = "../storage" }
 axum = { version = "0.8", features = ["macros"] }
 clap = { workspace = true, features = ["derive", "env"] }

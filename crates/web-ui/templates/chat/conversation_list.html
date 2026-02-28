@@ -1,0 +1,23 @@
+<!-- htmx partial: conversation list items (search results / full list) -->
+{% for conv in conversations %}
+  <a class="conv-item{% if active_id.as_deref() == Some(conv.id.as_str()) %} active{% endif %}"
+     href="/chat/{{ conv.id }}"
+     hx-get="/chat/{{ conv.id }}"
+     hx-target="#chat-panel"
+     hx-swap="innerHTML"
+     hx-push-url="/chat/{{ conv.id }}"
+     hx-on::after-swap="document.getElementById('chat-layout').classList.add('chat-active')">
+    <div class="conv-item-title">
+      {% if active_id.as_deref() == Some(conv.id.as_str()) %}
+        <span class="conv-item-dot"></span>
+      {% endif %}
+      {{ conv.title }}
+    </div>
+    <div class="conv-item-meta">{{ conv.time_ago }}</div>
+  </a>
+{% endfor %}
+{% if conversations.is_empty() %}
+  <div style="padding: 20px; text-align: center; color: #5a7396; font-size: 0.85rem">
+    No conversations yet
+  </div>
+{% endif %}

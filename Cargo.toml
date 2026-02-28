@@ -87,6 +87,8 @@ gray_matter = "0.3"
 serde_yaml = "0.9"
 # Embed static file trees into the binary at compile time
 include_dir = "0.7"
+# Type-safe compiled templates
+askama = "0.15"
 # SQL persistence
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }
 # cron expression parsing
