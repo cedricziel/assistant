@@ -17,6 +17,7 @@ pub use subagent::SubagentRunner;
 pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
     AssistantConfig, ExecutionContext, Interface, LlmConfig, LlmProviderKind, MattermostConfig,
-    McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, SignalConfig, SkillsConfig,
-    SlackConfig, SlackListenMode, StorageConfig, DEFAULT_MAX_AGENT_DEPTH,
+    McpConfig, MemoryConfig, Message, MessageRole, MirrorConfig, OpenAIAuthMode, OpenAIOptions,
+    SignalConfig, SkillsConfig, SlackConfig, SlackListenMode, StorageConfig,
+    DEFAULT_MAX_AGENT_DEPTH,
 };

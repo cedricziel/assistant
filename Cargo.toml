@@ -13,6 +13,7 @@ members = [
     "crates/llm",
     "crates/provider-ollama",
     "crates/provider-anthropic",
+    "crates/provider-openai",
     "crates/storage",
     "crates/runtime",
     "crates/tool-executor",
