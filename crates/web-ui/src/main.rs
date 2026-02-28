@@ -11,8 +11,14 @@ mod webhooks;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use assistant_core::LlmProviderKind;
+use assistant_llm::LlmProvider;
+use assistant_provider_anthropic::AnthropicProvider;
+use assistant_provider_ollama::OllamaProvider;
+use assistant_provider_openai::OpenAIProvider;
 use assistant_storage::{default_db_path, StorageLayer};
 use axum::{
     response::Redirect,
@@ -61,6 +67,19 @@ struct Args {
     /// address automatically sets `Secure`, which requires HTTPS.
     #[arg(long)]
     no_secure_cookie: bool,
+
+    /// LLM provider to use for chat responses (ollama, anthropic, or openai).
+    #[arg(long, default_value = "ollama", env = "LLM_PROVIDER")]
+    llm_provider: String,
+
+    /// LLM model name (e.g. "qwen2.5:7b" for Ollama, "claude-sonnet-4-20250514" for Anthropic).
+    /// Defaults to the provider's built-in default if not set.
+    #[arg(long, env = "LLM_MODEL")]
+    llm_model: Option<String>,
+
+    /// Base URL for the LLM provider (mainly for Ollama).
+    #[arg(long, env = "OLLAMA_BASE_URL")]
+    llm_base_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -110,6 +129,51 @@ async fn main() -> Result<()> {
         log_limit: args.log_limit,
     };
 
+    // -- LLM provider for chat ------------------------------------------------
+    let llm_provider_kind = match args.llm_provider.to_lowercase().as_str() {
+        "anthropic" => LlmProviderKind::Anthropic,
+        "openai" => LlmProviderKind::OpenAI,
+        _ => LlmProviderKind::Ollama,
+    };
+
+    let default_cfg = assistant_core::LlmConfig::default();
+
+    let llm_model = args.llm_model.unwrap_or_else(|| match llm_provider_kind {
+        LlmProviderKind::Anthropic => "claude-sonnet-4-20250514".to_string(),
+        LlmProviderKind::OpenAI => "gpt-4o".to_string(),
+        LlmProviderKind::Ollama => default_cfg.model.clone(),
+    });
+
+    let llm_base_url = args.llm_base_url.unwrap_or(default_cfg.base_url);
+
+    let llm_config = assistant_core::LlmConfig {
+        provider: llm_provider_kind,
+        model: llm_model,
+        base_url: llm_base_url,
+        ..Default::default()
+    };
+
+    let llm: Arc<dyn LlmProvider> = match llm_config.provider {
+        LlmProviderKind::Ollama => Arc::new(
+            OllamaProvider::from_llm_config(&llm_config)
+                .context("Failed to create Ollama LLM provider")?,
+        ),
+        LlmProviderKind::Anthropic => Arc::new(
+            AnthropicProvider::from_llm_config(&llm_config)
+                .context("Failed to create Anthropic LLM provider")?,
+        ),
+        LlmProviderKind::OpenAI => Arc::new(
+            OpenAIProvider::from_llm_config(&llm_config)
+                .context("Failed to create OpenAI LLM provider")?,
+        ),
+    };
+
+    info!(
+        "Chat LLM: provider={}, model={}",
+        llm.provider_name(),
+        llm.model_name()
+    );
+
     // -- Agent store (filesystem-backed) --
     let agent_store = AgentStore::default_dir()?;
 
@@ -142,6 +206,7 @@ async fn main() -> Result<()> {
 
     let chat_state = chat::ChatState {
         pool: storage.pool.clone(),
+        llm,
     };
 
     // -- Router: public routes (no auth required) --------------------------

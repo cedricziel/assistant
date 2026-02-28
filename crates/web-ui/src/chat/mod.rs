@@ -4,8 +4,11 @@
 //! Dynamic interactions use htmx 2 — the server returns HTML fragments
 //! for partial page updates.
 
+use std::sync::Arc;
+
 use askama::Template;
 use assistant_core::{Message, MessageRole};
+use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
 use assistant_storage::{ConversationRecord, ConversationStore};
 use axum::{
     extract::{Path, Query, State},
@@ -22,10 +25,14 @@ use uuid::Uuid;
 
 // -- State -------------------------------------------------------------------
 
+/// Default system prompt for chat conversations.
+const SYSTEM_PROMPT: &str = "You are a helpful assistant. Answer clearly and concisely.";
+
 /// Shared state for chat route handlers.
 #[derive(Clone)]
 pub struct ChatState {
     pub pool: SqlitePool,
+    pub llm: Arc<dyn LlmProvider>,
 }
 
 // -- View models -------------------------------------------------------------
@@ -297,9 +304,9 @@ async fn send_message(
     let next_turn = last.last().map(|m| m.turn + 1).unwrap_or(1);
 
     // Save user message
-    let mut msg = Message::user(conv_id, &content);
-    msg.turn = next_turn;
-    if let Err(e) = store.save_message(&msg).await {
+    let mut user_msg = Message::user(conv_id, &content);
+    user_msg.turn = next_turn;
+    if let Err(e) = store.save_message(&user_msg).await {
         warn!("Failed to save message: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save message").into_response();
     }
@@ -319,9 +326,92 @@ async fn send_message(
             .await;
     }
 
-    let view = msg_to_view(&msg);
-    let tmpl = MessageTemplate { msg: view };
-    render_template(tmpl)
+    // Render the user message fragment immediately
+    let user_view = msg_to_view(&user_msg);
+    let user_html = MessageTemplate { msg: user_view }
+        .render()
+        .unwrap_or_default();
+
+    // -- Call the LLM for an assistant response ------------------------------
+    let assistant_html = match generate_llm_response(&state, &store, conv_id, next_turn).await {
+        Ok(html) => html,
+        Err(e) => {
+            warn!("LLM response failed: {}", e);
+            // Return an error message as the assistant reply so the user sees it
+            let error_view = MessageView {
+                role_class: "msg-assistant",
+                role_label: "Assistant",
+                content: format!("Sorry, I couldn't generate a response: {e}"),
+                time: format_time(Utc::now()),
+                tool_calls: vec![],
+            };
+            MessageTemplate { msg: error_view }
+                .render()
+                .unwrap_or_default()
+        }
+    };
+
+    // Return both fragments concatenated so htmx appends user + assistant
+    Html(format!("{user_html}{assistant_html}")).into_response()
+}
+
+/// Call the LLM provider with the conversation history and save + render the
+/// assistant's reply.
+async fn generate_llm_response(
+    state: &ChatState,
+    store: &ConversationStore,
+    conv_id: Uuid,
+    user_turn: i64,
+) -> anyhow::Result<String> {
+    // Load full conversation history (includes the just-saved user message)
+    let history = store.load_history(conv_id).await?;
+
+    // Convert Message list to ChatHistoryMessage list for the LLM
+    let chat_history: Vec<ChatHistoryMessage> = history
+        .iter()
+        .filter_map(|m| match m.role {
+            MessageRole::User => Some(ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: m.content.clone(),
+            }),
+            MessageRole::Assistant => Some(ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: m.content.clone(),
+            }),
+            MessageRole::System => Some(ChatHistoryMessage::Text {
+                role: ChatRole::System,
+                content: m.content.clone(),
+            }),
+            // Skip tool messages — not relevant for simple chat
+            MessageRole::Tool => None,
+        })
+        .collect();
+
+    // Call the LLM (no tools — simple chat)
+    let response = state
+        .llm
+        .chat(SYSTEM_PROMPT, &chat_history, &[])
+        .await
+        .map_err(|e| anyhow::anyhow!("LLM call failed: {e}"))?;
+
+    // Extract the text from the response
+    let reply_text = match response {
+        LlmResponse::FinalAnswer(text, _) => text,
+        LlmResponse::Thinking(text, _) => text,
+        LlmResponse::ToolCalls(_, _) => {
+            "(The model tried to use tools, but none are available in chat mode.)".to_string()
+        }
+    };
+
+    // Save assistant message
+    let mut assistant_msg = Message::assistant(conv_id, &reply_text);
+    assistant_msg.turn = user_turn + 1;
+    store.save_message(&assistant_msg).await?;
+
+    // Render the assistant message fragment
+    let view = msg_to_view(&assistant_msg);
+    let html = MessageTemplate { msg: view }.render()?;
+    Ok(html)
 }
 
 /// `DELETE /chat/{id}` — delete a conversation and redirect to chat.
