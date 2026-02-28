@@ -56,6 +56,13 @@ struct Args {
     /// Maximum number of logs to show on the logs page
     #[arg(long, default_value_t = 500)]
     log_limit: i64,
+
+    /// Disable the `Secure` attribute on session cookies.
+    /// Useful when running behind a VPN or firewall over plain HTTP on a
+    /// non-loopback address.  Without this flag, binding to a non-loopback
+    /// address automatically sets `Secure`, which requires HTTPS.
+    #[arg(long)]
+    no_secure_cookie: bool,
 }
 
 #[derive(Clone)]
@@ -112,7 +119,8 @@ async fn main() -> Result<()> {
 
     // Parse listen address early so we can pass `is_loopback` to AuthConfig.
     let addr: SocketAddr = args.listen.parse()?;
-    let auth_config = AuthConfig::new(auth_token, !addr.ip().is_loopback());
+    let secure_cookie = !addr.ip().is_loopback() && !args.no_secure_cookie;
+    let auth_config = AuthConfig::new(auth_token, secure_cookie);
 
     let db_path = match args.db_path.or_else(default_db_path) {
         Some(p) => p,
