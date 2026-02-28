@@ -78,13 +78,13 @@ OpenClaw's hybrid vector+BM25 search is something we lack entirely — our `Memo
 
 | Dimension | OpenClaw | NanoClaw | Our Assistant |
 |---|---|---|---|
-| **Providers** | 14+ (OpenAI, Anthropic, Gemini, DeepSeek, Ollama, vLLM, LM Studio, LiteLLM…) | **Claude only** (Anthropic Agent SDK) | **Ollama only** (local, default `qwen2.5:7b`) |
+| **Providers** | 14+ (OpenAI, Anthropic, Gemini, DeepSeek, Ollama, vLLM, LM Studio, LiteLLM…) | **Claude only** (Anthropic Agent SDK) | **Ollama** (local, default), **Anthropic**, **OpenAI** (+ any OpenAI-compatible API) |
 | **Tool calling** | Native (Pi agent framework handles) | Native (Anthropic Agent SDK handles) | **Dual-mode: native → ReAct text fallback** |
-| **Local LLM support** | Yes (Ollama, vLLM, LM Studio) | No (Claude API required) | **Yes, Ollama-first** |
-| **Model agnosticism** | Fully agnostic via provider config | Locked to Claude | Provider-agnostic at config level but only Ollama implemented |
+| **Local LLM support** | Yes (Ollama, vLLM, LM Studio) | No (Claude API required) | **Yes, Ollama-first** (OpenAI provider also works with local vLLM/LM Studio) |
+| **Model agnosticism** | Fully agnostic via provider config | Locked to Claude | Provider-agnostic: Ollama, Anthropic, OpenAI (+ OpenAI-compatible endpoints) |
 | **Fallback strategy** | Not described | Not needed | **Explicit `Auto` mode**: native tool calling → ReAct |
 
-**Key contrast:** Our dual-mode LLM client (native tool calling → ReAct fallback) is the most sophisticated handling of model capability variance. OpenClaw delegates this to Pi (which presumably handles it). NanoClaw doesn't need it (Claude always supports native tool calling). We built this because Ollama models vary widely in tool-calling support — a pragmatic engineering choice. Our Ollama-only focus is actually a **significant gap** compared to OpenClaw's 14+ providers, but aligned with our local-first/privacy stance.
+**Key contrast:** Our dual-mode LLM client (native tool calling → ReAct fallback) is the most sophisticated handling of model capability variance. OpenClaw delegates this to Pi (which presumably handles it). NanoClaw doesn't need it (Claude always supports native tool calling). We built this because Ollama models vary widely in tool-calling support — a pragmatic engineering choice. With Ollama, Anthropic, and OpenAI providers now implemented, we cover the most important local and cloud model sources. The OpenAI provider also supports any OpenAI-compatible endpoint (vLLM, LM Studio, OpenRouter, Azure), making the effective provider count much higher than three.
 
 ---
 
@@ -153,7 +153,7 @@ OpenClaw's hybrid vector+BM25 search is something we lack entirely — our `Memo
 | **Semantic memory search** | OpenClaw: hybrid vector+BM25 | Substring only | Medium |
 | **Container isolation** | NanoClaw: hypervisor-enforced | Application-level SafetyGate | Low (single-user trusted) |
 | **Proactive heartbeat** | Both: native daemon | Nascent scheduler | Medium |
-| **Multi-LLM providers** | OpenClaw: 14+ | Ollama only | Low (intentional) |
+| **Multi-LLM providers** | OpenClaw: 14+ | Ollama, Anthropic, OpenAI (+ compatible) | Low (narrowing) |
 | **Context auto-compaction** | OpenClaw: auto-compacts to model window | Manual history management | Medium |
 | **Lane queue** | OpenClaw: per-session serial queue | None explicit | Low (single-user) |
 
