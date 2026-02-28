@@ -54,6 +54,32 @@ timeout_secs = 120
 # blocked_domains = []
 # citations.enabled = true
 
+# ── Dedicated embedding provider ──────────────────────────────────────────────
+# Ollama and OpenAI support embeddings natively — no extra config needed.
+# For Anthropic (which has no built-in embeddings), or when you want a
+# specialised embedding model, add an [llm.embeddings] section.
+#
+# Supported providers: "ollama", "openai", "voyage"
+# API keys fall back to env vars: OPENAI_API_KEY, VOYAGE_API_KEY
+#
+# Voyage AI (recommended by Anthropic):
+# [llm.embeddings]
+# provider = "voyage"
+# model    = "voyage-3-lite"          # default; also voyage-3, voyage-3-large
+# # api_key = "pa-..."               # or set VOYAGE_API_KEY env var
+#
+# Ollama (use your local server for embeddings while chatting via Anthropic):
+# [llm.embeddings]
+# provider = "ollama"
+# model    = "nomic-embed-text"       # default
+# base_url = "http://localhost:11434"
+#
+# OpenAI:
+# [llm.embeddings]
+# provider = "openai"
+# model    = "text-embedding-3-small" # default; also text-embedding-3-large
+# # api_key = "sk-..."               # or set OPENAI_API_KEY env var
+
 # ── OpenAI cloud provider ─────────────────────────────────────────────────────
 # To use OpenAI instead of a local Ollama model, replace the [llm] block above
 # with (or uncomment) the following:
