@@ -129,29 +129,30 @@ async fn main() -> Result<()> {
         log_limit: args.log_limit,
     };
 
-    // -- LLM provider for chat ------------------------------------------------
-    let llm_provider_kind = match args.llm_provider.to_lowercase().as_str() {
-        "anthropic" => LlmProviderKind::Anthropic,
-        "openai" => LlmProviderKind::OpenAI,
-        _ => LlmProviderKind::Ollama,
+    // -- Load assistant config from ~/.assistant/config.toml --------------------
+    let file_config = match assistant_core::default_config_path() {
+        Some(p) => assistant_core::load_config(&p),
+        None => {
+            warn!("Cannot determine home directory; using default LLM config");
+            assistant_core::AssistantConfig::default()
+        }
     };
+    let mut llm_config = file_config.llm;
 
-    let default_cfg = assistant_core::LlmConfig::default();
-
-    let llm_model = args.llm_model.unwrap_or_else(|| match llm_provider_kind {
-        LlmProviderKind::Anthropic => "claude-sonnet-4-20250514".to_string(),
-        LlmProviderKind::OpenAI => "gpt-4o".to_string(),
-        LlmProviderKind::Ollama => default_cfg.model.clone(),
-    });
-
-    let llm_base_url = args.llm_base_url.unwrap_or(default_cfg.base_url);
-
-    let llm_config = assistant_core::LlmConfig {
-        provider: llm_provider_kind,
-        model: llm_model,
-        base_url: llm_base_url,
-        ..Default::default()
-    };
+    // CLI args override config file values when explicitly set.
+    if args.llm_provider != "ollama" {
+        llm_config.provider = match args.llm_provider.to_lowercase().as_str() {
+            "anthropic" => LlmProviderKind::Anthropic,
+            "openai" => LlmProviderKind::OpenAI,
+            _ => LlmProviderKind::Ollama,
+        };
+    }
+    if let Some(model) = args.llm_model {
+        llm_config.model = model;
+    }
+    if let Some(base_url) = args.llm_base_url {
+        llm_config.base_url = base_url;
+    }
 
     let llm: Arc<dyn LlmProvider> = match llm_config.provider {
         LlmProviderKind::Ollama => Arc::new(
