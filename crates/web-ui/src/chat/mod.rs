@@ -648,7 +648,7 @@ fn format_time(dt: DateTime<Utc>) -> String {
     dt.format("%l:%M %p").to_string().trim().to_string()
 }
 
-/// Truncate a string to at most `max` characters, appending "..." if needed.
+/// Truncate a string to at most `max` characters.
 fn truncate_str(s: &str, max: usize) -> &str {
     if s.len() <= max {
         s

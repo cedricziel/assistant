@@ -681,9 +681,19 @@ fn detail_js() -> &'static str {
       var raw = row.getAttribute('data-attrs');
       var data;
       try { data = JSON.parse(raw); } catch(e){ panel.textContent = 'Could not parse attributes.'; return; }
-      var html = '<table class="attr-table">';
+      var tbl = document.createElement('table');
+      tbl.className = 'attr-table';
       function addRow(k, v){
-        html += '<tr><td class="attr-k">' + k + '</td><td class="attr-v">' + String(v) + '</td></tr>';
+        var tr = document.createElement('tr');
+        var tdK = document.createElement('td');
+        tdK.className = 'attr-k';
+        tdK.textContent = k;
+        var tdV = document.createElement('td');
+        tdV.className = 'attr-v';
+        tdV.textContent = String(v);
+        tr.appendChild(tdK);
+        tr.appendChild(tdV);
+        tbl.appendChild(tr);
       }
       if(data.span_id) addRow('span_id', data.span_id);
       if(data.name) addRow('name', data.name);
@@ -695,8 +705,8 @@ fn detail_js() -> &'static str {
       if(data.attributes && typeof data.attributes === 'object'){
         Object.keys(data.attributes).forEach(function(k){ addRow(k, data.attributes[k]); });
       }
-      html += '</table>';
-      panel.innerHTML = html;
+      panel.textContent = '';
+      panel.appendChild(tbl);
     });
   });
 })();

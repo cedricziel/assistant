@@ -149,6 +149,7 @@ fn render_logs_sidebar(
     // Severity facets
     let severity_options: &[(&str, &str, i64)] = &[
         ("", "All", stats.total),
+        ("trace", "Trace", stats.trace_count),
         ("debug", "Debug", stats.debug_count),
         ("info", "Info", stats.info_count),
         ("warn", "Warn", stats.warn_count),
@@ -378,7 +379,7 @@ fn render_log_detail_page(log: &RecordedLog) -> String {
         .format("%Y-%m-%d %H:%M:%S%.3f UTC")
         .to_string();
     let body = log.body.as_deref().unwrap_or("");
-    let target = log.target.as_deref().unwrap_or("&mdash;");
+    let target = log.target.as_deref().unwrap_or("\u{2014}");
 
     let trace_link = log
         .trace_id

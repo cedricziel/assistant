@@ -5,10 +5,13 @@
 
 use askama::Template;
 
-/// Wrapper template that extends `base.html` with escaping disabled so that
-/// pre-rendered HTML content passes through unchanged.
+/// Wrapper template that extends `base.html`.
+///
+/// Fields like `page_title` and breadcrumb labels are auto-escaped by Askama.
+/// Pre-rendered HTML fields (`content_html`, `page_css`, `page_js`) use the
+/// `|safe` filter in the template to bypass escaping.
 #[derive(Template)]
-#[template(path = "wrapper.html", escape = "none")]
+#[template(path = "wrapper.html")]
 pub struct WrapperTemplate {
     pub active_page: String,
     pub page_title: String,

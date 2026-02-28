@@ -207,7 +207,7 @@ fn render_bar_chart(title: &str, data: &[(&str, f64)], color: &str) -> String {
         let x = i * (bar_w + bar_gap);
         let y = chart_h as f64 - h;
         // Shorten the bucket label to just HH:MM for tooltips.
-        let short_label = if label.len() >= 14 {
+        let short_label = if label.len() >= 16 {
             &label[11..16]
         } else {
             label

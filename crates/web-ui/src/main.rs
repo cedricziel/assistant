@@ -69,8 +69,9 @@ struct Args {
     no_secure_cookie: bool,
 
     /// LLM provider to use for chat responses (ollama, anthropic, or openai).
-    #[arg(long, default_value = "ollama", env = "LLM_PROVIDER")]
-    llm_provider: String,
+    /// Overrides the provider set in ~/.assistant/config.toml when specified.
+    #[arg(long, env = "LLM_PROVIDER")]
+    llm_provider: Option<String>,
 
     /// LLM model name (e.g. "qwen2.5:7b" for Ollama, "claude-sonnet-4-20250514" for Anthropic).
     /// Defaults to the provider's built-in default if not set.
@@ -140,8 +141,8 @@ async fn main() -> Result<()> {
     let mut llm_config = file_config.llm;
 
     // CLI args override config file values when explicitly set.
-    if args.llm_provider != "ollama" {
-        llm_config.provider = match args.llm_provider.to_lowercase().as_str() {
+    if let Some(provider) = args.llm_provider {
+        llm_config.provider = match provider.to_lowercase().as_str() {
             "anthropic" => LlmProviderKind::Anthropic,
             "openai" => LlmProviderKind::OpenAI,
             _ => LlmProviderKind::Ollama,
