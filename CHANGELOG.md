@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.19](https://github.com/cedricziel/assistant/compare/v0.1.18...v0.1.19) (2026-02-28)
+
+
+### Bug Fixes
+
+* **packaging:** correct web-ui binary name and add EnvironmentFile ([#99](https://github.com/cedricziel/assistant/issues/99)) ([5848347](https://github.com/cedricziel/assistant/commit/58483474330008b66d8aade75abf1ad43ec13bdb))
+
 ## [0.1.18](https://github.com/cedricziel/assistant/compare/v0.1.17...v0.1.18) (2026-02-27)
 
 
