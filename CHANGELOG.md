@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.22](https://github.com/cedricziel/assistant/compare/v0.1.21...v0.1.22) (2026-02-28)
+
+
+### Features
+
+* **llm:** add dedicated embedding provider with Voyage AI support ([#109](https://github.com/cedricziel/assistant/issues/109)) ([b71ff13](https://github.com/cedricziel/assistant/commit/b71ff137b8d929159b3cd7af23e2e5dd19d9a9c7))
+* **provider-openai:** add OpenAI LLM provider with API key and OAuth PKCE auth ([#105](https://github.com/cedricziel/assistant/issues/105)) ([af44f8a](https://github.com/cedricziel/assistant/commit/af44f8a7609c9bc9cbdec3042cc9ca97f633ba3c))
+* **web-ui:** add PWA support for installable offline-capable app ([#112](https://github.com/cedricziel/assistant/issues/112)) ([395db47](https://github.com/cedricziel/assistant/commit/395db47b4647ed27c5ed63fc5809dfcb90ef1efb))
+* **web-ui:** chat interface with LLM streaming and Askama template migration ([#107](https://github.com/cedricziel/assistant/issues/107)) ([e0de5b9](https://github.com/cedricziel/assistant/commit/e0de5b94866b399577dabd12a49438e0a192c399))
+
+
+### Bug Fixes
+
+* **interface-slack:** strip cite tags and convert markdown tables in mrkdwn output ([#108](https://github.com/cedricziel/assistant/issues/108)) ([b88a93b](https://github.com/cedricziel/assistant/commit/b88a93b2596073791d16e1494d8349719cdd04a6))
+* truncate bash output and increase turn timeout ([#110](https://github.com/cedricziel/assistant/issues/110)) ([67a1327](https://github.com/cedricziel/assistant/commit/67a132729b971f070d2cac62c082001da10539e3))
+
 ## [0.1.21](https://github.com/cedricziel/assistant/compare/v0.1.20...v0.1.21) (2026-02-28)
 
 
