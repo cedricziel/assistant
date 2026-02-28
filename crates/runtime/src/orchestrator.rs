@@ -426,10 +426,10 @@ impl Orchestrator {
             )
             .await?;
 
-        // Poll for the result with a 5-minute timeout.
+        // Poll for the result with a 10-minute timeout.
         // Match by both conversation_id and batch_id (request_id) so
         // overlapping turns for the same conversation don't collide.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(600);
         loop {
             if tokio::time::Instant::now() > deadline {
                 anyhow::bail!(
