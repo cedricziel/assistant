@@ -71,6 +71,8 @@ impl ToolHandler for SlackReplyHandler {
         // already stored in the DB by the orchestrator and must not be
         // shown to the user.
         let text = strip_think_tags(&text);
+        // Strip <cite index="…">…</cite> tags (keep inner text).
+        let text = strip_cite_tags(&text);
         if text.is_empty() {
             return Ok(ToolOutput::success(
                 "(thinking-only response; no visible content)",
@@ -392,6 +394,60 @@ fn strip_think_tags(input: &str) -> String {
     result.trim().to_string()
 }
 
+// ── Cite-tag stripping ───────────────────────────────────────────────────────
+
+/// Strip `<cite index="…">…</cite>` tags that some models embed to attribute
+/// sources, keeping only the inner text.
+///
+/// Unlike think-tags the *content* of a cite block is meaningful and must be
+/// preserved; only the surrounding tags are removed.
+fn strip_cite_tags(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut pos = 0;
+    let bytes = input.as_bytes();
+
+    while pos < bytes.len() {
+        // Look for `<cite` (case-sensitive — models emit lowercase).
+        match input[pos..].find("<cite") {
+            Some(open_rel) => {
+                let open_abs = pos + open_rel;
+                // Copy everything before the tag.
+                result.push_str(&input[pos..open_abs]);
+
+                // Find the closing `>` of the opening tag.
+                match input[open_abs..].find('>') {
+                    Some(gt_rel) => {
+                        let content_start = open_abs + gt_rel + 1;
+                        // Find the matching `</cite>`.
+                        match input[content_start..].find("</cite>") {
+                            Some(close_rel) => {
+                                // Keep the inner content.
+                                result.push_str(&input[content_start..content_start + close_rel]);
+                                pos = content_start + close_rel + "</cite>".len();
+                            }
+                            None => {
+                                // Unclosed cite — keep everything after the opening tag as-is.
+                                result.push_str(&input[content_start..]);
+                                return result;
+                            }
+                        }
+                    }
+                    None => {
+                        // Malformed opening tag — copy remainder and bail.
+                        result.push_str(&input[open_abs..]);
+                        return result;
+                    }
+                }
+            }
+            None => {
+                result.push_str(&input[pos..]);
+                break;
+            }
+        }
+    }
+    result
+}
+
 // ── Markdown → mrkdwn conversion ─────────────────────────────────────────────
 
 /// Convert a subset of standard Markdown to Slack mrkdwn format.
@@ -402,6 +458,7 @@ fn strip_think_tags(input: &str) -> String {
 /// - Strikethrough: `~~text~~` → `~text~`
 /// - Links: `[text](url)` → `<url|text>`
 /// - Headings: `# heading` → `*heading*` (bold substitute)
+/// - Tables: consecutive `|`-prefixed lines → fenced code block
 ///
 /// Code spans and code blocks are passed through unchanged (Slack uses the
 /// same backtick syntax). Unrecognised syntax is also passed through.
@@ -443,6 +500,38 @@ fn markdown_to_mrkdwn(input: &str) -> String {
                 line_start = false;
                 continue;
             }
+        }
+
+        // Markdown table: consecutive lines starting with `|` → wrap in a
+        // fenced code block so Slack renders them monospaced with aligned
+        // columns.  Requires at least two `|`-prefixed lines (header + separator
+        // or header + data row) to avoid false positives on stray `|` chars.
+        if line_start && chars[i] == '|' {
+            let mut end = i;
+            let mut line_count = 0u32;
+            loop {
+                // Scan to end of this line.
+                while end < n && chars[end] != '\n' {
+                    end += 1;
+                }
+                line_count += 1;
+                // Check whether the next line also starts with `|`.
+                if end < n && end + 1 < n && chars[end + 1] == '|' {
+                    end += 1; // skip '\n', advance to next `|`-line
+                } else {
+                    break;
+                }
+            }
+            if line_count >= 2 {
+                let table: String = chars[i..end].iter().collect();
+                result.push_str("```\n");
+                result.push_str(&table);
+                result.push_str("\n```");
+                i = end;
+                line_start = false;
+                continue;
+            }
+            // Single `|`-line — not a table, fall through to normal processing.
         }
 
         // Newline: reset line_start.
@@ -710,7 +799,7 @@ fn resolve_upload_bytes(params: &HashMap<String, Value>) -> Result<Vec<u8>, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{markdown_to_mrkdwn, resolve_upload_bytes, strip_think_tags};
+    use super::{markdown_to_mrkdwn, resolve_upload_bytes, strip_cite_tags, strip_think_tags};
 
     #[test]
     fn think_tags_stripped() {
@@ -737,6 +826,50 @@ mod tests {
     fn only_think_tags_returns_empty() {
         assert_eq!(strip_think_tags("<think>all thinking</think>"), "");
     }
+
+    // ── strip_cite_tags tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn cite_tags_stripped_content_kept() {
+        assert_eq!(
+            strip_cite_tags(r#"Hello <cite index="1-2">world</cite>!"#),
+            "Hello world!"
+        );
+    }
+
+    #[test]
+    fn multiple_cite_tags_stripped() {
+        let input = r#"<cite index="1">A</cite> and <cite index="2-3,4">B</cite>"#;
+        assert_eq!(strip_cite_tags(input), "A and B");
+    }
+
+    #[test]
+    fn no_cite_tags_unchanged() {
+        assert_eq!(strip_cite_tags("Hello world"), "Hello world");
+    }
+
+    #[test]
+    fn cite_tag_with_complex_index() {
+        let input = r#"<cite index="14-11,14-12,14-13,14-14,14-15,14-16">Directions here.</cite>"#;
+        assert_eq!(strip_cite_tags(input), "Directions here.");
+    }
+
+    #[test]
+    fn unclosed_cite_tag_keeps_content() {
+        let input = r#"Before <cite index="1">unclosed content"#;
+        assert_eq!(strip_cite_tags(input), "Before unclosed content");
+    }
+
+    #[test]
+    fn cite_tags_in_realistic_message() {
+        let input = r#"P3 — Freiluftparkplatz. <cite index="14-11,14-12">Aus Richtung A52 bleiben.</cite>
+
+<cite index="14-22">Parkgebühr: 7 Euro.</cite>"#;
+        let expected = "P3 — Freiluftparkplatz. Aus Richtung A52 bleiben.\n\nParkgebühr: 7 Euro.";
+        assert_eq!(strip_cite_tags(input), expected);
+    }
+
+    // ── markdown_to_mrkdwn tests ────────────────────────────────────────────
 
     #[test]
     fn bold_double_star_converted() {
@@ -822,6 +955,37 @@ mod tests {
         // Slack emoji syntax :name: must pass through the converter untouched.
         let input = "Hello! How can I assist you today? :wave:";
         assert_eq!(markdown_to_mrkdwn(input), input);
+    }
+
+    #[test]
+    fn table_wrapped_in_code_block() {
+        let input = "| Name | Age |\n|------|-----|\n| Alice | 30 |";
+        let expected = "```\n| Name | Age |\n|------|-----|\n| Alice | 30 |\n```";
+        assert_eq!(markdown_to_mrkdwn(input), expected);
+    }
+
+    #[test]
+    fn table_with_surrounding_text() {
+        let input = "Here is a table:\n| A | B |\n|---|---|\n| 1 | 2 |\nEnd.";
+        let output = markdown_to_mrkdwn(input);
+        assert_eq!(
+            output,
+            "Here is a table:\n```\n| A | B |\n|---|---|\n| 1 | 2 |\n```\nEnd."
+        );
+    }
+
+    #[test]
+    fn single_pipe_line_not_wrapped() {
+        // A single line starting with `|` is not a table.
+        let input = "| just a pipe";
+        assert_eq!(markdown_to_mrkdwn(input), input);
+    }
+
+    #[test]
+    fn table_at_end_of_input() {
+        let input = "Results:\n| x | y |\n| 1 | 2 |";
+        let expected = "Results:\n```\n| x | y |\n| 1 | 2 |\n```";
+        assert_eq!(markdown_to_mrkdwn(input), expected);
     }
 
     // ── resolve_upload_bytes tests ───────────────────────────────────────────
