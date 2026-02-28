@@ -244,7 +244,7 @@ fn render_login_page(error: Option<&str>) -> String {
   </div>
 </div>
 </body></html>"#,
-        css = crate::default_css(),
+        css = crate::common::default_css(),
         login_css = login_css(),
         error = error_html,
     )

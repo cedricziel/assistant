@@ -1,0 +1,9 @@
+<div class="message msg-assistant" id="streaming-msg"
+     hx-ext="sse" sse-connect="/chat/{{ id }}/stream?turn={{ turn }}"
+     sse-swap="done" hx-swap="outerHTML">
+  <div class="msg-header">
+    <span class="msg-role">Assistant</span>
+    <span class="msg-time">now</span>
+  </div>
+  <div class="msg-content" sse-swap="token" hx-swap="beforeend"></div>
+</div>

@@ -1,5 +1,6 @@
 pub mod bus;
 pub mod bus_messages;
+pub mod config;
 pub mod memory;
 pub mod subagent;
 pub mod tool;
@@ -10,6 +11,7 @@ pub use bus_messages::{
     topic, AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase,
     TurnRequest, TurnResult, TurnStatus,
 };
+pub use config::{default_config_path, load_config};
 pub use memory::{
     base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments, MemoryLoader,
 };

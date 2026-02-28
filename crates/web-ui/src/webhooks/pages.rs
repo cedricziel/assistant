@@ -630,23 +630,23 @@ fn format_ts(ts: DateTime<Utc>) -> String {
 }
 
 fn page_shell(title: &str, sidebar: &str, content: &str) -> String {
-    format!(
-        "<!DOCTYPE html>\
-         <html><head>\
-         <meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <title>{title} - Assistant</title>\
-         <style>{css}\n{extra_css}</style>\
-         </head><body>\
-         <div class=\"layout\">\
+    let content_html = format!(
+        "<div class=\"layout\">\
          <aside class=\"sidebar\">{sidebar}</aside>\
          <main class=\"main\">{content}</main>\
-         </div></body></html>",
-        title = html_escape(title),
-        css = crate::default_css(),
-        extra_css = webhooks_css(),
+         </div>",
         sidebar = sidebar,
         content = content,
+    );
+    let page_css = format!("{}\n{}", crate::common::default_css(), webhooks_css());
+    crate::legacy::render_page(
+        "webhooks",
+        title,
+        "Management",
+        title,
+        &page_css,
+        &content_html,
+        "",
     )
 }
 
@@ -902,26 +902,16 @@ mod tests {
     // -- render_sidebar --
 
     #[test]
-    fn render_sidebar_marks_active_item() {
+    fn render_sidebar_shows_heading_for_active_page() {
         let html = render_sidebar("webhooks");
-        assert!(
-            html.contains("facet-link active"),
-            "should have an active class",
-        );
-        // The Webhooks link should be the active one.
-        assert!(html.contains("href=\"/webhooks\""));
-        // Other links should be present but not active.
-        assert!(html.contains("href=\"/traces\""));
-        assert!(html.contains("href=\"/agents\""));
+        assert!(html.contains("Webhooks"), "heading matches active page");
+        assert!(html.contains("assistant"), "brand name present");
     }
 
     #[test]
-    fn render_sidebar_includes_all_nav_items() {
-        let html = render_sidebar("traces");
-        assert!(html.contains("Traces"));
-        assert!(html.contains("Logs"));
-        assert!(html.contains("Agents"));
-        assert!(html.contains("Webhooks"));
+    fn render_sidebar_shows_agents_heading() {
+        let html = render_sidebar("agents");
+        assert!(html.contains("Agents"), "heading matches agents page");
     }
 
     // -- render_webhook_form --

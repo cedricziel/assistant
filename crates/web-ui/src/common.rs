@@ -17,45 +17,51 @@ pub fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
 
-/// Render the sidebar navigation shared by agent and webhook management pages.
-///
-/// `active` should be the lowercase label of the currently active page
-/// (e.g. `"agents"`, `"webhooks"`).
-pub fn render_sidebar(active: &str) -> String {
-    let items = [
-        ("Traces", "/traces"),
-        ("Logs", "/logs"),
-        ("Agents", "/agents"),
-        ("Webhooks", "/webhooks"),
-    ];
-    let mut links = String::new();
-    for (label, href) in &items {
-        let class = if label.to_ascii_lowercase() == active {
-            "facet-link active"
-        } else {
-            "facet-link"
-        };
-        links.push_str(&format!(
-            "<li><a class=\"{class}\" href=\"{href}\"><span>{label}</span></a></li>",
-            class = class,
-            href = href,
-            label = label,
-        ));
+/// Percent-encode a string for use in URL query parameters.
+pub fn url_encode(input: &str) -> String {
+    input
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{:02X}", byte),
+        })
+        .collect()
+}
+
+/// Format a millisecond duration as a human-readable string.
+pub fn format_duration(ms: i64) -> String {
+    if ms >= 60_000 {
+        format!("{:.1} min", ms as f64 / 60_000.0)
+    } else if ms >= 1_000 {
+        format!("{:.1} s", ms as f64 / 1_000.0)
+    } else {
+        format!("{ms} ms")
     }
+}
+
+/// Shared CSS used by legacy pages (traces, logs, analytics, agents, webhooks).
+pub fn default_css() -> &'static str {
+    include_str!("default.css")
+}
+
+/// Render the sidebar for agent and webhook management pages.
+///
+/// Navigation links have been removed — the icon rail handles cross-page
+/// navigation.  The sidebar retains the brand heading and section title
+/// derived from `active`.
+pub fn render_sidebar(active: &str) -> String {
+    let heading = match active {
+        "agents" => "Agents",
+        "webhooks" => "Webhooks",
+        _ => "Management",
+    };
 
     format!(
         "<div class=\"sidebar-inner\">\
-         <div class=\"brand\"><p>assistant</p><h2>Agent Manager</h2></div>\
-         <div class=\"facet-group\">\
-         <h3>Navigation</h3>\
-         <ul>{links}</ul>\
-         </div>\
-         <div class=\"facet-footer\">\
-         <form method=\"POST\" action=\"/logout\" style=\"margin:0\">\
-         <button type=\"submit\" class=\"logout-btn\">Sign out</button>\
-         </form>\
-         </div>\
+         <div class=\"brand\"><p>assistant</p><h2>{heading}</h2></div>\
          </div>",
-        links = links,
+        heading = heading,
     )
 }
