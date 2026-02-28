@@ -213,6 +213,9 @@ pub enum LlmProviderKind {
     #[default]
     Ollama,
     Anthropic,
+    /// OpenAI Chat Completions API (API key or OAuth).
+    #[serde(alias = "openai-codex")]
+    OpenAI,
 }
 
 /// LLM / provider configuration
@@ -234,11 +237,15 @@ pub struct LlmConfig {
     pub embedding_model: String,
     /// API key for cloud providers (Anthropic, OpenAI, …).
     /// For Anthropic, also checked via `ANTHROPIC_API_KEY` env var.
+    /// For OpenAI, also checked via `OPENAI_API_KEY` env var.
     #[serde(default)]
     pub api_key: Option<String>,
     /// Provider-specific Anthropic options.
     #[serde(default)]
     pub anthropic: AnthropicOptions,
+    /// Provider-specific OpenAI options.
+    #[serde(default)]
+    pub openai: OpenAIOptions,
 }
 
 impl Default for LlmConfig {
@@ -252,6 +259,7 @@ impl Default for LlmConfig {
             embedding_model: default_embedding_model(),
             api_key: None,
             anthropic: AnthropicOptions::default(),
+            openai: OpenAIOptions::default(),
         }
     }
 }
@@ -330,6 +338,31 @@ impl Default for AnthropicWebFetchOptions {
 pub struct AnthropicCitationsOptions {
     #[serde(default)]
     pub enabled: bool,
+}
+
+// ── OpenAI-specific options ───────────────────────────────────────────────────
+
+/// Additional configuration for OpenAI-specific features.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenAIOptions {
+    /// Authentication mode: `"api-key"` (default) or `"oauth"` (Codex subscription).
+    #[serde(default)]
+    pub auth_mode: OpenAIAuthMode,
+    /// OAuth client ID for the PKCE flow.  Required when `auth_mode = "oauth"`.
+    pub oauth_client_id: Option<String>,
+    /// Maximum completion tokens per response (default: 8192).
+    pub max_tokens: Option<u32>,
+}
+
+/// How the OpenAI provider authenticates.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OpenAIAuthMode {
+    /// Standard `OPENAI_API_KEY` bearer token (pay-per-use).
+    #[default]
+    ApiKey,
+    /// OAuth 2.0 PKCE via ChatGPT sign-in (Codex subscription).
+    OAuth,
 }
 
 /// Storage configuration

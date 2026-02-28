@@ -2,7 +2,7 @@
 # Copy to ~/.assistant/config.toml and customize
 
 [llm]
-# LLM backend provider.  Options: "ollama" (default, local), "anthropic" (cloud).
+# LLM backend provider.  Options: "ollama" (default, local), "anthropic" (cloud), "openai" (cloud).
 provider = "ollama"
 # Model to use for inference.
 # Ollama models — requires native tool-calling support. Recommended choices (2026):
@@ -53,6 +53,33 @@ timeout_secs = 120
 # allowed_domains = []
 # blocked_domains = []
 # citations.enabled = true
+
+# ── OpenAI cloud provider ─────────────────────────────────────────────────────
+# To use OpenAI instead of a local Ollama model, replace the [llm] block above
+# with (or uncomment) the following:
+#
+# [llm]
+# provider        = "openai"
+# model           = "gpt-4o"          # or gpt-4.1, gpt-4o-mini, o3-mini, o3
+# api_key         = "sk-..."          # or set OPENAI_API_KEY env var
+# max_iterations  = 80
+# timeout_secs    = 120
+# embedding_model = "text-embedding-3-small"
+#
+# [llm.openai]
+# max_tokens = 8192                   # max_completion_tokens per response
+#
+# # Alternative: OAuth PKCE mode for Codex subscriptions (billed against
+# # your ChatGPT plan quota instead of API credits).
+# # [llm.openai]
+# # auth_mode       = "oauth"
+# # oauth_client_id = "your-client-id"
+# # max_tokens      = 8192
+#
+# The base_url setting also works with OpenAI-compatible APIs:
+# base_url = "https://openrouter.ai/api/v1"        # OpenRouter
+# base_url = "http://localhost:8000/v1"             # vLLM / LM Studio
+# See docs/openai.md for full details.
 
 [storage]
 # Path to SQLite database (~/.assistant/assistant.db by default)

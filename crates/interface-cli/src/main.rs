@@ -9,6 +9,7 @@ use assistant_core::{AssistantConfig, Interface, LlmProviderKind, MemoryLoader, 
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_ollama::OllamaProvider;
+use assistant_provider_openai::OpenAIProvider;
 use assistant_runtime::{
     init_tracing, orchestrator::ConfirmationCallback, scheduler::spawn_scheduler,
     start_conversation_context, Orchestrator,
@@ -428,6 +429,10 @@ async fn bootstrap(
         LlmProviderKind::Anthropic => Arc::new(
             AnthropicProvider::from_llm_config(&config.llm)
                 .context("Failed to create Anthropic LLM client")?,
+        ),
+        LlmProviderKind::OpenAI => Arc::new(
+            OpenAIProvider::from_llm_config(&config.llm)
+                .context("Failed to create OpenAI LLM client")?,
         ),
     };
 

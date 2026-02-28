@@ -1,0 +1,26 @@
+[package]
+name = "assistant-provider-openai"
+version = "0.1.19"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "OpenAI LLM provider with API key and Codex OAuth support"
+
+[dependencies]
+assistant-core = { path = "../core" }
+assistant-llm  = { path = "../llm" }
+async-trait    = { workspace = true }
+anyhow         = { workspace = true }
+tokio          = { workspace = true }
+reqwest        = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+tracing        = { workspace = true }
+futures        = { workspace = true }
+chrono         = { workspace = true }
+dirs           = { workspace = true }
+base64         = { workspace = true }
+sha2           = { workspace = true }
+url            = { workspace = true }
+getrandom      = { workspace = true }
+async-openai   = { version = "0.33", features = ["chat-completion", "embedding"] }
