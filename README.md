@@ -172,14 +172,34 @@ Copy `config.toml` to `~/.assistant/config.toml` and edit:
 
 ```toml
 [llm]
-# Conservative default (≤ 8 GB VRAM). For 12 GB VRAM, try qwen2.5:14b.
+provider = "ollama"            # "ollama" (default), "anthropic", or "openai"
 model = "qwen2.5:7b"          # any Ollama model with tool-calling support
 base_url = "http://localhost:11434"
-tool_call_mode = "auto"        # "auto" | "native" | "react"
-max_iterations = 10
+max_iterations = 80
 
 [skills]
 disabled = []                   # optional list of tool names to disable
+```
+
+For cloud providers, set the provider and API key:
+
+```toml
+[llm]
+provider = "anthropic"
+model    = "claude-sonnet-4-20250514"
+api_key  = "sk-ant-..."       # or set ANTHROPIC_API_KEY env var
+```
+
+#### Embeddings
+
+Ollama and OpenAI support embeddings natively.  When using Anthropic (which
+lacks built-in embeddings), configure a dedicated embedding provider:
+
+```toml
+[llm.embeddings]
+provider = "voyage"            # "ollama", "openai", or "voyage"
+model    = "voyage-3-lite"     # optional, provider-specific default used
+# api_key = "pa-..."          # or set VOYAGE_API_KEY env var
 ```
 
 ## Workspace layout
@@ -187,9 +207,11 @@ disabled = []                   # optional list of tool names to disable
 ```
 assistant/
 ├── crates/
-│   ├── core/                  # SkillDef, parser, shared types
-│   ├── llm/                   # LlmProvider trait + LlmClient
-│   ├── provider-ollama/       # Ollama backend (native tool-call + ReAct)
+│   ├── core/                  # Shared types, ToolHandler trait, MessageBus
+│   ├── llm/                   # LlmProvider trait, EmbeddingProvider, LlmClient
+│   ├── provider-ollama/       # Ollama backend (native tool-call + embeddings)
+│   ├── provider-anthropic/    # Anthropic backend (Claude models)
+│   ├── provider-openai/       # OpenAI backend (GPT models + embeddings)
 │   ├── storage/               # SQLite, SkillRegistry, trace store, memory store
 │   ├── runtime/               # ReAct orchestrator, scheduler
 │   ├── tool-executor/         # Builtin tool registry + skill installer
@@ -198,7 +220,7 @@ assistant/
 │   ├── interface-slack/       # Slack Socket Mode library + slack-post skill
 │   ├── interface-mattermost/  # Mattermost WebSocket library
 │   ├── interface-signal/      # Signal interface (feature-gated, separate binary)
-│   └── web-ui/                # Optional trace analysis web UI
+│   └── web-ui/                # Trace analysis web UI + A2A protocol server
 ├── docker/                    # Dockerfiles (all build the unified assistant binary)
 ├── migrations/                # SQLite migration files
 ├── skills/                    # Built-in SKILL.md definitions

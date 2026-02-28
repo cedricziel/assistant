@@ -26,13 +26,16 @@ Install hooks after cloning: `make install-hooks`.
 
 ## Workspace Structure
 
-12 crates under `crates/`, one root crate. Edition 2021, resolver 2.
+Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 
 | Crate (package name)             | Path                          | Purpose                                              |
 |----------------------------------|-------------------------------|------------------------------------------------------|
 | `assistant-core`                 | `crates/core`                 | Shared types, ToolHandler trait, MessageBus trait      |
-| `assistant-llm`                  | `crates/llm`                  | LlmProvider trait, LlmClient, prompt builder          |
+| `assistant-llm`                  | `crates/llm`                  | LlmProvider trait, EmbeddingProvider, LlmClient       |
 | `assistant-provider-ollama`      | `crates/provider-ollama`      | Ollama LlmProvider implementation                     |
+| `assistant-provider-anthropic`   | `crates/provider-anthropic`   | Anthropic LlmProvider implementation                  |
+| `assistant-provider-openai`      | `crates/provider-openai`      | OpenAI LlmProvider implementation                     |
+| `assistant-skills`               | `crates/skills`               | Skill parsing, validation, embedded builtins          |
 | `assistant-storage`              | `crates/storage`              | SQLite (sqlx), SkillRegistry, TraceStore, MessageBus  |
 | `assistant-runtime`              | `crates/runtime`              | Orchestrator (main ReAct loop), SafetyGate, Scheduler |
 | `assistant-tool-executor`        | `crates/tool-executor`        | ToolHandler registry, builtin tools, dispatch         |
@@ -41,12 +44,13 @@ Install hooks after cloning: `make install-hooks`.
 | `assistant-interface-slack`      | `crates/interface-slack`      | Slack bot library                                     |
 | `assistant-interface-mattermost` | `crates/interface-mattermost` | Mattermost bot library                                |
 | `assistant-interface-signal`     | `crates/interface-signal`     | Signal interface stub (feature-gated)                 |
+| `assistant-web-ui`               | `crates/web-ui`               | Trace analysis web UI + A2A protocol server           |
 | `assistant-integration-tests`    | `crates/integration-tests`    | End-to-end smoke tests                                |
 
 Dependency order (no cycles):
 ```
 interface-cli -> runtime -> llm -> core
-                    |         '-> provider-ollama
+                    |         '-> provider-ollama, provider-anthropic, provider-openai
                     |-> storage -> core
                     |-> tool-executor -> core, storage, llm
                     '-> mcp-server, interface-slack, interface-mattermost (optional features)
