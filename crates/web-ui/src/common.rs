@@ -17,6 +17,35 @@ pub fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
 
+/// Percent-encode a string for use in URL query parameters.
+pub fn url_encode(input: &str) -> String {
+    input
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{:02X}", byte),
+        })
+        .collect()
+}
+
+/// Format a millisecond duration as a human-readable string.
+pub fn format_duration(ms: i64) -> String {
+    if ms >= 60_000 {
+        format!("{:.1} min", ms as f64 / 60_000.0)
+    } else if ms >= 1_000 {
+        format!("{:.1} s", ms as f64 / 1_000.0)
+    } else {
+        format!("{ms} ms")
+    }
+}
+
+/// Shared CSS used by legacy pages (traces, logs, analytics, agents, webhooks).
+pub fn default_css() -> &'static str {
+    include_str!("default.css")
+}
+
 /// Render the sidebar for agent and webhook management pages.
 ///
 /// Navigation links have been removed — the icon rail handles cross-page
