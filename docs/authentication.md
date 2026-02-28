@@ -28,6 +28,7 @@ is trimmed automatically.
 4. The cookie is `HttpOnly`, `SameSite=Strict`, and valid for 7 days.
 5. When the server binds to a non-loopback address, the `Secure`
    attribute is added so the cookie is only sent over HTTPS.
+   Pass `--no-secure-cookie` to disable this if plain HTTP is acceptable.
 6. Sign out via the sidebar button (`POST /logout`), which clears the
    cookie.
 
@@ -101,6 +102,7 @@ before calling any protected endpoint.
   never stored in the cookie.
 - `SameSite=Strict` prevents CSRF via cross-origin requests.
 - `HttpOnly` prevents JavaScript access to the cookie.
-- `Secure` is added automatically when binding to a non-loopback address.
+- `Secure` is added automatically when binding to a non-loopback address
+  (override with `--no-secure-cookie` for plain HTTP behind a VPN).
 - A warning is logged when binding to a non-loopback address to flag
   unintentional network exposure.
