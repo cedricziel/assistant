@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.27](https://github.com/cedricziel/assistant/compare/v0.1.26...v0.1.27) (2026-03-01)
+
+
+### Features
+
+* add voice message transcription (Whisper, Ollama, Deepgram) ([#131](https://github.com/cedricziel/assistant/issues/131)) ([9610c0d](https://github.com/cedricziel/assistant/commit/9610c0d7fe0f335875d9576a346aeee9f65b6ebb))
+* **provider-openai,provider-moonshot:** add hosted web search support ([#126](https://github.com/cedricziel/assistant/issues/126)) ([a90de0a](https://github.com/cedricziel/assistant/commit/a90de0a26fe8af1cdcf210b83e365b5b1a6490f2))
+* **provider-openai:** migrate from Chat Completions to Responses API ([#128](https://github.com/cedricziel/assistant/issues/128)) ([89eeffb](https://github.com/cedricziel/assistant/commit/89eeffbe4772565d83f28a8ec7786e89ff10a59f))
+
+
+### Bug Fixes
+
+* **runtime:** scope turn workers by interface to prevent cross-service theft ([#130](https://github.com/cedricziel/assistant/issues/130)) ([9b672b2](https://github.com/cedricziel/assistant/commit/9b672b2b6d405dee7264fe49dd293c6d91acdfeb))
+
 ## [0.1.26](https://github.com/cedricziel/assistant/compare/v0.1.25...v0.1.26) (2026-03-01)
 
 
