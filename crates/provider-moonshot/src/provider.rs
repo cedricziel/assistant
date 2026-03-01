@@ -173,11 +173,16 @@ impl MoonshotProvider {
         for round in 0..MAX_WEB_SEARCH_ROUNDS {
             debug!(round, "Moonshot web-search: sending request");
 
+            // NOTE: Thinking mode must be disabled when $web_search is
+            // active.  Moonshot's builtin does not return `reasoning_content`
+            // in tool-call responses, causing the API to reject the echo-back
+            // with "thinking is enabled but reasoning_content is missing".
             let body = json!({
                 "model": self.model,
                 "messages": messages,
                 "tools": request_tools,
                 "max_tokens": self.max_tokens,
+                "thinking": { "type": "disabled" },
             });
 
             let resp = client
@@ -767,6 +772,51 @@ mod tests {
                 assert_eq!(text, "2+2 is 4");
             }
             other => panic!("expected FinalAnswer, got {other:?}"),
+        }
+    }
+
+    // ── Live integration tests (require MOONSHOT_API_KEY) ─────────────────
+
+    #[tokio::test]
+    #[ignore = "requires MOONSHOT_API_KEY"]
+    async fn live_web_search() {
+        let api_key = std::env::var("MOONSHOT_API_KEY").expect("MOONSHOT_API_KEY must be set");
+
+        let provider = MoonshotProvider::new(
+            "kimi-k2.5".to_string(),
+            DEFAULT_BASE_URL.to_string(),
+            &api_key,
+            60,
+            DEFAULT_MAX_TOKENS,
+            true,
+        )
+        .expect("should build");
+
+        let history = vec![ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "What is today's date? Use web search to confirm.".to_string(),
+        }];
+
+        let result = provider
+            .chat("You are a helpful assistant. Be concise.", &history, &[])
+            .await
+            .expect("live chat should succeed");
+
+        match result {
+            LlmResponse::FinalAnswer(text, meta) => {
+                eprintln!("--- Live $web_search response ---");
+                eprintln!("Model: {:?}", meta.model);
+                eprintln!(
+                    "Tokens: in={:?} out={:?}",
+                    meta.input_tokens, meta.output_tokens
+                );
+                eprintln!("Answer: {text}");
+                eprintln!("---");
+                assert!(!text.is_empty(), "answer should not be empty");
+            }
+            other => {
+                panic!("expected FinalAnswer but got {other:?}");
+            }
         }
     }
 }
