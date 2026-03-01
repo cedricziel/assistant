@@ -653,7 +653,7 @@ impl Orchestrator {
             .prepare_history(user_message, conversation_id, attachments)
             .await?;
 
-        // 4. Load global tool specs and merge with extensions for LLM tool listing.
+        // 4. Provider capabilities — used to filter tool specs each iteration.
         //    Extension specs come first so the LLM sees them prominently.
         //
         //    When a `reply` extension tool is present, suppress any global tools
@@ -662,16 +662,6 @@ impl Orchestrator {
         //    into replying to the channel root instead of the active thread.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
         let provider_caps = self.llm.capabilities();
-        let global_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
-        let all_specs: Vec<ToolSpec> = ext_specs
-            .iter()
-            .cloned()
-            .chain(
-                global_specs
-                    .into_iter()
-                    .filter(|s| !has_reply_ext || !s.name.contains("post")),
-            )
-            .collect();
 
         let base_system_prompt = self.compose_system_prompt().await;
         // When extension tools are present, guide the LLM to use them.
@@ -754,17 +744,37 @@ impl Orchestrator {
         let mut turn_ended = false;
         let mut replied = false;
         let mut turn_attachments: Vec<Attachment> = Vec::new();
+        // Tracks tool restrictions imposed by the most recently loaded skill.
+        let mut active_allowed_tools: Option<Vec<String>> = None;
 
         // 5. Tool-calling loop.
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Extension-tools loop iteration");
+
+            // Recompute global tool specs each iteration — when a skill with
+            // `allowed-tools` was loaded, only advertise those global tools.
+            // Extension tools are always available regardless of skill
+            // restrictions (they are interface concerns, not skill concerns).
+            let global_specs = Self::filter_tool_specs(
+                self.executor.to_specs_filtered(&active_allowed_tools),
+                &provider_caps,
+            );
+            let all_specs: Vec<ToolSpec> = ext_specs
+                .iter()
+                .cloned()
+                .chain(
+                    global_specs
+                        .into_iter()
+                        .filter(|s| !has_reply_ext || !s.name.contains("post")),
+                )
+                .collect();
 
             let ctx = ExecutionContext {
                 conversation_id,
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: false,
-                allowed_tools: None,
+                allowed_tools: active_allowed_tools.clone(),
                 depth: 0,
             };
 
@@ -1172,6 +1182,13 @@ impl Orchestrator {
                                         "tool_observation",
                                         output.content.clone(),
                                     ));
+                                    // When load-skill returns an allowed_tools
+                                    // restriction, activate it for subsequent
+                                    // iterations.
+                                    if name == "load-skill" {
+                                        active_allowed_tools =
+                                            extract_allowed_tools(output.data.as_ref());
+                                    }
                                     // Collect any attachments from the global tool.
                                     if !output.attachments.is_empty() {
                                         turn_attachments.extend(output.attachments);
@@ -1307,26 +1324,35 @@ impl Orchestrator {
             .prepare_history(user_message, conversation_id, Vec::new())
             .await?;
 
-        // 4. Load all registered tool specs.
+        // 4. Provider capabilities (used to filter tool specs each iteration).
         let provider_caps = self.llm.capabilities();
-        let tool_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
 
         // 5. Build the system prompt fresh from disk.
         let system_prompt = self.compose_system_prompt().await;
 
         // 6. Tool-calling loop.
         let mut turn_attachments: Vec<Attachment> = Vec::new();
+        // Tracks tool restrictions imposed by the most recently loaded skill.
+        let mut active_allowed_tools: Option<Vec<String>> = None;
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
             debug!(parent: &iteration_span, iteration, "Tool-calling loop iteration");
+
+            // Recompute tool specs each iteration — when a skill with
+            // `allowed-tools` was loaded, only advertise those tools to
+            // the LLM.
+            let tool_specs = Self::filter_tool_specs(
+                self.executor.to_specs_filtered(&active_allowed_tools),
+                &provider_caps,
+            );
 
             let ctx = ExecutionContext {
                 conversation_id,
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: matches!(interface, Interface::Cli),
-                allowed_tools: None,
+                allowed_tools: active_allowed_tools.clone(),
                 depth: 0,
             };
 
@@ -1517,6 +1543,13 @@ impl Orchestrator {
                                     "tool_observation",
                                     output.content.clone(),
                                 ));
+                                // When load-skill returns an allowed_tools
+                                // restriction, activate it for subsequent
+                                // iterations.
+                                if name == "load-skill" {
+                                    active_allowed_tools =
+                                        extract_allowed_tools(output.data.as_ref());
+                                }
                                 // Collect any attachments from the tool output.
                                 if !output.attachments.is_empty() {
                                     turn_attachments.extend(output.attachments);
@@ -1617,22 +1650,30 @@ impl Orchestrator {
             .await?;
 
         let provider_caps = self.llm.capabilities();
-        let tool_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
 
         let system_prompt = self.compose_system_prompt().await;
 
         let mut turn_attachments: Vec<Attachment> = Vec::new();
+        // Tracks tool restrictions imposed by the most recently loaded skill.
+        let mut active_allowed_tools: Option<Vec<String>> = None;
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
             debug!(parent: &iteration_span, iteration, "Streaming tool-calling loop iteration");
+
+            // Recompute tool specs each iteration — when a skill with
+            // `allowed-tools` was loaded, only advertise those tools.
+            let tool_specs = Self::filter_tool_specs(
+                self.executor.to_specs_filtered(&active_allowed_tools),
+                &provider_caps,
+            );
 
             let ctx = ExecutionContext {
                 conversation_id,
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: matches!(interface, Interface::Cli),
-                allowed_tools: None,
+                allowed_tools: active_allowed_tools.clone(),
                 depth: 0,
             };
 
@@ -1817,6 +1858,13 @@ impl Orchestrator {
                                     "tool_observation",
                                     output.content.clone(),
                                 ));
+                                // When load-skill returns an allowed_tools
+                                // restriction, activate it for subsequent
+                                // iterations.
+                                if name == "load-skill" {
+                                    active_allowed_tools =
+                                        extract_allowed_tools(output.data.as_ref());
+                                }
                                 // Collect any attachments from the tool output.
                                 if !output.attachments.is_empty() {
                                     turn_attachments.extend(output.attachments);
@@ -2659,6 +2707,22 @@ impl SubagentRunner for Orchestrator {
 /// the model directly.
 fn tool_result_content(content: &str, _data: Option<&serde_json::Value>) -> String {
     content.to_string()
+}
+
+/// Extract an `allowed_tools` list from the structured data returned by
+/// `load-skill`.  Returns `Some(list)` when the skill declared a non-empty
+/// allowlist, or `None` to lift any previous restriction.
+fn extract_allowed_tools(data: Option<&serde_json::Value>) -> Option<Vec<String>> {
+    let arr = data?.get("allowed_tools")?.as_array()?;
+    let tools: Vec<String> = arr
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+    if tools.is_empty() {
+        None
+    } else {
+        Some(tools)
+    }
 }
 
 /// Create an OpenTelemetry context carrying a conversation-level root span.
@@ -4697,5 +4761,36 @@ mod tests {
             .unwrap()
             .expect("agent record should exist");
         assert_eq!(record.status, assistant_storage::AgentStatus::Failed);
+    }
+
+    // ── allowed-tools tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn extract_allowed_tools_parses_list() {
+        let data = json!({ "allowed_tools": ["bash", "file-read"] });
+        let result = super::extract_allowed_tools(Some(&data));
+        assert_eq!(
+            result,
+            Some(vec!["bash".to_string(), "file-read".to_string()])
+        );
+    }
+
+    #[test]
+    fn extract_allowed_tools_returns_none_for_empty_list() {
+        let data = json!({ "allowed_tools": [] });
+        let result = super::extract_allowed_tools(Some(&data));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn extract_allowed_tools_returns_none_for_no_data() {
+        assert_eq!(super::extract_allowed_tools(None), None);
+    }
+
+    #[test]
+    fn extract_allowed_tools_returns_none_for_missing_key() {
+        let data = json!({ "other_field": 42 });
+        let result = super::extract_allowed_tools(Some(&data));
+        assert_eq!(result, None);
     }
 }
