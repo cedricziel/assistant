@@ -199,7 +199,7 @@
         </thead>
         <tbody>
           {% for agent in agents %}
-          <tr class="is-clickable" onclick="window.location='/agents/{{ agent.id }}'">
+          <tr class="is-clickable" tabindex="0" onclick="window.location='/agents/{{ agent.id }}'" onkeydown="if(event.key==='Enter')window.location='/agents/{{ agent.id }}'">
             <td><a class="trace-id row-link" href="/agents/{{ agent.id }}">{{ agent.short_id }}&hellip;</a></td>
             <td>
               <span class="primary">{{ agent.name }}</span>

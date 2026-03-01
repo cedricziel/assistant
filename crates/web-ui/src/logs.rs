@@ -199,23 +199,12 @@ async fn show_log_detail(
         .to_string();
     let target = log.target.as_deref().unwrap_or("\u{2014}").to_string();
 
-    let trace_link = log
-        .trace_id
-        .as_ref()
-        .filter(|t| !t.is_empty() && *t != "00000000000000000000000000000000")
-        .map(|t| TraceLinkView {
-            short_id: if t.len() >= 8 {
-                t[..8].to_string()
-            } else {
-                t.clone()
-            },
-            full_id: t.clone(),
-        });
+    let trace_link = trace_id_to_link(log.trace_id.as_ref());
 
     let span_id = log
         .span_id
         .as_deref()
-        .filter(|s| !s.is_empty() && *s != "0000000000000000")
+        .filter(|s| !s.is_empty() && *s != NULL_SPAN_ID)
         .map(|s| s.to_string());
 
     let body = log.body.as_deref().unwrap_or("").to_string();
@@ -240,6 +229,28 @@ async fn show_log_detail(
     Ok(render_template(tmpl))
 }
 
+// -- Helpers -----------------------------------------------------------------
+
+/// Null trace ID (32 zeros) used by OpenTelemetry for unset trace context.
+const NULL_TRACE_ID: &str = "00000000000000000000000000000000";
+/// Null span ID (16 zeros) used by OpenTelemetry for unset span context.
+const NULL_SPAN_ID: &str = "0000000000000000";
+
+/// Build a [`TraceLinkView`] from an optional trace ID, filtering out empty and
+/// null OpenTelemetry IDs.
+fn trace_id_to_link(trace_id: Option<&String>) -> Option<TraceLinkView> {
+    trace_id
+        .filter(|t| !t.is_empty() && *t != NULL_TRACE_ID)
+        .map(|t| TraceLinkView {
+            short_id: if t.len() >= 8 {
+                t[..8].to_string()
+            } else {
+                t.clone()
+            },
+            full_id: t.clone(),
+        })
+}
+
 // -- View model builders -----------------------------------------------------
 
 fn log_to_row_view(log: &RecordedLog) -> LogRowView {
@@ -255,21 +266,7 @@ fn log_to_row_view(log: &RecordedLog) -> LogRowView {
     let target = log.target.clone();
     let timestamp = log.timestamp.format("%H:%M:%S%.3f").to_string();
 
-    let trace_link = log
-        .trace_id
-        .as_ref()
-        .filter(|t| !t.is_empty() && *t != "00000000000000000000000000000000")
-        .map(|t| {
-            let short = if t.len() >= 8 {
-                t[..8].to_string()
-            } else {
-                t.clone()
-            };
-            TraceLinkView {
-                short_id: short,
-                full_id: t.clone(),
-            }
-        });
+    let trace_link = trace_id_to_link(log.trace_id.as_ref());
 
     LogRowView {
         id: log.id.clone(),

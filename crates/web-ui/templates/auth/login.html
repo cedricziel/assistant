@@ -93,11 +93,11 @@
         <h2>Agent Manager</h2>
       </div>
       {% if let Some(error) = error %}
-      <div class="login-error">{{ error }}</div>
+      <div class="login-error" id="login-error" role="alert">{{ error }}</div>
       {% endif %}
       <form method="POST" action="/login" class="login-form">
         <label for="token">Auth Token</label>
-        <input type="password" id="token" name="token" placeholder="Enter your token" required autofocus>
+        <input type="password" id="token" name="token" placeholder="Enter your token" required autofocus{% if error.is_some() %} aria-describedby="login-error"{% endif %}>
         <button type="submit">Sign in</button>
       </form>
     </div>

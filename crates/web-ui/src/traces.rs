@@ -149,7 +149,18 @@ async fn show_dashboard(
         .await
         .map_err(internal_error)?;
     let total_count = all_traces.len();
-    let mut traces = all_traces.clone();
+
+    // Build facets from the unfiltered list before moving ownership.
+    let skill_facets = build_skill_facet_views(
+        &all_traces,
+        skill_filter,
+        status_value.as_deref(),
+        conversation_value.as_deref(),
+        min_duration_ms,
+    );
+    let status_options = build_status_options(status_value.as_deref());
+
+    let mut traces = all_traces;
 
     if let Some(filter) = skill_filter {
         traces.retain(|trace| {
@@ -186,18 +197,6 @@ async fn show_dashboard(
     }
 
     let filtered_count = traces.len();
-
-    // -- Build view models --
-
-    let skill_facets = build_skill_facet_views(
-        &all_traces,
-        skill_filter,
-        status_value.as_deref(),
-        conversation_value.as_deref(),
-        min_duration_ms,
-    );
-
-    let status_options = build_status_options(status_value.as_deref());
 
     let trace_rows: Vec<TraceRowView> = traces.iter().map(trace_to_row_view).collect();
 
@@ -407,8 +406,9 @@ fn build_waterfall_rows(
             let label = span.tool_name.as_deref().unwrap_or(&span.name).to_string();
             let offset_ms = (span.start_time - start).num_milliseconds().max(0);
             let offset_pct = ((offset_ms as f64 / total_ms as f64) * 100.0).clamp(0.0, 100.0);
-            let width_pct = ((span.duration_ms.max(1) as f64 / total_ms as f64) * 100.0)
-                .clamp(0.5, 100.0 - offset_pct);
+            let remaining = (100.0 - offset_pct).max(0.0);
+            let raw_width = (span.duration_ms.max(1) as f64 / total_ms as f64) * 100.0;
+            let width_pct = raw_width.clamp(0.0, remaining).max(0.5).min(remaining);
             let bar_class = match span.tool_status.as_deref() {
                 Some("error") => "wf-bar error",
                 Some("ok") => "wf-bar ok",

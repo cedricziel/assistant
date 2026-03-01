@@ -135,8 +135,14 @@ struct AgentFormTemplate {
 // -- Page handlers -----------------------------------------------------------
 
 /// `GET /agents` -- Lists all registered local agents.
-pub async fn list_agents(State(state): State<AgentPagesState>) -> Response {
-    let agents = state.agent_store.list().await.unwrap_or_default();
+pub async fn list_agents(
+    State(state): State<AgentPagesState>,
+) -> Result<Response, (StatusCode, String)> {
+    let agents = state
+        .agent_store
+        .list()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let count = agents.len();
 
     let rows: Vec<AgentRowView> = agents
@@ -158,7 +164,7 @@ pub async fn list_agents(State(state): State<AgentPagesState>) -> Response {
         agents: rows,
         count,
     };
-    render_template(tmpl)
+    Ok(render_template(tmpl))
 }
 
 /// `GET /agents/new` -- Form to create a new agent.
@@ -393,7 +399,10 @@ impl AgentFormData {
         let skills: Vec<AgentSkill> = if self.skills_json.trim().is_empty() {
             vec![]
         } else {
-            serde_json::from_str(&self.skills_json).unwrap_or_default()
+            serde_json::from_str(&self.skills_json).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to parse skills JSON, using empty list");
+                vec![]
+            })
         };
 
         let input_modes: Vec<String> = self

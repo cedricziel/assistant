@@ -25,6 +25,7 @@ struct AnalyticsQuery {
 // -- View models -------------------------------------------------------------
 
 /// A time-window option in the sidebar.
+#[derive(Debug)]
 struct WindowOptionView {
     hours: i64,
     label: &'static str,
@@ -32,6 +33,7 @@ struct WindowOptionView {
 }
 
 /// A single bar in an SVG bar chart.
+#[derive(Debug)]
 struct BarView {
     x: usize,
     y: String,
@@ -42,6 +44,7 @@ struct BarView {
 }
 
 /// An SVG bar chart panel.
+#[derive(Debug)]
 struct ChartView {
     title: &'static str,
     color: &'static str,
@@ -51,6 +54,7 @@ struct ChartView {
 }
 
 /// A row in the model comparison table.
+#[derive(Debug)]
 struct ModelRowView {
     model: String,
     input_tokens: String,
@@ -60,6 +64,7 @@ struct ModelRowView {
 }
 
 /// A row in the tool usage table.
+#[derive(Debug)]
 struct ToolRowView {
     tool_name: String,
     invocations: i64,
@@ -216,8 +221,10 @@ fn build_chart(title: &'static str, data: &[(&str, f64)], color: &'static str) -
             };
             let x = i * (bar_w + bar_gap);
             let y = chart_h as f64 - h;
+            // Labels are ISO timestamps like "2024-01-15 10:30:00";
+            // extract "10:30" (chars 11..16) for compact x-axis display.
             let short_label = if label.len() >= 16 {
-                &label[11..16]
+                label.get(11..16).unwrap_or(label)
             } else {
                 label
             };

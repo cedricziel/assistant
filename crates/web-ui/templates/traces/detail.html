@@ -52,7 +52,7 @@
           {% endfor %}
         </div>
         {% for row in waterfall_rows %}
-        <div class="wf-row" data-span-id="{{ row.span_id }}" data-attrs="{{ row.attrs_json }}">
+        <div class="wf-row" data-span-id="{{ row.span_id }}" data-attrs="{{ row.attrs_json }}" tabindex="0" role="button">
           <div class="wf-label-col" style="padding-left:{{ row.padding_left }}px">
             <span class="wf-label">{% if row.has_error %}<span class="wf-err-icon">&#x2717;</span>{% endif %}{{ row.label }}</span>
             <span class="wf-dur">{{ row.duration }}</span>
@@ -79,6 +79,7 @@
   var rows = document.querySelectorAll('.wf-row');
   var panel = document.getElementById('span-attrs-content');
   rows.forEach(function(row){
+    row.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); row.click(); } });
     row.addEventListener('click', function(){
       rows.forEach(function(r){ r.classList.remove('selected'); });
       row.classList.add('selected');

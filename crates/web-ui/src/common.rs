@@ -56,7 +56,11 @@ pub fn render_template(tmpl: impl Template) -> Response {
         Ok(html) => Html(html).into_response(),
         Err(e) => {
             warn!("Template render error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            if cfg!(debug_assertions) {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
+            }
         }
     }
 }

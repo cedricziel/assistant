@@ -15,6 +15,9 @@ const AUTH_TOKEN = "test-token";
 // 3% tolerance absorbs font hinting differences while still catching layout regressions.
 const MAX_DIFF_RATIO = 0.03;
 
+// Settle time for CSS transitions before screenshotting.
+const CSS_SETTLE_MS = 300;
+
 // -- Helpers ----------------------------------------------------------------
 
 /** Authenticate by submitting the login form. */
@@ -30,7 +33,7 @@ async function login(page: Page) {
 async function navigateAndSettle(page: Page, path: string) {
   await page.goto(path, { waitUntil: "networkidle" });
   // Extra settle time for any CSS transitions
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(CSS_SETTLE_MS);
 }
 
 // -- Tests ------------------------------------------------------------------
@@ -48,7 +51,8 @@ test.describe("Login page", () => {
     await page.goto("/login");
     await page.fill('input[name="token"]', "wrong-token");
     await page.click('button[type="submit"]');
-    await page.waitForTimeout(300);
+    await page.waitForSelector(".login-error");
+    await page.waitForTimeout(CSS_SETTLE_MS);
     await expect(page).toHaveScreenshot("login-error.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,

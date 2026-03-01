@@ -167,11 +167,11 @@ pub async fn login_page() -> Response {
 
 /// `POST /login` — validate the submitted token and set a session cookie.
 #[derive(Deserialize)]
-pub struct LoginForm {
+pub(crate) struct LoginForm {
     token: String,
 }
 
-pub async fn login_submit(
+pub(crate) async fn login_submit(
     Extension(auth): Extension<AuthConfig>,
     Form(form): Form<LoginForm>,
 ) -> Response {

@@ -72,7 +72,7 @@
         </thead>
         <tbody>
           {% for row in rows %}
-          <tr class="is-clickable" onclick="window.location='/webhooks/{{ row.id }}'">
+          <tr class="is-clickable" tabindex="0" onclick="window.location='/webhooks/{{ row.id }}'" onkeydown="if(event.key==='Enter')window.location='/webhooks/{{ row.id }}'">
             <td><a class="trace-id row-link" href="/webhooks/{{ row.id }}">{{ row.short_id }}&hellip;</a></td>
             <td><span class="primary">{{ row.name }}</span></td>
             <td class="url-cell">{{ row.url }}</td>

@@ -108,7 +108,7 @@
         </thead>
         <tbody>
           {% for log in logs %}
-          <tr class="is-clickable" onclick="window.location='/log/{{ log.id }}'">
+          <tr class="is-clickable" tabindex="0" onclick="window.location='/log/{{ log.id }}'" onkeydown="if(event.key==='Enter')window.location='/log/{{ log.id }}'">
             <td><a class="row-link" href="/log/{{ log.id }}"><span class="{{ log.severity_class }}">{{ log.severity_text }}</span></a></td>
             <td class="log-ts">{{ log.timestamp }}</td>
             <td>

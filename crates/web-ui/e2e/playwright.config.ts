@@ -1,4 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import * as os from "os";
+import * as path from "path";
+
+const dbPath = path.join(os.tmpdir(), "assistant-e2e-test.db");
 
 /**
  * Playwright configuration for visual regression tests.
@@ -61,7 +65,7 @@ export default defineConfig({
   /* Auto-start the server if not already running */
   webServer: {
     command:
-      "cargo run -p assistant-web-ui -- --auth-token test-token --listen 127.0.0.1:8787 --db-path /tmp/assistant-e2e-test.db",
+      `cargo run -p assistant-web-ui -- --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
     url: "http://127.0.0.1:8787/login",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
