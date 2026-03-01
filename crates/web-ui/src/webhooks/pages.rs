@@ -560,7 +560,7 @@ fn render_webhook_form(
 ) -> String {
     let tmpl = build_form_template(wh, heading, action, submit_label);
     tmpl.render()
-        .unwrap_or_else(|e| format!("render error: {e}"))
+        .expect("webhook form template should render in tests")
 }
 
 // -- Tests --

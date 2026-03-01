@@ -203,8 +203,8 @@ pub async fn stream_chat(
 </div>
 ```
 
-Clicking the item loads the conversation into the panel without a full
-page reload.
+Clicking the item loads the conversation into the panel without a full-page
+reload.
 
 ### Form Submit with Target
 

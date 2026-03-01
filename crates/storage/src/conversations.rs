@@ -1,6 +1,6 @@
 //! Conversation and message persistence backed by the `conversations` and `messages` tables.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use assistant_core::{Message, MessageRole};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
@@ -129,14 +129,21 @@ impl ConversationStore {
     }
 
     /// Update the title of an existing conversation.
+    ///
+    /// Returns an error if the conversation does not exist.
     pub async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
         let id_str = id.to_string();
-        sqlx::query("UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3")
-            .bind(title)
-            .bind(Utc::now())
-            .bind(&id_str)
-            .execute(&self.pool)
-            .await?;
+        let result =
+            sqlx::query("UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3")
+                .bind(title)
+                .bind(Utc::now())
+                .bind(&id_str)
+                .execute(&self.pool)
+                .await
+                .with_context(|| format!("failed to update title for conversation {id}"))?;
+        if result.rows_affected() == 0 {
+            anyhow::bail!("conversation {id} not found");
+        }
         Ok(())
     }
 

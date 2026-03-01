@@ -67,7 +67,8 @@ fn fingerprint_static(name: &str, ext: &str, content: &'static str) -> Asset {
 struct CssBundle {
     content: String,
     url: String,
-    hash: String,
+    /// ETag value wrapped in double quotes per RFC 7232.
+    etag: String,
 }
 
 static CSS_BUNDLE: LazyLock<CssBundle> = LazyLock::new(|| {
@@ -76,10 +77,11 @@ static CSS_BUNDLE: LazyLock<CssBundle> = LazyLock::new(|| {
         BASE_CSS, DEFAULT_CSS, ENTITY_CSS,
     );
     let fp = fingerprint("app", "css", &content);
+    let etag = format!("\"{}\"", fp.hash);
     CssBundle {
         content,
         url: fp.url,
-        hash: fp.hash,
+        etag,
     }
 });
 
@@ -156,7 +158,7 @@ async fn serve_css_stable() -> Response {
                 header::CACHE_CONTROL,
                 "public, max-age=300, must-revalidate",
             ),
-            (header::ETAG, CSS_BUNDLE.hash.as_str()),
+            (header::ETAG, CSS_BUNDLE.etag.as_str()),
         ],
         CSS_BUNDLE.content.as_str(),
     )

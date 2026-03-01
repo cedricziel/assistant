@@ -204,7 +204,10 @@ pub async fn create_agent(
     Form(form): Form<AgentFormData>,
 ) -> Response {
     let set_default = form.is_default.is_some();
-    let card = form.into_agent_card(&state.base_url);
+    let card = match form.into_agent_card(&state.base_url) {
+        Ok(card) => card,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
     match state.agent_store.register(card, set_default).await {
         Ok(id) => Redirect::to(&format!("/agents/{id}")).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -324,7 +327,10 @@ pub async fn update_agent(
     Path(id): Path<String>,
     Form(form): Form<AgentFormData>,
 ) -> Response {
-    let card = form.into_agent_card(&state.base_url);
+    let card = match form.into_agent_card(&state.base_url) {
+        Ok(card) => card,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
     if state.agent_store.update(&id, card).await {
         Redirect::to(&format!("/agents/{id}")).into_response()
     } else {
@@ -381,7 +387,7 @@ pub struct AgentFormData {
 }
 
 impl AgentFormData {
-    fn into_agent_card(self, default_url: &str) -> AgentCard {
+    fn into_agent_card(self, default_url: &str) -> Result<AgentCard, String> {
         let url = if self.url.is_empty() {
             default_url.to_string()
         } else {
@@ -405,10 +411,10 @@ impl AgentFormData {
         let skills: Vec<AgentSkill> = if self.skills_json.trim().is_empty() {
             vec![]
         } else {
-            serde_json::from_str(&self.skills_json).unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Failed to parse skills JSON, using empty list");
-                vec![]
-            })
+            match serde_json::from_str(&self.skills_json) {
+                Ok(skills) => skills,
+                Err(e) => return Err(format!("Invalid skills JSON: {e}")),
+            }
         };
 
         let input_modes: Vec<String> = self
@@ -424,7 +430,7 @@ impl AgentFormData {
             .filter(|s| !s.is_empty())
             .collect();
 
-        AgentCard {
+        Ok(AgentCard {
             name: self.name,
             description: self.description,
             supported_interfaces: vec![AgentInterface {
@@ -461,7 +467,7 @@ impl AgentFormData {
             skills,
             signatures: vec![],
             icon_url: None,
-        }
+        })
     }
 }
 

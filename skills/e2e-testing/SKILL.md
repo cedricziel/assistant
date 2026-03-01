@@ -20,7 +20,7 @@ mobile) and compared against committed baselines.
 
 ## Directory Layout
 
-```
+```text
 crates/web-ui/e2e/
   playwright.config.ts     # Config: viewports, server, reporters
   package.json             # Dependencies (playwright, @playwright/test)
