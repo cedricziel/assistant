@@ -52,6 +52,9 @@ pub struct MoonshotProvider {
     api_key: String,
     max_tokens: u32,
     web_search_enabled: bool,
+    /// Pre-configured HTTP client (with tracing middleware) for the raw-HTTP
+    /// web-search path.
+    http_client: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl MoonshotProvider {
@@ -75,6 +78,8 @@ impl MoonshotProvider {
 
         let inner = OpenAIProvider::new(openai_cfg, api_key)?;
 
+        let http_client = assistant_llm::build_http_client(timeout_secs)?;
+
         debug!(
             model = %model,
             base_url = %base_url,
@@ -89,6 +94,7 @@ impl MoonshotProvider {
             api_key: api_key.to_string(),
             max_tokens,
             web_search_enabled,
+            http_client,
         })
     }
 
@@ -139,7 +145,6 @@ impl MoonshotProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        let client = reqwest::Client::new();
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
         // Build the initial messages array.
@@ -185,7 +190,8 @@ impl MoonshotProvider {
                 "thinking": { "type": "disabled" },
             });
 
-            let resp = client
+            let resp = self
+                .http_client
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", self.api_key))
                 .header("Content-Type", "application/json")

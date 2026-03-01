@@ -158,16 +158,13 @@ impl From<&AnthropicWebFetchOptions> for WebFetchConfig {
 /// [`LlmProvider`] backed by the Anthropic Messages API.
 pub struct AnthropicProvider {
     config: AnthropicConfig,
-    http: reqwest::Client,
+    http: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl AnthropicProvider {
     /// Create from explicit config.
     pub fn new(config: AnthropicConfig) -> anyhow::Result<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
+        let http = assistant_llm::build_http_client(config.timeout_secs)?;
         Ok(Self { config, http })
     }
 

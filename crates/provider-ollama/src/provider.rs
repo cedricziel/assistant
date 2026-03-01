@@ -54,7 +54,7 @@ pub struct OllamaProvider {
     inner: LlmClient,
     base_url: String,
     embedding_model: String,
-    http: reqwest::Client,
+    http: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl OllamaProvider {
@@ -65,10 +65,7 @@ impl OllamaProvider {
             base_url: config.base_url.clone(),
             timeout_secs: config.timeout_secs,
         };
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
+        let http = assistant_llm::build_http_client(config.timeout_secs)?;
         Ok(Self {
             inner: LlmClient::new(client_config)?,
             base_url: config.base_url,

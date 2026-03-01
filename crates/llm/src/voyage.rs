@@ -81,16 +81,13 @@ struct VoyageEmbedResponse {
 /// Voyage AI embedding client implementing [`EmbeddingProvider`].
 pub struct VoyageEmbedder {
     config: VoyageConfig,
-    http: reqwest::Client,
+    http: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl VoyageEmbedder {
     /// Create a new Voyage AI embedding client.
     pub fn new(config: VoyageConfig) -> anyhow::Result<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build Voyage HTTP client: {e}"))?;
+        let http = crate::http::build_http_client(30)?;
         Ok(Self { config, http })
     }
 }
