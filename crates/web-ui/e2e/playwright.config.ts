@@ -3,11 +3,12 @@ import { defineConfig, devices } from "@playwright/test";
 /**
  * Playwright configuration for visual regression tests.
  *
+ * Three viewport sizes match the app's responsive breakpoints:
+ *   - Desktop (1280px) — full icon rail + top bar
+ *   - Tablet  (768px)  — hamburger menu, no icon rail  (breakpoint: 900px)
+ *   - Mobile  (375px)  — bottom tab bar, no top bar    (breakpoint: 640px)
+ *
  * The web-ui server must be running at BASE_URL before tests start.
- * Use the helper script `./run-server.sh` or start it manually:
- *
- *   cargo run -p assistant-web-ui -- --auth-token test-token --listen 127.0.0.1:8787
- *
  * Set E2E_BASE_URL to override the default address.
  */
 export default defineConfig({
@@ -21,13 +22,14 @@ export default defineConfig({
   retries: process.env.CI ? 0 : 1,
   timeout: 30_000,
 
-  /* Reporter */
-  reporter: process.env.CI ? "github" : "html",
+  /* Reporter: always generate HTML report for visual diff review.
+   * In CI, also emit GitHub annotations for inline failure markers. */
+  reporter: process.env.CI
+    ? [["github"], ["html", { open: "never", outputFolder: "playwright-report" }]]
+    : [["html", { open: "on-failure", outputFolder: "playwright-report" }]],
 
   use: {
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:8787",
-    /* Consistent viewport for snapshot stability */
-    viewport: { width: 1280, height: 900 },
     colorScheme: "dark",
     /* Reduce flakiness from animations */
     actionTimeout: 10_000,
@@ -36,7 +38,23 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chrome",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 900 },
+      },
+    },
+    {
+      name: "tablet-chrome",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 768, height: 1024 },
+      },
+    },
+    {
+      name: "mobile-chrome",
+      use: {
+        ...devices["Pixel 7"],
+      },
     },
   ],
 
