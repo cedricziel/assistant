@@ -1,18 +1,9 @@
-{% extends "base.html" %}
-
-{% block title %}Log {{ short_id }}...{% endblock %}
-
+{% extends "base.html" %} {% block title %}Log {{ short_id }}...{% endblock %}
 {% block breadcrumb %}
 <span class="breadcrumb-page">Observability</span>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">Log {{ short_id }}&hellip;</span>
-{% endblock %}
-
-{% block extra_css %}
-{% include "partials/default_css.html" %}
-{% endblock %}
-
-{% block content %}
+{% endblock %} {% block extra_css %}{% endblock %} {% block content %}
 <div class="page">
   <div class="trace-detail">
     <div class="trace-header-bar">
@@ -25,24 +16,40 @@
     <div class="log-detail-grid">
       <div class="log-meta">
         <table class="attr-table">
-          <tr><td class="attr-k">ID</td><td class="attr-v">{{ log_id }}</td></tr>
-          <tr><td class="attr-k">Severity</td><td class="attr-v"><span class="{{ severity_class }}">{{ severity_text }}</span> ({{ severity_number }})</td></tr>
-          <tr><td class="attr-k">Timestamp</td><td class="attr-v">{{ timestamp }}</td></tr>
-          <tr><td class="attr-k">Target</td><td class="attr-v">{{ target }}</td></tr>
-          <tr><td class="attr-k">Trace ID</td><td class="attr-v">
-            {% if let Some(trace) = trace_link %}
-            <a href="/trace/{{ trace.full_id }}">{{ trace.full_id }}</a>
-            {% else %}
-            &mdash;
-            {% endif %}
-          </td></tr>
-          <tr><td class="attr-k">Span ID</td><td class="attr-v">
-            {% if let Some(sid) = span_id %}
-            {{ sid }}
-            {% else %}
-            &mdash;
-            {% endif %}
-          </td></tr>
+          <tr>
+            <td class="attr-k">ID</td>
+            <td class="attr-v">{{ log_id }}</td>
+          </tr>
+          <tr>
+            <td class="attr-k">Severity</td>
+            <td class="attr-v">
+              <span class="{{ severity_class }}">{{ severity_text }}</span> ({{
+              severity_number }})
+            </td>
+          </tr>
+          <tr>
+            <td class="attr-k">Timestamp</td>
+            <td class="attr-v">{{ timestamp }}</td>
+          </tr>
+          <tr>
+            <td class="attr-k">Target</td>
+            <td class="attr-v">{{ target }}</td>
+          </tr>
+          <tr>
+            <td class="attr-k">Trace ID</td>
+            <td class="attr-v">
+              {% if let Some(trace) = trace_link %}
+              <a href="/trace/{{ trace.full_id }}">{{ trace.full_id }}</a>
+              {% else %} &mdash; {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="attr-k">Span ID</td>
+            <td class="attr-v">
+              {% if let Some(sid) = span_id %} {{ sid }} {% else %} &mdash; {%
+              endif %}
+            </td>
+          </tr>
         </table>
       </div>
       <div class="log-body-section">

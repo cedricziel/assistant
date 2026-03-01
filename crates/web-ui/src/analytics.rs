@@ -76,6 +76,7 @@ struct ToolRowView {
 #[derive(Template)]
 #[template(path = "analytics/page.html")]
 struct AnalyticsPageTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     // Sidebar
     window_options: Vec<WindowOptionView>,
@@ -173,6 +174,7 @@ async fn show_analytics(
         .collect();
 
     let tmpl = AnalyticsPageTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "analytics",
         window_options,
         tokens_in: format_number(summary.total_tokens_in),

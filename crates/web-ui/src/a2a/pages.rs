@@ -82,6 +82,7 @@ struct AgentFormValues {
 #[derive(Template)]
 #[template(path = "agents/list.html")]
 struct AgentsListTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     agents: Vec<AgentRowView>,
     count: usize,
@@ -91,6 +92,7 @@ struct AgentsListTemplate {
 #[derive(Template)]
 #[template(path = "agents/detail.html")]
 struct AgentDetailTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     agent_id: String,
     agent_name: String,
@@ -113,6 +115,7 @@ struct AgentDetailTemplate {
 #[derive(Template)]
 #[template(path = "agents/form.html")]
 struct AgentFormTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     page_title: String,
     heading: String,
@@ -160,6 +163,7 @@ pub async fn list_agents(
         .collect();
 
     let tmpl = AgentsListTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "agents",
         agents: rows,
         count,
@@ -171,6 +175,7 @@ pub async fn list_agents(
 pub async fn new_agent_form(State(_state): State<AgentPagesState>) -> Response {
     let vals = build_form_values(None);
     let tmpl = AgentFormTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "agents",
         page_title: "New Agent".to_string(),
         heading: "Create Agent".to_string(),
@@ -247,6 +252,7 @@ pub async fn show_agent(
     });
 
     let tmpl = AgentDetailTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "agents",
         agent_id: agent.id.clone(),
         agent_name: card.name.clone(),
@@ -291,6 +297,7 @@ pub async fn edit_agent_form(
 
     let vals = build_form_values(Some(&agent));
     let tmpl = AgentFormTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "agents",
         page_title: format!("Edit: {}", agent.card.name),
         heading: "Edit Agent".to_string(),

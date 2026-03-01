@@ -19,6 +19,7 @@ const STATIC_ASSETS = [
   "/pwa/icon.svg",
   "/pwa/icon-maskable.svg",
   "/pwa/offline",
+  "__APP_CSS_URL__",
 ];
 
 const CDN_ASSETS = [
@@ -31,9 +32,7 @@ const CDN_ASSETS = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     Promise.all([
-      caches
-        .open(STATIC_CACHE)
-        .then((cache) => cache.addAll(STATIC_ASSETS)),
+      caches.open(STATIC_CACHE).then((cache) => cache.addAll(STATIC_ASSETS)),
       caches.open(CDN_CACHE).then((cache) => cache.addAll(CDN_ASSETS)),
     ]).then(() => self.skipWaiting()),
   );
@@ -82,6 +81,12 @@ self.addEventListener("fetch", (event) => {
 
   // Static PWA assets: cache-first
   if (url.pathname.startsWith("/pwa/")) {
+    event.respondWith(cacheFirst(request, STATIC_CACHE));
+    return;
+  }
+
+  // Fingerprinted static assets (CSS): cache-first
+  if (url.pathname.startsWith("/static/")) {
     event.respondWith(cacheFirst(request, STATIC_CACHE));
     return;
   }

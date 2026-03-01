@@ -75,6 +75,7 @@ struct WaterfallRowView {
 #[derive(Template)]
 #[template(path = "traces/page.html")]
 struct TracesPageTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     // Sidebar
     skill_facets: Vec<SkillFacetView>,
@@ -94,6 +95,7 @@ struct TracesPageTemplate {
 #[derive(Template)]
 #[template(path = "traces/detail.html")]
 struct TraceDetailTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     short_id: String,
     first_service: Option<String>,
@@ -201,6 +203,7 @@ async fn show_dashboard(
     let trace_rows: Vec<TraceRowView> = traces.iter().map(trace_to_row_view).collect();
 
     let tmpl = TracesPageTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "traces",
         skill_facets,
         status_options,
@@ -264,6 +267,7 @@ async fn show_trace_detail(
     let waterfall_rows = build_waterfall_rows(start, end, &spans);
 
     let tmpl = TraceDetailTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "traces",
         short_id,
         first_service,

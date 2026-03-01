@@ -151,10 +151,12 @@ pub async fn require_auth(
 /// Askama template for the standalone login page.
 ///
 /// This is a self-contained page (does **not** extend `base.html`) because
-/// unauthenticated users must not see the app shell.
+/// unauthenticated users must not see the app shell.  It still loads the
+/// fingerprinted app stylesheet for consistent look & feel.
 #[derive(Template)]
 #[template(path = "auth/login.html")]
-struct LoginPageTemplate {
+pub(crate) struct LoginPageTemplate {
+    app_css_url: &'static str,
     error: Option<String>,
 }
 
@@ -162,7 +164,10 @@ struct LoginPageTemplate {
 
 /// `GET /login` — render the login form.
 pub async fn login_page() -> Response {
-    render_template(LoginPageTemplate { error: None })
+    render_template(LoginPageTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
+        error: None,
+    })
 }
 
 /// `POST /login` — validate the submitted token and set a session cookie.
@@ -190,6 +195,7 @@ pub(crate) async fn login_submit(
             .unwrap()
     } else {
         render_template(LoginPageTemplate {
+            app_css_url: crate::static_assets::app_css_url(),
             error: Some("Invalid token.".to_string()),
         })
     }

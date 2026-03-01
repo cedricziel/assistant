@@ -64,6 +64,7 @@ struct LogRowView {
 #[derive(Template)]
 #[template(path = "logs/page.html")]
 struct LogsPageTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     // Sidebar
     severity_options: Vec<SeverityOptionView>,
@@ -82,6 +83,7 @@ struct LogsPageTemplate {
 #[derive(Template)]
 #[template(path = "logs/detail.html")]
 struct LogDetailTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     short_id: String,
     log_id: String,
@@ -159,6 +161,7 @@ async fn show_logs(
     let shown_count = log_rows.len();
 
     let tmpl = LogsPageTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "logs",
         severity_options,
         target_facets,
@@ -212,6 +215,7 @@ async fn show_log_detail(
         serde_json::to_string_pretty(&log.attributes).unwrap_or_else(|_| "{}".to_string());
 
     let tmpl = LogDetailTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "logs",
         short_id,
         log_id: log.id.clone(),

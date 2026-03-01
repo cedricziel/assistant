@@ -41,7 +41,9 @@ static SERVICE_WORKER: LazyLock<String> = LazyLock::new(|| {
     } else {
         env!("CARGO_PKG_VERSION").to_string()
     };
-    SW_TEMPLATE.replace("__APP_VERSION__", &version)
+    SW_TEMPLATE
+        .replace("__APP_VERSION__", &version)
+        .replace("__APP_CSS_URL__", crate::static_assets::app_css_url())
 });
 
 // -- Route handlers ----------------------------------------------------------

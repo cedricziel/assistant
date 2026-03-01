@@ -68,6 +68,7 @@ struct EventTypeView {
 #[derive(Template)]
 #[template(path = "webhooks/list.html")]
 struct WebhookListTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     count: usize,
     rows: Vec<WebhookRowView>,
@@ -77,6 +78,7 @@ struct WebhookListTemplate {
 #[derive(Template)]
 #[template(path = "webhooks/detail.html")]
 struct WebhookDetailTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     id: String,
     short_id: String,
@@ -95,6 +97,7 @@ struct WebhookDetailTemplate {
 #[derive(Template)]
 #[template(path = "webhooks/form.html")]
 struct WebhookFormTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     heading: String,
     action: String,
@@ -110,6 +113,7 @@ struct WebhookFormTemplate {
 #[derive(Template)]
 #[template(path = "webhooks/verify.html")]
 struct WebhookVerifyTemplate {
+    app_css_url: &'static str,
     active_page: &'static str,
     id: String,
     url: String,
@@ -141,6 +145,7 @@ pub async fn list_webhooks(
         .collect();
 
     let tmpl = WebhookListTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "webhooks",
         count,
         rows,
@@ -193,6 +198,7 @@ pub async fn show_webhook(
         .ok_or((StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")))?;
 
     let tmpl = WebhookDetailTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "webhooks",
         id: wh.id.clone(),
         short_id: wh.id[..8.min(wh.id.len())].to_string(),
@@ -359,6 +365,7 @@ pub async fn verify_webhook(
     };
 
     let tmpl = WebhookVerifyTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "webhooks",
         id: wh.id.clone(),
         url: wh.url.clone(),
@@ -530,6 +537,7 @@ fn build_form_template(
         .collect();
 
     WebhookFormTemplate {
+        app_css_url: crate::static_assets::app_css_url(),
         active_page: "webhooks",
         heading: heading.to_string(),
         action: action.to_string(),
