@@ -682,6 +682,18 @@ async fn main() -> Result<()> {
         Duration::from_secs(60),
     );
 
+    // 7b. Build transcription provider (shared across interfaces).
+    let transcription_provider = bs
+        .config
+        .transcription
+        .as_ref()
+        .map(|tc| {
+            let provider = assistant_transcription::build_provider(tc)?;
+            info!(provider = provider.name(), "Audio transcription enabled");
+            Ok::<_, anyhow::Error>(provider)
+        })
+        .transpose()?;
+
     // 8. Slack-only mode.
     #[cfg(feature = "slack")]
     if let Some(Command::Slack) = &cli.command {
@@ -689,7 +701,10 @@ async fn main() -> Result<()> {
         let slack_cfg = bs.config.slack.clone().context(
             "Slack is not configured. Add a [slack] section to ~/.assistant/config.toml",
         )?;
-        let iface = SlackInterface::new(slack_cfg, bs.orchestrator, bs.storage);
+        let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator, bs.storage);
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone());
+        }
 
         // Register ambient tools (slack-post, slack-send-dm, slack-list-channels)
         // so the LLM can see and invoke them during Slack turns.
@@ -725,7 +740,10 @@ async fn main() -> Result<()> {
     if bs.config.slack.is_some() {
         use assistant_interface_slack::SlackInterface;
         let slack_cfg = bs.config.slack.clone().unwrap_or_default();
-        let iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
+        let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone());
+        }
 
         // Register proactive Slack posting tool.
         for handler in iface.ambient_tools() {

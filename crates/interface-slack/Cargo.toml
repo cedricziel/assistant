@@ -14,6 +14,7 @@ assistant-core = { path = "../core" }
 assistant-llm = { path = "../llm" }
 assistant-runtime = { path = "../runtime" }
 assistant-storage = { path = "../storage" }
+assistant-transcription = { path = "../transcription" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
