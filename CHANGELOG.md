@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.26](https://github.com/cedricziel/assistant/compare/v0.1.25...v0.1.26) (2026-03-01)
+
+
+### Features
+
+* **provider-moonshot:** add Moonshot AI (Kimi) LLM provider ([#124](https://github.com/cedricziel/assistant/issues/124)) ([0c438ed](https://github.com/cedricziel/assistant/commit/0c438ed4b84ece11fe1114f82f871f74500ff718))
+
+
+### Bug Fixes
+
+* **storage:** cast metric aggregations to REAL for sqlx f64 decoding ([3194520](https://github.com/cedricziel/assistant/commit/31945205b355a0c0d78f6ca0df95ab51f472d789))
+
 ## [0.1.25](https://github.com/cedricziel/assistant/compare/v0.1.24...v0.1.25) (2026-03-01)
 
 
