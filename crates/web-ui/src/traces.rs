@@ -399,9 +399,10 @@ fn build_waterfall_rows(
         child.sort_by_key(|idx| spans[*idx].start_time);
     }
 
-    // DFS ordering
+    // DFS ordering (cycle-safe via visited set)
     let mut ordered: Vec<(usize, usize)> = Vec::new();
-    collect_dfs(&roots, spans, &children, 0, &mut ordered);
+    let mut visited: HashSet<String> = HashSet::new();
+    collect_dfs(&roots, spans, &children, 0, &mut ordered, &mut visited);
 
     ordered
         .iter()
@@ -457,17 +458,24 @@ fn build_waterfall_rows(
 }
 
 /// DFS traversal to produce ordered `(span_index, depth)` pairs.
+///
+/// Uses a `visited` set to guard against cycles in span parent references.
 fn collect_dfs(
     indexes: &[usize],
     spans: &[RecordedSpan],
     children: &HashMap<String, Vec<usize>>,
     depth: usize,
     out: &mut Vec<(usize, usize)>,
+    visited: &mut HashSet<String>,
 ) {
     for &idx in indexes {
+        let span_id = &spans[idx].span_id;
+        if !visited.insert(span_id.clone()) {
+            continue;
+        }
         out.push((idx, depth));
-        if let Some(child_indexes) = children.get(&spans[idx].span_id) {
-            collect_dfs(child_indexes, spans, children, depth + 1, out);
+        if let Some(child_indexes) = children.get(span_id) {
+            collect_dfs(child_indexes, spans, children, depth + 1, out, visited);
         }
     }
 }

@@ -336,7 +336,7 @@ button {
     display: flex;
     justify-content: space-around;
   }
-  .btn-signout {
+  .top-bar .btn-signout {
     display: none;
   }
 }

@@ -108,7 +108,10 @@ async fn show_analytics(
     State(state): State<AppState>,
     Query(query): Query<AnalyticsQuery>,
 ) -> Result<Response, (StatusCode, String)> {
-    let window_hours = query.window.unwrap_or(24);
+    let window_hours = match query.window.unwrap_or(24) {
+        1 | 6 | 24 | 72 | 168 => query.window.unwrap_or(24),
+        _ => 24,
+    };
     let store = MetricsStore::new(state.pool.clone());
 
     let summary = store.summary(window_hours).await.map_err(internal_error)?;

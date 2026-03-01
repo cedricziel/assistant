@@ -6,6 +6,7 @@
 
   var errorDiv = document.getElementById("skills-json-error");
   var form = textarea.closest("form");
+  if (!form) return;
 
   function validate() {
     var val = textarea.value.trim();
