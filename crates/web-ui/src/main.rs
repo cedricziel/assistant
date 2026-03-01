@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use assistant_core::{LlmProviderKind, MessageBus};
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
+use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_provider_openai::OpenAIProvider;
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
@@ -151,9 +152,10 @@ async fn main() -> Result<()> {
             "ollama" => LlmProviderKind::Ollama,
             "anthropic" => LlmProviderKind::Anthropic,
             "openai" => LlmProviderKind::OpenAI,
+            "moonshot" => LlmProviderKind::Moonshot,
             other => anyhow::bail!(
                 "Unsupported --llm-provider value: {other}. \
-                 Expected one of: ollama, anthropic, openai."
+                 Expected one of: ollama, anthropic, openai, moonshot."
             ),
         };
     }
@@ -208,6 +210,10 @@ async fn main() -> Result<()> {
         LlmProviderKind::OpenAI => Arc::new(
             OpenAIProvider::from_llm_config(&config.llm)
                 .context("Failed to create OpenAI LLM provider")?,
+        ),
+        LlmProviderKind::Moonshot => Arc::new(
+            MoonshotProvider::from_llm_config(&config.llm)
+                .context("Failed to create Moonshot LLM provider")?,
         ),
     };
 

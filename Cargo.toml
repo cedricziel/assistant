@@ -14,6 +14,7 @@ members = [
     "crates/provider-ollama",
     "crates/provider-anthropic",
     "crates/provider-openai",
+    "crates/provider-moonshot",
     "crates/storage",
     "crates/runtime",
     "crates/tool-executor",

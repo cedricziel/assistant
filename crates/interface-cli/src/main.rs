@@ -14,6 +14,7 @@ use assistant_llm::{
     WithEmbeddingOverride,
 };
 use assistant_provider_anthropic::AnthropicProvider;
+use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::{OllamaConfig, OllamaProvider};
 use assistant_provider_openai::{OpenAIProvider, OpenAIProviderConfig};
 use assistant_runtime::{
@@ -519,6 +520,10 @@ async fn bootstrap(
         LlmProviderKind::OpenAI => Arc::new(
             OpenAIProvider::from_llm_config(&config.llm)
                 .context("Failed to create OpenAI LLM client")?,
+        ),
+        LlmProviderKind::Moonshot => Arc::new(
+            MoonshotProvider::from_llm_config(&config.llm)
+                .context("Failed to create Moonshot LLM client")?,
         ),
     };
 

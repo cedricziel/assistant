@@ -218,6 +218,8 @@ pub enum LlmProviderKind {
     /// OpenAI Chat Completions API (API key or OAuth).
     #[serde(alias = "openai-codex")]
     OpenAI,
+    /// Moonshot AI (Kimi) — OpenAI-compatible chat completions.
+    Moonshot,
 }
 
 /// Which embedding backend to use when configured separately from the main
@@ -289,6 +291,9 @@ pub struct LlmConfig {
     /// Provider-specific OpenAI options.
     #[serde(default)]
     pub openai: OpenAIOptions,
+    /// Provider-specific Moonshot options.
+    #[serde(default)]
+    pub moonshot: MoonshotOptions,
     /// Optional dedicated embedding provider override.
     ///
     /// When set, embeddings are served by this provider instead of the main
@@ -310,6 +315,7 @@ impl Default for LlmConfig {
             api_key: None,
             anthropic: AnthropicOptions::default(),
             openai: OpenAIOptions::default(),
+            moonshot: MoonshotOptions::default(),
             embeddings: None,
         }
     }
@@ -414,6 +420,15 @@ pub enum OpenAIAuthMode {
     ApiKey,
     /// OAuth 2.0 PKCE via ChatGPT sign-in (Codex subscription).
     OAuth,
+}
+
+// ── Moonshot-specific options ─────────────────────────────────────────────────
+
+/// Additional configuration for Moonshot-specific features.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MoonshotOptions {
+    /// Maximum completion tokens per response (default: 8192).
+    pub max_tokens: Option<u32>,
 }
 
 /// Storage configuration
