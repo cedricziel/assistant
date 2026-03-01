@@ -114,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
@@ -176,10 +176,13 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.issue.number;
 
-            // Collect pages that changed by scanning for diff images
+            // -- 1. Collect diff/actual/expected images -----------------------
             const testResults = 'crates/web-ui/e2e/test-results';
-            const changed = [];
+            const pages = [];
 
             function walk(dir) {
               if (!fs.existsSync(dir)) return;
@@ -187,62 +190,118 @@ jobs:
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) walk(full);
                 else if (entry.name.endsWith('-diff.png')) {
+                  const base = full.replace('-diff.png', '');
                   const rel = path.relative(testResults, path.dirname(full));
-                  changed.push(rel.replace(/-retry\d+$/, '').replace(/-/g, ' '));
+                  const label = rel.replace(/-retry\d+$/, '').replace(/-/g, ' ');
+                  // Sanitize for use as a path in the git tree
+                  const slug = label.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+                  pages.push({
+                    label,
+                    slug,
+                    diff:     full,
+                    actual:   fs.existsSync(base + '-actual.png')   ? base + '-actual.png'   : null,
+                    expected: fs.existsSync(base + '-expected.png') ? base + '-expected.png' : null,
+                  });
                 }
               }
             }
             walk(testResults);
 
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            if (pages.length === 0) {
+              core.info('No diff images found, skipping comment.');
+              return;
+            }
+
+            // -- 2. Upload images as git blobs and push to a branch -----------
+            const branch = `visual-diffs/pr-${prNumber}`;
+            const treeEntries = [];
+
+            for (const page of pages) {
+              for (const [suffix, filePath] of [['diff', page.diff], ['actual', page.actual], ['expected', page.expected]]) {
+                if (!filePath) continue;
+                const content = fs.readFileSync(filePath).toString('base64');
+                const { data: blob } = await github.rest.git.createBlob({
+                  owner, repo,
+                  content,
+                  encoding: 'base64',
+                });
+                treeEntries.push({
+                  path: `${page.slug}/${suffix}.png`,
+                  mode: '100644',
+                  type: 'blob',
+                  sha: blob.sha,
+                });
+              }
+            }
+
+            const { data: tree } = await github.rest.git.createTree({
+              owner, repo,
+              tree: treeEntries,
+            });
+
+            // Orphan commit (no parents) so the branch stays lightweight
+            const { data: commit } = await github.rest.git.createCommit({
+              owner, repo,
+              message: `Visual diffs for PR #${prNumber} (run ${context.runId})`,
+              tree: tree.sha,
+              parents: [],
+            });
+
+            const ref = `heads/${branch}`;
+            try {
+              await github.rest.git.updateRef({ owner, repo, ref, sha: commit.sha, force: true });
+            } catch {
+              await github.rest.git.createRef({ owner, repo, ref: `refs/${ref}`, sha: commit.sha });
+            }
+
+            // Small delay so raw.githubusercontent.com picks up the new ref
+            await new Promise(r => setTimeout(r, 3000));
+
+            // -- 3. Build PR comment with inline images -----------------------
+            const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
 
             let body = '## Visual Changes Detected\n\n';
             body += 'This PR changes the visual appearance of the following pages. ';
             body += 'This is expected when the frontend evolves — just verify the ';
             body += 'new look is intentional.\n\n';
 
-            if (changed.length > 0) {
-              body += '| Page | |\n|------|---|\n';
-              for (const name of changed) {
-                body += `| ${name} | changed |\n`;
+            for (const page of pages) {
+              body += `### ${page.label}\n\n`;
+              body += '<table><tr>';
+              if (page.expected) {
+                body += `<td align="center"><strong>Baseline</strong><br><img src="${rawBase}/${page.slug}/expected.png" width="380"></td>`;
               }
-              body += '\n';
+              if (page.actual) {
+                body += `<td align="center"><strong>This PR</strong><br><img src="${rawBase}/${page.slug}/actual.png" width="380"></td>`;
+              }
+              body += `<td align="center"><strong>Diff</strong><br><img src="${rawBase}/${page.slug}/diff.png" width="380"></td>`;
+              body += '</tr></table>\n\n';
             }
 
-            body += '### Reviewing the diff\n\n';
-            body += `1. Download the **playwright-report** artifact from the [CI run](${runUrl})\n`;
-            body += '2. Unzip and open `index.html` — each failed test has a **side-by-side slider** showing baseline vs this PR\n';
-            body += '3. The **playwright-diff-images** artifact contains the raw expected / actual / diff PNGs\n\n';
-            body += '### Accepting the changes\n\n';
+            body += '---\n\n';
+            body += '<details><summary>How to review &amp; accept</summary>\n\n';
+            body += `Download the **playwright-report** artifact from the [CI run](${runUrl}), `;
+            body += 'unzip and open `index.html` for an interactive side-by-side slider.\n\n';
             body += 'If the new appearance is correct, update the baselines:\n\n';
             body += '```sh\ncd crates/web-ui/e2e\nnpm run test:update\n```\n\n';
-            body += 'Then commit the updated screenshots.\n';
+            body += 'Then commit the updated screenshots.\n\n';
+            body += '</details>\n';
 
-            // Upsert: update existing comment or create a new one
+            // -- 4. Upsert comment --------------------------------------------
             const marker = '<!-- visual-regression-report -->';
             body = marker + '\n' + body;
 
             const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
+              owner, repo,
+              issue_number: prNumber,
             });
             const existing = comments.find(c => c.body && c.body.includes(marker));
 
             if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
             } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
+              await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
             }
 
       - name: Clear stale visual diff comment
@@ -250,21 +309,29 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.issue.number;
             const marker = '<!-- visual-regression-report -->';
+
+            // Update comment to show passing state
             const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
+              owner, repo,
+              issue_number: prNumber,
             });
             const existing = comments.find(c => c.body && c.body.includes(marker));
             if (existing) {
               await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
+                owner, repo,
                 comment_id: existing.id,
                 body: marker + '\n## Visual Regression Report\n\nNo visual changes detected — all pages match their baselines.',
               });
             }
+
+            // Clean up the diff images branch if it exists
+            try {
+              await github.rest.git.deleteRef({ owner, repo, ref: `heads/visual-diffs/pr-${prNumber}` });
+            } catch { /* branch may not exist */ }
 
   integration:
     name: Integration (smoke)
