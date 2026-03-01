@@ -14,7 +14,10 @@ assistant-llm = { path = "../llm" }
 assistant-provider-anthropic = { path = "../provider-anthropic" }
 assistant-provider-ollama = { path = "../provider-ollama" }
 assistant-provider-openai = { path = "../provider-openai" }
+assistant-runtime = { path = "../runtime" }
+assistant-skills = { path = "../skills" }
 assistant-storage = { path = "../storage" }
+assistant-tool-executor = { path = "../tool-executor" }
 axum = { version = "0.8", features = ["macros"] }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }

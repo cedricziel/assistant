@@ -15,12 +15,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::LlmProviderKind;
+use assistant_core::{LlmProviderKind, MessageBus};
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_provider_openai::OpenAIProvider;
+use assistant_runtime::bootstrap::AutoDenyConfirmation;
+use assistant_runtime::Orchestrator;
+use assistant_skills::SkillSource;
+use assistant_storage::registry::SkillRegistry;
 use assistant_storage::{default_db_path, StorageLayer};
+use assistant_tool_executor::ToolExecutor;
 use axum::{
     response::Redirect,
     routing::{get, post},
@@ -124,7 +129,7 @@ async fn main() -> Result<()> {
         None => anyhow::bail!("Cannot determine default DB path. Specify --db-path."),
     };
 
-    let storage = StorageLayer::new(&db_path).await?;
+    let storage = Arc::new(StorageLayer::new(&db_path).await?);
     let state = AppState {
         pool: storage.pool.clone(),
         trace_limit: args.trace_limit,
@@ -132,41 +137,72 @@ async fn main() -> Result<()> {
     };
 
     // -- Load assistant config from ~/.assistant/config.toml --------------------
-    let file_config = match assistant_core::default_config_path() {
+    let mut config = match assistant_core::default_config_path() {
         Some(p) => assistant_core::load_config(&p),
         None => {
             warn!("Cannot determine home directory; using default LLM config");
             assistant_core::AssistantConfig::default()
         }
     };
-    let mut llm_config = file_config.llm;
 
     // CLI args override config file values when explicitly set.
     if let Some(provider) = args.llm_provider {
-        llm_config.provider = match provider.to_lowercase().as_str() {
+        config.llm.provider = match provider.to_lowercase().as_str() {
             "anthropic" => LlmProviderKind::Anthropic,
             "openai" => LlmProviderKind::OpenAI,
             _ => LlmProviderKind::Ollama,
         };
     }
     if let Some(model) = args.llm_model {
-        llm_config.model = model;
+        config.llm.model = model;
     }
     if let Some(base_url) = args.llm_base_url {
-        llm_config.base_url = base_url;
+        config.llm.base_url = base_url;
     }
 
-    let llm: Arc<dyn LlmProvider> = match llm_config.provider {
+    // -- Build the full orchestrator chain -----------------------------------
+    //
+    // The web UI MUST route chat messages through the Orchestrator so the
+    // assistant gets the same system prompt, tools, skills, memory, and ReAct
+    // loop as every other interface (CLI, Slack, etc.).
+    //
+    // See skills/interface-implementation/SKILL.md for the canonical checklist.
+
+    // 1. Skill registry
+    let registry = SkillRegistry::new(storage.pool.clone())
+        .await
+        .context("Failed to create skill registry")?;
+
+    let project_root = std::env::current_dir().ok();
+    let dirs_to_scan = assistant_runtime::bootstrap::skill_dirs(&config, project_root.as_deref());
+    let dirs_ref: Vec<(&std::path::Path, SkillSource)> = dirs_to_scan
+        .iter()
+        .map(|(p, s)| (p.as_path(), s.clone()))
+        .collect();
+
+    registry
+        .load_embedded()
+        .await
+        .context("Failed to load embedded builtin skills")?;
+    registry
+        .load_from_dirs(&dirs_ref)
+        .await
+        .context("Failed to load skills from directories")?;
+
+    let registry = Arc::new(registry);
+
+    // 2. LLM provider
+    let llm: Arc<dyn LlmProvider> = match config.llm.provider {
         LlmProviderKind::Ollama => Arc::new(
-            OllamaProvider::from_llm_config(&llm_config)
+            OllamaProvider::from_llm_config(&config.llm)
                 .context("Failed to create Ollama LLM provider")?,
         ),
         LlmProviderKind::Anthropic => Arc::new(
-            AnthropicProvider::from_llm_config(&llm_config)
+            AnthropicProvider::from_llm_config(&config.llm)
                 .context("Failed to create Anthropic LLM provider")?,
         ),
         LlmProviderKind::OpenAI => Arc::new(
-            OpenAIProvider::from_llm_config(&llm_config)
+            OpenAIProvider::from_llm_config(&config.llm)
                 .context("Failed to create OpenAI LLM provider")?,
         ),
     };
@@ -176,6 +212,39 @@ async fn main() -> Result<()> {
         llm.provider_name(),
         llm.model_name()
     );
+
+    // 3. Tool executor
+    let executor = Arc::new(ToolExecutor::new(
+        storage.clone(),
+        llm.clone(),
+        registry.clone(),
+        Arc::new(config.clone()),
+    ));
+
+    // 4. Message bus + Orchestrator
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+    let orchestrator = Arc::new(
+        Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor.clone(),
+            registry,
+            bus,
+            &config,
+        )
+        .with_confirmation_callback(Arc::new(AutoDenyConfirmation {
+            interface_name: "Web",
+        })),
+    );
+
+    // Wire up subagent support (breaks the init-time circular dep).
+    executor.set_subagent_runner(orchestrator.clone());
+
+    // 5. Spawn the turn-processing worker.
+    let worker_orch = orchestrator.clone();
+    tokio::spawn(async move {
+        worker_orch.run_worker("web-worker").await;
+    });
 
     // -- Agent store (filesystem-backed) --
     let agent_store = AgentStore::default_dir()?;
@@ -207,10 +276,7 @@ async fn main() -> Result<()> {
         pool: storage.pool.clone(),
     };
 
-    let chat_state = chat::ChatState {
-        pool: storage.pool.clone(),
-        llm,
-    };
+    let chat_state = chat::ChatState::new(storage.pool.clone(), orchestrator);
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
