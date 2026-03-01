@@ -26,8 +26,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install protoc
-        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+      - name: Install system dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
       - name: Vendor JS dependencies
         run: make vendor
@@ -55,6 +55,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
 
       - name: Vendor JS dependencies
         run: make vendor
@@ -85,8 +88,8 @@ jobs:
         with:
           components: clippy
 
-      - name: Install protoc
-        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+      - name: Install system dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
       - name: Vendor JS dependencies
         run: make vendor
