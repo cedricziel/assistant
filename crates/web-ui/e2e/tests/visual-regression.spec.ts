@@ -11,6 +11,10 @@ import { test, expect, Page } from "@playwright/test";
 
 const AUTH_TOKEN = "test-token";
 
+// Cross-platform font rendering (macOS vs Linux CI) causes ~2% pixel diffs.
+// 3% tolerance absorbs font hinting differences while still catching layout regressions.
+const MAX_DIFF_RATIO = 0.03;
+
 // -- Helpers ----------------------------------------------------------------
 
 /** Authenticate by submitting the login form. */
@@ -36,7 +40,7 @@ test.describe("Login page", () => {
     await navigateAndSettle(page, "/login");
     await expect(page).toHaveScreenshot("login.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 
@@ -47,7 +51,7 @@ test.describe("Login page", () => {
     await page.waitForTimeout(300);
     await expect(page).toHaveScreenshot("login-error.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 });
@@ -61,7 +65,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/traces");
     await expect(page).toHaveScreenshot("traces-empty.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 
@@ -69,7 +73,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/logs");
     await expect(page).toHaveScreenshot("logs-empty.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 
@@ -77,7 +81,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/analytics");
     await expect(page).toHaveScreenshot("analytics-empty.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 
@@ -85,7 +89,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/agents");
     await expect(page).toHaveScreenshot("agents-empty.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 
@@ -93,7 +97,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/agents/new");
     await expect(page).toHaveScreenshot("agent-form.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 
@@ -101,7 +105,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/webhooks");
     await expect(page).toHaveScreenshot("webhooks-empty.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 
@@ -109,7 +113,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/webhooks/new");
     await expect(page).toHaveScreenshot("webhook-form.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 
@@ -117,7 +121,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/chat");
     await expect(page).toHaveScreenshot("chat.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
   });
 });
