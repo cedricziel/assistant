@@ -49,18 +49,47 @@ impl ToolHandler for ListSkillsHandler {
         }
 
         // Build a formatted table
+        let has_compat = skills.iter().any(|s| s.compatibility.is_some());
+
         let mut lines: Vec<String> = Vec::new();
-        lines.push(format!("{:<24} {:<70} {}", "Name", "Description", "Source"));
-        lines.push(format!(
-            "{} {} {}",
-            "-".repeat(24),
-            "-".repeat(70),
-            "-".repeat(10)
-        ));
+        if has_compat {
+            lines.push(format!(
+                "{:<24} {:<60} {:<10} {}",
+                "Name", "Description", "Source", "Compatibility"
+            ));
+            lines.push(format!(
+                "{} {} {} {}",
+                "-".repeat(24),
+                "-".repeat(60),
+                "-".repeat(10),
+                "-".repeat(40),
+            ));
+        } else {
+            lines.push(format!("{:<24} {:<70} {}", "Name", "Description", "Source"));
+            lines.push(format!(
+                "{} {} {}",
+                "-".repeat(24),
+                "-".repeat(70),
+                "-".repeat(10),
+            ));
+        }
 
         for skill in &skills {
-            let desc = truncate(&skill.description, DESC_TRUNCATE);
-            lines.push(format!("{:<24} {:<70} {}", skill.name, desc, skill.source,));
+            let desc_len = if has_compat { 56 } else { DESC_TRUNCATE };
+            let desc = truncate(&skill.description, desc_len);
+            if has_compat {
+                let compat = skill
+                    .compatibility
+                    .as_deref()
+                    .map(|c| truncate(c, 40))
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "{:<24} {:<60} {:<10} {}",
+                    skill.name, desc, skill.source, compat,
+                ));
+            } else {
+                lines.push(format!("{:<24} {:<70} {}", skill.name, desc, skill.source,));
+            }
         }
 
         lines.push(String::new());

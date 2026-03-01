@@ -8,6 +8,7 @@ description: >
   Supports fire-and-forget async jobs (tmux-based, non-blocking) as well as
   quick blocking one-shot tasks and follow-up questions in the same session.
 license: MIT
+compatibility: "Requires: claude CLI (claude --version), tmux"
 ---
 
 # Claude Code Agent Skill
