@@ -27,7 +27,7 @@ use opentelemetry::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, info_span, warn};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 use uuid::Uuid;
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -579,7 +579,27 @@ impl Orchestrator {
             interface = ?interface,
             extension_tools = extensions.len()
         );
-        let _turn_guard = turn_span.enter();
+        self.run_turn_with_tools_impl(
+            user_message,
+            conversation_id,
+            interface,
+            extensions,
+            trace_cx,
+            attachments,
+        )
+        .instrument(turn_span)
+        .await
+    }
+
+    async fn run_turn_with_tools_impl(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        extensions: Vec<Arc<dyn ToolHandler>>,
+        trace_cx: Option<&OtelContext>,
+        attachments: Vec<ContentBlock>,
+    ) -> Result<TurnResult> {
         self.metrics.record_turn(None, &format!("{interface:?}"));
         info!("Starting turn with extension tools");
 
@@ -1073,7 +1093,6 @@ impl Orchestrator {
                                 tool = %name,
                                 source = "builtin"
                             );
-                            let _builtin_guard = builtin_span.enter();
                             if let Some(reason) = self
                                 .reject_if_disabled(
                                     &name,
@@ -1082,6 +1101,7 @@ impl Orchestrator {
                                     conversation_id,
                                     turn_index,
                                 )
+                                .instrument(builtin_span.clone())
                                 .await
                             {
                                 otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
@@ -1112,7 +1132,11 @@ impl Orchestrator {
                                             &name,
                                             &observation,
                                         );
-                                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                        if let Err(e) = conv_store
+                                            .save_message(&tr_msg)
+                                            .instrument(builtin_span.clone())
+                                            .await
+                                        {
                                             warn!("Failed to persist tool-result message: {e}");
                                         }
                                         continue;
@@ -1128,7 +1152,11 @@ impl Orchestrator {
                                 };
 
                             let start = std::time::Instant::now();
-                            let exec_result = self.executor.execute(&name, params_map, &ctx).await;
+                            let exec_result = self
+                                .executor
+                                .execute(&name, params_map, &ctx)
+                                .instrument(builtin_span.clone())
+                                .await;
                             let duration_ms = start.elapsed().as_millis() as i64;
                             self.metrics.record_tool_invocation(&name);
                             self.metrics
@@ -1291,8 +1319,7 @@ impl Orchestrator {
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
-            let _iteration_guard = iteration_span.enter();
-            debug!(iteration, "Tool-calling loop iteration");
+            debug!(parent: &iteration_span, iteration, "Tool-calling loop iteration");
 
             let ctx = ExecutionContext {
                 conversation_id,
@@ -1313,12 +1340,18 @@ impl Orchestrator {
                 &tool_specs,
             );
             let llm_start = std::time::Instant::now();
-            let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
+            let response = self
+                .llm
+                .chat(&system_prompt, &history, &tool_specs)
+                .instrument(iteration_span.clone())
+                .await;
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
-                    Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    Self::persist_error_recovery(&conv_store, conversation_id)
+                        .instrument(iteration_span.clone())
+                        .await;
                     self.metrics.record_error("llm_error", "run_turn");
                     return Err(e);
                 }
@@ -1345,7 +1378,10 @@ impl Orchestrator {
                             m.turn = base_turn + iteration as i64 + 1;
                             m
                         };
-                        conv_store.save_message(&assistant_msg).await?;
+                        conv_store
+                            .save_message(&assistant_msg)
+                            .instrument(iteration_span.clone())
+                            .await?;
                     }
 
                     return Ok(TurnResult {
@@ -1369,7 +1405,11 @@ impl Orchestrator {
                         base_turn + iteration as i64 + 1,
                         &tool_call_items,
                     );
-                    if let Err(e) = conv_store.save_message(&tc_msg).await {
+                    if let Err(e) = conv_store
+                        .save_message(&tc_msg)
+                        .instrument(iteration_span.clone())
+                        .await
+                    {
                         warn!("Failed to persist tool-call message: {e}");
                     }
 
@@ -1396,6 +1436,7 @@ impl Orchestrator {
                                 conversation_id,
                                 turn_index,
                             )
+                            .instrument(iteration_span.clone())
                             .await
                         {
                             otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
@@ -1430,7 +1471,11 @@ impl Orchestrator {
                                         &name,
                                         &observation,
                                     );
-                                    if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                    if let Err(e) = conv_store
+                                        .save_message(&tr_msg)
+                                        .instrument(iteration_span.clone())
+                                        .await
+                                    {
                                         warn!("Failed to persist tool-result message: {e}");
                                     }
                                     otel_span.end();
@@ -1447,7 +1492,11 @@ impl Orchestrator {
                             };
 
                         let start = std::time::Instant::now();
-                        let exec_result = self.executor.execute(&name, params_map, &ctx).await;
+                        let exec_result = self
+                            .executor
+                            .execute(&name, params_map, &ctx)
+                            .instrument(iteration_span.clone())
+                            .await;
                         let duration_ms = start.elapsed().as_millis() as i64;
                         self.metrics.record_tool_invocation(&name);
                         self.metrics
@@ -1491,7 +1540,11 @@ impl Orchestrator {
                             &name,
                             &observation,
                         );
-                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                        if let Err(e) = conv_store
+                            .save_message(&tr_msg)
+                            .instrument(iteration_span.clone())
+                            .await
+                        {
                             warn!("Failed to persist tool-result message: {e}");
                         }
                     }
@@ -1572,8 +1625,7 @@ impl Orchestrator {
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
-            let _iteration_guard = iteration_span.enter();
-            debug!(iteration, "Streaming tool-calling loop iteration");
+            debug!(parent: &iteration_span, iteration, "Streaming tool-calling loop iteration");
 
             let ctx = ExecutionContext {
                 conversation_id,
@@ -1602,12 +1654,15 @@ impl Orchestrator {
                     &tool_specs,
                     Some(token_sink.clone()),
                 )
+                .instrument(iteration_span.clone())
                 .await;
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
-                    Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    Self::persist_error_recovery(&conv_store, conversation_id)
+                        .instrument(iteration_span.clone())
+                        .await;
                     self.metrics.record_error("llm_error", "run_turn_streaming");
                     return Err(e);
                 }
@@ -1633,7 +1688,10 @@ impl Orchestrator {
                             m.turn = base_turn + iteration as i64 + 1;
                             m
                         };
-                        conv_store.save_message(&assistant_msg).await?;
+                        conv_store
+                            .save_message(&assistant_msg)
+                            .instrument(iteration_span.clone())
+                            .await?;
                     }
 
                     return Ok(TurnResult {
@@ -1656,7 +1714,11 @@ impl Orchestrator {
                         base_turn + iteration as i64 + 1,
                         &tool_call_items,
                     );
-                    if let Err(e) = conv_store.save_message(&tc_msg).await {
+                    if let Err(e) = conv_store
+                        .save_message(&tc_msg)
+                        .instrument(iteration_span.clone())
+                        .await
+                    {
                         warn!("Failed to persist tool-call message: {e}");
                     }
 
@@ -1682,6 +1744,7 @@ impl Orchestrator {
                                 conversation_id,
                                 turn_index,
                             )
+                            .instrument(iteration_span.clone())
                             .await
                         {
                             otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
@@ -1715,7 +1778,11 @@ impl Orchestrator {
                                         &name,
                                         &observation,
                                     );
-                                    if let Err(e) = conv_store.save_message(&tr_msg).await {
+                                    if let Err(e) = conv_store
+                                        .save_message(&tr_msg)
+                                        .instrument(iteration_span.clone())
+                                        .await
+                                    {
                                         warn!("Failed to persist tool-result message: {e}");
                                     }
                                     otel_span.end();
@@ -1732,7 +1799,11 @@ impl Orchestrator {
                             };
 
                         let start = std::time::Instant::now();
-                        let exec_result = self.executor.execute(&name, params_map, &ctx).await;
+                        let exec_result = self
+                            .executor
+                            .execute(&name, params_map, &ctx)
+                            .instrument(iteration_span.clone())
+                            .await;
                         let duration_ms = start.elapsed().as_millis() as i64;
                         self.metrics.record_tool_invocation(&name);
                         self.metrics
@@ -1768,7 +1839,11 @@ impl Orchestrator {
                             &name,
                             &observation,
                         );
-                        if let Err(e) = conv_store.save_message(&tr_msg).await {
+                        if let Err(e) = conv_store
+                            .save_message(&tr_msg)
+                            .instrument(iteration_span.clone())
+                            .await
+                        {
                             warn!("Failed to persist tool-result message: {e}");
                         }
                         otel_span.end();
@@ -2242,8 +2317,7 @@ impl SubagentRunner for Orchestrator {
                     agent_id = %spawn.agent_id,
                     iteration
                 );
-                let _iteration_guard = iteration_span.enter();
-                debug!(iteration, agent_id = %spawn.agent_id, "Subagent tool-calling loop");
+                debug!(parent: &iteration_span, iteration, agent_id = %spawn.agent_id, "Subagent tool-calling loop");
 
                 let _ctx = ExecutionContext {
                     conversation_id,
@@ -2265,7 +2339,11 @@ impl SubagentRunner for Orchestrator {
                     &tool_specs,
                 );
                 let llm_start = std::time::Instant::now();
-                let response = self.llm.chat(&system_prompt, &history, &tool_specs).await;
+                let response = self
+                    .llm
+                    .chat(&system_prompt, &history, &tool_specs)
+                    .instrument(iteration_span.clone())
+                    .await;
                 let llm_elapsed = llm_start.elapsed();
                 let response = match response {
                     Ok(r) => r,
@@ -2273,7 +2351,9 @@ impl SubagentRunner for Orchestrator {
                         llm_span.set_attribute(KeyValue::new("error", true));
                         llm_span.set_attribute(KeyValue::new("error.message", e.to_string()));
                         llm_span.end();
-                        Self::persist_error_recovery(&conv_store, conversation_id).await;
+                        Self::persist_error_recovery(&conv_store, conversation_id)
+                            .instrument(iteration_span.clone())
+                            .await;
                         self.metrics.record_error("llm_error", "run_subagent");
                         let msg = format!("LLM error: {e}");
                         let _ = agent_store
@@ -2282,6 +2362,7 @@ impl SubagentRunner for Orchestrator {
                                 assistant_storage::AgentStatus::Failed,
                                 Some(&msg),
                             )
+                            .instrument(iteration_span.clone())
                             .await;
                         let span = agent_cx.span();
                         span.set_attribute(KeyValue::new("agent.status", "failed"));
@@ -2316,7 +2397,11 @@ impl SubagentRunner for Orchestrator {
                                 m.turn = base_turn + iteration as i64 + 1;
                                 m
                             };
-                            if let Err(e) = conv_store.save_message(&assistant_msg).await {
+                            if let Err(e) = conv_store
+                                .save_message(&assistant_msg)
+                                .instrument(iteration_span.clone())
+                                .await
+                            {
                                 warn!("Failed to persist subagent answer: {e}");
                             }
                         }
@@ -2329,6 +2414,7 @@ impl SubagentRunner for Orchestrator {
                                 assistant_storage::AgentStatus::Completed,
                                 Some(&summary),
                             )
+                            .instrument(iteration_span.clone())
                             .await;
 
                         // Finalize the agent span with success.
@@ -2363,7 +2449,11 @@ impl SubagentRunner for Orchestrator {
                             base_turn + iteration as i64 + 1,
                             &tool_call_items,
                         );
-                        if let Err(e) = conv_store.save_message(&tc_msg).await {
+                        if let Err(e) = conv_store
+                            .save_message(&tc_msg)
+                            .instrument(iteration_span.clone())
+                            .await
+                        {
                             warn!("Failed to persist subagent tool-call message: {e}");
                         }
 
@@ -2412,6 +2502,7 @@ impl SubagentRunner for Orchestrator {
                             let observation = match self
                                 .executor
                                 .execute(&name, params_map, &ctx)
+                                .instrument(iteration_span.clone())
                                 .await
                             {
                                 Ok(output) => {
@@ -2467,7 +2558,11 @@ impl SubagentRunner for Orchestrator {
                                 &name,
                                 &observation,
                             );
-                            if let Err(e) = conv_store.save_message(&tr_msg).await {
+                            if let Err(e) = conv_store
+                                .save_message(&tr_msg)
+                                .instrument(iteration_span.clone())
+                                .await
+                            {
                                 warn!("Failed to persist subagent tool-result: {e}");
                             }
                         }
