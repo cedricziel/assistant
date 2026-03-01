@@ -3,7 +3,6 @@ mod analytics;
 pub mod auth;
 mod chat;
 pub mod common;
-mod legacy;
 mod logs;
 mod pwa;
 mod traces;

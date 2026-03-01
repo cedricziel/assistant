@@ -18,7 +18,7 @@ use tracing::{info, warn};
 use assistant_storage::WebhookStore;
 
 #[cfg(test)]
-use crate::common::{html_escape, render_sidebar};
+use crate::common::html_escape;
 use crate::common::{internal_error, render_template};
 
 // -- Shared state --
@@ -733,21 +733,6 @@ mod tests {
             form.selected_event_types().is_empty(),
             "all-unknown input should produce empty vec",
         );
-    }
-
-    // -- render_sidebar --
-
-    #[test]
-    fn render_sidebar_shows_heading_for_active_page() {
-        let html = render_sidebar("webhooks");
-        assert!(html.contains("Webhooks"), "heading matches active page");
-        assert!(html.contains("assistant"), "brand name present");
-    }
-
-    #[test]
-    fn render_sidebar_shows_agents_heading() {
-        let html = render_sidebar("agents");
-        assert!(html.contains("Agents"), "heading matches agents page");
     }
 
     // -- render_webhook_form --

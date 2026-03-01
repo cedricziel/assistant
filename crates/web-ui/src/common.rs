@@ -5,10 +5,10 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use tracing::warn;
 
-/// HTML-escape a string to prevent XSS in server-rendered pages.
+/// HTML-escape a string to prevent XSS.
 ///
-/// Still needed by legacy pages that build HTML via `format!()`.
-/// Askama-based pages get auto-escaping for free.
+/// Used by the chat SSE token stream and webhook test helpers.
+/// Askama-based templates get auto-escaping for free.
 pub fn html_escape(input: &str) -> String {
     input
         .replace('&', "&amp;")
@@ -45,31 +45,6 @@ pub fn format_duration(ms: i64) -> String {
     } else {
         format!("{ms} ms")
     }
-}
-
-/// Shared CSS used by legacy pages (traces, logs, analytics, agents, webhooks).
-pub fn default_css() -> &'static str {
-    include_str!("default.css")
-}
-
-/// Render the sidebar for agent and webhook management pages.
-///
-/// Navigation links have been removed — the icon rail handles cross-page
-/// navigation.  The sidebar retains the brand heading and section title
-/// derived from `active`.
-pub fn render_sidebar(active: &str) -> String {
-    let heading = match active {
-        "agents" => "Agents",
-        "webhooks" => "Webhooks",
-        _ => "Management",
-    };
-
-    format!(
-        "<div class=\"sidebar-inner\">\
-         <div class=\"brand\"><p>assistant</p><h2>{heading}</h2></div>\
-         </div>",
-        heading = heading,
-    )
 }
 
 /// Render an Askama template into an axum [`Response`].
