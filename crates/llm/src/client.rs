@@ -150,17 +150,14 @@ impl From<&assistant_core::LlmConfig> for LlmClientConfig {
 /// Ollama `/api/chat` endpoint and parses `tool_calls` from the JSON response.
 pub struct LlmClient {
     config: LlmClientConfig,
-    /// Shared reqwest client for all requests.
-    http: reqwest::Client,
+    /// Shared reqwest client (with tracing middleware) for all requests.
+    http: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl LlmClient {
     /// Create a new client from the given configuration.
     pub fn new(config: LlmClientConfig) -> anyhow::Result<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .build()
-            .context("failed to build reqwest client")?;
+        let http = crate::http::build_http_client(config.timeout_secs)?;
 
         Ok(Self { config, http })
     }
