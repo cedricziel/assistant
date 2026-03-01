@@ -4,11 +4,6 @@ description: >
   A minimal example WASM skill that returns a greeting. Use to verify that the
   WASM execution tier is working correctly.
 license: MIT
-metadata:
-  tier: wasm
-  mutating: "false"
-  confirmation-required: "false"
-  params: '{"name": {"type": "string", "description": "Name to greet (default: World)", "default": "World"}}'
 ---
 
 ## Instructions

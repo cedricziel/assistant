@@ -7,10 +7,6 @@ description: >
   defaults, vendoring setup, and migration from htmx 1.x. Use when building
   or modifying any htmx-powered interaction in the web UI.
 license: MIT
-metadata:
-  tier: info
-  mutating: "false"
-  confirmation-required: "false"
 ---
 
 # htmx 2.0 Patterns

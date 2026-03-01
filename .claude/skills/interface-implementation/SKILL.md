@@ -6,10 +6,6 @@ description: >
   consistent behaviour: system prompt, tools, skills, memory, and the full
   ReAct loop.  Use this skill when adding, reviewing, or fixing an interface.
 license: MIT
-metadata:
-  tier: docs
-  mutating: "false"
-  confirmation-required: "false"
 ---
 
 # Interface Implementation Guide

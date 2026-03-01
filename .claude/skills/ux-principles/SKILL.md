@@ -7,10 +7,6 @@ description: >
   the no-inline-JS policy with replacement patterns. Use when building
   or reviewing any web-facing HTML/CSS in this project.
 license: MIT
-metadata:
-  tier: info
-  mutating: "false"
-  confirmation-required: "false"
 ---
 
 # UX Principles

@@ -6,10 +6,6 @@ description: >
   CI workflow with inline diff comments, and baseline management.
   Use when adding pages, changing layouts, or debugging visual test failures.
 license: MIT
-metadata:
-  tier: bash
-  mutating: "true"
-  confirmation-required: "false"
 ---
 
 # E2E Testing (Playwright Visual Regression)
