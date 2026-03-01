@@ -21,7 +21,7 @@ producing a "dumb chatbot" instead of the full assistant.
 
 ## Architecture invariant
 
-```
+```text
 User message
   -> Interface (transport layer)
     -> Orchestrator.submit_turn()        <-- REQUIRED
@@ -64,7 +64,7 @@ pub enum Interface {
 
 Every interface needs these components, in order:
 
-```
+```text
 AssistantConfig        (load from ~/.assistant/config.toml)
   -> StorageLayer      (SQLite, migrations)
   -> SkillRegistry     (load embedded + dir-scanned skills)

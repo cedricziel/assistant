@@ -352,11 +352,18 @@ async fn send_message(
 
     // Stash the user text so `stream_response` can retrieve it.
     // The orchestrator will persist the message via `prepare_history`.
-    state
-        .pending_messages
-        .write()
-        .await
-        .insert(conv_id, content.clone());
+    // Reject if a turn is already in-flight for this conversation.
+    {
+        let mut pending = state.pending_messages.write().await;
+        if pending.contains_key(&conv_id) {
+            return (
+                StatusCode::CONFLICT,
+                "A response is already in progress for this conversation",
+            )
+                .into_response();
+        }
+        pending.insert(conv_id, content.clone());
+    }
 
     // Render the user bubble directly from form data (not from a DB record).
     let user_view = MessageView {

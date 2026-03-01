@@ -148,9 +148,13 @@ async fn main() -> Result<()> {
     // CLI args override config file values when explicitly set.
     if let Some(provider) = args.llm_provider {
         config.llm.provider = match provider.to_lowercase().as_str() {
+            "ollama" => LlmProviderKind::Ollama,
             "anthropic" => LlmProviderKind::Anthropic,
             "openai" => LlmProviderKind::OpenAI,
-            _ => LlmProviderKind::Ollama,
+            other => anyhow::bail!(
+                "Unsupported --llm-provider value: {other}. \
+                 Expected one of: ollama, anthropic, openai."
+            ),
         };
     }
     if let Some(model) = args.llm_model {
