@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.24](https://github.com/cedricziel/assistant/compare/v0.1.23...v0.1.24) (2026-03-01)
+
+
+### Features
+
+* **web-ui:** route chat through Orchestrator for full assistant capabilities ([#121](https://github.com/cedricziel/assistant/issues/121)) ([7aabc85](https://github.com/cedricziel/assistant/commit/7aabc850b84ca38574fd96d1bcd59a7a3198d656))
+
+
+### Bug Fixes
+
+* **ci:** never cancel in-progress CI runs on main ([ac76ebf](https://github.com/cedricziel/assistant/commit/ac76ebfe6f4bfcefff49e58774ad22f23aa39e6d))
+* **web-ui:** increase screenshot diff tolerance to 5% for cross-platform fonts ([969bf4a](https://github.com/cedricziel/assistant/commit/969bf4a122b498a24dfc75127034ac2b9a759a82))
+
 ## [0.1.23](https://github.com/cedricziel/assistant/compare/v0.1.22...v0.1.23) (2026-02-28)
 
 
