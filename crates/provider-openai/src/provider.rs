@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use futures::StreamExt as _;
 use serde_json::Value;
 use tokio::sync::{mpsc, RwLock};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use assistant_core::types::OpenAIUserLocation;
 use assistant_core::LlmConfig;
@@ -406,7 +406,15 @@ impl LlmProvider for OpenAIProvider {
     fn capabilities(&self) -> Capabilities {
         let mut hosted_tools = Vec::new();
         if self.config.web_search.is_some() {
-            hosted_tools.push(HostedTool::WebSearch);
+            if model_supports_web_search(&self.config.model) {
+                hosted_tools.push(HostedTool::WebSearch);
+            } else {
+                warn!(
+                    model = %self.config.model,
+                    "web_search enabled but model does not support web_search_options; \
+                     falling back to builtin web-search tool"
+                );
+            }
         }
         Capabilities {
             tools: ToolSupport::Native,
@@ -706,6 +714,25 @@ fn build_web_search_options(cfg: &OpenAIWebSearchConfig) -> WebSearchOptions {
     }
 }
 
+// ── Model compatibility ───────────────────────────────────────────────────────
+
+/// Models known to support `web_search_options` in Chat Completions.
+const WEB_SEARCH_MODELS: &[&str] = &[
+    "gpt-4o-search-preview",
+    "gpt-4o-mini-search-preview",
+    "gpt-5-search-api",
+];
+
+/// Returns `true` when the model name matches a known search-capable model.
+///
+/// Uses prefix matching so versioned snapshots like
+/// `gpt-4o-search-preview-2025-03-11` are also accepted.
+fn model_supports_web_search(model: &str) -> bool {
+    WEB_SEARCH_MODELS
+        .iter()
+        .any(|prefix| model.starts_with(prefix))
+}
+
 // ── URL normalisation ─────────────────────────────────────────────────────────
 
 /// Ensure the base URL ends with `/v1` for the OpenAI API.
@@ -881,8 +908,9 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_with_web_search() {
+    fn capabilities_with_web_search_compatible_model() {
         let cfg = OpenAIProviderConfig {
+            model: "gpt-4o-search-preview".to_string(),
             web_search: Some(OpenAIWebSearchConfig {
                 search_context_size: None,
                 user_location: None,
@@ -892,5 +920,36 @@ mod tests {
         let provider = OpenAIProvider::new(cfg, "test-key").expect("should build");
         let caps = provider.capabilities();
         assert_eq!(caps.hosted_tools, vec![HostedTool::WebSearch]);
+    }
+
+    #[test]
+    fn capabilities_with_web_search_incompatible_model() {
+        let cfg = OpenAIProviderConfig {
+            model: "gpt-4o".to_string(),
+            web_search: Some(OpenAIWebSearchConfig {
+                search_context_size: None,
+                user_location: None,
+            }),
+            ..Default::default()
+        };
+        let provider = OpenAIProvider::new(cfg, "test-key").expect("should build");
+        let caps = provider.capabilities();
+        assert!(
+            caps.hosted_tools.is_empty(),
+            "should not advertise WebSearch for incompatible model"
+        );
+    }
+
+    #[test]
+    fn model_supports_web_search_prefix_matching() {
+        assert!(model_supports_web_search("gpt-4o-search-preview"));
+        assert!(model_supports_web_search(
+            "gpt-4o-search-preview-2025-03-11"
+        ));
+        assert!(model_supports_web_search("gpt-4o-mini-search-preview"));
+        assert!(model_supports_web_search("gpt-5-search-api"));
+        assert!(!model_supports_web_search("gpt-4o"));
+        assert!(!model_supports_web_search("gpt-4.1"));
+        assert!(!model_supports_web_search("o3-mini"));
     }
 }
