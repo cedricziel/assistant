@@ -433,6 +433,7 @@ fn build_embedding_provider(
                     .model
                     .clone()
                     .unwrap_or_else(|| "text-embedding-3-small".to_string()),
+                web_search: None,
             };
             let provider = OpenAIProvider::new(provider_cfg, &api_key)
                 .context("Failed to create OpenAI embedding provider")?;

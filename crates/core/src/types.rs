@@ -409,6 +409,43 @@ pub struct OpenAIOptions {
     pub oauth_client_id: Option<String>,
     /// Maximum completion tokens per response (default: 8192).
     pub max_tokens: Option<u32>,
+    /// Hosted web-search configuration.
+    ///
+    /// Requires a search-capable model (`gpt-4o-search-preview`,
+    /// `gpt-4o-mini-search-preview`, or `gpt-5-search-api`).
+    #[serde(default)]
+    pub web_search: OpenAIWebSearchOptions,
+}
+
+/// Configuration for OpenAI hosted web search via Chat Completions.
+///
+/// When enabled, the provider sets the `web_search_options` top-level parameter
+/// on every Chat Completions request.  The model always searches the web before
+/// responding (there is no per-turn opt-in with Chat Completions).
+///
+/// **Requires** one of: `gpt-4o-search-preview`, `gpt-4o-mini-search-preview`,
+/// `gpt-5-search-api`.  Other models will ignore the parameter.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenAIWebSearchOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Search context size: `"low"`, `"medium"` (default), or `"high"`.
+    pub search_context_size: Option<String>,
+    /// Approximate user location for geographically relevant results.
+    pub user_location: Option<OpenAIUserLocation>,
+}
+
+/// Approximate user location for OpenAI web search.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenAIUserLocation {
+    /// Two-letter ISO country code (e.g. `"US"`, `"GB"`).
+    pub country: Option<String>,
+    /// City name (e.g. `"London"`).
+    pub city: Option<String>,
+    /// Region/state name (e.g. `"California"`).
+    pub region: Option<String>,
+    /// IANA timezone (e.g. `"America/Chicago"`).
+    pub timezone: Option<String>,
 }
 
 /// How the OpenAI provider authenticates.
@@ -429,6 +466,28 @@ pub enum OpenAIAuthMode {
 pub struct MoonshotOptions {
     /// Maximum completion tokens per response (default: 8192).
     pub max_tokens: Option<u32>,
+    /// Hosted web-search configuration (`$web_search` builtin).
+    #[serde(default)]
+    pub web_search: MoonshotWebSearchOptions,
+}
+
+/// Configuration for Moonshot's `$web_search` builtin function.
+///
+/// When enabled (the default), the provider injects a `builtin_function` tool
+/// spec into every request and handles the server-side search echo-back loop
+/// internally.  The orchestrator never sees `$web_search` tool calls.
+///
+/// The model decides per-turn whether to search — there is no extra cost.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoonshotWebSearchOptions {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for MoonshotWebSearchOptions {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 /// Storage configuration

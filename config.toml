@@ -95,6 +95,17 @@ timeout_secs = 120
 # [llm.openai]
 # max_tokens = 8192                   # max_completion_tokens per response
 #
+# # Hosted web search (requires gpt-4o-search-preview, gpt-4o-mini-search-preview,
+# # or gpt-5-search-api model):
+# # [llm.openai.web_search]
+# # enabled             = true
+# # search_context_size = "medium"     # "low", "medium" (default), or "high"
+# # [llm.openai.web_search.user_location]
+# # country  = "US"
+# # city     = "San Francisco"
+# # region   = "California"
+# # timezone = "America/Los_Angeles"
+#
 # # Alternative: OAuth PKCE mode for Codex subscriptions (billed against
 # # your ChatGPT plan quota instead of API credits).
 # # [llm.openai]
@@ -123,6 +134,10 @@ timeout_secs = 120
 #
 # [llm.moonshot]
 # max_tokens = 8192                   # max completion tokens per response
+#
+# # Hosted web search ($web_search builtin — server-side, no extra cost):
+# # [llm.moonshot.web_search]
+# # enabled = true
 
 [storage]
 # Path to SQLite database (~/.assistant/assistant.db by default)

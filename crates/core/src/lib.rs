@@ -20,6 +20,7 @@ pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
     AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, ExecutionContext, Interface,
     LlmConfig, LlmProviderKind, MattermostConfig, McpConfig, MemoryConfig, Message, MessageRole,
-    MirrorConfig, MoonshotOptions, OpenAIAuthMode, OpenAIOptions, SignalConfig, SkillsConfig,
-    SlackConfig, SlackListenMode, StorageConfig, DEFAULT_MAX_AGENT_DEPTH,
+    MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, OpenAIAuthMode, OpenAIOptions,
+    OpenAIUserLocation, OpenAIWebSearchOptions, SignalConfig, SkillsConfig, SlackConfig,
+    SlackListenMode, StorageConfig, DEFAULT_MAX_AGENT_DEPTH,
 };

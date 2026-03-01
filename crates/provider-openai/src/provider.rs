@@ -12,7 +12,8 @@ use async_openai::types::chat::{
     ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestToolMessageArgs,
     ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionTools, CompletionUsage,
-    CreateChatCompletionRequestArgs, FunctionCall, FunctionObjectArgs,
+    CreateChatCompletionRequestArgs, FunctionCall, FunctionObjectArgs, WebSearchContextSize,
+    WebSearchLocation, WebSearchOptions, WebSearchUserLocation, WebSearchUserLocationType,
 };
 use async_openai::types::embeddings::CreateEmbeddingRequestArgs;
 use async_openai::Client;
@@ -22,9 +23,10 @@ use serde_json::Value;
 use tokio::sync::{mpsc, RwLock};
 use tracing::debug;
 
+use assistant_core::types::OpenAIUserLocation;
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse,
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
     LlmResponseMeta, ToolCallItem, ToolSpec, ToolSupport,
 };
 
@@ -45,6 +47,8 @@ pub struct OpenAIProviderConfig {
     pub max_tokens: u32,
     /// Embedding model for vector search.
     pub embedding_model: String,
+    /// Hosted web-search config (Chat Completions `web_search_options`).
+    pub web_search: Option<OpenAIWebSearchConfig>,
 }
 
 impl Default for OpenAIProviderConfig {
@@ -55,8 +59,16 @@ impl Default for OpenAIProviderConfig {
             timeout_secs: 120,
             max_tokens: 8192,
             embedding_model: "text-embedding-3-small".to_string(),
+            web_search: None,
         }
     }
+}
+
+/// Resolved web-search configuration for the OpenAI provider.
+#[derive(Debug, Clone)]
+pub struct OpenAIWebSearchConfig {
+    pub search_context_size: Option<String>,
+    pub user_location: Option<OpenAIUserLocation>,
 }
 
 // ── OpenAIProvider ────────────────────────────────────────────────────────────
@@ -112,12 +124,22 @@ impl OpenAIProvider {
         let base_url = normalise_base_url(&cfg.base_url);
         let max_tokens = cfg.openai.max_tokens.unwrap_or(8192);
 
+        let web_search = if cfg.openai.web_search.enabled {
+            Some(OpenAIWebSearchConfig {
+                search_context_size: cfg.openai.web_search.search_context_size.clone(),
+                user_location: cfg.openai.web_search.user_location.clone(),
+            })
+        } else {
+            None
+        };
+
         let provider_cfg = OpenAIProviderConfig {
             model: cfg.model.clone(),
             base_url,
             timeout_secs: cfg.timeout_secs,
             max_tokens,
             embedding_model: cfg.embedding_model.clone(),
+            web_search,
         };
 
         match cfg.openai.auth_mode {
@@ -190,6 +212,9 @@ impl OpenAIProvider {
         if !openai_tools.is_empty() {
             builder.tools(openai_tools);
         }
+        if let Some(ref ws) = self.config.web_search {
+            builder.web_search_options(build_web_search_options(ws));
+        }
         let request = builder
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build OpenAI request: {e}"))?;
@@ -250,6 +275,9 @@ impl OpenAIProvider {
             .max_completion_tokens(self.config.max_tokens);
         if !openai_tools.is_empty() {
             builder.tools(openai_tools);
+        }
+        if let Some(ref ws) = self.config.web_search {
+            builder.web_search_options(build_web_search_options(ws));
         }
         let request = builder
             .build()
@@ -376,11 +404,15 @@ impl OpenAIProvider {
 #[async_trait]
 impl LlmProvider for OpenAIProvider {
     fn capabilities(&self) -> Capabilities {
+        let mut hosted_tools = Vec::new();
+        if self.config.web_search.is_some() {
+            hosted_tools.push(HostedTool::WebSearch);
+        }
         Capabilities {
             tools: ToolSupport::Native,
             streaming: true,
             vision: true,
-            hosted_tools: Vec::new(),
+            hosted_tools,
         }
     }
 
@@ -646,6 +678,34 @@ fn parse_tool_calls_enum(tool_calls: &[ChatCompletionMessageToolCalls]) -> Vec<T
         .collect()
 }
 
+// ── Web search helpers ────────────────────────────────────────────────────────
+
+/// Convert the provider-level web search config into the `async-openai` typed
+/// [`WebSearchOptions`] that gets serialised on the Chat Completions request.
+fn build_web_search_options(cfg: &OpenAIWebSearchConfig) -> WebSearchOptions {
+    let search_context_size = cfg.search_context_size.as_deref().and_then(|s| match s {
+        "low" => Some(WebSearchContextSize::Low),
+        "medium" => Some(WebSearchContextSize::Medium),
+        "high" => Some(WebSearchContextSize::High),
+        _ => None,
+    });
+
+    let user_location = cfg.user_location.as_ref().map(|loc| WebSearchUserLocation {
+        r#type: WebSearchUserLocationType::Approximate,
+        approximate: WebSearchLocation {
+            country: loc.country.clone(),
+            city: loc.city.clone(),
+            region: loc.region.clone(),
+            timezone: loc.timezone.clone(),
+        },
+    });
+
+    WebSearchOptions {
+        search_context_size,
+        user_location,
+    }
+}
+
 // ── URL normalisation ─────────────────────────────────────────────────────────
 
 /// Ensure the base URL ends with `/v1` for the OpenAI API.
@@ -754,5 +814,83 @@ mod tests {
         let tool = tool_spec_to_openai(&spec);
         assert_eq!(tool.function.name, "file-read");
         assert_eq!(tool.function.description, Some("Read a file".to_string()));
+    }
+
+    // ── Web search option tests ───────────────────────────────────────────
+
+    #[test]
+    fn build_web_search_options_defaults() {
+        let cfg = OpenAIWebSearchConfig {
+            search_context_size: None,
+            user_location: None,
+        };
+        let opts = build_web_search_options(&cfg);
+        assert!(opts.search_context_size.is_none());
+        assert!(opts.user_location.is_none());
+    }
+
+    #[test]
+    fn build_web_search_options_with_context_size() {
+        for (input, expected) in [
+            ("low", WebSearchContextSize::Low),
+            ("medium", WebSearchContextSize::Medium),
+            ("high", WebSearchContextSize::High),
+        ] {
+            let cfg = OpenAIWebSearchConfig {
+                search_context_size: Some(input.to_string()),
+                user_location: None,
+            };
+            let opts = build_web_search_options(&cfg);
+            assert_eq!(opts.search_context_size, Some(expected));
+        }
+    }
+
+    #[test]
+    fn build_web_search_options_invalid_context_size_ignored() {
+        let cfg = OpenAIWebSearchConfig {
+            search_context_size: Some("ultra".to_string()),
+            user_location: None,
+        };
+        let opts = build_web_search_options(&cfg);
+        assert!(opts.search_context_size.is_none());
+    }
+
+    #[test]
+    fn build_web_search_options_with_user_location() {
+        let cfg = OpenAIWebSearchConfig {
+            search_context_size: None,
+            user_location: Some(OpenAIUserLocation {
+                country: Some("GB".to_string()),
+                city: Some("London".to_string()),
+                region: Some("London".to_string()),
+                timezone: Some("Europe/London".to_string()),
+            }),
+        };
+        let opts = build_web_search_options(&cfg);
+        let loc = opts.user_location.expect("user_location should be set");
+        assert_eq!(loc.approximate.country, Some("GB".to_string()));
+        assert_eq!(loc.approximate.city, Some("London".to_string()));
+    }
+
+    #[test]
+    fn capabilities_without_web_search() {
+        let provider =
+            OpenAIProvider::new(OpenAIProviderConfig::default(), "test-key").expect("should build");
+        let caps = provider.capabilities();
+        assert!(caps.hosted_tools.is_empty());
+    }
+
+    #[test]
+    fn capabilities_with_web_search() {
+        let cfg = OpenAIProviderConfig {
+            web_search: Some(OpenAIWebSearchConfig {
+                search_context_size: None,
+                user_location: None,
+            }),
+            ..Default::default()
+        };
+        let provider = OpenAIProvider::new(cfg, "test-key").expect("should build");
+        let caps = provider.capabilities();
+        assert_eq!(caps.hosted_tools, vec![HostedTool::WebSearch]);
     }
 }
