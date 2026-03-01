@@ -5,6 +5,30 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use tracing::warn;
 
+// -- Static asset URL trait --------------------------------------------------
+
+/// Provides fingerprinted static asset URLs to Askama templates.
+///
+/// Implement this (empty `impl`) on every template struct that extends
+/// `base.html`.  The template can then use `{{ self.app_css_url() }}`,
+/// `{{ self.htmx_url() }}`, etc. — no per-struct fields required.
+pub trait StaticUrls {
+    /// Fingerprinted URL for the concatenated app stylesheet.
+    fn app_css_url(&self) -> &'static str {
+        crate::static_assets::app_css_url()
+    }
+
+    /// Fingerprinted URL for the vendored htmx script.
+    fn htmx_url(&self) -> &'static str {
+        crate::static_assets::htmx_url()
+    }
+
+    /// Fingerprinted URL for the vendored htmx-ext-sse script.
+    fn htmx_sse_url(&self) -> &'static str {
+        crate::static_assets::htmx_sse_url()
+    }
+}
+
 /// HTML-escape a string to prevent XSS.
 ///
 /// Used by the chat SSE token stream and webhook test helpers.

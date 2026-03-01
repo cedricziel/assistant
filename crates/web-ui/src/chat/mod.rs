@@ -35,6 +35,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::common;
+use crate::common::StaticUrls;
 
 // -- State -------------------------------------------------------------------
 
@@ -99,12 +100,13 @@ pub struct ActiveConversationView {
 #[derive(Template)]
 #[template(path = "chat/page.html")]
 struct ChatPageTemplate {
-    app_css_url: &'static str,
     active_page: &'static str,
     conversations: Vec<ConversationView>,
     active_conversation: Option<ActiveConversationView>,
     active_id: Option<String>,
 }
+
+impl StaticUrls for ChatPageTemplate {}
 
 /// htmx partial: chat panel content for a selected conversation.
 #[derive(Template)]
@@ -164,7 +166,6 @@ async fn chat_page(State(state): State<ChatState>) -> Response {
     let conversations = convs.iter().map(conv_to_view).collect();
 
     let tmpl = ChatPageTemplate {
-        app_css_url: crate::static_assets::app_css_url(),
         active_page: "chat",
         conversations,
         active_conversation: None,
@@ -300,7 +301,6 @@ async fn load_conversation(
         let conversations = convs.iter().map(conv_to_view).collect();
 
         let tmpl = ChatPageTemplate {
-            app_css_url: crate::static_assets::app_css_url(),
             active_page: "chat",
             conversations,
             active_conversation: Some(ActiveConversationView {

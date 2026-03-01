@@ -1,0 +1,19 @@
+{
+  "comment": "Pinned vendor dependencies for assistant-web-ui. Run 'make vendor' to download.",
+  "packages": [
+    {
+      "name": "htmx.org",
+      "version": "2.0.4",
+      "file": "htmx.min.js",
+      "url": "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js",
+      "sha256": "e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447"
+    },
+    {
+      "name": "htmx-ext-sse",
+      "version": "2.2.2",
+      "file": "sse.js",
+      "url": "https://unpkg.com/htmx-ext-sse@2.2.2/sse.js",
+      "sha256": "83eca6fa0611fe2b0bf1700b424b88b5eced38ef448ef9760a2ea08fbc875611"
+    }
+  ]
+}

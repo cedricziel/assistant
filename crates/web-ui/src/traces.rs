@@ -16,7 +16,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use crate::common::{format_duration, internal_error, render_template, url_encode};
+use crate::common::{format_duration, internal_error, render_template, url_encode, StaticUrls};
 use crate::AppState;
 
 // -- Query -------------------------------------------------------------------
@@ -75,7 +75,6 @@ struct WaterfallRowView {
 #[derive(Template)]
 #[template(path = "traces/page.html")]
 struct TracesPageTemplate {
-    app_css_url: &'static str,
     active_page: &'static str,
     // Sidebar
     skill_facets: Vec<SkillFacetView>,
@@ -91,11 +90,12 @@ struct TracesPageTemplate {
     total_count: usize,
 }
 
+impl StaticUrls for TracesPageTemplate {}
+
 /// Trace detail page with waterfall chart (extends base.html).
 #[derive(Template)]
 #[template(path = "traces/detail.html")]
 struct TraceDetailTemplate {
-    app_css_url: &'static str,
     active_page: &'static str,
     short_id: String,
     first_service: Option<String>,
@@ -105,6 +105,8 @@ struct TraceDetailTemplate {
     waterfall_rows: Vec<WaterfallRowView>,
     time_ticks: Vec<String>,
 }
+
+impl StaticUrls for TraceDetailTemplate {}
 
 // -- Router ------------------------------------------------------------------
 
@@ -203,7 +205,6 @@ async fn show_dashboard(
     let trace_rows: Vec<TraceRowView> = traces.iter().map(trace_to_row_view).collect();
 
     let tmpl = TracesPageTemplate {
-        app_css_url: crate::static_assets::app_css_url(),
         active_page: "traces",
         skill_facets,
         status_options,
@@ -267,7 +268,6 @@ async fn show_trace_detail(
     let waterfall_rows = build_waterfall_rows(start, end, &spans);
 
     let tmpl = TraceDetailTemplate {
-        app_css_url: crate::static_assets::app_css_url(),
         active_page: "traces",
         short_id,
         first_service,

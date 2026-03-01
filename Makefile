@@ -1,8 +1,11 @@
-.PHONY: all build test lint lint-signal format clean check install-hooks
+.PHONY: all build test lint lint-signal format clean check install-hooks vendor
 
 all: build
 
-build:
+vendor:
+	@crates/web-ui/vendor.sh
+
+build: vendor
 	cargo build --workspace
 
 build-release:

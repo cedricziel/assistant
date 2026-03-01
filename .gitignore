@@ -33,5 +33,8 @@
 # WASM plugins (compiled artefacts, not source)
 *.wasm
 
+# Vendored JS dependencies (downloaded by `make vendor`)
+crates/web-ui/src/static_assets/vendor/
+
 # Logs
 *.log

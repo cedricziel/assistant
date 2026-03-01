@@ -19,7 +19,7 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 
-use crate::common::render_template;
+use crate::common::{render_template, StaticUrls};
 
 // -- Configuration ----------------------------------------------------------
 
@@ -156,18 +156,16 @@ pub async fn require_auth(
 #[derive(Template)]
 #[template(path = "auth/login.html")]
 pub(crate) struct LoginPageTemplate {
-    app_css_url: &'static str,
     error: Option<String>,
 }
+
+impl StaticUrls for LoginPageTemplate {}
 
 // -- Login page -------------------------------------------------------------
 
 /// `GET /login` — render the login form.
 pub async fn login_page() -> Response {
-    render_template(LoginPageTemplate {
-        app_css_url: crate::static_assets::app_css_url(),
-        error: None,
-    })
+    render_template(LoginPageTemplate { error: None })
 }
 
 /// `POST /login` — validate the submitted token and set a session cookie.
@@ -195,7 +193,6 @@ pub(crate) async fn login_submit(
             .unwrap()
     } else {
         render_template(LoginPageTemplate {
-            app_css_url: crate::static_assets::app_css_url(),
             error: Some("Invalid token.".to_string()),
         })
     }

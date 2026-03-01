@@ -44,6 +44,8 @@ static SERVICE_WORKER: LazyLock<String> = LazyLock::new(|| {
     SW_TEMPLATE
         .replace("__APP_VERSION__", &version)
         .replace("__APP_CSS_URL__", crate::static_assets::app_css_url())
+        .replace("__HTMX_URL__", crate::static_assets::htmx_url())
+        .replace("__HTMX_SSE_URL__", crate::static_assets::htmx_sse_url())
 });
 
 // -- Route handlers ----------------------------------------------------------

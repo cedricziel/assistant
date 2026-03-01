@@ -1,8 +1,7 @@
 // -- Assistant PWA Service Worker (full offline) --
 //
 // Cache strategy:
-//   - Static PWA assets (manifest, icons): cache-first
-//   - CDN scripts (htmx): cache-first
+//   - Static assets (CSS, vendored JS, icons): cache-first
 //   - HTML pages: network-first, fall back to cache, then offline page
 //   - Non-GET / SSE streams: network-only (pass through)
 
@@ -12,7 +11,6 @@
 const CACHE_VERSION = "__APP_VERSION__";
 const STATIC_CACHE = `assistant-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `assistant-pages-${CACHE_VERSION}`;
-const CDN_CACHE = `assistant-cdn-${CACHE_VERSION}`;
 
 const STATIC_ASSETS = [
   "/pwa/manifest.webmanifest",
@@ -20,28 +18,25 @@ const STATIC_ASSETS = [
   "/pwa/icon-maskable.svg",
   "/pwa/offline",
   "__APP_CSS_URL__",
-];
-
-const CDN_ASSETS = [
-  "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js",
-  "https://unpkg.com/htmx-ext-sse@2.2.2/sse.js",
+  "__HTMX_URL__",
+  "__HTMX_SSE_URL__",
 ];
 
 // -- Install: pre-cache app shell -------------------------------------------
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    Promise.all([
-      caches.open(STATIC_CACHE).then((cache) => cache.addAll(STATIC_ASSETS)),
-      caches.open(CDN_CACHE).then((cache) => cache.addAll(CDN_ASSETS)),
-    ]).then(() => self.skipWaiting()),
+    caches
+      .open(STATIC_CACHE)
+      .then((cache) => cache.addAll(STATIC_ASSETS))
+      .then(() => self.skipWaiting()),
   );
 });
 
 // -- Activate: purge old caches ---------------------------------------------
 
 self.addEventListener("activate", (event) => {
-  const CURRENT = [STATIC_CACHE, PAGE_CACHE, CDN_CACHE];
+  const CURRENT = [STATIC_CACHE, PAGE_CACHE];
   event.waitUntil(
     caches
       .keys()
@@ -72,12 +67,6 @@ self.addEventListener("fetch", (event) => {
 
   // Skip htmx partial requests — let them go to network
   if (request.headers.get("HX-Request") === "true") return;
-
-  // CDN assets (different origin): cache-first
-  if (url.origin !== self.location.origin) {
-    event.respondWith(cacheFirst(request, CDN_CACHE));
-    return;
-  }
 
   // Static PWA assets: cache-first
   if (url.pathname.startsWith("/pwa/")) {

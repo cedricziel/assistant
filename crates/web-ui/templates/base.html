@@ -16,9 +16,10 @@
   <meta name="apple-mobile-web-app-title" content="Assistant">
   <link rel="apple-touch-icon" href="/pwa/icon.svg">
 
-  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
-  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
-  <link rel="stylesheet" href="{{ app_css_url }}">
+  <script type="importmap">{"imports":{"htmx.org":"{{ self.htmx_url() }}","htmx-ext-sse":"{{ self.htmx_sse_url() }}"}}</script>
+  <script src="{{ self.htmx_url() }}"></script>
+  <script src="{{ self.htmx_sse_url() }}"></script>
+  <link rel="stylesheet" href="{{ self.app_css_url() }}">
   <style>{% block extra_css %}{% endblock %}</style>
 </head>
 <body>
