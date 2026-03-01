@@ -270,6 +270,7 @@ dependencies = [
  "assistant-skills",
  "assistant-storage",
  "assistant-tool-executor",
+ "assistant-transcription",
  "clap",
  "dirs",
  "reedline",
@@ -371,6 +372,7 @@ dependencies = [
  "assistant-llm",
  "assistant-runtime",
  "assistant-storage",
+ "assistant-transcription",
  "async-trait",
  "base64 0.22.1",
  "reqwest 0.12.28",
@@ -575,6 +577,23 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "assistant-transcription"
+version = "0.1.26"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "assistant-llm",
+ "async-trait",
+ "reqwest 0.12.28",
+ "reqwest-middleware",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

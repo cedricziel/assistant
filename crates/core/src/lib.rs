@@ -22,5 +22,6 @@ pub use types::{
     LlmConfig, LlmProviderKind, MattermostConfig, McpConfig, MemoryConfig, Message, MessageRole,
     MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, OpenAIAuthMode, OpenAIOptions,
     OpenAIUserLocation, OpenAIWebSearchOptions, SignalConfig, SkillsConfig, SlackConfig,
-    SlackListenMode, StorageConfig, DEFAULT_MAX_AGENT_DEPTH,
+    SlackListenMode, StorageConfig, TranscriptionConfig, TranscriptionProviderKind,
+    DEFAULT_MAX_AGENT_DEPTH,
 };

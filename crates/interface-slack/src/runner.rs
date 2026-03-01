@@ -35,6 +35,7 @@ use assistant_core::{Interface, Message, MessageRole};
 use assistant_llm::ContentBlock;
 use assistant_runtime::Orchestrator;
 use assistant_storage::StorageLayer;
+use assistant_transcription::TranscriptionProvider;
 use base64::Engine as _;
 
 use slack_morphism::prelude::*;
@@ -137,6 +138,12 @@ struct SlackCallbackState {
     started_at: f64,
     /// Storage layer used to seed thread history into the conversation store.
     storage: Arc<StorageLayer>,
+    /// Audio transcription provider (if configured).
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    /// BCP-47 language hint for transcription (e.g. `"en"`, `"de"`).
+    transcription_language: Option<String>,
+    /// Shared HTTP client for downloading Slack file attachments.
+    http_client: reqwest::Client,
     /// Per-conversation serialisation mutex.
     ///
     /// Each conversation has a single `Mutex<()>` token; holding it means
@@ -237,6 +244,7 @@ const SLACK_FILE_DOWNLOAD_TIMEOUT_SECS: u64 = 15;
 async fn download_slack_file_as_content_block(
     file: &SlackFile,
     bot_token: &str,
+    http_client: &reqwest::Client,
 ) -> Option<ContentBlock> {
     let mime = file.mimetype.as_ref().map(|m| m.to_string())?;
     if !IMAGE_MIME_PREFIXES.iter().any(|p| mime.starts_with(p)) {
@@ -255,13 +263,7 @@ async fn download_slack_file_as_content_block(
 
     debug!(file_id = %file.id.0, mime = %mime, "Downloading Slack file for vision");
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(
-            SLACK_FILE_DOWNLOAD_TIMEOUT_SECS,
-        ))
-        .build()
-        .ok()?;
-    let resp = client
+    let resp = http_client
         .get(url.as_str())
         .header("Authorization", format!("Bearer {bot_token}"))
         .send()
@@ -306,6 +308,129 @@ async fn download_slack_file_as_content_block(
         media_type: mime,
         data,
     })
+}
+
+/// Maximum audio file size we will download for transcription (25 MB).
+/// Matches the OpenAI Whisper API file-size limit.
+const MAX_AUDIO_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+
+/// Download a Slack audio file and return the raw bytes and MIME type.
+///
+/// Only files with a recognised audio MIME type are downloaded; all others
+/// are skipped (returns `None`).
+async fn download_slack_audio_file(
+    file: &SlackFile,
+    bot_token: &str,
+    http_client: &reqwest::Client,
+) -> Option<(Vec<u8>, String, Option<String>)> {
+    let mime = file.mimetype.as_ref().map(|m| m.to_string())?;
+    if !assistant_transcription::is_audio_mime(&mime) {
+        return None;
+    }
+
+    let url = file
+        .url_private_download
+        .as_ref()
+        .or(file.url_private.as_ref())?;
+
+    let filename = file
+        .name
+        .as_deref()
+        .or(file.title.as_deref())
+        .map(|s| s.to_string());
+
+    debug!(file_id = %file.id.0, mime = %mime, "Downloading Slack audio file for transcription");
+
+    let resp = http_client
+        .get(url.as_str())
+        .header("Authorization", format!("Bearer {bot_token}"))
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        warn!(
+            file_id = %file.id.0,
+            status = %resp.status(),
+            "Failed to download Slack audio file"
+        );
+        return None;
+    }
+
+    if resp
+        .content_length()
+        .is_some_and(|len| len > MAX_AUDIO_ATTACHMENT_BYTES as u64)
+    {
+        warn!(
+            file_id = %file.id.0,
+            limit = MAX_AUDIO_ATTACHMENT_BYTES,
+            "Skipping oversized Slack audio attachment"
+        );
+        return None;
+    }
+
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.len() > MAX_AUDIO_ATTACHMENT_BYTES {
+        warn!(
+            file_id = %file.id.0,
+            size = bytes.len(),
+            limit = MAX_AUDIO_ATTACHMENT_BYTES,
+            "Skipping oversized Slack audio attachment after download"
+        );
+        return None;
+    }
+
+    Some((bytes.to_vec(), mime, filename))
+}
+
+/// Transcribe all audio files in the list using the given provider.
+///
+/// Returns a combined transcript string (one `[Voice transcription]` block
+/// per file) that should be prepended to the user's text message.
+async fn transcribe_slack_audio_files(
+    files: &[SlackFile],
+    bot_token: &str,
+    http_client: &reqwest::Client,
+    provider: &dyn TranscriptionProvider,
+    language: Option<&str>,
+) -> String {
+    let mut transcripts = Vec::new();
+    for file in files {
+        let Some((audio_data, mime, filename)) =
+            download_slack_audio_file(file, bot_token, http_client).await
+        else {
+            continue;
+        };
+
+        let request = assistant_transcription::TranscriptionRequest {
+            audio_data,
+            mime_type: mime,
+            filename,
+            language: language.map(|s| s.to_string()),
+        };
+
+        match provider.transcribe(request).await {
+            Ok(result) => {
+                info!(
+                    file_id = %file.id.0,
+                    text_len = result.text.len(),
+                    language = ?result.language,
+                    duration = ?result.duration_secs,
+                    "Audio transcription successful"
+                );
+                transcripts.push(format!("[Voice transcription]: {}", result.text));
+            }
+            Err(e) => {
+                warn!(
+                    file_id = %file.id.0,
+                    error = %e,
+                    "Audio transcription failed"
+                );
+                transcripts.push("[Voice message: transcription failed]".to_string());
+            }
+        }
+    }
+    transcripts.join("\n")
 }
 
 fn incoming_from_message_event(msg: &SlackMessageEvent) -> Option<SlackIncomingEvent> {
@@ -452,6 +577,9 @@ async fn on_push_event(
         processed_ts,
         started_at,
         storage,
+        transcription,
+        transcription_language,
+        http_client,
         conv_locks,
         pending_messages,
     ) = {
@@ -472,6 +600,9 @@ async fn on_push_event(
             s.processed_ts.clone(),
             s.started_at,
             s.storage.clone(),
+            s.transcription.clone(),
+            s.transcription_language.clone(),
+            s.http_client.clone(),
             s.conv_locks.clone(),
             s.pending_messages.clone(),
         )
@@ -732,7 +863,9 @@ async fn on_push_event(
     let bot_token_str = bot_token.token_value.0.as_str();
     let mut attachments = Vec::new();
     for file in &slack_files {
-        if let Some(block) = download_slack_file_as_content_block(file, bot_token_str).await {
+        if let Some(block) =
+            download_slack_file_as_content_block(file, bot_token_str, &http_client).await
+        {
             attachments.push(block);
         }
     }
@@ -741,6 +874,27 @@ async fn on_push_event(
             count = attachments.len(),
             "Downloaded image attachments for vision"
         );
+    }
+
+    // Transcribe audio files (voice messages) if a transcription provider is configured.
+    let mut text = text;
+    if let Some(ref provider) = transcription {
+        let transcript = transcribe_slack_audio_files(
+            &slack_files,
+            bot_token_str,
+            &http_client,
+            provider.as_ref(),
+            transcription_language.as_deref(),
+        )
+        .await;
+        if !transcript.is_empty() {
+            // Prepend the transcript so the LLM sees it before any file metadata.
+            text = if text.trim().is_empty() {
+                transcript
+            } else {
+                format!("{transcript}\n\n{text}")
+            };
+        }
     }
 
     // Push this message into the per-conversation pending queue so that if
@@ -961,6 +1115,8 @@ pub struct SlackInterface {
     config: SlackConfig,
     orchestrator: Arc<Orchestrator>,
     storage: Arc<StorageLayer>,
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    transcription_language: Option<String>,
 }
 
 impl SlackInterface {
@@ -973,7 +1129,20 @@ impl SlackInterface {
             config,
             orchestrator,
             storage,
+            transcription: None,
+            transcription_language: None,
         }
+    }
+
+    /// Enable automatic audio transcription for voice messages.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
+        self
     }
 
     /// Return ambient tools contributed by this interface.
@@ -1144,6 +1313,14 @@ impl SlackInterface {
                 processed_ts: processed_ts.clone(),
                 started_at,
                 storage: self.storage.clone(),
+                transcription: self.transcription.clone(),
+                transcription_language: self.transcription_language.clone(),
+                http_client: reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(
+                        SLACK_FILE_DOWNLOAD_TIMEOUT_SECS,
+                    ))
+                    .build()
+                    .expect("Failed to build HTTP client for Slack file downloads"),
                 conv_locks: conv_locks.clone(),
                 pending_messages: Arc::new(Mutex::new(HashMap::new())),
             };
