@@ -3,9 +3,9 @@ mod analytics;
 pub mod auth;
 mod chat;
 pub mod common;
-mod legacy;
 mod logs;
 mod pwa;
+pub(crate) mod static_assets;
 mod traces;
 mod webhooks;
 
@@ -289,7 +289,9 @@ async fn main() -> Result<()> {
         // A2A agent card is public per spec — callers need it to discover auth.
         .merge(a2a::public_router().with_state(a2a_state.clone()))
         // PWA assets must be public so the browser can fetch them before auth.
-        .merge(pwa::pwa_router());
+        .merge(pwa::pwa_router())
+        // Fingerprinted static assets (CSS).
+        .merge(static_assets::static_router());
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()

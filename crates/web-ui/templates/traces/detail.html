@@ -1,0 +1,78 @@
+{% extends "base.html" %} {% block title %}Trace {{ short_id }}...{% endblock %}
+{% block breadcrumb %}
+<span class="breadcrumb-page">Observability</span>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Trace {{ short_id }}&hellip;</span>
+{% endblock %} {% block extra_css %}{% endblock %} {% block content %}
+<div class="page">
+  <div class="trace-detail">
+    <div class="trace-header-bar">
+      <a class="hdr-back" href="/traces">&larr; Back</a>
+      <span class="hdr-sep">|</span>
+      <span class="hdr-trace-id">Trace {{ short_id }}&hellip;</span>
+      <span class="hdr-sep">|</span>
+      <span class="hdr-svc">
+        {% if let Some(first) = first_service %} {% if let Some(last) =
+        last_service %} {{ first }} &rarr; {{ last }} {% else %} {{ first }} {%
+        endif %} {% else %} &mdash; {% endif %}
+      </span>
+      <span class="hdr-sep">|</span>
+      <span class="hdr-dur">{{ duration }}</span>
+      <span class="hdr-sep">|</span>
+      {% if has_errors %}
+      <span class="hdr-badge error">ERR</span>
+      {% else %}
+      <span class="hdr-badge ok">OK</span>
+      {% endif %}
+    </div>
+
+    <section class="wf-section">
+      {% if waterfall_rows.is_empty() %}
+      <p class="empty">No spans recorded for this trace.</p>
+      {% else %}
+      <div class="wf-container">
+        <div class="wf-time-axis">
+          {% for tick in time_ticks %}
+          <span>{{ tick }}</span>
+          {% endfor %}
+        </div>
+        {% for row in waterfall_rows %}
+        <div
+          class="wf-row"
+          data-span-id="{{ row.span_id }}"
+          data-attrs="{{ row.attrs_json }}"
+          tabindex="0"
+          role="button"
+        >
+          <div
+            class="wf-label-col"
+            style="padding-left:{{ row.padding_left }}px"
+          >
+            <span class="wf-label"
+              >{% if row.has_error %}<span class="wf-err-icon">&#x2717;</span>{%
+              endif %}{{ row.label }}</span
+            >
+            <span class="wf-dur">{{ row.duration }}</span>
+          </div>
+          <div class="wf-track-axis">
+            <div
+              class="{{ row.bar_class }}"
+              style="margin-left:{{ row.offset_pct }}%;width:{{ row.width_pct }}%;"
+            ></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+
+    <div id="span-attrs-panel" class="attrs-panel">
+      <div id="span-attrs-content">
+        Click a span row to view its attributes.
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="{{ self.trace_detail_js_url() }}"></script>
+{% endblock %}

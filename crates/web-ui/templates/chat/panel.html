@@ -2,8 +2,15 @@
 <!-- Mobile back header -->
 <div class="mobile-chat-header">
   <a href="/chat" class="mobile-back">
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-      <polyline points="15 18 9 12 15 6"/>
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+    >
+      <polyline points="15 18 9 12 15 6" />
     </svg>
     Back
   </a>
@@ -14,11 +21,14 @@
   <div>
     <h2>{{ title }}</h2>
   </div>
-  <div style="display:flex; gap:8px; align-items:center">
-    <button class="btn-signout" style="font-size:0.75rem"
-            hx-delete="/chat/{{ id }}"
-            hx-confirm="Delete this conversation?"
-            hx-target="body">
+  <div style="display: flex; gap: 8px; align-items: center">
+    <button
+      class="btn-signout"
+      style="font-size: 0.75rem"
+      hx-delete="/chat/{{ id }}"
+      hx-confirm="Delete this conversation?"
+      hx-target="body"
+    >
       Delete
     </button>
   </div>
@@ -26,59 +36,50 @@
 
 <div id="messages" class="messages-container">
   {% for msg in messages %}
-    <div class="message {{ msg.role_class }}">
-      <div class="msg-header">
-        <span class="msg-role">{{ msg.role_label }}</span>
-        <span class="msg-time">{{ msg.time }}</span>
-      </div>
-      <div class="msg-content">{{ msg.content }}</div>
-      {% for tc in msg.tool_calls %}
-        <div class="tool-call">
-          <button type="button" class="tool-call-header"
-                  aria-expanded="false"
-                  onclick="var body=this.nextElementSibling;var open=body.style.display!=='none';body.style.display=open?'none':'block';this.setAttribute('aria-expanded',!open)">
-            <span>&#9654;</span>
-            <span class="tool-call-name">{{ tc.name }}</span>
-            <span class="tool-call-status{% if tc.is_success %} ok{% else %} err{% endif %}">
-              {% if tc.is_success %}&#10003;{% else %}&#10007;{% endif %}
-            </span>
-          </button>
-          <div class="tool-call-body" style="display:none">{{ tc.summary }}</div>
-        </div>
-      {% endfor %}
+  <div class="message {{ msg.role_class }}">
+    <div class="msg-header">
+      <span class="msg-role">{{ msg.role_label }}</span>
+      <span class="msg-time">{{ msg.time }}</span>
     </div>
+    <div class="msg-content">{{ msg.content }}</div>
+    {% for tc in msg.tool_calls %}
+    <div class="tool-call">
+      <details>
+        <summary class="tool-call-header">
+          <span>&#9654;</span>
+          <span class="tool-call-name">{{ tc.name }}</span>
+          <span
+            class="tool-call-status{% if tc.is_success %} ok{% else %} err{% endif %}"
+          >
+            {% if tc.is_success %}&#10003;{% else %}&#10007;{% endif %}
+          </span>
+        </summary>
+        <div class="tool-call-body">{{ tc.summary }}</div>
+      </details>
+    </div>
+    {% endfor %}
+  </div>
   {% endfor %}
 </div>
 
 <div class="chat-input">
-  <form id="chat-form" class="chat-input-form"
-        hx-post="/chat/{{ id }}/send"
-        hx-target="#messages"
-        hx-swap="beforeend scroll:#messages:bottom"
-        hx-on::after-request="this.reset(); if(typeof chatStreamStarted==='function') chatStreamStarted()">
-    <textarea class="chat-input-field"
-            name="message"
-            placeholder="Type a message..."
-            rows="1"
-            required
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.form.requestSubmit()}"></textarea>
+  <form
+    id="chat-form"
+    class="chat-input-form"
+    hx-post="/chat/{{ id }}/send"
+    hx-target="#messages"
+    hx-swap="beforeend scroll:#messages:bottom"
+  >
+    <textarea
+      class="chat-input-field"
+      name="message"
+      placeholder="Type a message..."
+      rows="1"
+      required
+    ></textarea>
     <button type="submit" class="btn-send" id="btn-send">Send</button>
   </form>
   <div class="chat-input-meta">
     <span>Shift+Enter for new line</span>
   </div>
 </div>
-
-<script>
-  // Scroll to bottom of messages
-  (function() {
-    var msgs = document.getElementById('messages');
-    if (msgs) msgs.scrollTop = msgs.scrollHeight;
-  })();
-  // Mark active in conversation list
-  document.querySelectorAll('.conv-item').forEach(function(el) {
-    el.classList.remove('active');
-  });
-  var activeLink = document.querySelector('.conv-item[href="/chat/{{ id }}"]');
-  if (activeLink) activeLink.classList.add('active');
-</script>

@@ -1,0 +1,156 @@
+{% extends "base.html" %} {% block title %}Agent: {{ agent_name }}{% endblock %}
+{% block breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/agents" class="breadcrumb-page">Agents</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">{{ agent_name }}</span>
+{% endblock %} {% block extra_css %}{% endblock %} {% block content %}
+<div class="page">
+  <div class="trace-detail">
+    {# -- Header bar -- #}
+    <div class="trace-header-bar">
+      <a class="hdr-back" href="/agents">&larr; Agents</a>
+      <span class="hdr-sep">|</span>
+      <span class="hdr-trace-id">{{ short_id }}&hellip;</span>
+      <span class="hdr-svc">{{ agent_name }}</span>
+      {% if is_default %} <span class="hdr-badge ok">default</span>{% endif %}
+      <span class="hdr-dur">v{{ version }}</span>
+    </div>
+
+    {# -- Description -- #}
+    <div class="entity-section">
+      <h3>Description</h3>
+      <p>{{ description }}</p>
+    </div>
+
+    {# -- Actions -- #}
+    <nav class="entity-actions" aria-label="Agent actions">
+      <a href="/agents/{{ agent_id }}/edit" class="action-btn">Edit</a>
+      {% if !is_default %}
+      <form method="POST" action="/agents/{{ agent_id }}/set-default">
+        <button type="submit" class="action-btn secondary">
+          Set as Default
+        </button>
+      </form>
+      {% endif %}
+      <form method="POST" action="/agents/{{ agent_id }}/delete">
+        <button
+          type="submit"
+          class="action-btn danger"
+          hx-post="/agents/{{ agent_id }}/delete"
+          hx-confirm="Delete this agent?"
+        >
+          Delete
+        </button>
+      </form>
+      <a
+        href="/agents/{{ agent_id }}/card.json"
+        class="action-btn secondary"
+        target="_blank"
+        >View JSON</a
+      >
+    </nav>
+
+    {# -- Interfaces -- #}
+    <div class="entity-section">
+      <h3>Interfaces</h3>
+      <table class="trace-table">
+        <thead>
+          <tr>
+            <th>Binding</th>
+            <th>URL</th>
+            <th>Protocol</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for iface in interfaces %}
+          <tr>
+            <td><span class="badge">{{ iface.protocol_binding }}</span></td>
+            <td>{{ iface.url }}</td>
+            <td>{{ iface.protocol_version }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# -- Capabilities -- #}
+    <div class="entity-section">
+      <h3>Capabilities</h3>
+      <ul class="cap-list">
+        <li>Streaming: {{ streaming_badge|safe }}</li>
+        <li>Push Notifications: {{ push_badge|safe }}</li>
+        <li>Extended Card: {{ ext_card_badge|safe }}</li>
+        <li>Extensions: {{ extension_count }}</li>
+      </ul>
+    </div>
+
+    {# -- Default I/O Modes -- #}
+    <div class="entity-section">
+      <h3>Default I/O Modes</h3>
+      <p>
+        <strong>Input:</strong>
+        {% if input_modes.is_empty() %}
+        <span class="muted">none</span>
+        {% else %} {% for mode in input_modes %}
+        <span class="badge">{{ mode }}</span>
+        {% endfor %} {% endif %}
+      </p>
+      <p>
+        <strong>Output:</strong>
+        {% if output_modes.is_empty() %}
+        <span class="muted">none</span>
+        {% else %} {% for mode in output_modes %}
+        <span class="badge">{{ mode }}</span>
+        {% endfor %} {% endif %}
+      </p>
+    </div>
+
+    {# -- Skills -- #} {% if skills.is_empty() %}
+    <div class="entity-section">
+      <h3>Skills</h3>
+      <p class="empty">No skills defined.</p>
+    </div>
+    {% else %}
+    <div class="entity-section">
+      <h3>Skills <span class="pill">{{ skills.len() }}</span></h3>
+      <div class="skill-grid">
+        {% for skill in skills %}
+        <div class="skill-card">
+          <div class="skill-head">
+            <span class="primary">{{ skill.name }}</span>
+            <span class="trace-id">{{ skill.id }}</span>
+          </div>
+          <p>{{ skill.description }}</p>
+          <div class="skill-tags">
+            {% for tag in skill.tags %}
+            <span class="badge muted">{{ tag }}</span>
+            {% endfor %}
+          </div>
+          {% if !skill.examples.is_empty() %}
+          <div class="skill-examples">
+            <strong>Examples:</strong>
+            <ul>
+              {% for example in skill.examples %}
+              <li>{{ example }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %} {# -- Provider -- #} {% if let Some(provider) = provider %}
+    <div class="entity-section">
+      <h3>Provider</h3>
+      <p>
+        <strong>{{ provider.organization }}</strong> &mdash;
+        <a href="{{ provider.url }}">{{ provider.url }}</a>
+      </p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

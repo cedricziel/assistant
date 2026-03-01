@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, closed]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,6 +18,7 @@ env:
 jobs:
   check:
     name: Check
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -26,6 +28,9 @@ jobs:
 
       - name: Install protoc
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: Vendor JS dependencies
+        run: make vendor
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -43,12 +48,16 @@ jobs:
 
   test:
     name: Test
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Vendor JS dependencies
+        run: make vendor
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -66,6 +75,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -77,6 +87,9 @@ jobs:
 
       - name: Install protoc
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: Vendor JS dependencies
+        run: make vendor
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -97,6 +110,7 @@ jobs:
 
   format:
     name: Format
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -109,8 +123,260 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
+  visual-regression:
+    name: Visual Regression
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Vendor JS dependencies
+        run: make vendor
+
+      - name: Build web-ui binary
+        run: cargo build -p assistant-web-ui
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright dependencies
+        working-directory: crates/web-ui/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run visual regression tests
+        id: playwright
+        working-directory: crates/web-ui/e2e
+        continue-on-error: true
+        run: npx playwright test
+
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: crates/web-ui/e2e/playwright-report/
+          retention-days: 14
+
+      - name: Upload diff images
+        if: steps.playwright.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diff-images
+          path: crates/web-ui/e2e/test-results/
+          retention-days: 14
+
+      - name: Post visual diff comment on PR
+        if: steps.playwright.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.issue.number;
+
+            // -- 1. Collect diff/actual/expected images -----------------------
+            const testResults = 'crates/web-ui/e2e/test-results';
+            const pages = [];
+
+            function walk(dir) {
+              if (!fs.existsSync(dir)) return;
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) walk(full);
+                else if (entry.name.endsWith('-diff.png')) {
+                  const base = full.replace('-diff.png', '');
+                  const rel = path.relative(testResults, path.dirname(full));
+                  const label = rel.replace(/-retry\d+$/, '').replace(/-/g, ' ');
+                  // Sanitize for use as a path in the git tree
+                  const slug = label.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+                  pages.push({
+                    label,
+                    slug,
+                    diff:     full,
+                    actual:   fs.existsSync(base + '-actual.png')   ? base + '-actual.png'   : null,
+                    expected: fs.existsSync(base + '-expected.png') ? base + '-expected.png' : null,
+                  });
+                }
+              }
+            }
+            walk(testResults);
+
+            if (pages.length === 0) {
+              core.info('No diff images found, skipping comment.');
+              return;
+            }
+
+            // -- 2. Upload images as git blobs and push to a branch -----------
+            const branch = `visual-diffs/pr-${prNumber}`;
+            const treeEntries = [];
+
+            for (const page of pages) {
+              for (const [suffix, filePath] of [['diff', page.diff], ['actual', page.actual], ['expected', page.expected]]) {
+                if (!filePath) continue;
+                const content = fs.readFileSync(filePath).toString('base64');
+                const { data: blob } = await github.rest.git.createBlob({
+                  owner, repo,
+                  content,
+                  encoding: 'base64',
+                });
+                treeEntries.push({
+                  path: `${page.slug}/${suffix}.png`,
+                  mode: '100644',
+                  type: 'blob',
+                  sha: blob.sha,
+                });
+              }
+            }
+
+            const { data: tree } = await github.rest.git.createTree({
+              owner, repo,
+              tree: treeEntries,
+            });
+
+            // Orphan commit (no parents) so the branch stays lightweight
+            const { data: commit } = await github.rest.git.createCommit({
+              owner, repo,
+              message: `Visual diffs for PR #${prNumber} (run ${context.runId})`,
+              tree: tree.sha,
+              parents: [],
+            });
+
+            const ref = `heads/${branch}`;
+            try {
+              await github.rest.git.updateRef({ owner, repo, ref, sha: commit.sha, force: true });
+            } catch {
+              await github.rest.git.createRef({ owner, repo, ref: `refs/${ref}`, sha: commit.sha });
+            }
+
+            // Small delay so raw.githubusercontent.com picks up the new ref
+            await new Promise(r => setTimeout(r, 3000));
+
+            // -- 3. Build PR comment with inline images -----------------------
+            const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            let body = '## Visual Changes Detected\n\n';
+            body += 'This PR changes the visual appearance of the following pages. ';
+            body += 'This is expected when the frontend evolves — just verify the ';
+            body += 'new look is intentional.\n\n';
+
+            for (const page of pages) {
+              body += `### ${page.label}\n\n`;
+              body += '<table><tr>';
+              if (page.expected) {
+                body += `<td align="center"><strong>Baseline</strong><br><img src="${rawBase}/${page.slug}/expected.png" width="380"></td>`;
+              }
+              if (page.actual) {
+                body += `<td align="center"><strong>This PR</strong><br><img src="${rawBase}/${page.slug}/actual.png" width="380"></td>`;
+              }
+              body += `<td align="center"><strong>Diff</strong><br><img src="${rawBase}/${page.slug}/diff.png" width="380"></td>`;
+              body += '</tr></table>\n\n';
+            }
+
+            body += '---\n\n';
+            body += '<details><summary>How to review &amp; accept</summary>\n\n';
+            body += `Download the **playwright-report** artifact from the [CI run](${runUrl}), `;
+            body += 'unzip and open `index.html` for an interactive side-by-side slider.\n\n';
+            body += 'If the new appearance is correct, update the baselines:\n\n';
+            body += '```sh\ncd crates/web-ui/e2e\nnpm run test:update\n```\n\n';
+            body += 'Then commit the updated screenshots.\n\n';
+            body += '</details>\n';
+
+            // -- 4. Upsert comment --------------------------------------------
+            const marker = '<!-- visual-regression-report -->';
+            body = marker + '\n' + body;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+            }
+
+      - name: Clear stale visual diff comment
+        if: steps.playwright.outcome == 'success' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.issue.number;
+            const marker = '<!-- visual-regression-report -->';
+
+            // Update comment to show passing state
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo,
+                comment_id: existing.id,
+                body: marker + '\n## Visual Regression Report\n\nNo visual changes detected — all pages match their baselines.',
+              });
+            }
+
+            // Clean up the diff images branch if it exists
+            try {
+              await github.rest.git.deleteRef({ owner, repo, ref: `heads/visual-diffs/pr-${prNumber}` });
+            } catch { /* branch may not exist */ }
+
+  visual-diff-cleanup:
+    name: Clean up visual diff branch
+    if: github.event.pull_request.state == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete visual-diffs branch for this PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/visual-diffs/pr-${prNumber}`,
+              });
+              core.info(`Deleted branch visual-diffs/pr-${prNumber}`);
+            } catch (e) {
+              core.info(`No branch visual-diffs/pr-${prNumber} to clean up`);
+            }
+
   integration:
     name: Integration (smoke)
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -118,6 +384,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Vendor JS dependencies
+        run: make vendor
 
       - name: Cache cargo
         uses: actions/cache@v5

@@ -1,0 +1,176 @@
+{% extends "base.html" %} {% block title %}{{ page_title }}{% endblock %} {%
+block breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/agents" class="breadcrumb-page">Agents</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">{{ heading }}</span>
+{% endblock %} {% block extra_css %}{% endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Agents</h2>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head"><h2>{{ heading }}</h2></div>
+      <form method="POST" action="{{ action }}" class="entity-form">
+        <div class="form-group">
+          <label>Name *</label>
+          <input
+            type="text"
+            name="name"
+            value="{{ name }}"
+            required
+            placeholder="My Agent"
+          />
+        </div>
+        <div class="form-group">
+          <label>Description *</label>
+          <textarea
+            name="description"
+            required
+            rows="3"
+            placeholder="What does this agent do?"
+          >
+{{ desc }}</textarea
+          >
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Version *</label>
+            <input
+              type="text"
+              name="version"
+              value="{{ version }}"
+              required
+              placeholder="1.0.0"
+            />
+          </div>
+          <div class="form-group">
+            <label>Protocol Binding</label>
+            <input
+              type="text"
+              name="protocol_binding"
+              value="{{ binding }}"
+              placeholder="HTTP+JSON"
+            />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Interface URL</label>
+          <input
+            type="text"
+            name="url"
+            value="{{ url }}"
+            placeholder="https://example.com/a2a"
+          />
+        </div>
+        <div class="form-group">
+          <label>Documentation URL</label>
+          <input
+            type="text"
+            name="documentation_url"
+            value="{{ doc_url }}"
+            placeholder="https://docs.example.com"
+          />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Input Modes (comma-separated)</label>
+            <input
+              type="text"
+              name="input_modes"
+              value="{{ input_modes }}"
+              placeholder="text/plain"
+            />
+          </div>
+          <div class="form-group">
+            <label>Output Modes (comma-separated)</label>
+            <input
+              type="text"
+              name="output_modes"
+              value="{{ output_modes }}"
+              placeholder="text/plain"
+            />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Provider Organization</label>
+            <input
+              type="text"
+              name="provider_org"
+              value="{{ provider_org }}"
+              placeholder="Acme Inc."
+            />
+          </div>
+          <div class="form-group">
+            <label>Provider URL</label>
+            <input
+              type="text"
+              name="provider_url"
+              value="{{ provider_url }}"
+              placeholder="https://acme.com"
+            />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              name="streaming"
+              value="on"
+              {%
+              if
+              streaming_checked
+              %}
+              checked{%
+              endif
+              %}
+            />
+            Supports streaming
+          </label>
+        </div>
+        <div class="form-group">
+          <label for="skills-json-input">Skills (JSON array)</label>
+          <textarea
+            id="skills-json-input"
+            name="skills_json"
+            rows="10"
+            class="code-input"
+            placeholder='[
+  {
+    "id": "my-skill",
+    "name": "My Skill",
+    "description": "What this skill does",
+    "tags": ["tag1", "tag2"],
+    "examples": ["example prompt 1"]
+  }
+]'
+          >
+{{ skills_json }}</textarea
+          >
+          <div
+            id="skills-json-error"
+            class="field-error"
+            role="alert"
+            aria-live="polite"
+          ></div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="action-btn">{{ submit_label }}</button>
+          <a href="/agents" class="action-btn secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="{{ self.agent_form_js_url() }}"></script>
+{% endblock %}

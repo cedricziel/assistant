@@ -1,0 +1,90 @@
+{% extends "base.html" %} {% block title %}{{ heading }}{% endblock %} {% block
+breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/webhooks" class="breadcrumb-page">Webhooks</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">{{ heading }}</span>
+{% endblock %} {% block extra_css %} .event-ref { margin-top: 0.4rem; font-size:
+0.85rem; color: #8ba2c6; } .event-ref summary { cursor: pointer; color: #6ec6ff;
+} .event-ref ul { margin: 0.3rem 0 0 1.2rem; padding: 0; } .event-ref li {
+margin-bottom: 0.2rem; } .event-ref code { background: rgba(94, 195, 255, 0.1);
+padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85rem; } {% endblock %}
+{% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Webhooks</h2>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head"><h2>{{ heading }}</h2></div>
+      <form method="POST" action="{{ action }}" class="entity-form">
+        <div class="form-group">
+          <label>Name *</label>
+          <input
+            type="text"
+            name="name"
+            value="{{ name }}"
+            required
+            placeholder="My Webhook"
+          />
+        </div>
+        <div class="form-group">
+          <label>URL *</label>
+          <input
+            type="url"
+            name="url"
+            value="{{ url }}"
+            required
+            placeholder="https://example.com/webhook"
+          />
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              name="active"
+              value="on"
+              {%
+              if
+              active_checked
+              %}
+              checked{%
+              endif
+              %}
+            />
+            Active
+          </label>
+        </div>
+        <div class="form-group">
+          <label>Event Types (comma-separated)</label>
+          <input
+            type="text"
+            name="event_types"
+            value="{{ event_types_csv }}"
+            placeholder="turn.result, tool.result"
+          />
+          <details class="event-ref">
+            <summary>Available event types</summary>
+            <ul>
+              {% for evt in available_events %}
+              <li><code>{{ evt.value }}</code> &mdash; {{ evt.label }}</li>
+              {% endfor %}
+            </ul>
+          </details>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="action-btn">{{ submit_label }}</button>
+          <a href="/webhooks" class="action-btn secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %}

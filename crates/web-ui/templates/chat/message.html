@@ -6,17 +6,19 @@
   </div>
   <div class="msg-content">{{ msg.content }}</div>
   {% for tc in msg.tool_calls %}
-    <div class="tool-call">
-      <button type="button" class="tool-call-header"
-              aria-expanded="false"
-              onclick="var body=this.nextElementSibling;var open=body.style.display!=='none';body.style.display=open?'none':'block';this.setAttribute('aria-expanded',!open)">
+  <div class="tool-call">
+    <details>
+      <summary class="tool-call-header">
         <span>&#9654;</span>
         <span class="tool-call-name">{{ tc.name }}</span>
-        <span class="tool-call-status{% if tc.is_success %} ok{% else %} err{% endif %}">
+        <span
+          class="tool-call-status{% if tc.is_success %} ok{% else %} err{% endif %}"
+        >
           {% if tc.is_success %}&#10003;{% else %}&#10007;{% endif %}
         </span>
-      </button>
-      <div class="tool-call-body" style="display:none">{{ tc.summary }}</div>
-    </div>
+      </summary>
+      <div class="tool-call-body">{{ tc.summary }}</div>
+    </details>
+  </div>
   {% endfor %}
 </div>

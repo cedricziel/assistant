@@ -1,13 +1,13 @@
 //! Server-side rendered HTML pages for webhook management.
 //!
-//! Follows the same patterns as the agent pages: dark theme, sidebar layout,
-//! `format!()` string assembly, `default_css()`.
+//! All HTML is rendered via Askama templates under `templates/webhooks/`.
 
 use std::net::IpAddr;
 
+use askama::Template;
 use axum::extract::{Form, Path, State};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
@@ -17,7 +17,9 @@ use tracing::{info, warn};
 
 use assistant_storage::WebhookStore;
 
-use crate::common::{html_escape, internal_error, render_sidebar};
+#[cfg(test)]
+use crate::common::html_escape;
+use crate::common::{internal_error, render_template, StaticUrls};
 
 // -- Shared state --
 
@@ -41,91 +43,123 @@ const EVENT_TYPES: &[(&str, &str)] = &[
     ("schedule.trigger", "Scheduled task triggered"),
 ];
 
+// -- View models -------------------------------------------------------------
+
+/// A row in the webhook list table.
+struct WebhookRowView {
+    id: String,
+    short_id: String,
+    name: String,
+    url: String,
+    event_count: usize,
+    active: bool,
+    verified: bool,
+}
+
+/// An available event type shown in the form reference list.
+struct EventTypeView {
+    value: &'static str,
+    label: &'static str,
+}
+
+// -- Templates ---------------------------------------------------------------
+
+/// Webhook list page (extends base.html).
+#[derive(Template)]
+#[template(path = "webhooks/list.html")]
+struct WebhookListTemplate {
+    active_page: &'static str,
+    count: usize,
+    rows: Vec<WebhookRowView>,
+}
+
+impl StaticUrls for WebhookListTemplate {}
+
+/// Webhook detail page (extends base.html).
+#[derive(Template)]
+#[template(path = "webhooks/detail.html")]
+struct WebhookDetailTemplate {
+    active_page: &'static str,
+    id: String,
+    short_id: String,
+    name: String,
+    url: String,
+    active: bool,
+    toggle_label: String,
+    verified_at: Option<String>,
+    secret: String,
+    event_types: Vec<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+impl StaticUrls for WebhookDetailTemplate {}
+
+/// Webhook create/edit form page (extends base.html).
+#[derive(Template)]
+#[template(path = "webhooks/form.html")]
+struct WebhookFormTemplate {
+    active_page: &'static str,
+    heading: String,
+    action: String,
+    submit_label: String,
+    name: String,
+    url: String,
+    active_checked: bool,
+    event_types_csv: String,
+    available_events: Vec<EventTypeView>,
+}
+
+impl StaticUrls for WebhookFormTemplate {}
+
+/// Verification result page (extends base.html).
+#[derive(Template)]
+#[template(path = "webhooks/verify.html")]
+struct WebhookVerifyTemplate {
+    active_page: &'static str,
+    id: String,
+    url: String,
+    success: bool,
+    detail: String,
+}
+
+impl StaticUrls for WebhookVerifyTemplate {}
+
 // -- Page handlers --
 
 /// `GET /webhooks` -- Lists all configured webhooks.
 pub async fn list_webhooks(
     State(state): State<WebhookPagesState>,
-) -> Result<Html<String>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let store = WebhookStore::new(state.pool);
     let webhooks = store.list().await.map_err(internal_error)?;
     let count = webhooks.len();
 
-    let mut rows = String::new();
-    for wh in &webhooks {
-        let short_id = &wh.id[..8.min(wh.id.len())];
-        let status_badge = if wh.active {
-            "<span class=\"hdr-badge ok\">active</span>"
-        } else {
-            "<span class=\"hdr-badge error\">inactive</span>"
-        };
-        let verified_badge = if wh.verified_at.is_some() {
-            "<span class=\"hdr-badge ok\">verified</span>"
-        } else {
-            "<span class=\"badge muted\">unverified</span>"
-        };
-        let event_count = wh.event_types.len();
+    let rows: Vec<WebhookRowView> = webhooks
+        .iter()
+        .map(|wh| WebhookRowView {
+            id: wh.id.clone(),
+            short_id: wh.id[..8.min(wh.id.len())].to_string(),
+            name: wh.name.clone(),
+            url: wh.url.clone(),
+            event_count: wh.event_types.len(),
+            active: wh.active,
+            verified: wh.verified_at.is_some(),
+        })
+        .collect();
 
-        rows.push_str(&format!(
-            "<tr onclick=\"window.location='/webhooks/{id}'\">\
-             <td><span class=\"trace-id\">{short_id}&hellip;</span></td>\
-             <td><span class=\"primary\">{name}</span></td>\
-             <td class=\"url-cell\">{url}</td>\
-             <td>{event_count} event{es}</td>\
-             <td>{status_badge}</td>\
-             <td>{verified_badge}</td>\
-             </tr>",
-            id = html_escape(&wh.id),
-            short_id = html_escape(short_id),
-            name = html_escape(&wh.name),
-            url = html_escape(&wh.url),
-            event_count = event_count,
-            es = if event_count == 1 { "" } else { "s" },
-            status_badge = status_badge,
-            verified_badge = verified_badge,
-        ));
-    }
-
-    let table = if webhooks.is_empty() {
-        "<p class=\"empty\">No webhooks configured yet. Create one to get started.</p>".to_string()
-    } else {
-        format!(
-            "<table class=\"trace-table\">\
-             <thead><tr>\
-             <th>ID</th><th>Name</th><th>URL</th><th>Events</th><th>Status</th><th>Verified</th>\
-             </tr></thead>\
-             <tbody>{rows}</tbody></table>",
-            rows = rows,
-        )
+    let tmpl = WebhookListTemplate {
+        active_page: "webhooks",
+        count,
+        rows,
     };
-
-    let content = format!(
-        "<div class=\"panel\">\
-         <div class=\"panel-head\">\
-         <div><h2>Webhooks</h2>\
-         <p>Manage outgoing webhook endpoints with HMAC-SHA256 verification.</p></div>\
-         <span class=\"pill\">{count}</span>\
-         </div>\
-         {table}\
-         <div style=\"margin-top:1.25rem\">\
-         <a href=\"/webhooks/new\" class=\"action-btn\">+ New Webhook</a>\
-         </div>\
-         </div>",
-        count = count,
-        table = table,
-    );
-
-    let sidebar = render_sidebar("webhooks");
-    let body = page_shell("Webhooks", &sidebar, &content);
-    Ok(Html(body))
+    Ok(render_template(tmpl))
 }
 
 /// `GET /webhooks/new` -- Form to create a new webhook.
-pub async fn new_webhook_form(State(_state): State<WebhookPagesState>) -> Html<String> {
-    let form = render_webhook_form(None, "Create Webhook", "/webhooks", "Create");
-    let sidebar = render_sidebar("webhooks");
-    let body = page_shell("New Webhook", &sidebar, &form);
-    Html(body)
+pub async fn new_webhook_form(State(_state): State<WebhookPagesState>) -> Response {
+    let tmpl = build_form_template(None, "Create Webhook", "/webhooks", "Create");
+    render_template(tmpl)
 }
 
 /// `POST /webhooks` -- Creates a new webhook from form data.
@@ -158,7 +192,7 @@ pub async fn create_webhook(
 pub async fn show_webhook(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
-) -> Result<Html<String>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let store = WebhookStore::new(state.pool);
     let wh = store
         .get(&id)
@@ -166,148 +200,32 @@ pub async fn show_webhook(
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")))?;
 
-    // -- Header --
-    let status_badge = if wh.active {
-        " <span class=\"hdr-badge ok\">active</span>"
-    } else {
-        " <span class=\"hdr-badge error\">inactive</span>"
+    let tmpl = WebhookDetailTemplate {
+        active_page: "webhooks",
+        id: wh.id.clone(),
+        short_id: wh.id[..8.min(wh.id.len())].to_string(),
+        name: wh.name.clone(),
+        url: wh.url.clone(),
+        active: wh.active,
+        toggle_label: if wh.active {
+            "Disable".to_string()
+        } else {
+            "Enable".to_string()
+        },
+        verified_at: wh.verified_at.map(format_ts),
+        secret: wh.secret.clone(),
+        event_types: wh.event_types.clone(),
+        created_at: format_ts(wh.created_at),
+        updated_at: format_ts(wh.updated_at),
     };
-
-    let header = format!(
-        "<div class=\"trace-header-bar\">\
-         <a class=\"hdr-back\" href=\"/webhooks\">&larr; Webhooks</a>\
-         <span class=\"hdr-sep\">|</span>\
-         <span class=\"hdr-trace-id\">{short_id}&hellip;</span>\
-         <span class=\"hdr-svc\">{name}</span>{status_badge}\
-         </div>",
-        short_id = html_escape(&id[..8.min(id.len())]),
-        name = html_escape(&wh.name),
-        status_badge = status_badge,
-    );
-
-    // -- URL --
-    let url_section = format!(
-        "<div class=\"agent-section\">\
-         <h3>Endpoint URL</h3>\
-         <p><code>{url}</code></p>\
-         </div>",
-        url = html_escape(&wh.url),
-    );
-
-    // -- Verification status --
-    let verified_section = match wh.verified_at {
-        Some(ts) => format!(
-            "<div class=\"agent-section\">\
-             <h3>Verification</h3>\
-             <p><span class=\"hdr-badge ok\">verified</span> Last verified: {ts}</p>\
-             </div>",
-            ts = format_ts(ts),
-        ),
-        None => "<div class=\"agent-section\">\
-                 <h3>Verification</h3>\
-                 <p><span class=\"badge muted\">unverified</span> \
-                 This webhook has not been verified yet. Use the Verify button to send a test payload.</p>\
-                 </div>"
-            .to_string(),
-    };
-
-    // -- Secret (masked with reveal) --
-    let secret_section = format!(
-        "<div class=\"agent-section\">\
-         <h3>Signing Secret</h3>\
-         <p>Payloads are signed with <code>HMAC-SHA256</code> using this secret. \
-         The signature is sent in the <code>X-Webhook-Signature</code> header as <code>sha256=&lt;hex&gt;</code>.</p>\
-         <div class=\"secret-box\">\
-         <code id=\"secret-value\" class=\"secret-masked\" onclick=\"this.classList.toggle('secret-masked')\">\
-         {secret}</code>\
-         <span class=\"secret-hint\">(click to reveal/hide)</span>\
-         </div>\
-         </div>",
-        secret = html_escape(&wh.secret),
-    );
-
-    // -- Event types --
-    let events_html = if wh.event_types.is_empty() {
-        "<p class=\"empty\">No event types selected — this webhook will not fire.</p>".to_string()
-    } else {
-        let badges: String = wh
-            .event_types
-            .iter()
-            .map(|e| format!("<span class=\"badge\">{}</span> ", html_escape(e)))
-            .collect();
-        format!("<p>{badges}</p>")
-    };
-    let events_section = format!(
-        "<div class=\"agent-section\">\
-         <h3>Subscribed Events</h3>\
-         {events}\
-         </div>",
-        events = events_html,
-    );
-
-    // -- Timestamps --
-    let ts_section = format!(
-        "<div class=\"agent-section\">\
-         <h3>Timestamps</h3>\
-         <p>Created: {created} &mdash; Updated: {updated}</p>\
-         </div>",
-        created = format_ts(wh.created_at),
-        updated = format_ts(wh.updated_at),
-    );
-
-    // -- Actions --
-    let toggle_label = if wh.active { "Disable" } else { "Enable" };
-    let actions = format!(
-        "<div class=\"agent-actions\">\
-         <a href=\"/webhooks/{id}/edit\" class=\"action-btn\">Edit</a>\
-         <form method=\"POST\" action=\"/webhooks/{id}/verify\" style=\"display:inline\">\
-         <button type=\"submit\" class=\"action-btn secondary\">Verify</button>\
-         </form>\
-         <form method=\"POST\" action=\"/webhooks/{id}/toggle\" style=\"display:inline\">\
-         <button type=\"submit\" class=\"action-btn secondary\">{toggle_label}</button>\
-         </form>\
-         <form method=\"POST\" action=\"/webhooks/{id}/rotate-secret\" style=\"display:inline\" \
-               onsubmit=\"return confirm('Rotate the signing secret? The old secret will be invalidated and verification will be cleared.')\">\
-         <button type=\"submit\" class=\"action-btn secondary\">Rotate Secret</button>\
-         </form>\
-         <form method=\"POST\" action=\"/webhooks/{id}/delete\" style=\"display:inline\" \
-               onsubmit=\"return confirm('Delete this webhook?')\">\
-         <button type=\"submit\" class=\"action-btn danger\">Delete</button>\
-         </form>\
-         </div>",
-        id = html_escape(&wh.id),
-        toggle_label = toggle_label,
-    );
-
-    let detail = format!(
-        "<div class=\"trace-detail\">\
-         {header}\
-         {url}\
-         {actions}\
-         {verified}\
-         {secret}\
-         {events}\
-         {ts}\
-         </div>",
-        header = header,
-        url = url_section,
-        actions = actions,
-        verified = verified_section,
-        secret = secret_section,
-        events = events_section,
-        ts = ts_section,
-    );
-
-    let sidebar = render_sidebar("webhooks");
-    let body = page_shell(&format!("Webhook: {}", wh.name), &sidebar, &detail);
-    Ok(Html(body))
+    Ok(render_template(tmpl))
 }
 
 /// `GET /webhooks/:id/edit` -- Edit form for an existing webhook.
 pub async fn edit_webhook_form(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
-) -> Result<Html<String>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let store = WebhookStore::new(state.pool);
     let wh = store
         .get(&id)
@@ -315,15 +233,13 @@ pub async fn edit_webhook_form(
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")))?;
 
-    let form = render_webhook_form(
+    let tmpl = build_form_template(
         Some(&wh),
         "Edit Webhook",
         &format!("/webhooks/{id}/edit"),
         "Save Changes",
     );
-    let sidebar = render_sidebar("webhooks");
-    let body = page_shell(&format!("Edit: {}", wh.name), &sidebar, &form);
-    Ok(Html(body))
+    Ok(render_template(tmpl))
 }
 
 /// `POST /webhooks/:id/edit` -- Updates a webhook from form data.
@@ -398,7 +314,7 @@ pub async fn rotate_secret(
 pub async fn verify_webhook(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
-) -> Result<Html<String>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let store = WebhookStore::new(state.pool);
     let wh = store
         .get(&id)
@@ -450,39 +366,14 @@ pub async fn verify_webhook(
         }
     };
 
-    let badge = if success {
-        "<span class=\"hdr-badge ok\">success</span>"
-    } else {
-        "<span class=\"hdr-badge error\">failed</span>"
+    let tmpl = WebhookVerifyTemplate {
+        active_page: "webhooks",
+        id: wh.id.clone(),
+        url: wh.url.clone(),
+        success,
+        detail,
     };
-
-    let content = format!(
-        "<div class=\"panel\">\
-         <div class=\"panel-head\"><h2>Verification Result</h2></div>\
-         <div class=\"verify-result\">\
-         <p>{badge} {detail}</p>\
-         <p class=\"verify-info\">A <code>POST</code> was sent to <code>{url}</code> with:</p>\
-         <ul>\
-         <li>Header: <code>X-Webhook-Signature: sha256=&lt;hex&gt;</code></li>\
-         <li>Header: <code>X-Webhook-Event: webhook.verify</code></li>\
-         <li>Body: <code>{{\"type\":\"webhook.verify\", ...}}</code></li>\
-         </ul>\
-         <p>The receiving endpoint should validate the HMAC-SHA256 signature using the \
-         shared secret to confirm authenticity.</p>\
-         </div>\
-         <div style=\"margin-top:1.25rem\">\
-         <a href=\"/webhooks/{id}\" class=\"action-btn secondary\">&larr; Back to Webhook</a>\
-         </div>\
-         </div>",
-        badge = badge,
-        detail = html_escape(&detail),
-        url = html_escape(&wh.url),
-        id = html_escape(&wh.id),
-    );
-
-    let sidebar = render_sidebar("webhooks");
-    let body = page_shell("Verify Webhook", &sidebar, &content);
-    Ok(Html(body))
+    Ok(render_template(tmpl))
 }
 
 // -- Form data --
@@ -629,94 +520,47 @@ fn format_ts(ts: DateTime<Utc>) -> String {
     ts.format("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 
-fn page_shell(title: &str, sidebar: &str, content: &str) -> String {
-    let content_html = format!(
-        "<div class=\"layout\">\
-         <aside class=\"sidebar\">{sidebar}</aside>\
-         <main class=\"main\">{content}</main>\
-         </div>",
-        sidebar = sidebar,
-        content = content,
-    );
-    let page_css = format!("{}\n{}", crate::common::default_css(), webhooks_css());
-    crate::legacy::render_page(
-        "webhooks",
-        title,
-        "Management",
-        title,
-        &page_css,
-        &content_html,
-        "",
-    )
+/// Build a [`WebhookFormTemplate`] for either create or edit.
+fn build_form_template(
+    wh: Option<&assistant_storage::WebhookRecord>,
+    heading: &str,
+    action: &str,
+    submit_label: &str,
+) -> WebhookFormTemplate {
+    let name = wh.map(|w| w.name.clone()).unwrap_or_default();
+    let url = wh.map(|w| w.url.clone()).unwrap_or_default();
+    let active_checked = wh.map(|w| w.active).unwrap_or(true);
+    let event_types_csv = wh.map(|w| w.event_types.join(", ")).unwrap_or_default();
+
+    let available_events: Vec<EventTypeView> = EVENT_TYPES
+        .iter()
+        .map(|(v, l)| EventTypeView { value: v, label: l })
+        .collect();
+
+    WebhookFormTemplate {
+        active_page: "webhooks",
+        heading: heading.to_string(),
+        action: action.to_string(),
+        submit_label: submit_label.to_string(),
+        name,
+        url,
+        active_checked,
+        event_types_csv,
+        available_events,
+    }
 }
 
+/// Render a webhook form as an HTML string (used by tests).
+#[cfg(test)]
 fn render_webhook_form(
     wh: Option<&assistant_storage::WebhookRecord>,
     heading: &str,
     action: &str,
     submit_label: &str,
 ) -> String {
-    let name = wh.map(|w| w.name.as_str()).unwrap_or("");
-    let url = wh.map(|w| w.url.as_str()).unwrap_or("");
-    let active = wh.map(|w| w.active).unwrap_or(true);
-    let event_types_csv = wh.map(|w| w.event_types.join(", ")).unwrap_or_default();
-
-    let active_checked = if active { "checked" } else { "" };
-
-    // Build the reference list of available event types.
-    let mut event_ref = String::new();
-    for (value, label) in EVENT_TYPES {
-        event_ref.push_str(&format!(
-            "<li><code>{value}</code> &mdash; {label}</li>",
-            value = html_escape(value),
-            label = html_escape(label),
-        ));
-    }
-
-    format!(
-        "<div class=\"panel\">\
-         <div class=\"panel-head\"><h2>{heading}</h2></div>\
-         <form method=\"POST\" action=\"{action}\" class=\"agent-form\">\
-         <div class=\"form-group\">\
-           <label>Name *</label>\
-           <input type=\"text\" name=\"name\" value=\"{name}\" required \
-                  placeholder=\"My Webhook\">\
-         </div>\
-         <div class=\"form-group\">\
-           <label>URL *</label>\
-           <input type=\"text\" name=\"url\" value=\"{url}\" required \
-                  placeholder=\"https://example.com/webhook\">\
-         </div>\
-         <div class=\"form-group\">\
-           <label class=\"checkbox-label\">\
-             <input type=\"checkbox\" name=\"active\" value=\"on\" {active_checked}>\
-             Active\
-           </label>\
-         </div>\
-         <div class=\"form-group\">\
-           <label>Event Types (comma-separated)</label>\
-           <input type=\"text\" name=\"event_types\" value=\"{event_types}\" \
-                  placeholder=\"turn.result, tool.result\">\
-           <details class=\"event-ref\">\
-           <summary>Available event types</summary>\
-           <ul>{event_ref}</ul>\
-           </details>\
-         </div>\
-         <div class=\"form-actions\">\
-           <button type=\"submit\" class=\"action-btn\">{submit_label}</button>\
-           <a href=\"/webhooks\" class=\"action-btn secondary\">Cancel</a>\
-         </div>\
-         </form>\
-         </div>",
-        heading = html_escape(heading),
-        action = html_escape(action),
-        name = html_escape(name),
-        url = html_escape(url),
-        active_checked = active_checked,
-        event_types = html_escape(&event_types_csv),
-        event_ref = event_ref,
-        submit_label = html_escape(submit_label),
-    )
+    let tmpl = build_form_template(wh, heading, action, submit_label);
+    tmpl.render()
+        .expect("webhook form template should render in tests")
 }
 
 // -- Tests --
@@ -899,21 +743,6 @@ mod tests {
         );
     }
 
-    // -- render_sidebar --
-
-    #[test]
-    fn render_sidebar_shows_heading_for_active_page() {
-        let html = render_sidebar("webhooks");
-        assert!(html.contains("Webhooks"), "heading matches active page");
-        assert!(html.contains("assistant"), "brand name present");
-    }
-
-    #[test]
-    fn render_sidebar_shows_agents_heading() {
-        let html = render_sidebar("agents");
-        assert!(html.contains("Agents"), "heading matches agents page");
-    }
-
     // -- render_webhook_form --
 
     #[test]
@@ -1033,179 +862,4 @@ mod tests {
     fn validate_url_accepts_public_ip() {
         assert!(validate_webhook_url("https://203.0.113.1/hook").is_ok());
     }
-}
-
-/// Additional CSS for webhook management pages.
-fn webhooks_css() -> &'static str {
-    r#"
-    .url-cell {
-        font-family: ui-monospace, monospace;
-        font-size: 0.85rem;
-        max-width: 300px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .event-ref {
-        margin-top: 0.4rem;
-        font-size: 0.85rem;
-        color: #8ba2c6;
-    }
-    .event-ref summary {
-        cursor: pointer;
-        color: #6ec6ff;
-    }
-    .event-ref ul {
-        margin: 0.3rem 0 0 1.2rem;
-        padding: 0;
-    }
-    .event-ref li {
-        margin-bottom: 0.2rem;
-    }
-    .event-ref code {
-        background: rgba(94, 195, 255, 0.1);
-        padding: 0.1rem 0.4rem;
-        border-radius: 4px;
-        font-size: 0.85rem;
-    }
-    .secret-box {
-        background: #020511;
-        border: 1px solid #15243b;
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        margin-top: 0.5rem;
-    }
-    .secret-box code {
-        font-family: ui-monospace, monospace;
-        font-size: 0.9rem;
-        word-break: break-all;
-        cursor: pointer;
-        user-select: all;
-    }
-    .secret-masked {
-        color: transparent !important;
-        text-shadow: 0 0 8px rgba(110, 198, 255, 0.5);
-    }
-    .secret-hint {
-        font-size: 0.8rem;
-        color: #5a7396;
-        white-space: nowrap;
-    }
-    .verify-result {
-        padding: 1rem 0;
-    }
-    .verify-result ul {
-        margin: 0.5rem 0 0.5rem 1.2rem;
-        padding: 0;
-    }
-    .verify-result li {
-        margin-bottom: 0.3rem;
-        font-size: 0.9rem;
-    }
-    .verify-result code {
-        background: rgba(94, 195, 255, 0.1);
-        padding: 0.1rem 0.4rem;
-        border-radius: 4px;
-        font-size: 0.85rem;
-    }
-    .verify-info {
-        margin-top: 1rem;
-        color: #8ba2c6;
-        font-size: 0.9rem;
-    }
-    .agent-form {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-    }
-    .form-group {
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-    }
-    .form-group label {
-        font-size: 0.85rem;
-        color: #8aa5d8;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-    }
-    .form-group input[type=text] {
-        background: #020511;
-        border: 1px solid #15243b;
-        border-radius: 8px;
-        color: #e5e9f0;
-        padding: 0.5rem 0.75rem;
-        font-size: 0.9rem;
-        font-family: inherit;
-        width: 100%;
-    }
-    .form-actions {
-        display: flex;
-        gap: 0.75rem;
-        margin-top: 0.5rem;
-    }
-    .checkbox-label {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        cursor: pointer;
-    }
-    .checkbox-label input[type=checkbox] {
-        accent-color: #6ec6ff;
-        width: 16px;
-        height: 16px;
-    }
-    .action-btn {
-        display: inline-block;
-        background: linear-gradient(135deg, #64cafe, #8b5dff);
-        border: none;
-        border-radius: 8px;
-        color: #050b16;
-        padding: 0.5rem 1.2rem;
-        font-weight: 600;
-        font-size: 0.9rem;
-        cursor: pointer;
-        text-decoration: none;
-        text-align: center;
-    }
-    .action-btn.secondary {
-        background: rgba(255,255,255,0.08);
-        color: #c2d6f0;
-    }
-    .action-btn.danger {
-        background: rgba(248, 113, 113, 0.25);
-        color: #ffb4b4;
-    }
-    .agent-actions {
-        display: flex;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-        margin: 1.25rem 0;
-        padding-bottom: 1.25rem;
-        border-bottom: 1px solid #0f1f36;
-    }
-    .agent-section {
-        margin: 1.25rem 0;
-    }
-    .agent-section h3 {
-        margin: 0 0 0.6rem;
-        color: #8aa5d8;
-        font-size: 0.9rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }
-    .agent-section p {
-        margin: 0.3rem 0;
-    }
-    .agent-section code {
-        background: rgba(94, 195, 255, 0.1);
-        padding: 0.15rem 0.5rem;
-        border-radius: 4px;
-        font-family: ui-monospace, monospace;
-        font-size: 0.88rem;
-    }
-    "#
 }

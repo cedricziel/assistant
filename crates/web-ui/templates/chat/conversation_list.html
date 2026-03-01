@@ -6,7 +6,6 @@
      hx-target="#chat-panel"
      hx-swap="innerHTML"
      hx-push-url="/chat/{{ conv.id }}"
-     hx-on::after-swap="document.getElementById('chat-layout').classList.add('chat-active')">
     <div class="conv-item-title">
       {% if active_id.as_deref() == Some(conv.id.as_str()) %}
         <span class="conv-item-dot"></span>

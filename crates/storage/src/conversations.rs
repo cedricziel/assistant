@@ -1,6 +1,6 @@
 //! Conversation and message persistence backed by the `conversations` and `messages` tables.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use assistant_core::{Message, MessageRole};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
@@ -126,6 +126,25 @@ impl ConversationStore {
                 })
             })
             .collect()
+    }
+
+    /// Update the title of an existing conversation.
+    ///
+    /// Returns an error if the conversation does not exist.
+    pub async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
+        let id_str = id.to_string();
+        let result =
+            sqlx::query("UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3")
+                .bind(title)
+                .bind(Utc::now())
+                .bind(&id_str)
+                .execute(&self.pool)
+                .await
+                .with_context(|| format!("failed to update title for conversation {id}"))?;
+        if result.rows_affected() == 0 {
+            anyhow::bail!("conversation {id} not found");
+        }
+        Ok(())
     }
 
     /// Delete a conversation and all its messages (cascade).
@@ -325,6 +344,26 @@ mod tests {
         // Should be in chronological order: msg 2, msg 3, msg 4
         assert_eq!(last[0].content, "msg 2");
         assert_eq!(last[2].content, "msg 4");
+    }
+
+    #[tokio::test]
+    async fn test_update_title() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        let conv = store.create_conversation(Some("Old Title")).await.unwrap();
+        store.update_title(conv.id, "New Title").await.unwrap();
+
+        let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+        assert_eq!(
+            loaded.title.as_deref(),
+            Some("New Title"),
+            "title should be updated"
+        );
+        assert!(
+            loaded.updated_at >= conv.updated_at,
+            "updated_at should advance"
+        );
     }
 
     #[tokio::test]

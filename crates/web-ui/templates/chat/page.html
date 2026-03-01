@@ -1,626 +1,315 @@
-{% extends "base.html" %}
-
-{% block title %}Chat{% endblock %}
-
-{% block breadcrumb %}
-  <span class="breadcrumb-page">Chat</span>
-  {% if let Some(active) = active_conversation %}
-    <span class="breadcrumb-sep">&rsaquo;</span>
-    <span class="breadcrumb-current">{{ active.title }}</span>
-  {% endif %}
-{% endblock %}
-
-{% block extra_css %}
-    /* -- Chat layout ----------------------------------------------------- */
-    .chat-layout {
-      display: grid;
-      grid-template-columns: 280px 1fr;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-    }
-
-    /* -- Conversation list panel ----------------------------------------- */
-    .conv-list-panel {
-      background: #050f21;
-      border-right: 1px solid #0f1f36;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .conv-list-header {
-      padding: 12px;
-      display: flex;
-      gap: 8px;
-    }
-    .btn-new-chat {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 8px 12px;
-      background: linear-gradient(135deg, #64cafe, #8b5dff);
-      border: none;
-      border-radius: 8px;
-      color: #030712;
-      font-weight: 600;
-      font-size: 0.85rem;
-      transition: opacity 0.15s;
-    }
-    .btn-new-chat:hover { opacity: 0.85; }
-    .conv-search {
-      padding: 0 12px 8px;
-    }
-    .conv-search input {
-      width: 100%;
-      background: #020511;
-      border: 1px solid #15243b;
-      border-radius: 8px;
-      color: #e5e9f0;
-      padding: 7px 10px;
-      font-size: 0.82rem;
-      outline: none;
-    }
-    .conv-search input:focus {
-      border-color: #6ec6ff;
-    }
-    .conv-search input::placeholder { color: #4a6080; }
-    .conv-items {
-      flex: 1;
-      overflow-y: auto;
-      padding: 0 8px 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-    .conv-item {
-      display: block;
-      padding: 10px 12px;
-      border-radius: 8px;
-      text-decoration: none;
-      color: inherit;
-      transition: background 0.12s;
-      cursor: pointer;
-    }
-    .conv-item:hover {
-      background: rgba(110, 198, 255, 0.06);
-      text-decoration: none;
-    }
-    .conv-item.active {
-      background: rgba(110, 198, 255, 0.12);
-    }
-    .conv-item-title {
-      font-size: 0.88rem;
-      font-weight: 500;
-      color: #c8def5;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .conv-item-meta {
+{% extends "base.html" %} {% block title %}Chat{% endblock %} {% block
+breadcrumb %}
+<span class="breadcrumb-page">Chat</span>
+{% if let Some(active) = active_conversation %}
+<span class="breadcrumb-sep">&rsaquo;</span>
+<span class="breadcrumb-current">{{ active.title }}</span>
+{% endif %} {% endblock %} {% block extra_css %} /* -- Chat layout
+----------------------------------------------------- */ .chat-layout { display:
+grid; grid-template-columns: 280px 1fr; width: 100%; height: 100%; overflow:
+hidden; } /* -- Conversation list panel
+----------------------------------------- */ .conv-list-panel { background:
+#050f21; border-right: 1px solid #0f1f36; display: flex; flex-direction: column;
+overflow: hidden; } .conv-list-header { padding: 12px; display: flex; gap: 8px;
+} .btn-new-chat { flex: 1; display: flex; align-items: center; justify-content:
+center; gap: 6px; padding: 8px 12px; background: linear-gradient(135deg,
+#64cafe, #8b5dff); border: none; border-radius: 8px; color: #030712;
+font-weight: 600; font-size: 0.85rem; transition: opacity 0.15s; }
+.btn-new-chat:hover { opacity: 0.85; } .conv-search { padding: 0 12px 8px; }
+.conv-search input { width: 100%; background: #020511; border: 1px solid
+#15243b; border-radius: 8px; color: #e5e9f0; padding: 7px 10px; font-size:
+0.82rem; outline: none; } .conv-search input:focus { border-color: #6ec6ff; }
+.conv-search input::placeholder { color: #4a6080; } .conv-items { flex: 1;
+overflow-y: auto; padding: 0 8px 8px; display: flex; flex-direction: column;
+gap: 2px; } .conv-item { display: block; padding: 10px 12px; border-radius: 8px;
+text-decoration: none; color: inherit; transition: background 0.12s; cursor:
+pointer; } .conv-item:hover { background: rgba(110, 198, 255, 0.06);
+text-decoration: none; } .conv-item.active { background: rgba(110, 198, 255,
+0.12); } .conv-item-title { font-size: 0.88rem; font-weight: 500; color:
+#c8def5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-item-meta { font-size: 0.75rem; color: #5a7396; margin-top: 2px; }
+.conv-item-dot { display: inline-block; width: 6px; height: 6px; border-radius:
+50%; background: #6ec6ff; margin-right: 6px; vertical-align: middle; } /* --
+Chat panel ------------------------------------------------------ */ .chat-panel
+{ display: flex; flex-direction: column; overflow: hidden; background: #030712;
+} .chat-header { padding: 12px 20px; border-bottom: 1px solid #0f1f36; display:
+flex; align-items: center; justify-content: space-between; min-height: 48px; }
+.chat-header h2 { font-size: 0.95rem; font-weight: 600; margin: 0; overflow:
+hidden; text-overflow: ellipsis; white-space: nowrap; } .chat-header-meta {
+font-size: 0.75rem; color: #5a7396; } /* -- Messages container
+---------------------------------------------- */ .messages-container { flex: 1;
+overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap:
+16px; } /* -- Message bubble --------------------------------------------------
+*/ .message { max-width: 720px; padding: 14px 18px; border-radius: 14px;
+font-size: 0.9rem; line-height: 1.55; } .msg-user { background: #0c1f3d; border:
+1px solid #152a4a; align-self: flex-end; } .msg-assistant { background: #050d1c;
+border: 1px solid #0f1f36; align-self: flex-start; } .msg-system { background:
+rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.15);
+align-self: center; text-align: center; font-size: 0.82rem; color: #d4a530; }
+.msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+} .msg-role { font-weight: 600; font-size: 0.8rem; } .msg-user .msg-role {
+color: #6ec6ff; } .msg-assistant .msg-role { color: #a78bfa; } .msg-time {
+font-size: 0.72rem; color: #5a7396; } .msg-content { white-space: pre-wrap;
+word-break: break-word; } /* -- Tool call blocks
+------------------------------------------------ */ .tool-call { margin-top:
+10px; background: #020a18; border: 1px solid #0f1f36; border-radius: 10px;
+overflow: hidden; } .tool-call-header { padding: 8px 12px; display: flex;
+align-items: center; gap: 8px; font-size: 0.8rem; color: #8aa5d8; cursor:
+pointer; } .tool-call-header:hover { background: rgba(110, 198, 255, 0.04); }
+.tool-call-name { font-family: ui-monospace, monospace; color: #9ccfff; }
+.tool-call-status { font-size: 0.75rem; } .tool-call-status.ok { color: #63e6be;
+} .tool-call-status.err { color: #f87171; } .tool-call details { border: none; }
+.tool-call summary { list-style: none; } .tool-call
+summary::-webkit-details-marker { display: none; } .tool-call-body { padding:
+8px 12px; border-top: 1px solid #0f1f36; font-family: ui-monospace, monospace;
+font-size: 0.78rem; color: #a0bfe0; white-space: pre-wrap; word-break:
+break-all; max-height: 200px; overflow-y: auto; } /* -- Chat input
+------------------------------------------------------- */ .chat-input {
+padding: 12px 20px 16px; border-top: 1px solid #0f1f36; background: #020611; }
+.chat-input-form { display: flex; gap: 8px; align-items: flex-end; }
+.chat-input-field { flex: 1; background: #050d1c; border: 1px solid #15243b;
+border-radius: 12px; color: #e5e9f0; padding: 10px 14px; font-size: 0.9rem;
+font-family: inherit; resize: none; outline: none; min-height: 42px; max-height:
+160px; line-height: 1.4; } .chat-input-field:focus { border-color: #6ec6ff; }
+.chat-input-field::placeholder { color: #4a6080; } .btn-send { background:
+linear-gradient(135deg, #64cafe, #8b5dff); border: none; border-radius: 10px;
+color: #030712; font-weight: 600; padding: 10px 18px; font-size: 0.85rem;
+transition: opacity 0.15s; white-space: nowrap; } .btn-send:hover { opacity:
+0.85; } .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
+.chat-input-meta { margin-top: 6px; font-size: 0.72rem; color: #4a6080; display:
+flex; gap: 12px; } /* -- Empty state
+------------------------------------------------------ */ .empty-state { flex:
+1; display: flex; flex-direction: column; align-items: center; justify-content:
+center; gap: 12px; color: #5a7396; text-align: center; padding: 40px; }
+.empty-state-icon { width: 64px; height: 64px; color: #2a3d5a; } .empty-state h2
+{ font-size: 1.1rem; color: #8aa5d8; font-weight: 600; } .empty-state p {
+max-width: 360px; line-height: 1.5; font-size: 0.88rem; } /* -- Typing indicator
+------------------------------------------------ */ .typing-indicator { display:
+flex; align-items: center; gap: 4px; padding: 14px 18px; align-self: flex-start;
+} .typing-dot { width: 6px; height: 6px; border-radius: 50%; background:
+#5a7396; animation: typing-bounce 1.2s infinite ease-in-out; }
+.typing-dot:nth-child(2) { animation-delay: 0.15s; } .typing-dot:nth-child(3) {
+animation-delay: 0.3s; } @keyframes typing-bounce { 0%, 60%, 100% { transform:
+translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; }
+} /* -- Responsive: tablet ---------------------------------------------- */
+@media (max-width: 900px) { .chat-layout { grid-template-columns: 240px 1fr; } }
+/* -- Responsive: mobile ---------------------------------------------- */
+@media (max-width: 640px) { .chat-layout { grid-template-columns: 1fr; }
+.chat-layout .conv-list-panel { display: flex; } .chat-layout .chat-panel {
+display: none; } /* When a chat is active, swap visibility */
+.chat-layout.chat-active .conv-list-panel { display: none; }
+.chat-layout.chat-active .chat-panel { display: flex; } .chat-layout.chat-active
+.back-link { display: flex; } /* On mobile, show a simplified top bar inside
+chat panel */ .mobile-chat-header { display: none; } .chat-layout.chat-active
+.mobile-chat-header { display: flex; align-items: center; gap: 8px; padding:
+10px 12px; border-bottom: 1px solid #0f1f36; background: #020611; } .mobile-back
+{ color: #6ec6ff; background: none; border: none; display: flex; align-items:
+center; gap: 4px; font-size: 0.85rem; padding: 4px; } .mobile-chat-title {
+font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis;
+white-space: nowrap; } } {% endblock %} {% block drawer_extra %}
+<div class="drawer-divider"></div>
+<div style="padding: 0 4px">
+  <div
+    style="
       font-size: 0.75rem;
       color: #5a7396;
-      margin-top: 2px;
-    }
-    .conv-item-dot {
-      display: inline-block;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #6ec6ff;
-      margin-right: 6px;
-      vertical-align: middle;
-    }
-
-    /* -- Chat panel ------------------------------------------------------ */
-    .chat-panel {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      background: #030712;
-    }
-    .chat-header {
-      padding: 12px 20px;
-      border-bottom: 1px solid #0f1f36;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      min-height: 48px;
-    }
-    .chat-header h2 {
-      font-size: 0.95rem;
-      font-weight: 600;
-      margin: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .chat-header-meta {
-      font-size: 0.75rem;
-      color: #5a7396;
-    }
-
-    /* -- Messages container ---------------------------------------------- */
-    .messages-container {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    /* -- Message bubble -------------------------------------------------- */
-    .message {
-      max-width: 720px;
-      padding: 14px 18px;
-      border-radius: 14px;
-      font-size: 0.9rem;
-      line-height: 1.55;
-    }
-    .msg-user {
-      background: #0c1f3d;
-      border: 1px solid #152a4a;
-      align-self: flex-end;
-    }
-    .msg-assistant {
-      background: #050d1c;
-      border: 1px solid #0f1f36;
-      align-self: flex-start;
-    }
-    .msg-system {
-      background: rgba(251, 191, 36, 0.08);
-      border: 1px solid rgba(251, 191, 36, 0.15);
-      align-self: center;
-      text-align: center;
-      font-size: 0.82rem;
-      color: #d4a530;
-    }
-    .msg-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
-    }
-    .msg-role {
-      font-weight: 600;
-      font-size: 0.8rem;
-    }
-    .msg-user .msg-role { color: #6ec6ff; }
-    .msg-assistant .msg-role { color: #a78bfa; }
-    .msg-time {
-      font-size: 0.72rem;
-      color: #5a7396;
-    }
-    .msg-content {
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    /* -- Tool call blocks ------------------------------------------------ */
-    .tool-call {
-      margin-top: 10px;
-      background: #020a18;
-      border: 1px solid #0f1f36;
-      border-radius: 10px;
-      overflow: hidden;
-    }
-    .tool-call-header {
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.8rem;
-      color: #8aa5d8;
-      cursor: pointer;
-    }
-    .tool-call-header:hover { background: rgba(110, 198, 255, 0.04); }
-    .tool-call-name {
-      font-family: ui-monospace, monospace;
-      color: #9ccfff;
-    }
-    .tool-call-status { font-size: 0.75rem; }
-    .tool-call-status.ok { color: #63e6be; }
-    .tool-call-status.err { color: #f87171; }
-    .tool-call-body {
-      padding: 8px 12px;
-      border-top: 1px solid #0f1f36;
-      font-family: ui-monospace, monospace;
-      font-size: 0.78rem;
-      color: #a0bfe0;
-      white-space: pre-wrap;
-      word-break: break-all;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-
-    /* -- Chat input ------------------------------------------------------- */
-    .chat-input {
-      padding: 12px 20px 16px;
-      border-top: 1px solid #0f1f36;
-      background: #020611;
-    }
-    .chat-input-form {
-      display: flex;
-      gap: 8px;
-      align-items: flex-end;
-    }
-    .chat-input-field {
-      flex: 1;
-      background: #050d1c;
-      border: 1px solid #15243b;
-      border-radius: 12px;
-      color: #e5e9f0;
-      padding: 10px 14px;
-      font-size: 0.9rem;
-      font-family: inherit;
-      resize: none;
-      outline: none;
-      min-height: 42px;
-      max-height: 160px;
-      line-height: 1.4;
-    }
-    .chat-input-field:focus {
-      border-color: #6ec6ff;
-    }
-    .chat-input-field::placeholder { color: #4a6080; }
-    .btn-send {
-      background: linear-gradient(135deg, #64cafe, #8b5dff);
-      border: none;
-      border-radius: 10px;
-      color: #030712;
-      font-weight: 600;
-      padding: 10px 18px;
-      font-size: 0.85rem;
-      transition: opacity 0.15s;
-      white-space: nowrap;
-    }
-    .btn-send:hover { opacity: 0.85; }
-    .btn-send:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-    .chat-input-meta {
-      margin-top: 6px;
-      font-size: 0.72rem;
-      color: #4a6080;
-      display: flex;
-      gap: 12px;
-    }
-
-    /* -- Empty state ------------------------------------------------------ */
-    .empty-state {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      color: #5a7396;
-      text-align: center;
-      padding: 40px;
-    }
-    .empty-state-icon {
-      width: 64px;
-      height: 64px;
-      color: #2a3d5a;
-    }
-    .empty-state h2 {
-      font-size: 1.1rem;
-      color: #8aa5d8;
-      font-weight: 600;
-    }
-    .empty-state p {
-      max-width: 360px;
-      line-height: 1.5;
-      font-size: 0.88rem;
-    }
-
-    /* -- Typing indicator ------------------------------------------------ */
-    .typing-indicator {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 14px 18px;
-      align-self: flex-start;
-    }
-    .typing-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #5a7396;
-      animation: typing-bounce 1.2s infinite ease-in-out;
-    }
-    .typing-dot:nth-child(2) { animation-delay: 0.15s; }
-    .typing-dot:nth-child(3) { animation-delay: 0.3s; }
-    @keyframes typing-bounce {
-      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-      30% { transform: translateY(-4px); opacity: 1; }
-    }
-
-    /* -- Responsive: tablet ---------------------------------------------- */
-    @media (max-width: 900px) {
-      .chat-layout {
-        grid-template-columns: 240px 1fr;
-      }
-    }
-
-    /* -- Responsive: mobile ---------------------------------------------- */
-    @media (max-width: 640px) {
-      .chat-layout {
-        grid-template-columns: 1fr;
-      }
-      .chat-layout .conv-list-panel {
-        display: flex;
-      }
-      .chat-layout .chat-panel {
-        display: none;
-      }
-      /* When a chat is active, swap visibility */
-      .chat-layout.chat-active .conv-list-panel {
-        display: none;
-      }
-      .chat-layout.chat-active .chat-panel {
-        display: flex;
-      }
-      .chat-layout.chat-active .back-link {
-        display: flex;
-      }
-      /* On mobile, show a simplified top bar inside chat panel */
-      .mobile-chat-header {
-        display: none;
-      }
-      .chat-layout.chat-active .mobile-chat-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 12px;
-        border-bottom: 1px solid #0f1f36;
-        background: #020611;
-      }
-      .mobile-back {
-        color: #6ec6ff;
-        background: none;
-        border: none;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        font-size: 0.85rem;
-        padding: 4px;
-      }
-      .mobile-chat-title {
-        font-weight: 600;
-        font-size: 0.9rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-    }
-{% endblock %}
-
-{% block drawer_extra %}
-  <div class="drawer-divider"></div>
-  <div style="padding: 0 4px">
-    <div style="font-size: 0.75rem; color: #5a7396; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px">
-      Conversations
-    </div>
-    <button class="btn-new-chat" style="width:100%; margin-bottom:8px"
-            hx-post="/chat/new"
-            hx-target="#conv-items"
-            hx-swap="afterbegin">
-      + New Chat
-    </button>
-    {% for conv in conversations %}
-      <a href="/chat/{{ conv.id }}"
-         class="drawer-nav-item"
-         style="font-size:0.82rem">
-        {{ conv.title }}
-      </a>
-    {% endfor %}
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    "
+  >
+    Conversations
   </div>
-{% endblock %}
+  <button
+    class="btn-new-chat"
+    style="width: 100%; margin-bottom: 8px"
+    hx-post="/chat/new"
+    hx-target="#conv-items"
+    hx-swap="afterbegin"
+  >
+    + New Chat
+  </button>
+  {% for conv in conversations %}
+  <a
+    href="/chat/{{ conv.id }}"
+    class="drawer-nav-item"
+    style="font-size: 0.82rem"
+  >
+    {{ conv.title }}
+  </a>
+  {% endfor %}
+</div>
+{% endblock %} {% block content %}
+<div
+  id="chat-layout"
+  class="chat-layout{% if active_conversation.is_some() %} chat-active{% endif %}"
+>
+  <!-- Conversation list -->
+  <div class="conv-list-panel">
+    <div class="conv-list-header">
+      <button
+        class="btn-new-chat"
+        hx-post="/chat/new"
+        hx-target="#conv-items"
+        hx-swap="afterbegin"
+      >
+        + New Chat
+      </button>
+    </div>
+    <div class="conv-search">
+      <input
+        type="text"
+        placeholder="Search conversations..."
+        hx-get="/chat/conversations"
+        hx-trigger="input changed delay:300ms"
+        hx-target="#conv-items"
+        hx-swap="innerHTML"
+        name="q"
+      />
+    </div>
+    <div id="conv-items" class="conv-items">
+      {% for conv in conversations %}
+      <a
+        class="conv-item{% if active_id.as_deref() == Some(conv.id.as_str()) %} active{% endif %}"
+        href="/chat/{{ conv.id }}"
+        hx-get="/chat/{{ conv.id }}"
+        hx-target="#chat-panel"
+        hx-swap="innerHTML"
+        hx-push-url="/chat/{{ conv.id }}"
+      >
+        <div class="conv-item-title">
+          {% if active_id.as_deref() == Some(conv.id.as_str()) %}
+          <span class="conv-item-dot"></span>
+          {% endif %} {{ conv.title }}
+        </div>
+        <div class="conv-item-meta">{{ conv.time_ago }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
 
-{% block content %}
-  <div id="chat-layout" class="chat-layout{% if active_conversation.is_some() %} chat-active{% endif %}">
-    <!-- Conversation list -->
-    <div class="conv-list-panel">
-      <div class="conv-list-header">
-        <button class="btn-new-chat"
-                hx-post="/chat/new"
-                hx-target="#conv-items"
-                hx-swap="afterbegin">
-          + New Chat
+  <!-- Chat panel -->
+  <div id="chat-panel" class="chat-panel">
+    {% if let Some(active) = active_conversation %}
+    <!-- Mobile back header -->
+    <div class="mobile-chat-header">
+      <a href="/chat" class="mobile-back">
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+        Back
+      </a>
+      <span class="mobile-chat-title">{{ active.title }}</span>
+    </div>
+
+    <div class="chat-header">
+      <div>
+        <h2>{{ active.title }}</h2>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center">
+        <button
+          class="btn-signout"
+          style="font-size: 0.75rem"
+          hx-delete="/chat/{{ active.id }}"
+          hx-confirm="Delete this conversation?"
+          hx-target="body"
+        >
+          Delete
         </button>
       </div>
-      <div class="conv-search">
-        <input type="text"
-               placeholder="Search conversations..."
-               hx-get="/chat/conversations"
-               hx-trigger="input changed delay:300ms"
-               hx-target="#conv-items"
-               hx-swap="innerHTML"
-               name="q">
-      </div>
-      <div id="conv-items" class="conv-items">
-        {% for conv in conversations %}
-          <a class="conv-item{% if active_id.as_deref() == Some(conv.id.as_str()) %} active{% endif %}"
-             href="/chat/{{ conv.id }}"
-             hx-get="/chat/{{ conv.id }}"
-             hx-target="#chat-panel"
-             hx-swap="innerHTML"
-             hx-push-url="/chat/{{ conv.id }}"
-             hx-on::after-swap="document.getElementById('chat-layout').classList.add('chat-active')">
-            <div class="conv-item-title">
-              {% if active_id.as_deref() == Some(conv.id.as_str()) %}
-                <span class="conv-item-dot"></span>
-              {% endif %}
-              {{ conv.title }}
-            </div>
-            <div class="conv-item-meta">{{ conv.time_ago }}</div>
-          </a>
+    </div>
+
+    <div id="messages" class="messages-container">
+      {% for msg in active.messages %}
+      <div class="message {{ msg.role_class }}">
+        <div class="msg-header">
+          <span class="msg-role">{{ msg.role_label }}</span>
+          <span class="msg-time">{{ msg.time }}</span>
+        </div>
+        <div class="msg-content">{{ msg.content }}</div>
+        {% for tc in msg.tool_calls %}
+        <div class="tool-call">
+          <details>
+            <summary class="tool-call-header">
+              <span>&#9654;</span>
+              <span class="tool-call-name">{{ tc.name }}</span>
+              <span
+                class="tool-call-status{% if tc.is_success %} ok{% else %} err{% endif %}"
+              >
+                {% if tc.is_success %}&#10003;{% else %}&#10007;{% endif %}
+              </span>
+            </summary>
+            <div class="tool-call-body">{{ tc.summary }}</div>
+          </details>
+        </div>
         {% endfor %}
       </div>
+      {% endfor %}
     </div>
 
-    <!-- Chat panel -->
-    <div id="chat-panel" class="chat-panel">
-  {% if let Some(active) = active_conversation %}
-        <!-- Mobile back header -->
-        <div class="mobile-chat-header">
-          <a href="/chat" class="mobile-back">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="15 18 9 12 15 6"/>
-            </svg>
-            Back
-          </a>
-          <span class="mobile-chat-title">{{ active.title }}</span>
-        </div>
-
-        <div class="chat-header">
-          <div>
-            <h2>{{ active.title }}</h2>
-          </div>
-          <div style="display:flex; gap:8px; align-items:center">
-            <button class="btn-signout" style="font-size:0.75rem"
-                    hx-delete="/chat/{{ active.id }}"
-                    hx-confirm="Delete this conversation?"
-                    hx-target="body">
-              Delete
-            </button>
-          </div>
-        </div>
-
-        <div id="messages" class="messages-container">
-          {% for msg in active.messages %}
-            <div class="message {{ msg.role_class }}">
-              <div class="msg-header">
-                <span class="msg-role">{{ msg.role_label }}</span>
-                <span class="msg-time">{{ msg.time }}</span>
-              </div>
-              <div class="msg-content">{{ msg.content }}</div>
-              {% for tc in msg.tool_calls %}
-                <div class="tool-call">
-                  <button type="button" class="tool-call-header"
-                          aria-expanded="false"
-                          onclick="var body=this.nextElementSibling;var open=body.style.display!=='none';body.style.display=open?'none':'block';this.setAttribute('aria-expanded',!open)">
-                    <span>&#9654;</span>
-                    <span class="tool-call-name">{{ tc.name }}</span>
-                    <span class="tool-call-status{% if tc.is_success %} ok{% else %} err{% endif %}">
-                      {% if tc.is_success %}&#10003;{% else %}&#10007;{% endif %}
-                    </span>
-                  </button>
-                  <div class="tool-call-body" style="display:none">{{ tc.summary }}</div>
-                </div>
-              {% endfor %}
-            </div>
-          {% endfor %}
-        </div>
-
-        <div class="chat-input">
-          <form id="chat-form" class="chat-input-form"
-                hx-post="/chat/{{ active.id }}/send"
-                hx-target="#messages"
-                hx-swap="beforeend scroll:#messages:bottom"
-                hx-on::after-request="this.reset(); chatStreamStarted()">
-            <textarea class="chat-input-field"
-                    name="message"
-                    placeholder="Type a message..."
-                    rows="1"
-                    required
-                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.form.requestSubmit()}"></textarea>
-            <button type="submit" class="btn-send" id="btn-send">Send</button>
-          </form>
-          <div class="chat-input-meta">
-            <span>Shift+Enter for new line</span>
-          </div>
-        </div>
-
-      {% else %}
-        <!-- Empty state -->
-        <div class="empty-state">
-          <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-          <h2>Start a conversation</h2>
-          <p>Create a new chat to begin interacting with the assistant. Your conversations are stored locally.</p>
-          <button class="btn-new-chat"
-                  hx-post="/chat/new"
-                  hx-target="#conv-items"
-                  hx-swap="afterbegin"
-                  style="margin-top:8px">
-            + New Chat
-          </button>
-        </div>
-      {% endif %}
+    <div class="chat-input">
+      <form
+        id="chat-form"
+        class="chat-input-form"
+        hx-post="/chat/{{ active.id }}/send"
+        hx-target="#messages"
+        hx-swap="beforeend scroll:#messages:bottom"
+      >
+        <textarea
+          class="chat-input-field"
+          name="message"
+          placeholder="Type a message..."
+          rows="1"
+          required
+        ></textarea>
+        <button type="submit" class="btn-send" id="btn-send">Send</button>
+      </form>
+      <div class="chat-input-meta">
+        <span>Shift+Enter for new line</span>
+      </div>
     </div>
+
+    {% else %}
+    <!-- Empty state -->
+    <div class="empty-state">
+      <svg
+        class="empty-state-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path
+          d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+        />
+      </svg>
+      <h2>Start a conversation</h2>
+      <p>
+        Create a new chat to begin interacting with the assistant. Your
+        conversations are stored locally.
+      </p>
+      <button
+        class="btn-new-chat"
+        hx-post="/chat/new"
+        hx-target="#conv-items"
+        hx-swap="afterbegin"
+        style="margin-top: 8px"
+      >
+        + New Chat
+      </button>
+    </div>
+    {% endif %}
   </div>
-{% endblock %}
-
-{% block extra_js %}
-<script>
-  // Auto-resize textarea
-  document.addEventListener('input', function(e) {
-    if (e.target.matches('.chat-input-field')) {
-      e.target.style.height = 'auto';
-      e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
-    }
-  });
-
-  // Scroll messages to bottom on page load
-  document.addEventListener('DOMContentLoaded', function() {
-    var msgs = document.getElementById('messages');
-    if (msgs) msgs.scrollTop = msgs.scrollHeight;
-  });
-
-  // Scroll to bottom after htmx swap into messages
-  document.addEventListener('htmx:afterSwap', function(e) {
-    if (e.detail.target.id === 'messages') {
-      e.detail.target.scrollTop = e.detail.target.scrollHeight;
-    }
-  });
-
-  // -- Streaming UX ---------------------------------------------------------
-
-  // Called after the send request returns (user bubble + streaming skeleton)
-  function chatStreamStarted() {
-    var btn = document.getElementById('btn-send');
-    var field = document.querySelector('.chat-input-field');
-    if (btn) { btn.disabled = true; btn.textContent = 'Thinking...'; }
-    if (field) field.disabled = true;
-  }
-
-  // Re-enable the form when the streaming skeleton is replaced by the final
-  // message (the "done" SSE event triggers an outerHTML swap that removes
-  // #streaming-msg from the DOM).
-  function chatStreamEnded() {
-    var btn = document.getElementById('btn-send');
-    var field = document.querySelector('.chat-input-field');
-    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
-    if (field) { field.disabled = false; field.focus(); }
-  }
-
-  // Detect when the streaming skeleton is removed (done event fired).
-  // We use a MutationObserver on #messages to watch for the removal of
-  // #streaming-msg (which happens on the outerHTML swap from the "done" event).
-  document.addEventListener('DOMContentLoaded', function() {
-    var msgs = document.getElementById('messages');
-    if (!msgs) return;
-
-    var observer = new MutationObserver(function() {
-      // If #streaming-msg no longer exists, streaming is done
-      if (!document.getElementById('streaming-msg')) {
-        chatStreamEnded();
-      }
-    });
-    observer.observe(msgs, { childList: true, subtree: true });
-  });
-
-  // Auto-scroll during streaming — whenever a token event swaps new content
-  // into the streaming message, scroll the messages container to the bottom.
-  document.addEventListener('htmx:sseMessage', function(e) {
-    var msgs = document.getElementById('messages');
-    if (msgs) msgs.scrollTop = msgs.scrollHeight;
-  });
-</script>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="{{ self.chat_js_url() }}"></script>
 {% endblock %}

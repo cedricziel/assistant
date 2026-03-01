@@ -1,0 +1,83 @@
+{% extends "base.html" %} {% block title %}Agents{% endblock %} {% block
+breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Agents</span>
+{% endblock %} {% block extra_css %}{% endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Agents</h2>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Local Agents</h2>
+          <p>Manage agent cards for your A2A-enabled agents.</p>
+        </div>
+        <span class="pill">{{ count }}</span>
+      </div>
+
+      {% if agents.is_empty() %}
+      <p class="empty">No agents registered yet. Create one to get started.</p>
+      {% else %}
+      <table class="trace-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Version</th>
+            <th>Skills</th>
+            <th>Interfaces</th>
+            <th>Caps</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for agent in agents %}
+          <tr
+            class="is-clickable"
+            tabindex="0"
+            data-href="/agents/{{ agent.id }}"
+          >
+            <td>
+              <a class="trace-id row-link" href="/agents/{{ agent.id }}"
+                >{{ agent.short_id }}&hellip;</a
+              >
+            </td>
+            <td>
+              <span class="primary">{{ agent.name }}</span>
+              {% if agent.is_default %}
+              <span class="hdr-badge ok">default</span>{% endif %}
+            </td>
+            <td>{{ agent.version }}</td>
+            <td>
+              {{ agent.skill_count }} skill{% if agent.skill_count != 1 %}s{%
+              endif %}
+            </td>
+            <td>
+              {{ agent.interface_count }} interface{% if agent.interface_count
+              != 1 %}s{% endif %}
+            </td>
+            <td>
+              {% if agent.streaming %}<span class="badge">streaming</span>{%
+              endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      <div style="margin-top: 1.25rem">
+        <a href="/agents/new" class="action-btn">+ New Agent</a>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}
