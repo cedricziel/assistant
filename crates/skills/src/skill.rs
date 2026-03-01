@@ -77,14 +77,6 @@ pub struct SkillDef {
     pub allowed_tools: Vec<String>,
     /// Raw `metadata` frontmatter entries (arbitrary key/value map)
     pub metadata: HashMap<String, Value>,
-    /// Declared execution tier (metadata `tier`)
-    pub tier: Option<String>,
-    /// Whether the metadata marks this skill as mutating
-    pub mutating: bool,
-    /// Whether the metadata requires explicit confirmation before running
-    pub confirmation_required: bool,
-    /// Optional parameter schema parsed from metadata `params`
-    pub params_schema: Option<Value>,
 
     // === Parsed body ===
     /// The Markdown instructions body from SKILL.md

@@ -6,10 +6,6 @@ description: >
   test web apps, or run any multi-step browser workflow. Requires no display
   (headless mode supported).
 license: MIT
-metadata:
-  tier: bash
-  mutating: "true"
-  confirmation-required: "false"
 ---
 
 # playwright-cli

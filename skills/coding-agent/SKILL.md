@@ -6,11 +6,6 @@ description: >
   parallel agents, PR reviews, or long-running coding tasks. Prefer this over
   direct bash for any task that takes more than ~20 seconds.
 license: MIT
-metadata:
-  tier: bash
-  mutating: "true"
-  confirmation-required: "false"
-
 ---
 
 # Coding Agent (background-first)
@@ -159,32 +154,39 @@ git worktree remove /tmp/issue-99
 
 When submitting PRs, use this format:
 
-````markdown
+```markdown
 ## Original Prompt
+
 [Exact request/problem statement]
 
 ## What this does
+
 [High-level description]
 
 **Features:**
+
 - [Key feature 1]
 - [Key feature 2]
 
 ## Feature intent (maintainer-friendly)
+
 [Why useful, how it fits, workflows it enables]
 
 ## Prompt history (timestamped)
+
 - YYYY-MM-DD HH:MM UTC: [Step 1]
 - YYYY-MM-DD HH:MM UTC: [Step 2]
 
 ## How I tested
+
 1. [Test step] - Output: `[result]`
 2. [Test step] - Result: [result]
 
 ## Implementation details
+
 **New files:** `path/file.rs` — [description]
 **Modified:** `path/file.rs` — [change]
-````
+```
 
 ---
 

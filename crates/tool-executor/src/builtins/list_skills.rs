@@ -50,27 +50,17 @@ impl ToolHandler for ListSkillsHandler {
 
         // Build a formatted table
         let mut lines: Vec<String> = Vec::new();
+        lines.push(format!("{:<24} {:<70} {}", "Name", "Description", "Source"));
         lines.push(format!(
-            "{:<24} {:<62} {:<8} {}",
-            "Name", "Description", "Tier", "Source"
-        ));
-        lines.push(format!(
-            "{} {} {} {}",
+            "{} {} {}",
             "-".repeat(24),
-            "-".repeat(62),
-            "-".repeat(8),
+            "-".repeat(70),
             "-".repeat(10)
         ));
 
         for skill in &skills {
             let desc = truncate(&skill.description, DESC_TRUNCATE);
-            lines.push(format!(
-                "{:<24} {:<62} {:<8} {}",
-                skill.name,
-                desc,
-                skill.tier.as_deref().unwrap_or("knowledge"),
-                skill.source,
-            ));
+            lines.push(format!("{:<24} {:<70} {}", skill.name, desc, skill.source,));
         }
 
         lines.push(String::new());

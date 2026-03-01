@@ -8,11 +8,6 @@ description: >
   Supports fire-and-forget async jobs (tmux-based, non-blocking) as well as
   quick blocking one-shot tasks and follow-up questions in the same session.
 license: MIT
-metadata:
-  tier: bash
-  mutating: "true"
-  confirmation-required: "false"
-
 ---
 
 # Claude Code Agent Skill
@@ -21,11 +16,11 @@ Run an agentic task on the local device via the `claude` CLI (Claude Code).
 
 ## How to choose between blocking and async mode
 
-| Use **blocking** (`async: false`) | Use **async** (`async: true`) |
-|---|---|
-| Quick one-shot tasks (<30s) | Long builds, refactors, multi-file work |
-| Single follow-up questions | Parallel agents / multiple worktrees |
-| Simple shell automation | Tasks that may take minutes |
+| Use **blocking** (`async: false`) | Use **async** (`async: true`)           |
+| --------------------------------- | --------------------------------------- |
+| Quick one-shot tasks (<30s)       | Long builds, refactors, multi-file work |
+| Single follow-up questions        | Parallel agents / multiple worktrees    |
+| Simple shell automation           | Tasks that may take minutes             |
 
 **Default heuristic:** if the task sounds like it will take more than ~20 seconds (build, analyse a big repo, write many files), use async mode.
 
@@ -48,6 +43,7 @@ claude \
 ```
 
 Parse the JSON result:
+
 - `result` — final text answer / summary
 - `session_id` — save this to resume later
 - `is_error` / `stop_reason` — detect failures
@@ -180,6 +176,7 @@ done
 ## Example invocations
 
 **Quick one-shot (blocking):**
+
 ```yaml
 prompt: "What's the largest file in ~/code/assistant?"
 workdir: "~/code/assistant"
@@ -187,6 +184,7 @@ async: false
 ```
 
 **Long build (async):**
+
 ```yaml
 prompt: "Run cargo build --release and fix any errors"
 workdir: "~/code/assistant"
@@ -194,6 +192,7 @@ async: true
 ```
 
 **Resume a Claude session:**
+
 ```yaml
 prompt: "Now also add tests for the function you wrote"
 session_id: "3153e086-80f2-4937-afa3-80a922ef1bdc"
@@ -201,12 +200,14 @@ async: false
 ```
 
 **Poll async session:**
+
 ```yaml
 tmux_session: "cca-1772179451"
 prompt: "(check status)"
 ```
 
 **Parallel worktree agents:**
+
 ```yaml
 prompt: "Fix issue #42: login button broken"
 workdir: "~/code/myproject"
