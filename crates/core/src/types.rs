@@ -120,6 +120,10 @@ pub struct AssistantConfig {
     /// Mattermost interface configuration (optional).
     /// Populated from the `[mattermost]` section of `config.toml`.
     pub mattermost: Option<MattermostConfig>,
+    /// Audio transcription configuration (optional).
+    /// Populated from the `[transcription]` section of `config.toml`.
+    #[serde(default)]
+    pub transcription: Option<TranscriptionConfig>,
 }
 
 /// Configuration for the Signal messenger interface.
@@ -185,6 +189,49 @@ pub struct MattermostConfig {
     /// If non-empty, only dispatch messages from these Mattermost user IDs.
     #[serde(default)]
     pub allowed_users: Vec<String>,
+}
+
+// ── Transcription configuration ───────────────────────────────────────────────
+
+/// Which transcription backend to use.
+///
+/// Set via `[transcription] provider = "whisper"` in `config.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TranscriptionProviderKind {
+    /// OpenAI Whisper API (or any compatible endpoint).
+    Whisper,
+    /// Local Ollama server running a whisper-compatible model.
+    Ollama,
+    /// Deepgram hosted speech-to-text API.
+    Deepgram,
+}
+
+/// Configuration for audio transcription.
+///
+/// When present, interfaces that receive audio attachments (Slack voice
+/// messages, Signal voice notes, …) will automatically transcribe them
+/// and inject the transcript into the conversation as text.
+///
+/// ```toml
+/// [transcription]
+/// provider = "whisper"
+/// # model = "whisper-1"
+/// # api_key = "sk-..."  # or set OPENAI_API_KEY env var
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptionConfig {
+    /// Which transcription backend to use.
+    pub provider: TranscriptionProviderKind,
+    /// Model name (uses provider-specific default if omitted).
+    pub model: Option<String>,
+    /// Base URL override (uses provider-specific default if omitted).
+    pub base_url: Option<String>,
+    /// API key (also checked via provider-specific env vars:
+    /// `OPENAI_API_KEY` for Whisper, `DEEPGRAM_API_KEY` for Deepgram).
+    pub api_key: Option<String>,
+    /// Optional BCP-47 language hint (e.g. `"en"`, `"de"`).
+    pub language: Option<String>,
 }
 
 fn default_llm_model() -> String {
