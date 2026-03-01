@@ -11,9 +11,9 @@ import { test, expect, Page } from "@playwright/test";
 
 const AUTH_TOKEN = "test-token";
 
-// Cross-platform font rendering (macOS vs Linux CI) causes ~2% pixel diffs.
-// 3% tolerance absorbs font hinting differences while still catching layout regressions.
-const MAX_DIFF_RATIO = 0.03;
+// Cross-platform font rendering (macOS vs Linux CI) causes up to ~4% pixel diffs.
+// 5% tolerance absorbs font hinting differences while still catching layout regressions.
+const MAX_DIFF_RATIO = 0.05;
 
 // Settle time for CSS transitions before screenshotting.
 const CSS_SETTLE_MS = 300;
