@@ -7,18 +7,19 @@
 
 use std::sync::Arc;
 
+use askama::Template;
 use axum::body::Body;
 use axum::extract::{Extension, Request};
 use axum::http::header::{COOKIE, LOCATION, SET_COOKIE};
 use axum::http::StatusCode;
 use axum::middleware::Next;
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::Response;
 use axum::Form;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 
-use crate::common::html_escape;
+use crate::common::render_template;
 
 // -- Configuration ----------------------------------------------------------
 
@@ -145,13 +146,23 @@ pub async fn require_auth(
     }
 }
 
+// -- Templates --------------------------------------------------------------
+
+/// Askama template for the standalone login page.
+///
+/// This is a self-contained page (does **not** extend `base.html`) because
+/// unauthenticated users must not see the app shell.
+#[derive(Template)]
+#[template(path = "auth/login.html")]
+struct LoginPageTemplate {
+    error: Option<String>,
+}
+
 // -- Login page -------------------------------------------------------------
 
 /// `GET /login` — render the login form.
 pub async fn login_page() -> Response {
-    // Always show the login form.  The auth middleware on protected pages
-    // handles the case where the user already has a valid session.
-    Html(render_login_page(None)).into_response()
+    render_template(LoginPageTemplate { error: None })
 }
 
 /// `POST /login` — validate the submitted token and set a session cookie.
@@ -178,7 +189,9 @@ pub async fn login_submit(
             .body(Body::empty())
             .unwrap()
     } else {
-        Html(render_login_page(Some("Invalid token."))).into_response()
+        render_template(LoginPageTemplate {
+            error: Some("Invalid token.".to_string()),
+        })
     }
 }
 
@@ -211,125 +224,6 @@ fn extract_cookie<'a>(cookies: &'a str, name: &str) -> Option<&'a str> {
         }
     }
     None
-}
-
-/// Render the login page HTML.
-fn render_login_page(error: Option<&str>) -> String {
-    let error_html = error
-        .map(|msg| format!("<div class=\"login-error\">{}</div>", html_escape(msg)))
-        .unwrap_or_default();
-
-    format!(
-        r#"<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Login - Assistant</title>
-<style>{css}
-{login_css}
-</style>
-</head><body>
-<div class="login-container">
-  <div class="login-card">
-    <div class="login-brand">
-      <p>assistant</p>
-      <h2>Agent Manager</h2>
-    </div>
-    {error}
-    <form method="POST" action="/login" class="login-form">
-      <label for="token">Auth Token</label>
-      <input type="password" id="token" name="token" placeholder="Enter your token" required autofocus>
-      <button type="submit">Sign in</button>
-    </form>
-  </div>
-</div>
-</body></html>"#,
-        css = crate::common::default_css(),
-        login_css = login_css(),
-        error = error_html,
-    )
-}
-
-/// CSS specific to the login page.
-fn login_css() -> &'static str {
-    r#"
-    .login-container {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 100vh;
-        padding: 2rem;
-    }
-    .login-card {
-        background: #0a1628;
-        border: 1px solid #0b1b32;
-        border-radius: 12px;
-        padding: 2.5rem;
-        width: 100%;
-        max-width: 400px;
-    }
-    .login-brand {
-        margin-bottom: 2rem;
-    }
-    .login-brand p {
-        text-transform: uppercase;
-        letter-spacing: 0.2em;
-        color: #7aa2ff;
-        margin: 0 0 0.2rem;
-        font-size: 0.75rem;
-    }
-    .login-brand h2 {
-        margin: 0;
-        color: #e5e9f0;
-    }
-    .login-error {
-        background: rgba(239, 68, 68, 0.15);
-        border: 1px solid rgba(239, 68, 68, 0.3);
-        color: #fca5a5;
-        padding: 0.75rem 1rem;
-        border-radius: 8px;
-        margin-bottom: 1.5rem;
-        font-size: 0.9rem;
-    }
-    .login-form {
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-    }
-    .login-form label {
-        font-size: 0.85rem;
-        color: #8aa5d8;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }
-    .login-form input {
-        background: #030712;
-        border: 1px solid #1a2744;
-        border-radius: 8px;
-        padding: 0.7rem 1rem;
-        color: #e5e9f0;
-        font-size: 1rem;
-        outline: none;
-        transition: border-color 0.15s;
-    }
-    .login-form input:focus {
-        border-color: #6ec6ff;
-    }
-    .login-form button {
-        background: #2563eb;
-        color: #fff;
-        border: none;
-        border-radius: 8px;
-        padding: 0.7rem;
-        font-size: 1rem;
-        cursor: pointer;
-        margin-top: 0.5rem;
-        transition: background 0.15s;
-    }
-    .login-form button:hover {
-        background: #1d4ed8;
-    }
-    "#
 }
 
 #[cfg(test)]
