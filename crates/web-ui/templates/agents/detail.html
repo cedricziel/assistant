@@ -34,12 +34,15 @@
         </button>
       </form>
       {% endif %}
-      <form
-        method="POST"
-        action="/agents/{{ agent_id }}/delete"
-        onsubmit="return confirm('Delete this agent?');"
-      >
-        <button type="submit" class="action-btn danger">Delete</button>
+      <form method="POST" action="/agents/{{ agent_id }}/delete">
+        <button
+          type="submit"
+          class="action-btn danger"
+          hx-post="/agents/{{ agent_id }}/delete"
+          hx-confirm="Delete this agent?"
+        >
+          Delete
+        </button>
       </form>
       <a
         href="/agents/{{ agent_id }}/card.json"

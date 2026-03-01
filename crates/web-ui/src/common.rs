@@ -27,6 +27,26 @@ pub trait StaticUrls {
     fn htmx_sse_url(&self) -> &'static str {
         crate::static_assets::htmx_sse_url()
     }
+
+    /// Fingerprinted URL for the app shell JS.
+    fn app_js_url(&self) -> &'static str {
+        crate::static_assets::app_js_url()
+    }
+
+    /// Fingerprinted URL for chat-specific JS.
+    fn chat_js_url(&self) -> &'static str {
+        crate::static_assets::chat_js_url()
+    }
+
+    /// Fingerprinted URL for the trace detail viewer JS.
+    fn trace_detail_js_url(&self) -> &'static str {
+        crate::static_assets::trace_detail_js_url()
+    }
+
+    /// Fingerprinted URL for the agent form validator JS.
+    fn agent_form_js_url(&self) -> &'static str {
+        crate::static_assets::agent_form_js_url()
+    }
 }
 
 /// HTML-escape a string to prevent XSS.

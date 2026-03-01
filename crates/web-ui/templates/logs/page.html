@@ -27,7 +27,11 @@ breadcrumb %}
               type="radio"
               name="severity"
               value="{{ opt.value }}"
-              onchange="this.form.submit()"
+              hx-get="/logs"
+              hx-include="closest form"
+              hx-target="body"
+              hx-push-url="true"
+              hx-trigger="change"
               {%
               if
               opt.checked
@@ -116,12 +120,7 @@ breadcrumb %}
         </thead>
         <tbody>
           {% for log in logs %}
-          <tr
-            class="is-clickable"
-            tabindex="0"
-            onclick="window.location='/log/{{ log.id }}'"
-            onkeydown="if(event.key==='Enter')window.location='/log/{{ log.id }}'"
-          >
+          <tr class="is-clickable" tabindex="0" data-href="/log/{{ log.id }}">
             <td>
               <a class="row-link" href="/log/{{ log.id }}"
                 ><span class="{{ log.severity_class }}"

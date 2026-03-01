@@ -22,6 +22,12 @@ const BASE_CSS: &str = include_str!("base.css");
 const DEFAULT_CSS: &str = include_str!("../../templates/partials/default_css.html");
 const ENTITY_CSS: &str = include_str!("../../templates/partials/entity_css.html");
 
+// First-party JS modules.
+const APP_JS: &str = include_str!("app.js");
+const CHAT_JS: &str = include_str!("chat.js");
+const TRACE_DETAIL_JS: &str = include_str!("trace-detail.js");
+const AGENT_FORM_JS: &str = include_str!("agent-form.js");
+
 // Vendored third-party JS (committed to repo, no CDN fetch at runtime).
 const HTMX_JS: &str = include_str!("vendor/htmx.min.js");
 const HTMX_SSE_JS: &str = include_str!("vendor/sse.js");
@@ -82,6 +88,16 @@ static HTMX_ASSET: LazyLock<Asset> = LazyLock::new(|| fingerprint_static("htmx",
 static SSE_ASSET: LazyLock<Asset> =
     LazyLock::new(|| fingerprint_static("htmx-sse", "js", HTMX_SSE_JS));
 
+static APP_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| fingerprint_static("app", "js", APP_JS));
+
+static CHAT_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| fingerprint_static("chat", "js", CHAT_JS));
+
+static TRACE_DETAIL_JS_ASSET: LazyLock<Asset> =
+    LazyLock::new(|| fingerprint_static("trace-detail", "js", TRACE_DETAIL_JS));
+
+static AGENT_FORM_JS_ASSET: LazyLock<Asset> =
+    LazyLock::new(|| fingerprint_static("agent-form", "js", AGENT_FORM_JS));
+
 // -- Public API --------------------------------------------------------------
 
 /// Fingerprinted URL for the app stylesheet (e.g. `/static/app.a1b2c3.css`).
@@ -97,6 +113,26 @@ pub fn htmx_url() -> &'static str {
 /// Fingerprinted URL for the vendored htmx-ext-sse script.
 pub fn htmx_sse_url() -> &'static str {
     &SSE_ASSET.url
+}
+
+/// Fingerprinted URL for the app shell JS.
+pub fn app_js_url() -> &'static str {
+    &APP_JS_ASSET.url
+}
+
+/// Fingerprinted URL for chat-specific JS.
+pub fn chat_js_url() -> &'static str {
+    &CHAT_JS_ASSET.url
+}
+
+/// Fingerprinted URL for the trace detail viewer JS.
+pub fn trace_detail_js_url() -> &'static str {
+    &TRACE_DETAIL_JS_ASSET.url
+}
+
+/// Fingerprinted URL for the agent form validator JS.
+pub fn agent_form_js_url() -> &'static str {
+    &AGENT_FORM_JS_ASSET.url
 }
 
 // -- Route handlers ----------------------------------------------------------
@@ -135,6 +171,22 @@ async fn serve_sse() -> Response {
     serve_js_immutable(SSE_ASSET.content)
 }
 
+async fn serve_app_js() -> Response {
+    serve_js_immutable(APP_JS_ASSET.content)
+}
+
+async fn serve_chat_js() -> Response {
+    serve_js_immutable(CHAT_JS_ASSET.content)
+}
+
+async fn serve_trace_detail_js() -> Response {
+    serve_js_immutable(TRACE_DETAIL_JS_ASSET.content)
+}
+
+async fn serve_agent_form_js() -> Response {
+    serve_js_immutable(AGENT_FORM_JS_ASSET.content)
+}
+
 /// Serve a JS asset with aggressive immutable cache headers.
 fn serve_js_immutable(content: &'static str) -> Response {
     (
@@ -159,4 +211,9 @@ pub fn static_router() -> Router {
         // Vendored JS
         .route(&HTMX_ASSET.url, get(serve_htmx))
         .route(&SSE_ASSET.url, get(serve_sse))
+        // First-party JS
+        .route(&APP_JS_ASSET.url, get(serve_app_js))
+        .route(&CHAT_JS_ASSET.url, get(serve_chat_js))
+        .route(&TRACE_DETAIL_JS_ASSET.url, get(serve_trace_detail_js))
+        .route(&AGENT_FORM_JS_ASSET.url, get(serve_agent_form_js))
 }

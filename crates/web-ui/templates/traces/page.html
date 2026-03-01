@@ -45,7 +45,11 @@ breadcrumb %}
               type="radio"
               name="status"
               value="{{ opt.value }}"
-              onchange="this.form.submit()"
+              hx-get="/traces"
+              hx-include="closest form"
+              hx-target="body"
+              hx-push-url="true"
+              hx-trigger="change"
               {%
               if
               opt.checked
@@ -125,8 +129,7 @@ breadcrumb %}
           <tr
             class="is-clickable"
             tabindex="0"
-            onclick="window.location='/trace/{{ t.trace_url }}'"
-            onkeydown="if(event.key==='Enter')window.location='/trace/{{ t.trace_url }}'"
+            data-href="/trace/{{ t.trace_url }}"
           >
             <td>
               <a class="trace-id row-link" href="/trace/{{ t.trace_url }}"

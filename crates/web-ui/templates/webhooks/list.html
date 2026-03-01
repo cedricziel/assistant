@@ -50,8 +50,7 @@ text-overflow: ellipsis; white-space: nowrap; } {% endblock %} {% block content
           <tr
             class="is-clickable"
             tabindex="0"
-            onclick="window.location='/webhooks/{{ row.id }}'"
-            onkeydown="if(event.key==='Enter')window.location='/webhooks/{{ row.id }}'"
+            data-href="/webhooks/{{ row.id }}"
           >
             <td>
               <a class="trace-id row-link" href="/webhooks/{{ row.id }}"

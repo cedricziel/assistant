@@ -9,12 +9,10 @@ block breadcrumb %}
 monospace; font-size: 0.85rem; max-width: 300px; overflow: hidden;
 text-overflow: ellipsis; white-space: nowrap; } .secret-box { background:
 #020511; border: 1px solid #15243b; border-radius: 8px; padding: 0.75rem 1rem;
-display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem; }
-.secret-box code { font-family: ui-monospace, monospace; font-size: 0.9rem;
-word-break: break-all; cursor: pointer; user-select: all; } .secret-masked {
-color: transparent !important; text-shadow: 0 0 8px rgba(110, 198, 255, 0.5); }
-.secret-hint { font-size: 0.8rem; color: #5a7396; white-space: nowrap; } {%
-endblock %} {% block content %}
+margin-top: 0.5rem; } .secret-box code { font-family: ui-monospace, monospace;
+font-size: 0.9rem; word-break: break-all; user-select: all; display: block;
+margin-top: 0.5rem; } .secret-hint { font-size: 0.8rem; color: #5a7396; cursor:
+pointer; } {% endblock %} {% block content %}
 <div class="layout">
   <aside class="sidebar">
     <div class="sidebar-inner">
@@ -57,25 +55,25 @@ endblock %} {% block content %}
             {{ toggle_label }}
           </button>
         </form>
-        <form
-          method="POST"
-          action="/webhooks/{{ id }}/rotate-secret"
-          onsubmit="
-            return confirm(
-              'Rotate the signing secret? The old secret will be invalidated and verification will be cleared.',
-            );
-          "
-        >
-          <button type="submit" class="action-btn secondary">
+        <form method="POST" action="/webhooks/{{ id }}/rotate-secret">
+          <button
+            type="submit"
+            class="action-btn secondary"
+            hx-post="/webhooks/{{ id }}/rotate-secret"
+            hx-confirm="Rotate the signing secret? The old secret will be invalidated and verification will be cleared."
+          >
             Rotate Secret
           </button>
         </form>
-        <form
-          method="POST"
-          action="/webhooks/{{ id }}/delete"
-          onsubmit="return confirm('Delete this webhook?');"
-        >
-          <button type="submit" class="action-btn danger">Delete</button>
+        <form method="POST" action="/webhooks/{{ id }}/delete">
+          <button
+            type="submit"
+            class="action-btn danger"
+            hx-post="/webhooks/{{ id }}/delete"
+            hx-confirm="Delete this webhook?"
+          >
+            Delete
+          </button>
         </form>
       </nav>
 
@@ -102,15 +100,10 @@ endblock %} {% block content %}
           The signature is sent in the <code>X-Webhook-Signature</code> header
           as <code>sha256=&lt;hex&gt;</code>.
         </p>
-        <div class="secret-box">
-          <code
-            id="secret-value"
-            class="secret-masked"
-            onclick="this.classList.toggle('secret-masked')"
-            >{{ secret }}</code
-          >
-          <span class="secret-hint">(click to reveal/hide)</span>
-        </div>
+        <details class="secret-box">
+          <summary class="secret-hint">Click to reveal/hide</summary>
+          <code id="secret-value">{{ secret }}</code>
+        </details>
       </div>
 
       {# Event types #}

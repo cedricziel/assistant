@@ -43,8 +43,7 @@ breadcrumb %}
           <tr
             class="is-clickable"
             tabindex="0"
-            onclick="window.location='/agents/{{ agent.id }}'"
-            onkeydown="if(event.key==='Enter')window.location='/agents/{{ agent.id }}'"
+            data-href="/agents/{{ agent.id }}"
           >
             <td>
               <a class="trace-id row-link" href="/agents/{{ agent.id }}"

@@ -20,6 +20,10 @@ const STATIC_ASSETS = [
   "__APP_CSS_URL__",
   "__HTMX_URL__",
   "__HTMX_SSE_URL__",
+  "__APP_JS_URL__",
+  "__CHAT_JS_URL__",
+  "__TRACE_DETAIL_JS_URL__",
+  "__AGENT_FORM_JS_URL__",
 ];
 
 // -- Install: pre-cache app shell -------------------------------------------

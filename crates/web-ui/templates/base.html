@@ -83,7 +83,7 @@
     <div class="app-content">
       <!-- Top bar -->
       <header class="top-bar">
-        <button class="hamburger" onclick="toggleDrawer()" aria-label="Menu">
+        <button class="hamburger" aria-label="Menu">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
           </svg>
@@ -142,11 +142,11 @@
   </div>
 
   <!-- Slide-over drawer (tablet) -->
-  <div class="drawer-backdrop" id="drawerBackdrop" onclick="toggleDrawer()"></div>
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
   <aside class="drawer" id="drawer">
     <div class="drawer-header">
       <span class="drawer-brand">Assistant</span>
-      <button class="drawer-close" onclick="toggleDrawer()">&times;</button>
+      <button class="drawer-close">&times;</button>
     </div>
     <nav class="drawer-nav">
       <a href="/chat" class="drawer-nav-item{% if active_page == "chat" %} active{% endif %}">
@@ -199,23 +199,7 @@
     </div>
   </aside>
 
-  <script>
-    function toggleDrawer() {
-      document.getElementById('drawer').classList.toggle('open');
-      document.getElementById('drawerBackdrop').classList.toggle('open');
-    }
-
-    // -- Service Worker registration --
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function() {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' })
-          .then(function(reg) {
-            // Check for updates periodically (every 60s)
-            setInterval(function() { reg.update(); }, 60000);
-          });
-      });
-    }
-  </script>
+  <script src="{{ self.app_js_url() }}"></script>
   {% block extra_js %}{% endblock %}
 </body>
 </html>
