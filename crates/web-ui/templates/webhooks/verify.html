@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Webhook{% endblock %}
+
+{% block breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/webhooks" class="breadcrumb-page">Webhooks</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Verify</span>
+{% endblock %}
+
+{% block extra_css %}
+{% include "partials/default_css.html" %}
+
+.verify-result {
+    padding: 1rem 0;
+}
+.verify-result ul {
+    margin: 0.5rem 0 0.5rem 1.2rem;
+    padding: 0;
+}
+.verify-result li {
+    margin-bottom: 0.3rem;
+    font-size: 0.9rem;
+}
+.verify-result code {
+    background: rgba(94, 195, 255, 0.1);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.verify-info {
+    margin-top: 1rem;
+    color: #8ba2c6;
+    font-size: 0.9rem;
+}
+.action-btn {
+    display: inline-block;
+    background: linear-gradient(135deg, #64cafe, #8b5dff);
+    border: none;
+    border-radius: 8px;
+    color: #050b16;
+    padding: 0.5rem 1.2rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+}
+.action-btn.secondary {
+    background: rgba(255,255,255,0.08);
+    color: #c2d6f0;
+}
+{% endblock %}
+
+{% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand"><p>assistant</p><h2>Webhooks</h2></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head"><h2>Verification Result</h2></div>
+      <div class="verify-result">
+        <p>
+          {% if success %}
+          <span class="hdr-badge ok">success</span>
+          {% else %}
+          <span class="hdr-badge error">failed</span>
+          {% endif %}
+          {{ detail }}
+        </p>
+        <p class="verify-info">A <code>POST</code> was sent to <code>{{ url }}</code> with:</p>
+        <ul>
+          <li>Header: <code>X-Webhook-Signature: sha256=&lt;hex&gt;</code></li>
+          <li>Header: <code>X-Webhook-Event: webhook.verify</code></li>
+          <li>Body: <code>{"type":"webhook.verify", ...}</code></li>
+        </ul>
+        <p>The receiving endpoint should validate the HMAC-SHA256 signature using the
+        shared secret to confirm authenticity.</p>
+      </div>
+      <div style="margin-top:1.25rem">
+        <a href="/webhooks/{{ id }}" class="action-btn secondary">&larr; Back to Webhook</a>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}

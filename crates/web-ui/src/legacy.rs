@@ -34,6 +34,7 @@ pub struct WrapperTemplate {
 /// * `page_css` — Combined CSS string (typically `default_css()` + page-specific).
 /// * `content_html` — Pre-rendered HTML for the content area.
 /// * `page_js` — Optional JavaScript to inject (include `<script>` tags).
+#[allow(dead_code)]
 pub fn render_page(
     active_page: &str,
     page_title: &str,

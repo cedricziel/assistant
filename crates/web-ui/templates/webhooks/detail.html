@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block title %}Webhook: {{ name }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/webhooks" class="breadcrumb-page">Webhooks</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">{{ name }}</span>
+{% endblock %}
+
+{% block extra_css %}
+{% include "partials/default_css.html" %}
+
+.url-cell {
+    font-family: ui-monospace, monospace;
+    font-size: 0.85rem;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.secret-box {
+    background: #020511;
+    border: 1px solid #15243b;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+.secret-box code {
+    font-family: ui-monospace, monospace;
+    font-size: 0.9rem;
+    word-break: break-all;
+    cursor: pointer;
+    user-select: all;
+}
+.secret-masked {
+    color: transparent !important;
+    text-shadow: 0 0 8px rgba(110, 198, 255, 0.5);
+}
+.secret-hint {
+    font-size: 0.8rem;
+    color: #5a7396;
+    white-space: nowrap;
+}
+.action-btn {
+    display: inline-block;
+    background: linear-gradient(135deg, #64cafe, #8b5dff);
+    border: none;
+    border-radius: 8px;
+    color: #050b16;
+    padding: 0.5rem 1.2rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+}
+.action-btn.secondary {
+    background: rgba(255,255,255,0.08);
+    color: #c2d6f0;
+}
+.action-btn.danger {
+    background: rgba(248, 113, 113, 0.25);
+    color: #ffb4b4;
+}
+.agent-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin: 1.25rem 0;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid #0f1f36;
+}
+.agent-section {
+    margin: 1.25rem 0;
+}
+.agent-section h3 {
+    margin: 0 0 0.6rem;
+    color: #8aa5d8;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.agent-section p {
+    margin: 0.3rem 0;
+}
+.agent-section code {
+    background: rgba(94, 195, 255, 0.1);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.88rem;
+}
+{% endblock %}
+
+{% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand"><p>assistant</p><h2>Webhooks</h2></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="trace-detail">
+      {# Header bar #}
+      <div class="trace-header-bar">
+        <a class="hdr-back" href="/webhooks">&larr; Webhooks</a>
+        <span class="hdr-sep">|</span>
+        <span class="hdr-trace-id">{{ short_id }}&hellip;</span>
+        <span class="hdr-svc">{{ name }}</span>
+        {% if active %}
+        <span class="hdr-badge ok">active</span>
+        {% else %}
+        <span class="hdr-badge error">inactive</span>
+        {% endif %}
+      </div>
+
+      {# Endpoint URL #}
+      <div class="agent-section">
+        <h3>Endpoint URL</h3>
+        <p><code>{{ url }}</code></p>
+      </div>
+
+      {# Actions #}
+      <div class="agent-actions">
+        <a href="/webhooks/{{ id }}/edit" class="action-btn">Edit</a>
+        <form method="POST" action="/webhooks/{{ id }}/verify" style="display:inline">
+          <button type="submit" class="action-btn secondary">Verify</button>
+        </form>
+        <form method="POST" action="/webhooks/{{ id }}/toggle" style="display:inline">
+          <button type="submit" class="action-btn secondary">{{ toggle_label }}</button>
+        </form>
+        <form method="POST" action="/webhooks/{{ id }}/rotate-secret" style="display:inline"
+              onsubmit="return confirm('Rotate the signing secret? The old secret will be invalidated and verification will be cleared.')">
+          <button type="submit" class="action-btn secondary">Rotate Secret</button>
+        </form>
+        <form method="POST" action="/webhooks/{{ id }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete this webhook?')">
+          <button type="submit" class="action-btn danger">Delete</button>
+        </form>
+      </div>
+
+      {# Verification status #}
+      <div class="agent-section">
+        <h3>Verification</h3>
+        {% if let Some(ts) = verified_at %}
+        <p><span class="hdr-badge ok">verified</span> Last verified: {{ ts }}</p>
+        {% else %}
+        <p><span class="badge muted">unverified</span>
+        This webhook has not been verified yet. Use the Verify button to send a test payload.</p>
+        {% endif %}
+      </div>
+
+      {# Signing secret #}
+      <div class="agent-section">
+        <h3>Signing Secret</h3>
+        <p>Payloads are signed with <code>HMAC-SHA256</code> using this secret.
+        The signature is sent in the <code>X-Webhook-Signature</code> header as <code>sha256=&lt;hex&gt;</code>.</p>
+        <div class="secret-box">
+          <code id="secret-value" class="secret-masked" onclick="this.classList.toggle('secret-masked')">{{ secret }}</code>
+          <span class="secret-hint">(click to reveal/hide)</span>
+        </div>
+      </div>
+
+      {# Event types #}
+      <div class="agent-section">
+        <h3>Subscribed Events</h3>
+        {% if event_types.is_empty() %}
+        <p class="empty">No event types selected &mdash; this webhook will not fire.</p>
+        {% else %}
+        <p>
+          {% for e in event_types %}
+          <span class="badge">{{ e }}</span>
+          {% endfor %}
+        </p>
+        {% endif %}
+      </div>
+
+      {# Timestamps #}
+      <div class="agent-section">
+        <h3>Timestamps</h3>
+        <p>Created: {{ created_at }} &mdash; Updated: {{ updated_at }}</p>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}
