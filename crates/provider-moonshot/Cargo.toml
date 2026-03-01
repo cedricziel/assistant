@@ -4,14 +4,15 @@ version = "0.1.26"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Moonshot AI (Kimi) LLM provider — thin facade over the OpenAI-compatible provider"
+description = "Moonshot AI (Kimi) LLM provider using async-openai Chat Completions"
 
 [dependencies]
 assistant-core           = { path = "../core" }
 assistant-llm            = { path = "../llm" }
-assistant-provider-openai = { path = "../provider-openai" }
+async-openai             = { version = "0.33", features = ["chat-completion"] }
 async-trait              = { workspace = true }
 anyhow                   = { workspace = true }
+futures                  = { workspace = true }
 reqwest                  = { workspace = true }
 reqwest-middleware        = { workspace = true }
 serde                    = { workspace = true }

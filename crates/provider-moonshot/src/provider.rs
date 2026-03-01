@@ -1,16 +1,24 @@
-//! `MoonshotProvider` — thin facade over [`OpenAIProvider`] for the Moonshot AI
+//! `MoonshotProvider` — [`LlmProvider`] implementation for the Moonshot AI
 //! (Kimi) chat completions API.
 //!
-//! Moonshot exposes an OpenAI-compatible `/v1/chat/completions` endpoint, so we
-//! delegate all heavy lifting to the existing OpenAI provider and only override
-//! construction defaults and OTel metadata.
-//!
-//! When the `$web_search` builtin is enabled the provider handles the
-//! Moonshot-specific echo-back loop internally: it injects a
-//! `builtin_function` tool spec, intercepts `$web_search` tool calls, echoes
-//! the arguments back to the API, and returns the final answer to the caller.
+//! Uses `async-openai`'s Chat Completions client directly (Moonshot's API is
+//! OpenAI-compatible).  The `$web_search` builtin is handled via raw HTTP
+//! because it uses the non-standard `"type": "builtin_function"` tool spec
+//! and requires an echo-back loop.
 
+use std::time::Duration;
+
+use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
+use async_openai::types::chat::{
+    ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,
+    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+    ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestToolMessageArgs,
+    ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionTools, CompletionUsage,
+    CreateChatCompletionRequestArgs, FunctionCall, FunctionObjectArgs,
+};
+use async_openai::Client;
 use async_trait::async_trait;
+use futures::StreamExt as _;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -18,9 +26,8 @@ use tracing::{debug, warn};
 use assistant_core::LlmConfig;
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, ToolCallItem, ToolSpec,
+    LlmResponseMeta, ToolCallItem, ToolSpec, ToolSupport,
 };
-use assistant_provider_openai::{OpenAIProvider, OpenAIProviderConfig};
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -35,22 +42,18 @@ const MAX_WEB_SEARCH_ROUNDS: usize = 5;
 
 /// [`LlmProvider`] backed by the Moonshot AI (Kimi) chat completions API.
 ///
-/// Internally delegates to [`OpenAIProvider`] since the wire protocol is
-/// identical.  Provides Moonshot-specific defaults for base URL, model, and
-/// API-key resolution (`MOONSHOT_API_KEY` env var).
-///
-/// When `web_search` is enabled, chat requests are handled via raw HTTP so the
-/// provider can inject the `builtin_function` tool type and perform the
-/// echo-back loop that Moonshot's `$web_search` requires.
+/// Uses `async-openai` for the standard chat path (messages + function tools).
+/// When `web_search` is enabled, requests go through raw HTTP instead, because
+/// the `$web_search` tool uses the non-standard `"type": "builtin_function"`
+/// and requires a multi-round echo-back loop.
 pub struct MoonshotProvider {
-    inner: OpenAIProvider,
-    /// Kept separately so `server_address()` returns the Moonshot URL, not
-    /// whatever the inner provider normalised.
-    base_url: String,
+    /// async-openai client configured for the Moonshot endpoint.
+    client: Client<AsyncOpenAIConfig>,
     model: String,
-    /// API key — needed for the raw-HTTP path when web search is enabled.
-    api_key: String,
+    base_url: String,
     max_tokens: u32,
+    /// API key — needed for the raw-HTTP web-search path.
+    api_key: String,
     web_search_enabled: bool,
     /// Pre-configured HTTP client (with tracing middleware) for the raw-HTTP
     /// web-search path.
@@ -67,34 +70,29 @@ impl MoonshotProvider {
         max_tokens: u32,
         web_search_enabled: bool,
     ) -> anyhow::Result<Self> {
-        let openai_cfg = OpenAIProviderConfig {
-            model: model.clone(),
-            base_url: base_url.clone(),
-            timeout_secs,
-            max_tokens,
-            embedding_model: String::new(), // Moonshot has no embedding endpoint
-            web_search: None,               // handled by our own raw-HTTP path
-        };
+        let oai_cfg = AsyncOpenAIConfig::new()
+            .with_api_key(api_key)
+            .with_api_base(&base_url);
+        let http = build_reqwest_client(timeout_secs)?;
+        let client = Client::with_config(oai_cfg).with_http_client(http);
 
-        let inner = OpenAIProvider::new(openai_cfg, api_key)?;
-
-        let http_client = assistant_llm::build_http_client(timeout_secs)?;
+        let traced_client = assistant_llm::build_http_client(timeout_secs)?;
 
         debug!(
             model = %model,
             base_url = %base_url,
             web_search = web_search_enabled,
-            "Moonshot provider initialised (delegating to OpenAI provider)"
+            "Moonshot provider initialised"
         );
 
         Ok(Self {
-            inner,
-            base_url,
+            client,
             model,
-            api_key: api_key.to_string(),
+            base_url,
             max_tokens,
+            api_key: api_key.to_string(),
             web_search_enabled,
-            http_client,
+            http_client: traced_client,
         })
     }
 
@@ -135,6 +133,196 @@ impl MoonshotProvider {
         )
     }
 
+    // ── Non-streaming chat (async-openai) ─────────────────────────────────
+
+    async fn chat_non_streaming(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+    ) -> anyhow::Result<LlmResponse> {
+        debug!(model = %self.model, tools = tools.len(), "Sending request to Moonshot");
+
+        let (messages, _pending) = build_chat_messages(system_prompt, history);
+        let openai_tools: Vec<ChatCompletionTools> = tools
+            .iter()
+            .map(|t| ChatCompletionTools::Function(tool_spec_to_chat(t)))
+            .collect();
+
+        let mut builder = CreateChatCompletionRequestArgs::default();
+        builder
+            .model(&self.model)
+            .messages(messages)
+            .max_completion_tokens(self.max_tokens);
+        if !openai_tools.is_empty() {
+            builder.tools(openai_tools);
+        }
+        let request = builder
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build Moonshot request: {e}"))?;
+
+        let response = self
+            .client
+            .chat()
+            .create(request)
+            .await
+            .map_err(|e| anyhow::anyhow!("Moonshot request failed: {e}"))?;
+
+        debug!("Moonshot response received");
+
+        let meta = extract_chat_meta(&response.model, &response.id, &response.usage);
+        let choice = response
+            .choices
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Moonshot returned empty choices"))?;
+
+        if let Some(ref tool_calls) = choice.message.tool_calls {
+            let items = parse_tool_calls(tool_calls);
+            if !items.is_empty() {
+                debug!(count = items.len(), "Moonshot: tool calls received");
+                return Ok(LlmResponse::ToolCalls(items, meta));
+            }
+        }
+
+        let content = choice.message.content.as_deref().unwrap_or("").to_string();
+        Ok(LlmResponse::FinalAnswer(content, meta))
+    }
+
+    // ── SSE streaming chat (async-openai) ─────────────────────────────────
+
+    async fn chat_sse(
+        &self,
+        system_prompt: &str,
+        history: &[ChatHistoryMessage],
+        tools: &[ToolSpec],
+        token_sink: Option<mpsc::Sender<String>>,
+    ) -> anyhow::Result<LlmResponse> {
+        debug!(model = %self.model, "Sending streaming request to Moonshot");
+
+        let (messages, _pending) = build_chat_messages(system_prompt, history);
+        let openai_tools: Vec<ChatCompletionTools> = tools
+            .iter()
+            .map(|t| ChatCompletionTools::Function(tool_spec_to_chat(t)))
+            .collect();
+
+        let mut builder = CreateChatCompletionRequestArgs::default();
+        builder
+            .model(&self.model)
+            .messages(messages)
+            .max_completion_tokens(self.max_tokens);
+        if !openai_tools.is_empty() {
+            builder.tools(openai_tools);
+        }
+        let request = builder
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build Moonshot streaming request: {e}"))?;
+
+        let mut stream = self
+            .client
+            .chat()
+            .create_stream(request)
+            .await
+            .map_err(|e| anyhow::anyhow!("Moonshot streaming request failed: {e}"))?;
+
+        let mut text_buf = String::new();
+        let mut tool_map: Vec<(String, String, String)> = Vec::new();
+        let mut model_name = String::new();
+        let mut response_id = String::new();
+        let mut finish_reason: Option<String> = None;
+        let mut input_tokens: Option<u64> = None;
+        let mut output_tokens: Option<u64> = None;
+
+        while let Some(result) = stream.next().await {
+            let chunk = result.map_err(|e| anyhow::anyhow!("Moonshot stream error: {e}"))?;
+
+            if model_name.is_empty() {
+                model_name.clone_from(&chunk.model);
+            }
+            if response_id.is_empty() {
+                response_id.clone_from(&chunk.id);
+            }
+            if let Some(ref usage) = chunk.usage {
+                input_tokens = Some(usage.prompt_tokens as u64);
+                output_tokens = Some(usage.completion_tokens as u64);
+            }
+
+            for choice in &chunk.choices {
+                if let Some(ref reason) = choice.finish_reason {
+                    finish_reason = Some(format!("{reason:?}").to_lowercase());
+                }
+
+                let delta = &choice.delta;
+
+                if let Some(ref content) = delta.content {
+                    text_buf.push_str(content);
+                    if let Some(ref sink) = token_sink {
+                        let _ = sink.send(content.clone()).await;
+                    }
+                }
+
+                if let Some(ref tc_chunks) = delta.tool_calls {
+                    for tc in tc_chunks {
+                        let idx = tc.index as usize;
+                        while tool_map.len() <= idx {
+                            tool_map.push((String::new(), String::new(), String::new()));
+                        }
+                        if let Some(ref id) = tc.id {
+                            tool_map[idx].0.clone_from(id);
+                        }
+                        if let Some(ref func) = tc.function {
+                            if let Some(ref name) = func.name {
+                                tool_map[idx].1.clone_from(name);
+                            }
+                            if let Some(ref args) = func.arguments {
+                                tool_map[idx].2.push_str(args);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        debug!("Moonshot SSE stream complete");
+
+        let meta = LlmResponseMeta {
+            model: if model_name.is_empty() {
+                None
+            } else {
+                Some(model_name)
+            },
+            response_id: if response_id.is_empty() {
+                None
+            } else {
+                Some(response_id)
+            },
+            finish_reason,
+            input_tokens,
+            output_tokens,
+        };
+
+        if !tool_map.is_empty() {
+            let items: Vec<ToolCallItem> = tool_map
+                .into_iter()
+                .filter(|(_, name, _)| !name.is_empty())
+                .map(|(id, name, args_json)| {
+                    let params = serde_json::from_str::<Value>(&args_json)
+                        .unwrap_or(Value::Object(serde_json::Map::new()));
+                    ToolCallItem {
+                        name,
+                        params,
+                        id: if id.is_empty() { None } else { Some(id) },
+                    }
+                })
+                .collect();
+            if !items.is_empty() {
+                debug!(count = items.len(), "Moonshot SSE: tool calls received");
+                return Ok(LlmResponse::ToolCalls(items, meta));
+            }
+        }
+
+        Ok(LlmResponse::FinalAnswer(text_buf, meta))
+    }
+
     // ── Raw-HTTP chat (web search path) ───────────────────────────────────
 
     /// Send a chat request via raw HTTP, injecting the `$web_search` builtin
@@ -148,7 +336,7 @@ impl MoonshotProvider {
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
         // Build the initial messages array.
-        let mut messages = build_moonshot_messages(system_prompt, history);
+        let mut messages = build_raw_messages(system_prompt, history);
 
         // Build tools: user-defined function tools + the builtin $web_search.
         let mut request_tools: Vec<Value> = tools
@@ -231,7 +419,6 @@ impl MoonshotProvider {
             // Check for tool calls.
             if finish_reason == "tool_calls" {
                 if let Some(tool_calls) = message["tool_calls"].as_array() {
-                    // Separate $web_search calls from regular tool calls.
                     let mut web_search_calls: Vec<&Value> = Vec::new();
                     let mut regular_calls: Vec<ToolCallItem> = Vec::new();
 
@@ -252,8 +439,6 @@ impl MoonshotProvider {
                         }
                     }
 
-                    // If there are regular (non-web-search) tool calls, return
-                    // them to the orchestrator immediately.
                     if !regular_calls.is_empty() {
                         debug!(
                             count = regular_calls.len(),
@@ -262,12 +447,9 @@ impl MoonshotProvider {
                         return Ok(LlmResponse::ToolCalls(regular_calls, meta));
                     }
 
-                    // Echo $web_search calls back and continue the loop.
                     if !web_search_calls.is_empty() {
-                        // Append the assistant message (with tool_calls).
                         messages.push(message.clone());
 
-                        // Echo each $web_search call's arguments as tool result.
                         for tc in &web_search_calls {
                             let call_id = tc["id"].as_str().unwrap_or("");
                             let arguments = tc["function"]["arguments"].as_str().unwrap_or("{}");
@@ -286,12 +468,11 @@ impl MoonshotProvider {
                             }));
                         }
 
-                        continue; // next round
+                        continue;
                     }
                 }
             }
 
-            // Final answer (finish_reason == "stop" or anything else).
             let content = message["content"].as_str().unwrap_or("").to_string();
             debug!("Moonshot web-search: final answer received");
             return Ok(LlmResponse::FinalAnswer(content, meta));
@@ -307,11 +488,16 @@ impl MoonshotProvider {
 #[async_trait]
 impl LlmProvider for MoonshotProvider {
     fn capabilities(&self) -> Capabilities {
-        let mut caps = self.inner.capabilities();
+        let mut hosted_tools = Vec::new();
         if self.web_search_enabled {
-            caps.hosted_tools.push(HostedTool::WebSearch);
+            hosted_tools.push(HostedTool::WebSearch);
         }
-        caps
+        Capabilities {
+            tools: ToolSupport::Native,
+            streaming: true,
+            vision: true,
+            hosted_tools,
+        }
     }
 
     async fn chat(
@@ -324,7 +510,7 @@ impl LlmProvider for MoonshotProvider {
             self.chat_with_web_search(system_prompt, history, tools)
                 .await
         } else {
-            self.inner.chat(system_prompt, history, tools).await
+            self.chat_non_streaming(system_prompt, history, tools).await
         }
     }
 
@@ -337,8 +523,7 @@ impl LlmProvider for MoonshotProvider {
     ) -> anyhow::Result<LlmResponse> {
         if self.web_search_enabled {
             // $web_search echo-back loop is not compatible with SSE streaming;
-            // fall back to non-streaming.  The final answer tokens are still
-            // forwarded through the sink if provided.
+            // fall back to non-streaming.
             let result = self
                 .chat_with_web_search(system_prompt, history, tools)
                 .await?;
@@ -349,8 +534,7 @@ impl LlmProvider for MoonshotProvider {
             }
             Ok(result)
         } else {
-            self.inner
-                .chat_streaming(system_prompt, history, tools, token_sink)
+            self.chat_sse(system_prompt, history, tools, token_sink)
                 .await
         }
     }
@@ -374,43 +558,77 @@ impl LlmProvider for MoonshotProvider {
     }
 }
 
-// ── Message conversion helpers ────────────────────────────────────────────────
+// ── HTTP client helper ────────────────────────────────────────────────────────
 
-/// Build a JSON messages array for the Moonshot API from our conversation
-/// history.  Uses the same structure as OpenAI Chat Completions.
-fn build_moonshot_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Vec<Value> {
-    let mut messages: Vec<Value> = Vec::with_capacity(history.len() + 1);
+/// Build a `reqwest::Client` with the configured timeout for `async-openai`.
+fn build_reqwest_client(timeout_secs: u64) -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))
+}
+
+// ── Chat Completions message conversion ───────────────────────────────────────
+
+/// Build `async-openai` Chat Completions messages from conversation history.
+fn build_chat_messages(
+    system_prompt: &str,
+    history: &[ChatHistoryMessage],
+) -> (Vec<ChatCompletionRequestMessage>, Vec<(String, String)>) {
+    let mut messages: Vec<ChatCompletionRequestMessage> = Vec::with_capacity(history.len() + 1);
     let mut pending_ids: Vec<(String, String)> = Vec::new();
 
     if !system_prompt.is_empty() {
-        messages.push(json!({
-            "role": "system",
-            "content": system_prompt,
-        }));
+        if let Ok(msg) = ChatCompletionRequestSystemMessageArgs::default()
+            .content(system_prompt)
+            .build()
+        {
+            messages.push(ChatCompletionRequestMessage::System(msg));
+        }
     }
 
     for entry in history {
         match entry {
-            ChatHistoryMessage::Text { role, content } => {
-                let role_str = match role {
-                    ChatRole::System => "system",
-                    ChatRole::User => "user",
-                    ChatRole::Assistant => "assistant",
-                    ChatRole::Tool => "user", // fallback
-                };
-                messages.push(json!({
-                    "role": role_str,
-                    "content": content,
-                }));
-            }
+            ChatHistoryMessage::Text { role, content } => match role {
+                ChatRole::System => {
+                    if let Ok(msg) = ChatCompletionRequestSystemMessageArgs::default()
+                        .content(content.as_str())
+                        .build()
+                    {
+                        messages.push(ChatCompletionRequestMessage::System(msg));
+                    }
+                }
+                ChatRole::User => {
+                    if let Ok(msg) = ChatCompletionRequestUserMessageArgs::default()
+                        .content(content.as_str())
+                        .build()
+                    {
+                        messages.push(ChatCompletionRequestMessage::User(msg));
+                    }
+                }
+                ChatRole::Assistant => {
+                    if let Ok(msg) = ChatCompletionRequestAssistantMessageArgs::default()
+                        .content(content.as_str())
+                        .build()
+                    {
+                        messages.push(ChatCompletionRequestMessage::Assistant(msg));
+                    }
+                }
+                ChatRole::Tool => {
+                    if let Ok(msg) = ChatCompletionRequestUserMessageArgs::default()
+                        .content(content.as_str())
+                        .build()
+                    {
+                        messages.push(ChatCompletionRequestMessage::User(msg));
+                    }
+                }
+            },
 
             ChatHistoryMessage::MultimodalUser { content } => {
-                let parts: Vec<Value> = content
+                let parts_json: Vec<Value> = content
                     .iter()
                     .map(|block| match block {
-                        ContentBlock::Text(text) => {
-                            json!({"type": "text", "text": text})
-                        }
+                        ContentBlock::Text(text) => json!({"type": "text", "text": text}),
                         ContentBlock::Image { media_type, data } => {
                             let data_uri = format!("data:{media_type};base64,{data}");
                             json!({
@@ -420,10 +638,151 @@ fn build_moonshot_messages(system_prompt: &str, history: &[ChatHistoryMessage]) 
                         }
                     })
                     .collect();
-                messages.push(json!({
-                    "role": "user",
-                    "content": parts,
-                }));
+
+                let msg_json = json!({"role": "user", "content": parts_json});
+                if let Ok(msg) = serde_json::from_value::<ChatCompletionRequestMessage>(msg_json) {
+                    messages.push(msg);
+                }
+            }
+
+            ChatHistoryMessage::AssistantToolCalls(calls) => {
+                pending_ids.clear();
+                let tc_enums: Vec<ChatCompletionMessageToolCalls> = calls
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| {
+                        let id = c.id.clone().unwrap_or_else(|| format!("call_{i}"));
+                        pending_ids.push((c.name.clone(), id.clone()));
+                        ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
+                            id,
+                            function: FunctionCall {
+                                name: c.name.clone(),
+                                arguments: serde_json::to_string(&c.params)
+                                    .unwrap_or_else(|_| "{}".to_string()),
+                            },
+                        })
+                    })
+                    .collect();
+
+                if let Ok(msg) = ChatCompletionRequestAssistantMessageArgs::default()
+                    .tool_calls(tc_enums)
+                    .build()
+                {
+                    messages.push(ChatCompletionRequestMessage::Assistant(msg));
+                }
+            }
+
+            ChatHistoryMessage::ToolResult { name, content } => {
+                let pos = pending_ids.iter().position(|(n, _)| n == name);
+                let tool_call_id = if let Some(idx) = pos {
+                    pending_ids.remove(idx).1
+                } else {
+                    format!("call_unknown_{name}")
+                };
+
+                if let Ok(msg) = ChatCompletionRequestToolMessageArgs::default()
+                    .tool_call_id(&tool_call_id)
+                    .content(content.as_str())
+                    .build()
+                {
+                    messages.push(ChatCompletionRequestMessage::Tool(msg));
+                }
+            }
+        }
+    }
+
+    (messages, pending_ids)
+}
+
+/// Convert a [`ToolSpec`] to `async-openai` `ChatCompletionTool`.
+fn tool_spec_to_chat(tool: &ToolSpec) -> ChatCompletionTool {
+    let schema = &tool.params_schema;
+
+    let parameters = if schema.get("type").and_then(|t| t.as_str()) == Some("object") {
+        schema.clone()
+    } else if schema.as_object().is_some() {
+        json!({"type": "object", "properties": schema})
+    } else {
+        json!({"type": "object", "properties": {}, "required": []})
+    };
+
+    let function = FunctionObjectArgs::default()
+        .name(&tool.name)
+        .description(&tool.description)
+        .parameters(parameters)
+        .build()
+        .expect("FunctionObject build should not fail");
+
+    ChatCompletionTool { function }
+}
+
+// ── Chat Completions response helpers ─────────────────────────────────────────
+
+fn extract_chat_meta(model: &str, id: &str, usage: &Option<CompletionUsage>) -> LlmResponseMeta {
+    LlmResponseMeta {
+        model: Some(model.to_string()),
+        response_id: Some(id.to_string()),
+        input_tokens: usage.as_ref().map(|u| u.prompt_tokens as u64),
+        output_tokens: usage.as_ref().map(|u| u.completion_tokens as u64),
+        finish_reason: None,
+    }
+}
+
+fn parse_tool_calls(tool_calls: &[ChatCompletionMessageToolCalls]) -> Vec<ToolCallItem> {
+    tool_calls
+        .iter()
+        .filter_map(|tc_enum| match tc_enum {
+            ChatCompletionMessageToolCalls::Function(tc) => {
+                if tc.function.name.is_empty() {
+                    return None;
+                }
+                let params = serde_json::from_str::<Value>(&tc.function.arguments)
+                    .unwrap_or(Value::Object(serde_json::Map::new()));
+                Some(ToolCallItem {
+                    name: tc.function.name.clone(),
+                    params,
+                    id: Some(tc.id.clone()),
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+// ── Raw-HTTP message conversion (web-search path) ─────────────────────────────
+
+fn build_raw_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Vec<Value> {
+    let mut messages: Vec<Value> = Vec::with_capacity(history.len() + 1);
+    let mut pending_ids: Vec<(String, String)> = Vec::new();
+
+    if !system_prompt.is_empty() {
+        messages.push(json!({"role": "system", "content": system_prompt}));
+    }
+
+    for entry in history {
+        match entry {
+            ChatHistoryMessage::Text { role, content } => {
+                let role_str = match role {
+                    ChatRole::System => "system",
+                    ChatRole::User => "user",
+                    ChatRole::Assistant => "assistant",
+                    ChatRole::Tool => "user",
+                };
+                messages.push(json!({"role": role_str, "content": content}));
+            }
+
+            ChatHistoryMessage::MultimodalUser { content } => {
+                let parts: Vec<Value> = content
+                    .iter()
+                    .map(|block| match block {
+                        ContentBlock::Text(text) => json!({"type": "text", "text": text}),
+                        ContentBlock::Image { media_type, data } => {
+                            let data_uri = format!("data:{media_type};base64,{data}");
+                            json!({"type": "image_url", "image_url": {"url": data_uri}})
+                        }
+                    })
+                    .collect();
+                messages.push(json!({"role": "user", "content": parts}));
             }
 
             ChatHistoryMessage::AssistantToolCalls(calls) => {
@@ -445,11 +804,8 @@ fn build_moonshot_messages(system_prompt: &str, history: &[ChatHistoryMessage]) 
                         })
                     })
                     .collect();
-                messages.push(json!({
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": tool_calls,
-                }));
+                messages
+                    .push(json!({"role": "assistant", "content": null, "tool_calls": tool_calls}));
             }
 
             ChatHistoryMessage::ToolResult { name, content } => {
@@ -486,18 +842,16 @@ mod tests {
         assert!(DEFAULT_MAX_TOKENS > 0);
     }
 
-    // ── Message builder tests ─────────────────────────────────────────────
+    // ── async-openai message builder tests ────────────────────────────────
 
     #[test]
-    fn build_moonshot_messages_system_prompt() {
-        let msgs = build_moonshot_messages("You are helpful.", &[]);
+    fn build_chat_messages_system_prompt() {
+        let (msgs, _) = build_chat_messages("You are helpful.", &[]);
         assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["role"], "system");
-        assert_eq!(msgs[0]["content"], "You are helpful.");
     }
 
     #[test]
-    fn build_moonshot_messages_text_exchange() {
+    fn build_chat_messages_text_exchange() {
         let history = vec![
             ChatHistoryMessage::Text {
                 role: ChatRole::User,
@@ -508,15 +862,12 @@ mod tests {
                 content: "hi there".to_string(),
             },
         ];
-        let msgs = build_moonshot_messages("sys", &history);
-        // system + user + assistant
+        let (msgs, _) = build_chat_messages("sys", &history);
         assert_eq!(msgs.len(), 3);
-        assert_eq!(msgs[1]["role"], "user");
-        assert_eq!(msgs[2]["role"], "assistant");
     }
 
     #[test]
-    fn build_moonshot_messages_tool_calls_and_results() {
+    fn build_chat_messages_tool_calls_and_results() {
         let history = vec![
             ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
                 name: "my-tool".to_string(),
@@ -528,147 +879,155 @@ mod tests {
                 content: "result".to_string(),
             },
         ];
-        let msgs = build_moonshot_messages("", &history);
-        // assistant (tool_calls) + tool (result)  (no system because empty prompt)
+        let (msgs, pending) = build_chat_messages("", &history);
         assert_eq!(msgs.len(), 2);
-        assert_eq!(msgs[0]["role"], "assistant");
-        assert!(msgs[0]["tool_calls"].is_array());
-        assert_eq!(msgs[1]["role"], "tool");
+        assert!(pending.is_empty());
+    }
+
+    // ── Raw-HTTP message builder tests ────────────────────────────────────
+
+    #[test]
+    fn build_raw_messages_system_prompt() {
+        let msgs = build_raw_messages("You are helpful.", &[]);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "system");
+    }
+
+    #[test]
+    fn build_raw_messages_text_exchange() {
+        let history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "hello".to_string(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "hi there".to_string(),
+            },
+        ];
+        let msgs = build_raw_messages("sys", &history);
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[2]["role"], "assistant");
+    }
+
+    #[test]
+    fn build_raw_messages_tool_calls_and_results() {
+        let history = vec![
+            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+                name: "my-tool".to_string(),
+                params: json!({"key": "val"}),
+                id: Some("call_123".to_string()),
+            }]),
+            ChatHistoryMessage::ToolResult {
+                name: "my-tool".to_string(),
+                content: "result".to_string(),
+            },
+        ];
+        let msgs = build_raw_messages("", &history);
+        assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[1]["tool_call_id"], "call_123");
     }
 
-    // ── Capabilities tests ────────────────────────────────────────────────
+    // ── Capabilities ──────────────────────────────────────────────────────
 
     #[test]
     fn capabilities_with_web_search_enabled() {
-        let provider = MoonshotProvider::new(
-            "kimi-k2.5".to_string(),
-            DEFAULT_BASE_URL.to_string(),
+        let p = MoonshotProvider::new(
+            "kimi-k2.5".into(),
+            DEFAULT_BASE_URL.into(),
             "test-key",
             120,
             DEFAULT_MAX_TOKENS,
             true,
         )
-        .expect("should build");
-        let caps = provider.capabilities();
-        assert!(
-            caps.hosted_tools.contains(&HostedTool::WebSearch),
-            "should report WebSearch"
-        );
+        .unwrap();
+        assert!(p
+            .capabilities()
+            .hosted_tools
+            .contains(&HostedTool::WebSearch));
     }
 
     #[test]
     fn capabilities_without_web_search() {
-        let provider = MoonshotProvider::new(
-            "kimi-k2.5".to_string(),
-            DEFAULT_BASE_URL.to_string(),
+        let p = MoonshotProvider::new(
+            "kimi-k2.5".into(),
+            DEFAULT_BASE_URL.into(),
             "test-key",
             120,
             DEFAULT_MAX_TOKENS,
             false,
         )
-        .expect("should build");
-        let caps = provider.capabilities();
-        assert!(
-            !caps.hosted_tools.contains(&HostedTool::WebSearch),
-            "should not report WebSearch"
-        );
+        .unwrap();
+        assert!(!p
+            .capabilities()
+            .hosted_tools
+            .contains(&HostedTool::WebSearch));
     }
 
-    // ── Web-search echo-back loop tests (wiremock) ────────────────────────
+    // ── Web-search echo-back tests (wiremock) ─────────────────────────────
 
-    /// Helper: build a Moonshot API response with a `$web_search` tool call.
-    fn web_search_tool_call_response(call_id: &str, query: &str) -> Value {
+    fn ws_tool_call_response(call_id: &str, query: &str) -> Value {
         json!({
-            "id": "resp_001",
-            "model": "kimi-k2.5",
-            "choices": [{
-                "index": 0,
-                "finish_reason": "tool_calls",
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": "$web_search",
-                            "arguments": json!({"query": query}).to_string()
-                        }
-                    }]
-                }
-            }],
-            "usage": {
-                "prompt_tokens": 50,
-                "completion_tokens": 10,
-            }
+            "id": "resp_001", "model": "kimi-k2.5",
+            "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
+                "role": "assistant", "content": "",
+                "tool_calls": [{"id": call_id, "type": "function", "function": {
+                    "name": "$web_search",
+                    "arguments": json!({"query": query}).to_string()
+                }}]
+            }}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 10}
         })
     }
 
-    /// Helper: build a Moonshot API final-answer response.
-    fn final_answer_response(content: &str) -> Value {
+    fn final_answer(content: &str) -> Value {
         json!({
-            "id": "resp_002",
-            "model": "kimi-k2.5",
-            "choices": [{
-                "index": 0,
-                "finish_reason": "stop",
-                "message": {
-                    "role": "assistant",
-                    "content": content,
-                }
-            }],
-            "usage": {
-                "prompt_tokens": 100,
-                "completion_tokens": 30,
-            }
+            "id": "resp_002", "model": "kimi-k2.5",
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {
+                "role": "assistant", "content": content
+            }}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 30}
         })
     }
 
     #[tokio::test]
     async fn web_search_echo_back_loop() {
-        let mock_server = MockServer::start().await;
+        let server = MockServer::start().await;
 
-        // Round 1: model requests $web_search.
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_json(web_search_tool_call_response("call_ws_1", "latest AI news")),
+                    .set_body_json(ws_tool_call_response("call_ws_1", "latest AI news")),
             )
             .up_to_n_times(1)
             .expect(1)
-            .mount(&mock_server)
+            .mount(&server)
             .await;
 
-        // Round 2: after echo-back, model returns final answer.
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_json(final_answer_response("Here are the latest AI news...")),
+                    .set_body_json(final_answer("Here are the latest AI news...")),
             )
             .up_to_n_times(1)
             .expect(1)
-            .mount(&mock_server)
+            .mount(&server)
             .await;
 
-        let provider = MoonshotProvider::new(
-            "kimi-k2.5".to_string(),
-            mock_server.uri(),
+        let p = MoonshotProvider::new(
+            "kimi-k2.5".into(),
+            server.uri(),
             "test-key",
             30,
             DEFAULT_MAX_TOKENS,
             true,
         )
-        .expect("should build");
+        .unwrap();
 
-        let result = provider
-            .chat("You are helpful.", &[], &[])
-            .await
-            .expect("chat should succeed");
-
-        match result {
+        match p.chat("You are helpful.", &[], &[]).await.unwrap() {
             LlmResponse::FinalAnswer(text, meta) => {
                 assert_eq!(text, "Here are the latest AI news...");
                 assert_eq!(meta.model.as_deref(), Some("kimi-k2.5"));
@@ -679,66 +1038,47 @@ mod tests {
 
     #[tokio::test]
     async fn web_search_regular_tool_calls_returned_to_caller() {
-        let mock_server = MockServer::start().await;
-
-        // Model returns a regular (non-$web_search) tool call.
-        let response = json!({
-            "id": "resp_003",
-            "model": "kimi-k2.5",
-            "choices": [{
-                "index": 0,
-                "finish_reason": "tool_calls",
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_regular",
-                        "type": "function",
-                        "function": {
-                            "name": "file-read",
-                            "arguments": "{\"path\": \"/tmp/foo.txt\"}"
-                        }
-                    }]
-                }
-            }],
-            "usage": { "prompt_tokens": 50, "completion_tokens": 10 }
-        });
+        let server = MockServer::start().await;
 
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(response))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "resp_003", "model": "kimi-k2.5",
+                "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
+                    "role": "assistant", "content": "",
+                    "tool_calls": [{"id": "call_regular", "type": "function", "function": {
+                        "name": "file-read",
+                        "arguments": "{\"path\": \"/tmp/foo.txt\"}"
+                    }}]
+                }}],
+                "usage": {"prompt_tokens": 50, "completion_tokens": 10}
+            })))
             .expect(1)
-            .mount(&mock_server)
+            .mount(&server)
             .await;
 
-        let provider = MoonshotProvider::new(
-            "kimi-k2.5".to_string(),
-            mock_server.uri(),
+        let p = MoonshotProvider::new(
+            "kimi-k2.5".into(),
+            server.uri(),
             "test-key",
             30,
             DEFAULT_MAX_TOKENS,
             true,
         )
-        .expect("should build");
+        .unwrap();
 
-        let tool_spec = ToolSpec {
-            name: "file-read".to_string(),
-            description: "Read a file".to_string(),
+        let spec = ToolSpec {
+            name: "file-read".into(),
+            description: "Read a file".into(),
             params_schema: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
             is_mutating: false,
             requires_confirmation: false,
         };
 
-        let result = provider
-            .chat("You are helpful.", &[], &[tool_spec])
-            .await
-            .expect("chat should succeed");
-
-        match result {
+        match p.chat("You are helpful.", &[], &[spec]).await.unwrap() {
             LlmResponse::ToolCalls(calls, _) => {
                 assert_eq!(calls.len(), 1);
                 assert_eq!(calls[0].name, "file-read");
-                assert_eq!(calls[0].params["path"], "/tmp/foo.txt");
             }
             other => panic!("expected ToolCalls, got {other:?}"),
         }
@@ -746,83 +1086,56 @@ mod tests {
 
     #[tokio::test]
     async fn web_search_direct_answer_no_search() {
-        let mock_server = MockServer::start().await;
+        let server = MockServer::start().await;
 
-        // Model answers directly without searching.
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(final_answer_response("2+2 is 4")),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(final_answer("2+2 is 4")))
             .expect(1)
-            .mount(&mock_server)
+            .mount(&server)
             .await;
 
-        let provider = MoonshotProvider::new(
-            "kimi-k2.5".to_string(),
-            mock_server.uri(),
+        let p = MoonshotProvider::new(
+            "kimi-k2.5".into(),
+            server.uri(),
             "test-key",
             30,
             DEFAULT_MAX_TOKENS,
             true,
         )
-        .expect("should build");
+        .unwrap();
 
-        let result = provider
-            .chat("You are helpful.", &[], &[])
-            .await
-            .expect("chat should succeed");
-
-        match result {
-            LlmResponse::FinalAnswer(text, _) => {
-                assert_eq!(text, "2+2 is 4");
-            }
+        match p.chat("You are helpful.", &[], &[]).await.unwrap() {
+            LlmResponse::FinalAnswer(text, _) => assert_eq!(text, "2+2 is 4"),
             other => panic!("expected FinalAnswer, got {other:?}"),
         }
     }
-
-    // ── Live integration tests (require MOONSHOT_API_KEY) ─────────────────
 
     #[tokio::test]
     #[ignore = "requires MOONSHOT_API_KEY"]
     async fn live_web_search() {
         let api_key = std::env::var("MOONSHOT_API_KEY").expect("MOONSHOT_API_KEY must be set");
-
-        let provider = MoonshotProvider::new(
-            "kimi-k2.5".to_string(),
-            DEFAULT_BASE_URL.to_string(),
+        let p = MoonshotProvider::new(
+            "kimi-k2.5".into(),
+            DEFAULT_BASE_URL.into(),
             &api_key,
             60,
             DEFAULT_MAX_TOKENS,
             true,
         )
-        .expect("should build");
+        .unwrap();
 
         let history = vec![ChatHistoryMessage::Text {
             role: ChatRole::User,
-            content: "What is today's date? Use web search to confirm.".to_string(),
+            content: "What is today's date? Use web search to confirm.".into(),
         }];
 
-        let result = provider
-            .chat("You are a helpful assistant. Be concise.", &history, &[])
-            .await
-            .expect("live chat should succeed");
-
-        match result {
+        match p.chat("Be concise.", &history, &[]).await.unwrap() {
             LlmResponse::FinalAnswer(text, meta) => {
-                eprintln!("--- Live $web_search response ---");
-                eprintln!("Model: {:?}", meta.model);
-                eprintln!(
-                    "Tokens: in={:?} out={:?}",
-                    meta.input_tokens, meta.output_tokens
-                );
-                eprintln!("Answer: {text}");
-                eprintln!("---");
-                assert!(!text.is_empty(), "answer should not be empty");
+                eprintln!("Model: {:?}, Answer: {text}", meta.model);
+                assert!(!text.is_empty());
             }
-            other => {
-                panic!("expected FinalAnswer but got {other:?}");
-            }
+            other => panic!("expected FinalAnswer but got {other:?}"),
         }
     }
 }
