@@ -83,9 +83,21 @@ impl SkillRegistry {
     pub async fn load_embedded(&self) -> Result<()> {
         for def in assistant_skills::embedded_builtin_skills() {
             info!("Registering embedded builtin skill '{}'", def.name);
+            if let Some(compat) = &def.compatibility {
+                info!(skill = %def.name, compatibility = %compat, "Skill has runtime requirements");
+            }
             self.register(def).await?;
         }
         Ok(())
+    }
+
+    /// Sync embedded built-in skills to `target_dir` on disk.
+    ///
+    /// Compares each embedded `SKILL.md` against the on-disk copy and
+    /// overwrites stale or missing files.  User (non-builtin) skills are
+    /// never touched.  Returns the names of skills that were written.
+    pub fn sync_builtins_to_disk(&self, target_dir: &Path) -> Result<Vec<String>> {
+        assistant_skills::sync_builtins_to_disk(target_dir)
     }
 
     /// Look up a skill by name from the in-memory cache.

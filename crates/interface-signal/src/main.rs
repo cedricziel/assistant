@@ -138,6 +138,23 @@ async fn bootstrap() -> Result<(Arc<Orchestrator>, SignalConfig, PathBuf)> {
         .await
         .context("Failed to load embedded builtin skills")?;
 
+    if let Some(home) = dirs::home_dir() {
+        let builtin_target = home.join(".assistant").join("skills");
+        match registry.sync_builtins_to_disk(&builtin_target) {
+            Ok(updated) if !updated.is_empty() => {
+                tracing::info!(
+                    "Synced {} built-in skill(s) to disk: {}",
+                    updated.len(),
+                    updated.join(", ")
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to sync built-in skills to disk: {e}");
+            }
+            _ => {}
+        }
+    }
+
     registry
         .load_from_dirs(&dirs_ref)
         .await
