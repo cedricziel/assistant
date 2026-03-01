@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Logs{% endblock %}
+
+{% block breadcrumb %}
+<span class="breadcrumb-page">Observability</span>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Logs</span>
+{% endblock %}
+
+{% block extra_css %}
+{% include "partials/default_css.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand"><p>assistant</p><h2>Logs</h2></div>
+
+      <div class="facet-group">
+        <h3>Severity</h3>
+        <form method="get" action="/logs">
+          {% if let Some(target) = selected_target %}
+          <input type="hidden" name="target" value="{{ target }}">
+          {% endif %}
+          {% if let Some(search) = search_query %}
+          <input type="hidden" name="search" value="{{ search }}">
+          {% endif %}
+          {% if let Some(tid) = trace_id_filter %}
+          <input type="hidden" name="trace_id" value="{{ tid }}">
+          {% endif %}
+          {% for opt in severity_options %}
+          <label class="radio-label">
+            <input type="radio" name="severity" value="{{ opt.value }}"
+                   onchange="this.form.submit()"{% if opt.checked %} checked{% endif %}>
+            {{ opt.label }} <em class="muted">({{ opt.count }})</em>
+          </label>
+          {% endfor %}
+        </form>
+      </div>
+
+      <div class="facet-group">
+        <h3>Target</h3>
+        <ul>
+          {% for t in target_facets %}
+          <li><a class="facet-link{% if t.active %} active{% endif %}" href="{{ t.url }}">
+            <span>{{ t.name }}</span></a></li>
+          {% endfor %}
+          {% if target_facets.is_empty() %}
+          <li class="muted">No targets yet</li>
+          {% endif %}
+        </ul>
+      </div>
+
+      <div class="facet-group">
+        <h3>Search</h3>
+        <form method="get" action="/logs" class="min-dur-row">
+          {% if let Some(sev) = selected_severity %}
+          {% if !sev.is_empty() %}
+          <input type="hidden" name="severity" value="{{ sev }}">
+          {% endif %}
+          {% endif %}
+          {% if let Some(target) = selected_target %}
+          <input type="hidden" name="target" value="{{ target }}">
+          {% endif %}
+          {% if let Some(tid) = trace_id_filter %}
+          <input type="hidden" name="trace_id" value="{{ tid }}">
+          {% endif %}
+          <input type="text" name="search" value="{{ search_value }}" placeholder="Search body...">
+          <button type="submit">Go</button>
+        </form>
+      </div>
+
+      <div class="facet-footer">
+        <span class="trace-count">Showing {{ shown_count }} log records</span>
+        <a href="/logs">Reset filters</a>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    {% if logs.is_empty() %}
+    <div class="panel trace-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Log Records</h2>
+          <p>No logs match this query yet.</p>
+        </div>
+      </div>
+      <p class="empty">No rows to display.</p>
+    </div>
+    {% else %}
+    <div class="panel trace-panel">
+      <div class="panel-head">
+        <div><h2>Log Records</h2></div>
+        <span class="pill">{{ shown_count }}</span>
+      </div>
+      <table class="trace-table log-table">
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>Time</th>
+            <th>Target</th>
+            <th>Body</th>
+            <th>Trace</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in logs %}
+          <tr onclick="window.location='/log/{{ log.id }}'">
+            <td><span class="{{ log.severity_class }}">{{ log.severity_text }}</span></td>
+            <td class="log-ts">{{ log.timestamp }}</td>
+            <td>
+              {% if let Some(target) = log.target %}
+              {{ target }}
+              {% else %}
+              <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td class="log-body">{{ log.body_preview }}</td>
+            <td>
+              {% if let Some(trace) = log.trace_link %}
+              <a href="/trace/{{ trace.full_id }}" class="trace-id">{{ trace.short_id }}&hellip;</a>
+              {% else %}
+              <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

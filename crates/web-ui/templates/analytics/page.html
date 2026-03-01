@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics{% endblock %}
+
+{% block breadcrumb %}
+<span class="breadcrumb-page">Observability</span>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Analytics</span>
+{% endblock %}
+
+{% block extra_css %}
+{% include "partials/default_css.html" %}
+
+.analytics-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+.a-card {
+    background: #111827;
+    border: 1px solid #1f2937;
+    border-radius: 8px;
+    padding: 16px;
+}
+.a-card h4 {
+    margin: 0 0 6px 0;
+    font-size: 0.75rem;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.a-big {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #e5e9f0;
+}
+.a-err { color: #f87171; }
+.analytics-charts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+.a-chart {
+    width: 100%;
+    height: 120px;
+    display: block;
+    margin-top: 8px;
+}
+.a-chart rect:hover { opacity: 0.8; }
+.a-empty {
+    color: #6b7280;
+    font-style: italic;
+    padding: 20px 0;
+    text-align: center;
+}
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) {
+    .analytics-charts { grid-template-columns: 1fr; }
+    .analytics-cards { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 640px) {
+    .analytics-cards { grid-template-columns: repeat(2, 1fr); }
+}
+{% endblock %}
+
+{% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand"><p>assistant</p><h2>Analytics</h2></div>
+      <div class="facet-group">
+        <h3>Time Window</h3>
+        <ul>
+          {% for w in window_options %}
+          <li><a class="facet-link{% if w.active %} active{% endif %}" href="/analytics?window={{ w.hours }}">
+            <span>{{ w.label }}</span></a></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    {# -- Summary cards -- #}
+    <div class="analytics-cards">
+      <div class="a-card"><h4>Total Tokens (In)</h4><p class="a-big">{{ tokens_in }}</p></div>
+      <div class="a-card"><h4>Total Tokens (Out)</h4><p class="a-big">{{ tokens_out }}</p></div>
+      <div class="a-card"><h4>Requests</h4><p class="a-big">{{ requests }}</p></div>
+      <div class="a-card"><h4>Tool Calls</h4><p class="a-big">{{ tool_calls }}</p></div>
+      <div class="a-card"><h4>Avg Duration</h4><p class="a-big">{{ avg_duration }}</p></div>
+      <div class="a-card"><h4>Errors</h4><p class="a-big a-err">{{ errors }}</p></div>
+    </div>
+
+    {# -- Sparkline charts -- #}
+    <div class="analytics-charts">
+      {% for chart in charts %}
+      <div class="panel">
+        <div class="panel-head"><h3>{{ chart.title }}</h3></div>
+        {% if chart.bars.is_empty() %}
+        <p class="a-empty">No data in this window</p>
+        {% else %}
+        <svg class="a-chart" viewBox="0 0 {{ chart.chart_w }} {{ chart.chart_h }}" preserveAspectRatio="none">
+          {% for bar in chart.bars %}
+          <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}" fill="{{ chart.color }}" rx="1">
+            <title>{{ bar.label }}: {{ bar.value }}</title>
+          </rect>
+          {% endfor %}
+        </svg>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    {# -- Model comparison -- #}
+    <div class="panel">
+      <div class="panel-head"><h3>Model Comparison</h3></div>
+      <table class="trace-table">
+        <thead><tr>
+          <th>Model</th><th>Input Tokens</th><th>Output Tokens</th>
+          <th>Total Tokens</th><th>Requests</th>
+        </tr></thead>
+        <tbody>
+          {% for m in models %}
+          <tr>
+            <td>{{ m.model }}</td>
+            <td class="num">{{ m.input_tokens }}</td>
+            <td class="num">{{ m.output_tokens }}</td>
+            <td class="num">{{ m.total_tokens }}</td>
+            <td class="num">{{ m.request_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# -- Tool usage -- #}
+    <div class="panel">
+      <div class="panel-head"><h3>Tool Usage</h3></div>
+      <table class="trace-table">
+        <thead><tr>
+          <th>Tool</th><th>Invocations</th>
+        </tr></thead>
+        <tbody>
+          {% for t in tools %}
+          <tr>
+            <td>{{ t.tool_name }}</td>
+            <td class="num">{{ t.invocations }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+{% endblock %}
