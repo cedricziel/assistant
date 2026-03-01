@@ -61,7 +61,7 @@ impl MetricsStore {
         // For histograms the `sum` column holds the total value of all
         // observations in the collection interval.
         let token_in: f64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(sum), 0.0) FROM metric_points \
+            "SELECT CAST(COALESCE(SUM(sum), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'gen_ai.client.token.usage' \
                AND json_extract(attributes, '$.\"gen_ai.token.type\"') = 'input' \
                AND recorded_at >= datetime('now', ?1)",
@@ -71,7 +71,7 @@ impl MetricsStore {
         .await?;
 
         let token_out: f64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(sum), 0.0) FROM metric_points \
+            "SELECT CAST(COALESCE(SUM(sum), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'gen_ai.client.token.usage' \
                AND json_extract(attributes, '$.\"gen_ai.token.type\"') = 'output' \
                AND recorded_at >= datetime('now', ?1)",
@@ -82,7 +82,7 @@ impl MetricsStore {
 
         // Request count (counter).
         let requests: f64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(value), 0.0) FROM metric_points \
+            "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'assistant.turn.count' \
                AND recorded_at >= datetime('now', ?1)",
         )
@@ -92,7 +92,7 @@ impl MetricsStore {
 
         // Tool invocations (counter).
         let tools: f64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(value), 0.0) FROM metric_points \
+            "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'assistant.tool.invocations' \
                AND recorded_at >= datetime('now', ?1)",
         )
@@ -102,8 +102,8 @@ impl MetricsStore {
 
         // Weighted-average operation duration (histogram sum / count).
         let avg_dur: f64 = sqlx::query_scalar(
-            "SELECT COALESCE( \
-                 CASE WHEN SUM(count) > 0 THEN SUM(sum) / SUM(count) ELSE 0.0 END, 0.0) \
+            "SELECT CAST(COALESCE( \
+                 CASE WHEN SUM(count) > 0 THEN SUM(sum) / SUM(count) ELSE 0.0 END, 0) AS REAL) \
              FROM metric_points \
              WHERE metric_name = 'gen_ai.client.operation.duration' \
                AND recorded_at >= datetime('now', ?1)",
@@ -114,7 +114,7 @@ impl MetricsStore {
 
         // Error count (counter).
         let errors: f64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(value), 0.0) FROM metric_points \
+            "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'assistant.error.count' \
                AND recorded_at >= datetime('now', ?1)",
         )
@@ -154,7 +154,7 @@ impl MetricsStore {
                  strftime('%Y-%m-%dT%H:', recorded_at) || \
                  printf('%02d', (CAST(strftime('%M', recorded_at) AS INTEGER) / ?1) * ?1) \
                  || ':00Z' AS bucket, \
-                 COALESCE(SUM(sum), 0) AS total \
+                 CAST(COALESCE(SUM(sum), 0) AS REAL) AS total \
              FROM metric_points \
              WHERE metric_name = 'gen_ai.client.token.usage' \
                AND recorded_at >= datetime('now', ?2) \
@@ -177,11 +177,11 @@ impl MetricsStore {
         let rows: Vec<(String, f64, f64, f64, f64)> = sqlx::query_as(
             "SELECT \
                  COALESCE(model, 'unknown') AS m, \
-                 COALESCE(SUM(CASE WHEN json_extract(attributes, '$.\"gen_ai.token.type\"') = 'input' \
-                     THEN sum ELSE 0 END), 0) AS input_tok, \
-                 COALESCE(SUM(CASE WHEN json_extract(attributes, '$.\"gen_ai.token.type\"') = 'output' \
-                     THEN sum ELSE 0 END), 0) AS output_tok, \
-                 COALESCE(SUM(count), 0) AS req_count, \
+                 CAST(COALESCE(SUM(CASE WHEN json_extract(attributes, '$.\"gen_ai.token.type\"') = 'input' \
+                     THEN sum ELSE 0 END), 0) AS REAL) AS input_tok, \
+                 CAST(COALESCE(SUM(CASE WHEN json_extract(attributes, '$.\"gen_ai.token.type\"') = 'output' \
+                     THEN sum ELSE 0 END), 0) AS REAL) AS output_tok, \
+                 CAST(COALESCE(SUM(count), 0) AS REAL) AS req_count, \
                  0.0 AS avg_dur \
              FROM metric_points \
              WHERE metric_name = 'gen_ai.client.token.usage' \
@@ -210,7 +210,7 @@ impl MetricsStore {
         let rows: Vec<(String, f64, f64)> = sqlx::query_as(
             "SELECT \
                  COALESCE(json_extract(attributes, '$.\"tool.name\"'), 'unknown') AS tn, \
-                 COALESCE(SUM(value), 0) AS invocations, \
+                 CAST(COALESCE(SUM(value), 0) AS REAL) AS invocations, \
                  0.0 AS avg_dur \
              FROM metric_points \
              WHERE metric_name = 'assistant.tool.invocations' \
@@ -243,7 +243,7 @@ impl MetricsStore {
                  strftime('%Y-%m-%dT%H:', recorded_at) || \
                  printf('%02d', (CAST(strftime('%M', recorded_at) AS INTEGER) / ?1) * ?1) \
                  || ':00Z' AS bucket, \
-                 COALESCE(SUM(value), 0) AS total \
+                 CAST(COALESCE(SUM(value), 0) AS REAL) AS total \
              FROM metric_points \
              WHERE metric_name = 'assistant.turn.count' \
                AND recorded_at >= datetime('now', ?2) \
@@ -272,7 +272,7 @@ impl MetricsStore {
                  strftime('%Y-%m-%dT%H:', recorded_at) || \
                  printf('%02d', (CAST(strftime('%M', recorded_at) AS INTEGER) / ?1) * ?1) \
                  || ':00Z' AS bucket, \
-                 COALESCE(SUM(value), 0) AS total \
+                 CAST(COALESCE(SUM(value), 0) AS REAL) AS total \
              FROM metric_points \
              WHERE metric_name = 'assistant.error.count' \
                AND recorded_at >= datetime('now', ?2) \
@@ -344,5 +344,140 @@ mod tests {
 
         let resources = store.list_resources().await.unwrap();
         assert!(resources.is_empty());
+    }
+
+    /// Insert FK parent rows and return (resource_id, scope_id).
+    async fn seed_parents(pool: &SqlitePool) -> (i64, i64) {
+        let rid: (i64,) = sqlx::query_as(
+            "INSERT INTO resources (fingerprint, attributes) VALUES ('test-fp', '{}') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let sid: (i64,) = sqlx::query_as(
+            "INSERT INTO metric_scopes (name, version) VALUES ('test', '0.1') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        (rid.0, sid.0)
+    }
+
+    /// Regression test: queries must not fail when rows exist and SQLite
+    /// returns INTEGER for aggregated columns (SUM of INTEGER column).
+    /// See: <https://github.com/cedricziel/assistant/issues/XXX>
+    #[tokio::test]
+    async fn queries_handle_integer_column_types() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let pool = storage.pool.clone();
+        let (rid, sid) = seed_parents(&pool).await;
+
+        // Insert token usage (histogram: sum + count are the key fields).
+        sqlx::query(
+            "INSERT INTO metric_points \
+             (resource_id, scope_id, metric_name, metric_kind, \
+              sum, count, attributes, model, recorded_at) \
+             VALUES (?1, ?2, 'gen_ai.client.token.usage', 'histogram', \
+                     150, 3, '{\"gen_ai.token.type\": \"input\"}', 'test-model', \
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
+        .bind(rid)
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO metric_points \
+             (resource_id, scope_id, metric_name, metric_kind, \
+              sum, count, attributes, model, recorded_at) \
+             VALUES (?1, ?2, 'gen_ai.client.token.usage', 'histogram', \
+                     80, 2, '{\"gen_ai.token.type\": \"output\"}', 'test-model', \
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
+        .bind(rid)
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Insert turn count (counter: value column).
+        sqlx::query(
+            "INSERT INTO metric_points \
+             (resource_id, scope_id, metric_name, metric_kind, \
+              value, attributes, recorded_at) \
+             VALUES (?1, ?2, 'assistant.turn.count', 'counter', \
+                     5, '{}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
+        .bind(rid)
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Insert tool invocation.
+        sqlx::query(
+            "INSERT INTO metric_points \
+             (resource_id, scope_id, metric_name, metric_kind, \
+              value, attributes, recorded_at) \
+             VALUES (?1, ?2, 'assistant.tool.invocations', 'counter', \
+                     7, '{\"tool.name\": \"file-read\"}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
+        .bind(rid)
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Insert operation duration (histogram).
+        sqlx::query(
+            "INSERT INTO metric_points \
+             (resource_id, scope_id, metric_name, metric_kind, \
+              sum, count, attributes, recorded_at) \
+             VALUES (?1, ?2, 'gen_ai.client.operation.duration', 'histogram', \
+                     12, 4, '{}', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        )
+        .bind(rid)
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = MetricsStore::new(pool);
+
+        // All of these previously failed with "mismatched types; Rust type
+        // `f64` (as SQL type `REAL`) is not compatible with SQL type `INTEGER`"
+        let summary = store.summary(24).await.expect("summary must not fail");
+        assert_eq!(summary.total_tokens_in, 150);
+        assert_eq!(summary.total_tokens_out, 80);
+        assert_eq!(summary.total_requests, 5);
+        assert_eq!(summary.total_tool_invocations, 7);
+        assert!(summary.avg_duration_s > 0.0, "avg duration should be > 0");
+
+        let models = store
+            .model_comparison(24)
+            .await
+            .expect("model_comparison must not fail");
+        assert_eq!(models.len(), 1, "should have one model");
+        assert_eq!(models[0].model, "test-model");
+
+        let tools = store
+            .tool_usage(24)
+            .await
+            .expect("tool_usage must not fail");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].tool_name, "file-read");
+
+        let tokens = store
+            .token_usage_over_time(24, 15)
+            .await
+            .expect("token_usage_over_time must not fail");
+        assert!(!tokens.is_empty(), "should have at least one bucket");
+
+        let requests = store
+            .request_rate(24, 15)
+            .await
+            .expect("request_rate must not fail");
+        assert!(!requests.is_empty(), "should have at least one bucket");
     }
 }
