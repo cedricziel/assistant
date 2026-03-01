@@ -263,6 +263,7 @@ dependencies = [
  "assistant-llm",
  "assistant-mcp-server",
  "assistant-provider-anthropic",
+ "assistant-provider-moonshot",
  "assistant-provider-ollama",
  "assistant-provider-openai",
  "assistant-runtime",
@@ -431,6 +432,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant-provider-moonshot"
+version = "0.1.25"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "assistant-llm",
+ "assistant-provider-openai",
+ "async-trait",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "assistant-provider-ollama"
 version = "0.1.25"
 dependencies = [
@@ -563,6 +577,7 @@ dependencies = [
  "assistant-core",
  "assistant-llm",
  "assistant-provider-anthropic",
+ "assistant-provider-moonshot",
  "assistant-provider-ollama",
  "assistant-provider-openai",
  "assistant-runtime",

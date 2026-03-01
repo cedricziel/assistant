@@ -107,6 +107,23 @@ timeout_secs = 120
 # base_url = "http://localhost:8000/v1"             # vLLM / LM Studio
 # See docs/openai.md for full details.
 
+# ── Moonshot AI (Kimi) cloud provider ─────────────────────────────────────────
+# To use Moonshot AI instead of a local Ollama model, replace the [llm] block
+# above with (or uncomment) the following:
+#
+# [llm]
+# provider        = "moonshot"
+# model           = "kimi-k2.5"       # or moonshot-v1-128k, kimi-latest, kimi-k2-thinking
+# api_key         = "sk-..."          # or set MOONSHOT_API_KEY env var
+# max_iterations  = 80
+# timeout_secs    = 120
+#
+# # Use the China endpoint instead of global:
+# # base_url = "https://api.moonshot.cn/v1"
+#
+# [llm.moonshot]
+# max_tokens = 8192                   # max completion tokens per response
+
 [storage]
 # Path to SQLite database (~/.assistant/assistant.db by default)
 # db_path = "~/.assistant/assistant.db"

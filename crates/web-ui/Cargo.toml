@@ -14,6 +14,7 @@ assistant-llm = { path = "../llm" }
 assistant-provider-anthropic = { path = "../provider-anthropic" }
 assistant-provider-ollama = { path = "../provider-ollama" }
 assistant-provider-openai = { path = "../provider-openai" }
+assistant-provider-moonshot = { path = "../provider-moonshot" }
 assistant-runtime = { path = "../runtime" }
 assistant-skills = { path = "../skills" }
 assistant-storage = { path = "../storage" }
