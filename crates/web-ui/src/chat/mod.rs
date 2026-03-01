@@ -343,11 +343,9 @@ async fn send_message(
         } else {
             content.clone()
         };
-        let _ = sqlx::query("UPDATE conversations SET title = ?1 WHERE id = ?2")
-            .bind(&title)
-            .bind(conv_id.to_string())
-            .execute(&state.pool)
-            .await;
+        if let Err(e) = store.update_title(conv_id, &title).await {
+            warn!("Failed to update conversation title: {}", e);
+        }
     }
 
     // Stash the user text so `stream_response` can retrieve it.

@@ -128,6 +128,18 @@ impl ConversationStore {
             .collect()
     }
 
+    /// Update the title of an existing conversation.
+    pub async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
+        let id_str = id.to_string();
+        sqlx::query("UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(title)
+            .bind(Utc::now())
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Delete a conversation and all its messages (cascade).
     pub async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
@@ -325,6 +337,26 @@ mod tests {
         // Should be in chronological order: msg 2, msg 3, msg 4
         assert_eq!(last[0].content, "msg 2");
         assert_eq!(last[2].content, "msg 4");
+    }
+
+    #[tokio::test]
+    async fn test_update_title() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        let conv = store.create_conversation(Some("Old Title")).await.unwrap();
+        store.update_title(conv.id, "New Title").await.unwrap();
+
+        let loaded = store.get_conversation(conv.id).await.unwrap().unwrap();
+        assert_eq!(
+            loaded.title.as_deref(),
+            Some("New Title"),
+            "title should be updated"
+        );
+        assert!(
+            loaded.updated_at >= conv.updated_at,
+            "updated_at should advance"
+        );
     }
 
     #[tokio::test]

@@ -1,48 +1,20 @@
-{% extends "base.html" %}
-
-{% block title %}Webhooks{% endblock %}
-
-{% block breadcrumb %}
+{% extends "base.html" %} {% block title %}Webhooks{% endblock %} {% block
+breadcrumb %}
 <span class="breadcrumb-page">Management</span>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">Webhooks</span>
-{% endblock %}
-
-{% block extra_css %}
-{% include "partials/default_css.html" %}
-
-.url-cell {
-    font-family: ui-monospace, monospace;
-    font-size: 0.85rem;
-    max-width: 300px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.action-btn {
-    display: inline-block;
-    background: linear-gradient(135deg, #64cafe, #8b5dff);
-    border: none;
-    border-radius: 8px;
-    color: #050b16;
-    padding: 0.5rem 1.2rem;
-    font-weight: 600;
-    font-size: 0.9rem;
-    cursor: pointer;
-    text-decoration: none;
-    text-align: center;
-}
-.action-btn.secondary {
-    background: rgba(255,255,255,0.08);
-    color: #c2d6f0;
-}
-{% endblock %}
-
-{% block content %}
+{% endblock %} {% block extra_css %} {% include "partials/default_css.html" %}
+{% include "partials/entity_css.html" %} .url-cell { font-family: ui-monospace,
+monospace; font-size: 0.85rem; max-width: 300px; overflow: hidden;
+text-overflow: ellipsis; white-space: nowrap; } {% endblock %} {% block content
+%}
 <div class="layout">
   <aside class="sidebar">
     <div class="sidebar-inner">
-      <div class="brand"><p>assistant</p><h2>Webhooks</h2></div>
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Webhooks</h2>
+      </div>
     </div>
   </aside>
 
@@ -51,13 +23,17 @@
       <div class="panel-head">
         <div>
           <h2>Webhooks</h2>
-          <p>Manage outgoing webhook endpoints with HMAC-SHA256 verification.</p>
+          <p>
+            Manage outgoing webhook endpoints with HMAC-SHA256 verification.
+          </p>
         </div>
         <span class="pill">{{ count }}</span>
       </div>
 
       {% if rows.is_empty() %}
-      <p class="empty">No webhooks configured yet. Create one to get started.</p>
+      <p class="empty">
+        No webhooks configured yet. Create one to get started.
+      </p>
       {% else %}
       <table class="trace-table">
         <thead>
@@ -72,11 +48,23 @@
         </thead>
         <tbody>
           {% for row in rows %}
-          <tr class="is-clickable" tabindex="0" onclick="window.location='/webhooks/{{ row.id }}'" onkeydown="if(event.key==='Enter')window.location='/webhooks/{{ row.id }}'">
-            <td><a class="trace-id row-link" href="/webhooks/{{ row.id }}">{{ row.short_id }}&hellip;</a></td>
+          <tr
+            class="is-clickable"
+            tabindex="0"
+            onclick="window.location='/webhooks/{{ row.id }}'"
+            onkeydown="if(event.key==='Enter')window.location='/webhooks/{{ row.id }}'"
+          >
+            <td>
+              <a class="trace-id row-link" href="/webhooks/{{ row.id }}"
+                >{{ row.short_id }}&hellip;</a
+              >
+            </td>
             <td><span class="primary">{{ row.name }}</span></td>
             <td class="url-cell">{{ row.url }}</td>
-            <td>{{ row.event_count }} event{% if row.event_count != 1 %}s{% endif %}</td>
+            <td>
+              {{ row.event_count }} event{% if row.event_count != 1 %}s{% endif
+              %}
+            </td>
             <td>
               {% if row.active %}
               <span class="hdr-badge ok">active</span>
@@ -97,7 +85,7 @@
       </table>
       {% endif %}
 
-      <div style="margin-top:1.25rem">
+      <div style="margin-top: 1.25rem">
         <a href="/webhooks/new" class="action-btn">+ New Webhook</a>
       </div>
     </div>

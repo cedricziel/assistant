@@ -1,173 +1,12 @@
-{% extends "base.html" %}
-
-{% block title %}Agent: {{ agent_name }}{% endblock %}
-
+{% extends "base.html" %} {% block title %}Agent: {{ agent_name }}{% endblock %}
 {% block breadcrumb %}
 <span class="breadcrumb-page">Management</span>
 <span class="breadcrumb-sep">/</span>
 <a href="/agents" class="breadcrumb-page">Agents</a>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">{{ agent_name }}</span>
-{% endblock %}
-
-{% block extra_css %}
-{% include "partials/default_css.html" %}
-
-.agent-form {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-}
-.form-group label {
-    font-size: 0.85rem;
-    color: #8aa5d8;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}
-.form-group input[type=text],
-.form-group textarea {
-    background: #020511;
-    border: 1px solid #15243b;
-    border-radius: 8px;
-    color: #e5e9f0;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.9rem;
-    font-family: inherit;
-    width: 100%;
-}
-.form-group textarea {
-    resize: vertical;
-}
-.code-input {
-    font-family: ui-monospace, monospace !important;
-    font-size: 0.82rem !important;
-}
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-}
-.form-actions {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
-}
-.checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-}
-.checkbox-label input[type=checkbox] {
-    accent-color: #6ec6ff;
-    width: 16px;
-    height: 16px;
-}
-.action-btn {
-    display: inline-block;
-    background: linear-gradient(135deg, #64cafe, #8b5dff);
-    border: none;
-    border-radius: 8px;
-    color: #050b16;
-    padding: 0.5rem 1.2rem;
-    font-weight: 600;
-    font-size: 0.9rem;
-    cursor: pointer;
-    text-decoration: none;
-    text-align: center;
-}
-.action-btn.secondary {
-    background: rgba(255,255,255,0.08);
-    color: #c2d6f0;
-}
-.action-btn.danger {
-    background: rgba(248, 113, 113, 0.25);
-    color: #ffb4b4;
-}
-.agent-actions {
-    display: flex;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-    margin: 1.25rem 0;
-    padding-bottom: 1.25rem;
-    border-bottom: 1px solid #0f1f36;
-}
-.agent-section {
-    margin: 1.25rem 0;
-}
-.agent-section h3 {
-    margin: 0 0 0.6rem;
-    color: #8aa5d8;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
-.agent-section p {
-    margin: 0.3rem 0;
-}
-.cap-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-}
-.cap-list li {
-    font-size: 0.9rem;
-}
-.skill-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-}
-.skill-card {
-    background: #030a15;
-    border: 1px solid #0f1f36;
-    border-radius: 12px;
-    padding: 1rem;
-}
-.skill-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.4rem;
-}
-.skill-card p {
-    margin: 0 0 0.5rem;
-    color: #a0bfe0;
-    font-size: 0.9rem;
-}
-.skill-tags {
-    display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-}
-.skill-examples {
-    margin-top: 0.5rem;
-    font-size: 0.85rem;
-    color: #8ba2c6;
-}
-.skill-examples ul {
-    margin: 0.2rem 0 0 1.2rem;
-    padding: 0;
-}
-.skill-examples li {
-    margin-bottom: 0.15rem;
-}
-@media (max-width: 640px) {
-    .form-row {
-        grid-template-columns: 1fr;
-    }
-}
-{% endblock %}
-
-{% block content %}
+{% endblock %} {% block extra_css %} {% include "partials/default_css.html" %}
+{% include "partials/entity_css.html" %} {% endblock %} {% block content %}
 <div class="page">
   <div class="trace-detail">
     {# -- Header bar -- #}
@@ -181,32 +20,47 @@
     </div>
 
     {# -- Description -- #}
-    <div class="agent-section">
+    <div class="entity-section">
       <h3>Description</h3>
       <p>{{ description }}</p>
     </div>
 
     {# -- Actions -- #}
-    <div class="agent-actions">
+    <nav class="entity-actions" aria-label="Agent actions">
       <a href="/agents/{{ agent_id }}/edit" class="action-btn">Edit</a>
       {% if !is_default %}
-      <form method="POST" action="/agents/{{ agent_id }}/set-default" style="display:inline">
-        <button type="submit" class="action-btn secondary">Set as Default</button>
+      <form method="POST" action="/agents/{{ agent_id }}/set-default">
+        <button type="submit" class="action-btn secondary">
+          Set as Default
+        </button>
       </form>
       {% endif %}
-      <form method="POST" action="/agents/{{ agent_id }}/delete" style="display:inline"
-            onsubmit="return confirm('Delete this agent?')">
+      <form
+        method="POST"
+        action="/agents/{{ agent_id }}/delete"
+        onsubmit="return confirm('Delete this agent?');"
+      >
         <button type="submit" class="action-btn danger">Delete</button>
       </form>
-      <a href="/agents/{{ agent_id }}/card.json" class="action-btn secondary"
-         target="_blank">View JSON</a>
-    </div>
+      <a
+        href="/agents/{{ agent_id }}/card.json"
+        class="action-btn secondary"
+        target="_blank"
+        >View JSON</a
+      >
+    </nav>
 
     {# -- Interfaces -- #}
-    <div class="agent-section">
+    <div class="entity-section">
       <h3>Interfaces</h3>
       <table class="trace-table">
-        <thead><tr><th>Binding</th><th>URL</th><th>Protocol</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Binding</th>
+            <th>URL</th>
+            <th>Protocol</th>
+          </tr>
+        </thead>
         <tbody>
           {% for iface in interfaces %}
           <tr>
@@ -220,7 +74,7 @@
     </div>
 
     {# -- Capabilities -- #}
-    <div class="agent-section">
+    <div class="entity-section">
       <h3>Capabilities</h3>
       <ul class="cap-list">
         <li>Streaming: {{ streaming_badge|safe }}</li>
@@ -231,36 +85,33 @@
     </div>
 
     {# -- Default I/O Modes -- #}
-    <div class="agent-section">
+    <div class="entity-section">
       <h3>Default I/O Modes</h3>
-      <p><strong>Input:</strong>
+      <p>
+        <strong>Input:</strong>
         {% if input_modes.is_empty() %}
         <span class="muted">none</span>
-        {% else %}
-          {% for mode in input_modes %}
-          <span class="badge">{{ mode }}</span>
-          {% endfor %}
-        {% endif %}
+        {% else %} {% for mode in input_modes %}
+        <span class="badge">{{ mode }}</span>
+        {% endfor %} {% endif %}
       </p>
-      <p><strong>Output:</strong>
+      <p>
+        <strong>Output:</strong>
         {% if output_modes.is_empty() %}
         <span class="muted">none</span>
-        {% else %}
-          {% for mode in output_modes %}
-          <span class="badge">{{ mode }}</span>
-          {% endfor %}
-        {% endif %}
+        {% else %} {% for mode in output_modes %}
+        <span class="badge">{{ mode }}</span>
+        {% endfor %} {% endif %}
       </p>
     </div>
 
-    {# -- Skills -- #}
-    {% if skills.is_empty() %}
-    <div class="agent-section">
+    {# -- Skills -- #} {% if skills.is_empty() %}
+    <div class="entity-section">
       <h3>Skills</h3>
       <p class="empty">No skills defined.</p>
     </div>
     {% else %}
-    <div class="agent-section">
+    <div class="entity-section">
       <h3>Skills <span class="pill">{{ skills.len() }}</span></h3>
       <div class="skill-grid">
         {% for skill in skills %}
@@ -289,13 +140,13 @@
         {% endfor %}
       </div>
     </div>
-    {% endif %}
-
-    {# -- Provider -- #}
-    {% if let Some(provider) = provider %}
-    <div class="agent-section">
+    {% endif %} {# -- Provider -- #} {% if let Some(provider) = provider %}
+    <div class="entity-section">
       <h3>Provider</h3>
-      <p><strong>{{ provider.organization }}</strong> &mdash; <a href="{{ provider.url }}">{{ provider.url }}</a></p>
+      <p>
+        <strong>{{ provider.organization }}</strong> &mdash;
+        <a href="{{ provider.url }}">{{ provider.url }}</a>
+      </p>
     </div>
     {% endif %}
   </div>

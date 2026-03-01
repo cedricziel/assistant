@@ -1,255 +1,221 @@
-{% extends "base.html" %}
-
-{% block title %}{{ page_title }}{% endblock %}
-
-{% block breadcrumb %}
+{% extends "base.html" %} {% block title %}{{ page_title }}{% endblock %} {%
+block breadcrumb %}
 <span class="breadcrumb-page">Management</span>
 <span class="breadcrumb-sep">/</span>
 <a href="/agents" class="breadcrumb-page">Agents</a>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">{{ heading }}</span>
-{% endblock %}
-
-{% block extra_css %}
-{% include "partials/default_css.html" %}
-
-.agent-form {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-}
-.form-group label {
-    font-size: 0.85rem;
-    color: #8aa5d8;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}
-.form-group input[type=text],
-.form-group textarea {
-    background: #020511;
-    border: 1px solid #15243b;
-    border-radius: 8px;
-    color: #e5e9f0;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.9rem;
-    font-family: inherit;
-    width: 100%;
-}
-.form-group textarea {
-    resize: vertical;
-}
-.code-input {
-    font-family: ui-monospace, monospace !important;
-    font-size: 0.82rem !important;
-}
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-}
-.form-actions {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
-}
-.checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-}
-.checkbox-label input[type=checkbox] {
-    accent-color: #6ec6ff;
-    width: 16px;
-    height: 16px;
-}
-.action-btn {
-    display: inline-block;
-    background: linear-gradient(135deg, #64cafe, #8b5dff);
-    border: none;
-    border-radius: 8px;
-    color: #050b16;
-    padding: 0.5rem 1.2rem;
-    font-weight: 600;
-    font-size: 0.9rem;
-    cursor: pointer;
-    text-decoration: none;
-    text-align: center;
-}
-.action-btn.secondary {
-    background: rgba(255,255,255,0.08);
-    color: #c2d6f0;
-}
-.action-btn.danger {
-    background: rgba(248, 113, 113, 0.25);
-    color: #ffb4b4;
-}
-.agent-actions {
-    display: flex;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-    margin: 1.25rem 0;
-    padding-bottom: 1.25rem;
-    border-bottom: 1px solid #0f1f36;
-}
-.agent-section {
-    margin: 1.25rem 0;
-}
-.agent-section h3 {
-    margin: 0 0 0.6rem;
-    color: #8aa5d8;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
-.agent-section p {
-    margin: 0.3rem 0;
-}
-.cap-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-}
-.cap-list li {
-    font-size: 0.9rem;
-}
-.skill-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-}
-.skill-card {
-    background: #030a15;
-    border: 1px solid #0f1f36;
-    border-radius: 12px;
-    padding: 1rem;
-}
-.skill-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.4rem;
-}
-.skill-card p {
-    margin: 0 0 0.5rem;
-    color: #a0bfe0;
-    font-size: 0.9rem;
-}
-.skill-tags {
-    display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-}
-.skill-examples {
-    margin-top: 0.5rem;
-    font-size: 0.85rem;
-    color: #8ba2c6;
-}
-.skill-examples ul {
-    margin: 0.2rem 0 0 1.2rem;
-    padding: 0;
-}
-.skill-examples li {
-    margin-bottom: 0.15rem;
-}
-@media (max-width: 640px) {
-    .form-row {
-        grid-template-columns: 1fr;
-    }
-}
-{% endblock %}
-
-{% block content %}
+{% endblock %} {% block extra_css %} {% include "partials/default_css.html" %}
+{% include "partials/entity_css.html" %} {% endblock %} {% block content %}
 <div class="layout">
   <aside class="sidebar">
     <div class="sidebar-inner">
-      <div class="brand"><p>assistant</p><h2>Agents</h2></div>
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Agents</h2>
+      </div>
     </div>
   </aside>
 
   <main class="main">
     <div class="panel">
       <div class="panel-head"><h2>{{ heading }}</h2></div>
-      <form method="POST" action="{{ action }}" class="agent-form">
+      <form method="POST" action="{{ action }}" class="entity-form">
         <div class="form-group">
           <label>Name *</label>
-          <input type="text" name="name" value="{{ name }}" required placeholder="My Agent">
+          <input
+            type="text"
+            name="name"
+            value="{{ name }}"
+            required
+            placeholder="My Agent"
+          />
         </div>
         <div class="form-group">
           <label>Description *</label>
-          <textarea name="description" required rows="3"
-                    placeholder="What does this agent do?">{{ desc }}</textarea>
+          <textarea
+            name="description"
+            required
+            rows="3"
+            placeholder="What does this agent do?"
+          >
+{{ desc }}</textarea
+          >
         </div>
         <div class="form-row">
           <div class="form-group">
             <label>Version *</label>
-            <input type="text" name="version" value="{{ version }}" required placeholder="1.0.0">
+            <input
+              type="text"
+              name="version"
+              value="{{ version }}"
+              required
+              placeholder="1.0.0"
+            />
           </div>
           <div class="form-group">
             <label>Protocol Binding</label>
-            <input type="text" name="protocol_binding" value="{{ binding }}"
-                   placeholder="HTTP+JSON">
+            <input
+              type="text"
+              name="protocol_binding"
+              value="{{ binding }}"
+              placeholder="HTTP+JSON"
+            />
           </div>
         </div>
         <div class="form-group">
           <label>Interface URL</label>
-          <input type="text" name="url" value="{{ url }}"
-                 placeholder="https://example.com/a2a">
+          <input
+            type="text"
+            name="url"
+            value="{{ url }}"
+            placeholder="https://example.com/a2a"
+          />
         </div>
         <div class="form-group">
           <label>Documentation URL</label>
-          <input type="text" name="documentation_url" value="{{ doc_url }}"
-                 placeholder="https://docs.example.com">
+          <input
+            type="text"
+            name="documentation_url"
+            value="{{ doc_url }}"
+            placeholder="https://docs.example.com"
+          />
         </div>
         <div class="form-row">
           <div class="form-group">
             <label>Input Modes (comma-separated)</label>
-            <input type="text" name="input_modes" value="{{ input_modes }}"
-                   placeholder="text/plain">
+            <input
+              type="text"
+              name="input_modes"
+              value="{{ input_modes }}"
+              placeholder="text/plain"
+            />
           </div>
           <div class="form-group">
             <label>Output Modes (comma-separated)</label>
-            <input type="text" name="output_modes" value="{{ output_modes }}"
-                   placeholder="text/plain">
+            <input
+              type="text"
+              name="output_modes"
+              value="{{ output_modes }}"
+              placeholder="text/plain"
+            />
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label>Provider Organization</label>
-            <input type="text" name="provider_org" value="{{ provider_org }}"
-                   placeholder="Acme Inc.">
+            <input
+              type="text"
+              name="provider_org"
+              value="{{ provider_org }}"
+              placeholder="Acme Inc."
+            />
           </div>
           <div class="form-group">
             <label>Provider URL</label>
-            <input type="text" name="provider_url" value="{{ provider_url }}"
-                   placeholder="https://acme.com">
+            <input
+              type="text"
+              name="provider_url"
+              value="{{ provider_url }}"
+              placeholder="https://acme.com"
+            />
           </div>
         </div>
         <div class="form-group">
           <label class="checkbox-label">
-            <input type="checkbox" name="streaming" value="on"{% if streaming_checked %} checked{% endif %}>
+            <input
+              type="checkbox"
+              name="streaming"
+              value="on"
+              {%
+              if
+              streaming_checked
+              %}
+              checked{%
+              endif
+              %}
+            />
             Supports streaming
           </label>
         </div>
         <div class="form-group">
-          <label>Skills (JSON array)</label>
-          <textarea name="skills_json" rows="10" class="code-input"
-                    placeholder='[{"id":"...","name":"...","description":"...","tags":["..."]}]'
-          >{{ skills_json }}</textarea>
+          <label for="skills-json-input">Skills (JSON array)</label>
+          <textarea
+            id="skills-json-input"
+            name="skills_json"
+            rows="10"
+            class="code-input"
+            placeholder='[
+  {
+    "id": "my-skill",
+    "name": "My Skill",
+    "description": "What this skill does",
+    "tags": ["tag1", "tag2"],
+    "examples": ["example prompt 1"]
+  }
+]'
+          >
+{{ skills_json }}</textarea
+          >
+          <div
+            id="skills-json-error"
+            class="field-error"
+            role="alert"
+            aria-live="polite"
+          ></div>
         </div>
         <div class="form-actions">
           <button type="submit" class="action-btn">{{ submit_label }}</button>
           <a href="/agents" class="action-btn secondary">Cancel</a>
         </div>
       </form>
+      <script>
+        (function () {
+          var textarea = document.getElementById("skills-json-input");
+          var errorDiv = document.getElementById("skills-json-error");
+          var form = textarea.closest("form");
+
+          function validate() {
+            var val = textarea.value.trim();
+            errorDiv.textContent = "";
+            if (!val) return true;
+            try {
+              var parsed = JSON.parse(val);
+              if (!Array.isArray(parsed)) {
+                errorDiv.textContent = "Skills must be a JSON array.";
+                return false;
+              }
+              for (var i = 0; i < parsed.length; i++) {
+                var s = parsed[i];
+                if (typeof s !== "object" || s === null || Array.isArray(s)) {
+                  errorDiv.textContent =
+                    "Each skill must be an object (item " + i + ").";
+                  return false;
+                }
+                if (typeof s.id !== "string" || !s.id) {
+                  errorDiv.textContent =
+                    "Skill " + i + ' is missing a string "id" field.';
+                  return false;
+                }
+                if (typeof s.name !== "string" || !s.name) {
+                  errorDiv.textContent =
+                    "Skill " + i + ' is missing a string "name" field.';
+                  return false;
+                }
+              }
+              return true;
+            } catch (e) {
+              errorDiv.textContent = "Invalid JSON: " + e.message;
+              return false;
+            }
+          }
+
+          textarea.addEventListener("blur", validate);
+          form.addEventListener("submit", function (e) {
+            if (!validate()) e.preventDefault();
+          });
+        })();
+      </script>
     </div>
   </main>
 </div>
