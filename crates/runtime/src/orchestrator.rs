@@ -247,9 +247,28 @@ impl Orchestrator {
     /// });
     /// ```
     pub async fn run_worker(&self, worker_id: &str) {
-        info!(worker_id, "Turn worker started");
+        self.run_worker_filtered(worker_id, None).await;
+    }
+
+    /// Run a turn-processing worker that only claims messages for the given
+    /// interface.  Pass `None` to claim messages for any interface (the
+    /// original `run_worker` behaviour).
+    ///
+    /// When multiple services share the same SQLite database, each service
+    /// should scope its worker to its own interface so one service doesn't
+    /// steal turns from another.
+    pub async fn run_worker_filtered(&self, worker_id: &str, interface: Option<&str>) {
+        info!(worker_id, ?interface, "Turn worker started");
+        let filter = match interface {
+            Some(iface) => ClaimFilter::new().with_interface(iface),
+            None => ClaimFilter::default(),
+        };
         loop {
-            match self.bus.claim(topic::TURN_REQUEST, worker_id).await {
+            match self
+                .bus
+                .claim_filtered(topic::TURN_REQUEST, worker_id, &filter)
+                .await
+            {
                 Ok(Some(msg)) => {
                     let turn_req: bus_messages::TurnRequest =
                         match serde_json::from_value(msg.payload.clone()) {

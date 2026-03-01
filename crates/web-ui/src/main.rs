@@ -250,10 +250,14 @@ async fn main() -> Result<()> {
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());
 
-    // 5. Spawn the turn-processing worker.
+    // 5. Spawn the turn-processing worker (scoped to Web interface only,
+    //    so it doesn't steal turns from Slack/Mattermost workers sharing
+    //    the same SQLite database).
     let worker_orch = orchestrator.clone();
     tokio::spawn(async move {
-        worker_orch.run_worker("web-worker").await;
+        worker_orch
+            .run_worker_filtered("web-worker", Some("Web"))
+            .await;
     });
 
     // -- Agent store (filesystem-backed) --

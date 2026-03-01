@@ -114,6 +114,11 @@ impl MessageBus for SqliteMessageBus {
         if let Some(ref batch) = filter.batch_id {
             where_clauses.push(format!("batch_id = ?{next_bind}"));
             extra_binds.push(batch.to_string());
+            next_bind += 1;
+        }
+        if let Some(ref iface) = filter.interface {
+            where_clauses.push(format!("interface = ?{next_bind}"));
+            extra_binds.push(iface.clone());
             // next_bind not needed after last, but keep for consistency
             let _ = next_bind;
         }
@@ -589,6 +594,57 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_none(), "should not match different agent");
+    }
+
+    #[tokio::test]
+    async fn test_claim_filtered_by_interface() {
+        let (_s, bus) = bus().await;
+
+        // Publish two messages: one for Slack, one for Web.
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"from": "slack"}))
+                .with_interface("Slack"),
+        )
+        .await
+        .unwrap();
+
+        bus.publish(
+            PublishRequest::new("turn.request", serde_json::json!({"from": "web"}))
+                .with_interface("Web"),
+        )
+        .await
+        .unwrap();
+
+        // Web worker should only get the Web message.
+        let web_msg = bus
+            .claim_filtered(
+                "turn.request",
+                "web-worker",
+                &ClaimFilter::new().with_interface("Web"),
+            )
+            .await
+            .unwrap()
+            .expect("web-worker should claim Web message");
+        assert_eq!(web_msg.payload["from"], "web");
+
+        // Web worker should NOT get the Slack message.
+        let none = bus
+            .claim_filtered(
+                "turn.request",
+                "web-worker",
+                &ClaimFilter::new().with_interface("Web"),
+            )
+            .await
+            .unwrap();
+        assert!(none.is_none(), "web-worker must not claim Slack message");
+
+        // Unscoped worker should still get the Slack message.
+        let slack_msg = bus
+            .claim_filtered("turn.request", "main-worker", &ClaimFilter::default())
+            .await
+            .unwrap()
+            .expect("unscoped worker should claim remaining Slack message");
+        assert_eq!(slack_msg.payload["from"], "slack");
     }
 
     // -- ack / nack / fail --------------------------------------------------

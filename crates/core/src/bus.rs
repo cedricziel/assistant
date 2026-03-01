@@ -215,6 +215,8 @@ pub struct ClaimFilter {
     pub conversation_id: Option<Uuid>,
     /// Only claim messages in this batch.
     pub batch_id: Option<Uuid>,
+    /// Only claim messages for this interface (e.g. "Slack", "Web").
+    pub interface: Option<String>,
 }
 
 impl ClaimFilter {
@@ -242,12 +244,18 @@ impl ClaimFilter {
         self
     }
 
+    pub fn with_interface(mut self, iface: impl Into<String>) -> Self {
+        self.interface = Some(iface.into());
+        self
+    }
+
     /// Returns `true` if no filter criteria are set.
     pub fn is_empty(&self) -> bool {
         self.agent_id.is_none()
             && self.user_id.is_none()
             && self.conversation_id.is_none()
             && self.batch_id.is_none()
+            && self.interface.is_none()
     }
 }
 
