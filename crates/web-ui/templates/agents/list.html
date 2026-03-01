@@ -199,8 +199,8 @@
         </thead>
         <tbody>
           {% for agent in agents %}
-          <tr onclick="window.location='/agents/{{ agent.id }}'">
-            <td><span class="trace-id">{{ agent.short_id }}&hellip;</span></td>
+          <tr class="is-clickable" onclick="window.location='/agents/{{ agent.id }}'">
+            <td><a class="trace-id row-link" href="/agents/{{ agent.id }}">{{ agent.short_id }}&hellip;</a></td>
             <td>
               <span class="primary">{{ agent.name }}</span>
               {% if agent.is_default %} <span class="hdr-badge ok">default</span>{% endif %}

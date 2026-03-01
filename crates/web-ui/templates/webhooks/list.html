@@ -72,8 +72,8 @@
         </thead>
         <tbody>
           {% for row in rows %}
-          <tr onclick="window.location='/webhooks/{{ row.id }}'">
-            <td><span class="trace-id">{{ row.short_id }}&hellip;</span></td>
+          <tr class="is-clickable" onclick="window.location='/webhooks/{{ row.id }}'">
+            <td><a class="trace-id row-link" href="/webhooks/{{ row.id }}">{{ row.short_id }}&hellip;</a></td>
             <td><span class="primary">{{ row.name }}</span></td>
             <td class="url-cell">{{ row.url }}</td>
             <td>{{ row.event_count }} event{% if row.event_count != 1 %}s{% endif %}</td>

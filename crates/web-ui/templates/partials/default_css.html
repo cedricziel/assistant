@@ -189,12 +189,19 @@ a {
 .trace-table tr:last-child td {
     border-bottom: none;
 }
-.trace-table tbody tr {
+.trace-table tbody tr.is-clickable {
     cursor: pointer;
     transition: background 0.1s;
 }
-.trace-table tbody tr:hover {
+.trace-table tbody tr.is-clickable:hover {
     background: rgba(110, 198, 255, 0.06);
+}
+.row-link {
+    color: inherit;
+    text-decoration: none;
+}
+.row-link:hover {
+    text-decoration: underline;
 }
 .trace-id {
     font-family: ui-monospace, monospace;

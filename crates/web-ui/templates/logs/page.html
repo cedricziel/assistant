@@ -108,8 +108,8 @@
         </thead>
         <tbody>
           {% for log in logs %}
-          <tr onclick="window.location='/log/{{ log.id }}'">
-            <td><span class="{{ log.severity_class }}">{{ log.severity_text }}</span></td>
+          <tr class="is-clickable" onclick="window.location='/log/{{ log.id }}'">
+            <td><a class="row-link" href="/log/{{ log.id }}"><span class="{{ log.severity_class }}">{{ log.severity_text }}</span></a></td>
             <td class="log-ts">{{ log.timestamp }}</td>
             <td>
               {% if let Some(target) = log.target %}

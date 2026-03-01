@@ -106,8 +106,8 @@
         </thead>
         <tbody>
           {% for t in traces %}
-          <tr onclick="window.location='/trace/{{ t.trace_url }}'">
-            <td><span class="trace-id">{{ t.short_id }}&hellip;</span></td>
+          <tr class="is-clickable" onclick="window.location='/trace/{{ t.trace_url }}'">
+            <td><a class="trace-id row-link" href="/trace/{{ t.trace_url }}">{{ t.short_id }}&hellip;</a></td>
             <td>
               {% if let Some(name) = t.service %}
               {{ name }}

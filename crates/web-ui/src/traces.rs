@@ -231,10 +231,15 @@ async fn show_trace_detail(
         ));
     }
 
-    let start = spans.first().map(|s| s.start_time).unwrap_or_else(Utc::now);
+    let start = spans
+        .iter()
+        .map(|s| s.start_time)
+        .min()
+        .unwrap_or_else(Utc::now);
     let end = spans
-        .last()
+        .iter()
         .map(|s| s.end_time)
+        .max()
         .unwrap_or(start + chrono::Duration::milliseconds(1));
     let total_duration_ms = (end - start).num_milliseconds();
     let distinct_tools = collect_distinct_tools(&spans);
