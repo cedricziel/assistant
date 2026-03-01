@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.28](https://github.com/cedricziel/assistant/compare/v0.1.27...v0.1.28) (2026-03-01)
+
+
+### Features
+
+* **skills:** expose compatibility field in list-skills and declare requirements ([#138](https://github.com/cedricziel/assistant/issues/138)) ([f1b62ff](https://github.com/cedricziel/assistant/commit/f1b62ff9aa696ce8c6ff51b151966d1bd9758679))
+* **transcription:** Add audio format conversion for Deepgram ([#139](https://github.com/cedricziel/assistant/issues/139)) ([b151736](https://github.com/cedricziel/assistant/commit/b1517367029c161d3d66da9182bcd19855dbf661))
+
+
+### Bug Fixes
+
+* **runtime:** replace tracing .enter() guards with .instrument() in async code ([#132](https://github.com/cedricziel/assistant/issues/132)) ([21206a2](https://github.com/cedricziel/assistant/commit/21206a2164c7462c58042aefd66a00ad4444742b)), closes [#116](https://github.com/cedricziel/assistant/issues/116)
+
 ## [0.1.27](https://github.com/cedricziel/assistant/compare/v0.1.26...v0.1.27) (2026-03-01)
 
 
