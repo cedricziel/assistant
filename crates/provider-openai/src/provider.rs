@@ -1,21 +1,25 @@
-//! `OpenAIProvider` — [`LlmProvider`] implementation backed by the OpenAI Chat Completions API.
+//! `OpenAIProvider` — [`LlmProvider`] implementation backed by the OpenAI **Responses API**.
+//!
+//! Migrated from the Chat Completions API to gain native `web_search` tool
+//! support on all modern models (gpt-5, gpt-4o, o4-mini, …) rather than being
+//! restricted to the three `*-search-preview` models.
 //!
 //! Supports two authentication modes:
 //! - **API key** — standard `OPENAI_API_KEY` bearer token.
 //! - **OAuth PKCE** — Codex subscription via ChatGPT sign-in.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
-use async_openai::types::chat::{
-    ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,
-    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-    ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestToolMessageArgs,
-    ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionTools, CompletionUsage,
-    CreateChatCompletionRequestArgs, FunctionCall, FunctionObjectArgs, WebSearchContextSize,
-    WebSearchLocation, WebSearchOptions, WebSearchUserLocation, WebSearchUserLocationType,
-};
 use async_openai::types::embeddings::CreateEmbeddingRequestArgs;
+use async_openai::types::responses::{
+    CreateResponseArgs, EasyInputMessage, FunctionCallOutput, FunctionCallOutputItemParam,
+    FunctionTool, FunctionToolCall, InputContent, InputItem, InputParam, InputTextContent, Item,
+    MessageType, OutputItem, OutputMessage, OutputMessageContent, OutputStatus, Response, Role,
+    Tool, WebSearchApproximateLocation, WebSearchApproximateLocationType, WebSearchTool,
+    WebSearchToolSearchContextSize,
+};
 use async_openai::Client;
 use async_trait::async_trait;
 use futures::StreamExt as _;
@@ -43,11 +47,11 @@ pub struct OpenAIProviderConfig {
     pub base_url: String,
     /// Request timeout in seconds.
     pub timeout_secs: u64,
-    /// `max_completion_tokens` sent in every request.
+    /// `max_output_tokens` sent in every request.
     pub max_tokens: u32,
     /// Embedding model for vector search.
     pub embedding_model: String,
-    /// Hosted web-search config (Chat Completions `web_search_options`).
+    /// Hosted web-search config (Responses API `Tool::WebSearch`).
     pub web_search: Option<OpenAIWebSearchConfig>,
 }
 
@@ -73,7 +77,7 @@ pub struct OpenAIWebSearchConfig {
 
 // ── OpenAIProvider ────────────────────────────────────────────────────────────
 
-/// [`LlmProvider`] backed by the OpenAI Chat Completions API.
+/// [`LlmProvider`] backed by the OpenAI **Responses API**.
 ///
 /// Uses `async-openai` for HTTP transport.  For OAuth mode the internal
 /// `Client` is recreated whenever the access token is refreshed.
@@ -92,7 +96,8 @@ impl OpenAIProvider {
         let oai_cfg = AsyncOpenAIConfig::new()
             .with_api_key(api_key)
             .with_api_base(&config.base_url);
-        let client = Client::with_config(oai_cfg);
+        let client = Client::with_config(oai_cfg)
+            .with_http_client(build_reqwest_client(config.timeout_secs)?);
 
         Ok(Self {
             client: RwLock::new(client),
@@ -110,7 +115,8 @@ impl OpenAIProvider {
         let oai_cfg = AsyncOpenAIConfig::new()
             .with_api_key("oauth-placeholder")
             .with_api_base(&config.base_url);
-        let client = Client::with_config(oai_cfg);
+        let client = Client::with_config(oai_cfg)
+            .with_http_client(build_reqwest_client(config.timeout_secs)?);
 
         Ok(Self {
             client: RwLock::new(client),
@@ -181,9 +187,26 @@ impl OpenAIProvider {
         let oai_cfg = AsyncOpenAIConfig::new()
             .with_api_key(&token)
             .with_api_base(&self.config.base_url);
-        *self.client.write().await = Client::with_config(oai_cfg);
+        *self.client.write().await = Client::with_config(oai_cfg)
+            .with_http_client(build_reqwest_client(self.config.timeout_secs)?);
 
         Ok(())
+    }
+
+    // ── Responses API tools ───────────────────────────────────────────────
+
+    /// Build the `tools` array for the Responses API request.
+    ///
+    /// Includes function tools for the assistant's builtin tools, plus
+    /// `Tool::WebSearch` when web search is configured.
+    fn build_tools(&self, tool_specs: &[ToolSpec]) -> Vec<Tool> {
+        let mut tools: Vec<Tool> = tool_specs.iter().map(tool_spec_to_responses).collect();
+
+        if let Some(ref ws) = self.config.web_search {
+            tools.push(build_web_search_tool(ws));
+        }
+
+        tools
     }
 
     // ── Non-streaming chat ────────────────────────────────────────────────
@@ -196,57 +219,39 @@ impl OpenAIProvider {
     ) -> anyhow::Result<LlmResponse> {
         self.ensure_fresh_client().await?;
 
-        debug!(model = %self.config.model, tools = tools.len(), "Sending request to OpenAI");
+        debug!(model = %self.config.model, tools = tools.len(), "Sending Responses API request to OpenAI");
 
-        let (messages, _pending) = build_openai_messages(system_prompt, history);
-        let openai_tools: Vec<ChatCompletionTools> = tools
-            .iter()
-            .map(|t| ChatCompletionTools::Function(tool_spec_to_openai(t)))
-            .collect();
+        let input_items = build_input_items(history);
+        let api_tools = self.build_tools(tools);
 
-        let mut builder = CreateChatCompletionRequestArgs::default();
+        let mut builder = CreateResponseArgs::default();
         builder
             .model(&self.config.model)
-            .messages(messages)
-            .max_completion_tokens(self.config.max_tokens);
-        if !openai_tools.is_empty() {
-            builder.tools(openai_tools);
+            .input(InputParam::Items(input_items))
+            .max_output_tokens(self.config.max_tokens)
+            .store(false);
+
+        if !system_prompt.is_empty() {
+            builder.instructions(system_prompt);
         }
-        if let Some(ref ws) = self.config.web_search {
-            builder.web_search_options(build_web_search_options(ws));
+        if !api_tools.is_empty() {
+            builder.tools(api_tools);
         }
+
         let request = builder
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build OpenAI request: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("Failed to build OpenAI Responses request: {e}"))?;
 
         let client = self.client.read().await;
         let response = client
-            .chat()
+            .responses()
             .create(request)
             .await
-            .map_err(|e| anyhow::anyhow!("OpenAI request failed: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("OpenAI Responses request failed: {e}"))?;
 
-        debug!("OpenAI response received");
+        debug!("OpenAI Responses API response received");
 
-        let meta = extract_response_meta(&response.model, &response.id, &response.usage);
-
-        let choice = response
-            .choices
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("OpenAI returned empty choices"))?;
-
-        // Check for tool calls.
-        if let Some(ref tool_calls) = choice.message.tool_calls {
-            let items = parse_tool_calls_enum(tool_calls);
-            if !items.is_empty() {
-                debug!(count = items.len(), "OpenAI: tool calls received");
-                return Ok(LlmResponse::ToolCalls(items, meta));
-            }
-        }
-
-        let content = choice.message.content.as_deref().unwrap_or("").to_string();
-        debug!("OpenAI: final answer received");
-        Ok(LlmResponse::FinalAnswer(content, meta))
+        parse_response(response)
     }
 
     // ── SSE streaming chat ────────────────────────────────────────────────
@@ -260,142 +265,74 @@ impl OpenAIProvider {
     ) -> anyhow::Result<LlmResponse> {
         self.ensure_fresh_client().await?;
 
-        debug!(model = %self.config.model, "Sending streaming request to OpenAI");
+        debug!(model = %self.config.model, "Sending streaming Responses API request to OpenAI");
 
-        let (messages, _pending) = build_openai_messages(system_prompt, history);
-        let openai_tools: Vec<ChatCompletionTools> = tools
-            .iter()
-            .map(|t| ChatCompletionTools::Function(tool_spec_to_openai(t)))
-            .collect();
+        let input_items = build_input_items(history);
+        let api_tools = self.build_tools(tools);
 
-        let mut builder = CreateChatCompletionRequestArgs::default();
+        let mut builder = CreateResponseArgs::default();
         builder
             .model(&self.config.model)
-            .messages(messages)
-            .max_completion_tokens(self.config.max_tokens);
-        if !openai_tools.is_empty() {
-            builder.tools(openai_tools);
+            .input(InputParam::Items(input_items))
+            .max_output_tokens(self.config.max_tokens)
+            .store(false);
+
+        if !system_prompt.is_empty() {
+            builder.instructions(system_prompt);
         }
-        if let Some(ref ws) = self.config.web_search {
-            builder.web_search_options(build_web_search_options(ws));
+        if !api_tools.is_empty() {
+            builder.tools(api_tools);
         }
-        let request = builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build OpenAI streaming request: {e}"))?;
+
+        let request = builder.build().map_err(|e| {
+            anyhow::anyhow!("Failed to build OpenAI streaming Responses request: {e}")
+        })?;
 
         let client = self.client.read().await;
         let mut stream = client
-            .chat()
+            .responses()
             .create_stream(request)
             .await
-            .map_err(|e| anyhow::anyhow!("OpenAI streaming request failed: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("OpenAI streaming Responses request failed: {e}"))?;
 
-        // Accumulation state.
+        // Accumulate text deltas and watch for the completed response.
         let mut text_buf = String::new();
-        // tool_call_index → (id, name, arguments_buf)
-        let mut tool_map: Vec<(String, String, String)> = Vec::new();
-        let mut model_name = String::new();
-        let mut response_id = String::new();
-        let mut finish_reason: Option<String> = None;
-        let mut input_tokens: Option<u64> = None;
-        let mut output_tokens: Option<u64> = None;
+        let mut completed_response: Option<Response> = None;
 
         while let Some(result) = stream.next().await {
-            let chunk = result.map_err(|e| anyhow::anyhow!("OpenAI stream error: {e}"))?;
+            let event =
+                result.map_err(|e| anyhow::anyhow!("OpenAI Responses stream error: {e}"))?;
 
-            if model_name.is_empty() {
-                model_name.clone_from(&chunk.model);
-            }
-            if response_id.is_empty() {
-                response_id.clone_from(&chunk.id);
-            }
-
-            // Extract usage from the final chunk (OpenAI sends it when stream_options.include_usage is set,
-            // but also in the last chunk of some API versions).
-            if let Some(ref usage) = chunk.usage {
-                input_tokens = Some(usage.prompt_tokens as u64);
-                output_tokens = Some(usage.completion_tokens as u64);
-            }
-
-            for choice in &chunk.choices {
-                if let Some(ref reason) = choice.finish_reason {
-                    finish_reason = Some(format!("{reason:?}").to_lowercase());
-                }
-
-                let delta = &choice.delta;
-
-                // Text content.
-                if let Some(ref content) = delta.content {
-                    text_buf.push_str(content);
+            use async_openai::types::responses::ResponseStreamEvent;
+            match event {
+                ResponseStreamEvent::ResponseOutputTextDelta(delta) => {
+                    text_buf.push_str(&delta.delta);
                     if let Some(ref sink) = token_sink {
-                        let _ = sink.send(content.clone()).await;
+                        let _ = sink.send(delta.delta).await;
                     }
                 }
-
-                // Tool call chunks.
-                if let Some(ref tc_chunks) = delta.tool_calls {
-                    for tc in tc_chunks {
-                        let idx = tc.index as usize;
-                        // Extend the tool_map to fit this index.
-                        while tool_map.len() <= idx {
-                            tool_map.push((String::new(), String::new(), String::new()));
-                        }
-                        if let Some(ref id) = tc.id {
-                            tool_map[idx].0.clone_from(id);
-                        }
-                        if let Some(ref func) = tc.function {
-                            if let Some(ref name) = func.name {
-                                tool_map[idx].1.clone_from(name);
-                            }
-                            if let Some(ref args) = func.arguments {
-                                tool_map[idx].2.push_str(args);
-                            }
-                        }
-                    }
+                ResponseStreamEvent::ResponseCompleted(completed) => {
+                    completed_response = Some(completed.response);
                 }
+                // Ignore all other event types — we extract the final result
+                // from the completed response.
+                _ => {}
             }
         }
 
-        debug!("OpenAI SSE stream complete");
+        debug!("OpenAI Responses SSE stream complete");
 
-        let meta = LlmResponseMeta {
-            model: if model_name.is_empty() {
-                None
-            } else {
-                Some(model_name)
-            },
-            response_id: if response_id.is_empty() {
-                None
-            } else {
-                Some(response_id)
-            },
-            finish_reason,
-            input_tokens,
-            output_tokens,
-        };
-
-        // Priority: tool calls > text.
-        if !tool_map.is_empty() {
-            let items: Vec<ToolCallItem> = tool_map
-                .into_iter()
-                .filter(|(_, name, _)| !name.is_empty())
-                .map(|(id, name, args_json)| {
-                    let params = serde_json::from_str::<Value>(&args_json)
-                        .unwrap_or(Value::Object(serde_json::Map::new()));
-                    ToolCallItem {
-                        name,
-                        params,
-                        id: if id.is_empty() { None } else { Some(id) },
-                    }
-                })
-                .collect();
-            if !items.is_empty() {
-                debug!(count = items.len(), "OpenAI SSE: tool calls received");
-                return Ok(LlmResponse::ToolCalls(items, meta));
-            }
+        // Prefer the completed response (it has structured output items + usage).
+        if let Some(response) = completed_response {
+            return parse_response(response);
         }
 
-        Ok(LlmResponse::FinalAnswer(text_buf, meta))
+        // Fallback: no completed event (shouldn't happen normally).
+        warn!("OpenAI Responses stream ended without a completed event, using buffered text");
+        Ok(LlmResponse::FinalAnswer(
+            text_buf,
+            LlmResponseMeta::default(),
+        ))
     }
 }
 
@@ -406,15 +343,7 @@ impl LlmProvider for OpenAIProvider {
     fn capabilities(&self) -> Capabilities {
         let mut hosted_tools = Vec::new();
         if self.config.web_search.is_some() {
-            if model_supports_web_search(&self.config.model) {
-                hosted_tools.push(HostedTool::WebSearch);
-            } else {
-                warn!(
-                    model = %self.config.model,
-                    "web_search enabled but model does not support web_search_options; \
-                     falling back to builtin web-search tool"
-                );
-            }
+            hosted_tools.push(HostedTool::WebSearch);
         }
         Capabilities {
             tools: ToolSupport::Native,
@@ -481,256 +410,283 @@ impl LlmProvider for OpenAIProvider {
     }
 }
 
-// ── Message conversion helpers ────────────────────────────────────────────────
+// ── Input conversion helpers ──────────────────────────────────────────────────
 
-/// Build the OpenAI-format messages array from conversation history.
+/// Build the Responses API input items from conversation history.
 ///
-/// Returns `(messages, pending_ids)` where `pending_ids` tracks
-/// `(tool_name, tool_call_id)` pairs from the most recent
-/// `AssistantToolCalls` block (used to match `ToolResult` messages).
-fn build_openai_messages(
-    system_prompt: &str,
-    history: &[ChatHistoryMessage],
-) -> (Vec<ChatCompletionRequestMessage>, Vec<(String, String)>) {
-    let mut messages: Vec<ChatCompletionRequestMessage> = Vec::with_capacity(history.len() + 1);
-    let mut pending_ids: Vec<(String, String)> = Vec::new();
-
-    // System prompt.
-    if !system_prompt.is_empty() {
-        if let Ok(msg) = ChatCompletionRequestSystemMessageArgs::default()
-            .content(system_prompt)
-            .build()
-        {
-            messages.push(ChatCompletionRequestMessage::System(msg));
-        }
-    }
+/// Maps our internal [`ChatHistoryMessage`] types to the Responses API
+/// [`InputItem`] format.
+fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
+    let mut items: Vec<InputItem> = Vec::with_capacity(history.len());
 
     for entry in history {
         match entry {
-            ChatHistoryMessage::Text { role, content } => match role {
-                ChatRole::System => {
-                    if let Ok(msg) = ChatCompletionRequestSystemMessageArgs::default()
-                        .content(content.as_str())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::System(msg));
+            ChatHistoryMessage::Text { role, content } => {
+                let api_role = match role {
+                    ChatRole::System => Role::Developer,
+                    ChatRole::User => Role::User,
+                    ChatRole::Assistant => Role::Assistant,
+                    ChatRole::Tool => {
+                        // Bare tool-role text — shouldn't happen normally.
+                        // Send as user message to avoid dropping it.
+                        Role::User
                     }
-                }
-                ChatRole::User => {
-                    if let Ok(msg) = ChatCompletionRequestUserMessageArgs::default()
-                        .content(content.as_str())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::User(msg));
-                    }
-                }
-                ChatRole::Assistant => {
-                    if let Ok(msg) = ChatCompletionRequestAssistantMessageArgs::default()
-                        .content(content.as_str())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::Assistant(msg));
-                    }
-                }
-                ChatRole::Tool => {
-                    // Bare tool-role text — shouldn't happen normally but handle gracefully.
-                    if let Ok(msg) = ChatCompletionRequestUserMessageArgs::default()
-                        .content(content.as_str())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::User(msg));
-                    }
-                }
-            },
+                };
+                items.push(InputItem::EasyMessage(EasyInputMessage {
+                    r#type: MessageType::Message,
+                    role: api_role,
+                    content: async_openai::types::responses::EasyInputContent::Text(
+                        content.clone(),
+                    ),
+                }));
+            }
 
             ChatHistoryMessage::MultimodalUser { content } => {
-                // Build content parts for the OpenAI API.
-                // Images are sent as data URIs: data:<media_type>;base64,<data>
-                let parts_json: Vec<Value> = content
+                let parts: Vec<InputContent> = content
                     .iter()
                     .map(|block| match block {
                         ContentBlock::Text(text) => {
-                            serde_json::json!({"type": "text", "text": text})
+                            InputContent::InputText(InputTextContent { text: text.clone() })
                         }
                         ContentBlock::Image { media_type, data } => {
                             let data_uri = format!("data:{media_type};base64,{data}");
-                            serde_json::json!({
-                                "type": "image_url",
-                                "image_url": { "url": data_uri }
-                            })
+                            InputContent::InputImage(
+                                async_openai::types::responses::InputImageContent {
+                                    detail: async_openai::types::responses::ImageDetail::Auto,
+                                    file_id: None,
+                                    image_url: Some(data_uri),
+                                },
+                            )
                         }
                     })
                     .collect();
 
-                // Construct via serde round-trip to avoid fighting content part types.
-                let msg_json = serde_json::json!({
-                    "role": "user",
-                    "content": parts_json,
-                });
-                if let Ok(msg) = serde_json::from_value::<ChatCompletionRequestMessage>(msg_json) {
-                    messages.push(msg);
-                }
+                items.push(InputItem::EasyMessage(EasyInputMessage {
+                    r#type: MessageType::Message,
+                    role: Role::User,
+                    content: async_openai::types::responses::EasyInputContent::ContentList(parts),
+                }));
             }
 
             ChatHistoryMessage::AssistantToolCalls(calls) => {
-                pending_ids.clear();
-                let tc_enums: Vec<ChatCompletionMessageToolCalls> = calls
-                    .iter()
-                    .enumerate()
-                    .map(|(i, c)| {
-                        let id = c.id.clone().unwrap_or_else(|| format!("call_{i}"));
-                        pending_ids.push((c.name.clone(), id.clone()));
-                        ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
-                            id,
-                            function: FunctionCall {
-                                name: c.name.clone(),
-                                arguments: serde_json::to_string(&c.params)
-                                    .unwrap_or_else(|_| "{}".to_string()),
-                            },
-                        })
-                    })
-                    .collect();
-
-                if let Ok(msg) = ChatCompletionRequestAssistantMessageArgs::default()
-                    .tool_calls(tc_enums)
-                    .build()
-                {
-                    messages.push(ChatCompletionRequestMessage::Assistant(msg));
+                // Each tool call becomes a FunctionCall item that we feed back
+                // as input for conversation context.
+                for call in calls {
+                    let call_id = call
+                        .id
+                        .clone()
+                        .unwrap_or_else(|| "call_unknown".to_string());
+                    items.push(InputItem::Item(Item::FunctionCall(FunctionToolCall {
+                        arguments: serde_json::to_string(&call.params)
+                            .unwrap_or_else(|_| "{}".to_string()),
+                        call_id: call_id.clone(),
+                        name: call.name.clone(),
+                        id: None,
+                        status: Some(OutputStatus::Completed),
+                    })));
                 }
             }
 
-            ChatHistoryMessage::ToolResult { name, content } => {
-                // Consume the first matching pending entry.
-                let pos = pending_ids.iter().position(|(n, _)| n == name);
-                let tool_call_id = if let Some(idx) = pos {
-                    pending_ids.remove(idx).1
-                } else {
-                    format!("call_unknown_{name}")
-                };
-
-                if let Ok(msg) = ChatCompletionRequestToolMessageArgs::default()
-                    .tool_call_id(&tool_call_id)
-                    .content(content.as_str())
-                    .build()
-                {
-                    messages.push(ChatCompletionRequestMessage::Tool(msg));
-                }
+            ChatHistoryMessage::ToolResult { name: _, content } => {
+                // Find the call_id for the most recent unmatched FunctionCall.
+                let call_id = find_preceding_call_id(&items);
+                items.push(InputItem::Item(Item::FunctionCallOutput(
+                    FunctionCallOutputItemParam {
+                        call_id,
+                        output: FunctionCallOutput::Text(content.clone()),
+                        id: None,
+                        status: None,
+                    },
+                )));
             }
         }
     }
 
-    (messages, pending_ids)
+    items
 }
 
-/// Convert a [`ToolSpec`] to the OpenAI `ChatCompletionTool` struct.
-fn tool_spec_to_openai(tool: &ToolSpec) -> ChatCompletionTool {
+/// Find the call_id for the most recent unmatched FunctionCall item.
+///
+/// The Responses API requires `FunctionCallOutput.call_id` to match a preceding
+/// `FunctionCall.call_id`. We track which call_ids have already been consumed
+/// by a FunctionCallOutput and return the first unmatched one.
+fn find_preceding_call_id(items: &[InputItem]) -> String {
+    let mut function_call_ids: Vec<String> = Vec::new();
+    let mut matched_ids: Vec<String> = Vec::new();
+
+    for item in items {
+        match item {
+            InputItem::Item(Item::FunctionCall(fc)) => {
+                function_call_ids.push(fc.call_id.clone());
+            }
+            InputItem::Item(Item::FunctionCallOutput(fco)) => {
+                matched_ids.push(fco.call_id.clone());
+            }
+            _ => {}
+        }
+    }
+
+    // Find the first unmatched call_id
+    for id in &function_call_ids {
+        if !matched_ids.contains(id) {
+            return id.clone();
+        }
+    }
+
+    // Fallback — shouldn't happen in well-formed conversations
+    "call_unknown".to_string()
+}
+
+// ── Tool conversion helpers ───────────────────────────────────────────────────
+
+/// Convert a [`ToolSpec`] to the Responses API `Tool::Function`.
+fn tool_spec_to_responses(tool: &ToolSpec) -> Tool {
     let schema = &tool.params_schema;
 
     let parameters = if schema.get("type").and_then(|t| t.as_str()) == Some("object") {
-        schema.clone()
+        Some(schema.clone())
     } else if schema.as_object().is_some() {
-        serde_json::json!({"type": "object", "properties": schema})
+        Some(serde_json::json!({"type": "object", "properties": schema}))
     } else {
-        serde_json::json!({"type": "object", "properties": {}, "required": []})
+        Some(serde_json::json!({"type": "object", "properties": {}, "required": []}))
     };
 
-    let function = FunctionObjectArgs::default()
-        .name(&tool.name)
-        .description(&tool.description)
-        .parameters(parameters)
-        .build()
-        .expect("FunctionObject build should not fail");
-
-    ChatCompletionTool { function }
-}
-
-// ── Response helpers ──────────────────────────────────────────────────────────
-
-/// Extract [`LlmResponseMeta`] from a non-streaming response.
-fn extract_response_meta(
-    model: &str,
-    id: &str,
-    usage: &Option<CompletionUsage>,
-) -> LlmResponseMeta {
-    LlmResponseMeta {
-        model: Some(model.to_string()),
-        response_id: Some(id.to_string()),
-        input_tokens: usage.as_ref().map(|u| u.prompt_tokens as u64),
-        output_tokens: usage.as_ref().map(|u| u.completion_tokens as u64),
-        finish_reason: None, // set from choice below if needed
-    }
-}
-
-/// Parse tool calls from a non-streaming response message.
-///
-/// The response uses `ChatCompletionMessageToolCalls` enum which wraps
-/// the actual `ChatCompletionMessageToolCall` struct.
-fn parse_tool_calls_enum(tool_calls: &[ChatCompletionMessageToolCalls]) -> Vec<ToolCallItem> {
-    tool_calls
-        .iter()
-        .filter_map(|tc_enum| match tc_enum {
-            ChatCompletionMessageToolCalls::Function(tc) => {
-                if tc.function.name.is_empty() {
-                    return None;
-                }
-                let params = serde_json::from_str::<Value>(&tc.function.arguments)
-                    .unwrap_or(Value::Object(serde_json::Map::new()));
-                Some(ToolCallItem {
-                    name: tc.function.name.clone(),
-                    params,
-                    id: Some(tc.id.clone()),
-                })
-            }
-            _ => None,
-        })
-        .collect()
+    Tool::Function(FunctionTool {
+        name: tool.name.clone(),
+        description: Some(tool.description.clone()),
+        parameters,
+        strict: Some(false),
+    })
 }
 
 // ── Web search helpers ────────────────────────────────────────────────────────
 
-/// Convert the provider-level web search config into the `async-openai` typed
-/// [`WebSearchOptions`] that gets serialised on the Chat Completions request.
-fn build_web_search_options(cfg: &OpenAIWebSearchConfig) -> WebSearchOptions {
+/// Build a `Tool::WebSearch` from the provider-level config.
+///
+/// The Responses API web search works with all models (gpt-5, gpt-4o,
+/// o4-mini, etc.) — the model decides per-turn whether to search.
+fn build_web_search_tool(cfg: &OpenAIWebSearchConfig) -> Tool {
     let search_context_size = cfg.search_context_size.as_deref().and_then(|s| match s {
-        "low" => Some(WebSearchContextSize::Low),
-        "medium" => Some(WebSearchContextSize::Medium),
-        "high" => Some(WebSearchContextSize::High),
+        "low" => Some(WebSearchToolSearchContextSize::Low),
+        "medium" => Some(WebSearchToolSearchContextSize::Medium),
+        "high" => Some(WebSearchToolSearchContextSize::High),
         _ => None,
     });
 
-    let user_location = cfg.user_location.as_ref().map(|loc| WebSearchUserLocation {
-        r#type: WebSearchUserLocationType::Approximate,
-        approximate: WebSearchLocation {
-            country: loc.country.clone(),
+    let user_location = cfg
+        .user_location
+        .as_ref()
+        .map(|loc| WebSearchApproximateLocation {
+            r#type: WebSearchApproximateLocationType::Approximate,
             city: loc.city.clone(),
+            country: loc.country.clone(),
             region: loc.region.clone(),
             timezone: loc.timezone.clone(),
-        },
-    });
+        });
 
-    WebSearchOptions {
-        search_context_size,
+    Tool::WebSearch(WebSearchTool {
+        filters: None,
         user_location,
+        search_context_size,
+    })
+}
+
+// ── Response parsing helpers ──────────────────────────────────────────────────
+
+/// Parse a completed [`Response`] into our [`LlmResponse`].
+///
+/// The Responses API returns a flat `output: Vec<OutputItem>` containing
+/// messages, function calls, web search calls, reasoning items, etc.
+/// We extract function calls and text content from the output.
+fn parse_response(response: Response) -> anyhow::Result<LlmResponse> {
+    let meta = extract_response_meta(&response);
+
+    let mut tool_calls: Vec<ToolCallItem> = Vec::new();
+    let mut text_parts: Vec<String> = Vec::new();
+
+    for item in &response.output {
+        match item {
+            OutputItem::FunctionCall(fc) => {
+                let params = serde_json::from_str::<Value>(&fc.arguments)
+                    .unwrap_or(Value::Object(serde_json::Map::new()));
+                tool_calls.push(ToolCallItem {
+                    name: fc.name.clone(),
+                    params,
+                    id: Some(fc.call_id.clone()),
+                });
+            }
+            OutputItem::Message(msg) => {
+                extract_message_text(msg, &mut text_parts);
+            }
+            OutputItem::WebSearchCall(_) => {
+                // Web search calls are handled internally by the API;
+                // the result appears as message text with citations.
+                debug!("OpenAI: web search call in output (handled by API)");
+            }
+            OutputItem::Reasoning(_) => {
+                // Reasoning items from o-series models — we could surface
+                // these but for now just log.
+                debug!("OpenAI: reasoning item in output");
+            }
+            other => {
+                debug!(?other, "OpenAI: unhandled output item type");
+            }
+        }
+    }
+
+    // Priority: tool calls > text.
+    if !tool_calls.is_empty() {
+        debug!(
+            count = tool_calls.len(),
+            "OpenAI Responses: tool calls received"
+        );
+        return Ok(LlmResponse::ToolCalls(tool_calls, meta));
+    }
+
+    let content = text_parts.join("");
+    debug!("OpenAI Responses: final answer received");
+    Ok(LlmResponse::FinalAnswer(content, meta))
+}
+
+/// Extract text from an [`OutputMessage`].
+fn extract_message_text(msg: &OutputMessage, text_parts: &mut Vec<String>) {
+    for content in &msg.content {
+        match content {
+            OutputMessageContent::OutputText(ot) => {
+                text_parts.push(ot.text.clone());
+            }
+            OutputMessageContent::Refusal(r) => {
+                text_parts.push(format!("[Refusal: {}]", r.refusal));
+            }
+        }
     }
 }
 
-// ── Model compatibility ───────────────────────────────────────────────────────
+/// Extract [`LlmResponseMeta`] from a Responses API response.
+fn extract_response_meta(response: &Response) -> LlmResponseMeta {
+    let status = format!("{:?}", response.status).to_lowercase();
 
-/// Models known to support `web_search_options` in Chat Completions.
-const WEB_SEARCH_MODELS: &[&str] = &[
-    "gpt-4o-search-preview",
-    "gpt-4o-mini-search-preview",
-    "gpt-5-search-api",
-];
+    LlmResponseMeta {
+        model: Some(response.model.clone()),
+        response_id: Some(response.id.clone()),
+        input_tokens: response.usage.as_ref().map(|u| u.input_tokens as u64),
+        output_tokens: response.usage.as_ref().map(|u| u.output_tokens as u64),
+        finish_reason: Some(status),
+    }
+}
 
-/// Returns `true` when the model name matches a known search-capable model.
+// ── HTTP client ───────────────────────────────────────────────────────────────
+
+/// Build a `reqwest::Client` with the configured timeout.
 ///
-/// Uses prefix matching so versioned snapshots like
-/// `gpt-4o-search-preview-2025-03-11` are also accepted.
-fn model_supports_web_search(model: &str) -> bool {
-    WEB_SEARCH_MODELS
-        .iter()
-        .any(|prefix| model.starts_with(prefix))
+/// `async-openai` does not support `reqwest-middleware`, so we cannot inject the
+/// tracing middleware.  We do however set the request timeout so that it matches
+/// the provider configuration rather than relying on async-openai's defaults.
+fn build_reqwest_client(timeout_secs: u64) -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))
 }
 
 // ── URL normalisation ─────────────────────────────────────────────────────────
@@ -781,13 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn build_messages_system_prompt() {
-        let (msgs, _) = build_openai_messages("You are helpful.", &[]);
-        assert_eq!(msgs.len(), 1);
-    }
-
-    #[test]
-    fn build_messages_text_user_assistant() {
+    fn build_input_items_user_assistant() {
         let history = vec![
             ChatHistoryMessage::Text {
                 role: ChatRole::User,
@@ -798,13 +748,28 @@ mod tests {
                 content: "hi there".to_string(),
             },
         ];
-        let (msgs, _) = build_openai_messages("sys", &history);
-        // system + user + assistant
-        assert_eq!(msgs.len(), 3);
+        let items = build_input_items(&history);
+        assert_eq!(items.len(), 2);
     }
 
     #[test]
-    fn build_messages_tool_calls_and_results() {
+    fn build_input_items_system_becomes_developer() {
+        let history = vec![ChatHistoryMessage::Text {
+            role: ChatRole::System,
+            content: "you are helpful".to_string(),
+        }];
+        let items = build_input_items(&history);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            InputItem::EasyMessage(msg) => {
+                assert_eq!(msg.role, Role::Developer);
+            }
+            _ => panic!("Expected EasyMessage"),
+        }
+    }
+
+    #[test]
+    fn build_input_items_tool_calls_and_results() {
         let history = vec![
             ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
                 name: "my-tool".to_string(),
@@ -816,11 +781,21 @@ mod tests {
                 content: "result".to_string(),
             },
         ];
-        let (msgs, pending) = build_openai_messages("", &history);
-        // assistant (tool_calls) + tool (result)
-        assert_eq!(msgs.len(), 2);
-        // pending_ids should be consumed
-        assert!(pending.is_empty());
+        let items = build_input_items(&history);
+        // FunctionCall + FunctionCallOutput
+        assert_eq!(items.len(), 2);
+
+        // Verify the call_id matches
+        match (&items[0], &items[1]) {
+            (
+                InputItem::Item(Item::FunctionCall(fc)),
+                InputItem::Item(Item::FunctionCallOutput(fco)),
+            ) => {
+                assert_eq!(fc.call_id, "call_123");
+                assert_eq!(fco.call_id, "call_123");
+            }
+            _ => panic!("Expected FunctionCall and FunctionCallOutput"),
+        }
     }
 
     #[test]
@@ -838,52 +813,73 @@ mod tests {
             is_mutating: false,
             requires_confirmation: false,
         };
-        let tool = tool_spec_to_openai(&spec);
-        assert_eq!(tool.function.name, "file-read");
-        assert_eq!(tool.function.description, Some("Read a file".to_string()));
+        let tool = tool_spec_to_responses(&spec);
+        match tool {
+            Tool::Function(ft) => {
+                assert_eq!(ft.name, "file-read");
+                assert_eq!(ft.description, Some("Read a file".to_string()));
+                assert!(ft.parameters.is_some());
+            }
+            _ => panic!("Expected Tool::Function"),
+        }
     }
 
-    // ── Web search option tests ───────────────────────────────────────────
+    // ── Web search tool tests ─────────────────────────────────────────────
 
     #[test]
-    fn build_web_search_options_defaults() {
+    fn build_web_search_tool_defaults() {
         let cfg = OpenAIWebSearchConfig {
             search_context_size: None,
             user_location: None,
         };
-        let opts = build_web_search_options(&cfg);
-        assert!(opts.search_context_size.is_none());
-        assert!(opts.user_location.is_none());
+        let tool = build_web_search_tool(&cfg);
+        match tool {
+            Tool::WebSearch(ws) => {
+                assert!(ws.search_context_size.is_none());
+                assert!(ws.user_location.is_none());
+            }
+            _ => panic!("Expected Tool::WebSearch"),
+        }
     }
 
     #[test]
-    fn build_web_search_options_with_context_size() {
+    fn build_web_search_tool_with_context_size() {
         for (input, expected) in [
-            ("low", WebSearchContextSize::Low),
-            ("medium", WebSearchContextSize::Medium),
-            ("high", WebSearchContextSize::High),
+            ("low", WebSearchToolSearchContextSize::Low),
+            ("medium", WebSearchToolSearchContextSize::Medium),
+            ("high", WebSearchToolSearchContextSize::High),
         ] {
             let cfg = OpenAIWebSearchConfig {
                 search_context_size: Some(input.to_string()),
                 user_location: None,
             };
-            let opts = build_web_search_options(&cfg);
-            assert_eq!(opts.search_context_size, Some(expected));
+            let tool = build_web_search_tool(&cfg);
+            match tool {
+                Tool::WebSearch(ws) => {
+                    assert_eq!(ws.search_context_size, Some(expected));
+                }
+                _ => panic!("Expected Tool::WebSearch"),
+            }
         }
     }
 
     #[test]
-    fn build_web_search_options_invalid_context_size_ignored() {
+    fn build_web_search_tool_invalid_context_size_ignored() {
         let cfg = OpenAIWebSearchConfig {
             search_context_size: Some("ultra".to_string()),
             user_location: None,
         };
-        let opts = build_web_search_options(&cfg);
-        assert!(opts.search_context_size.is_none());
+        let tool = build_web_search_tool(&cfg);
+        match tool {
+            Tool::WebSearch(ws) => {
+                assert!(ws.search_context_size.is_none());
+            }
+            _ => panic!("Expected Tool::WebSearch"),
+        }
     }
 
     #[test]
-    fn build_web_search_options_with_user_location() {
+    fn build_web_search_tool_with_user_location() {
         let cfg = OpenAIWebSearchConfig {
             search_context_size: None,
             user_location: Some(OpenAIUserLocation {
@@ -893,10 +889,15 @@ mod tests {
                 timezone: Some("Europe/London".to_string()),
             }),
         };
-        let opts = build_web_search_options(&cfg);
-        let loc = opts.user_location.expect("user_location should be set");
-        assert_eq!(loc.approximate.country, Some("GB".to_string()));
-        assert_eq!(loc.approximate.city, Some("London".to_string()));
+        let tool = build_web_search_tool(&cfg);
+        match tool {
+            Tool::WebSearch(ws) => {
+                let loc = ws.user_location.expect("user_location should be set");
+                assert_eq!(loc.country, Some("GB".to_string()));
+                assert_eq!(loc.city, Some("London".to_string()));
+            }
+            _ => panic!("Expected Tool::WebSearch"),
+        }
     }
 
     #[test]
@@ -908,9 +909,8 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_with_web_search_compatible_model() {
+    fn capabilities_with_web_search() {
         let cfg = OpenAIProviderConfig {
-            model: "gpt-4o-search-preview".to_string(),
             web_search: Some(OpenAIWebSearchConfig {
                 search_context_size: None,
                 user_location: None,
@@ -919,37 +919,82 @@ mod tests {
         };
         let provider = OpenAIProvider::new(cfg, "test-key").expect("should build");
         let caps = provider.capabilities();
-        assert_eq!(caps.hosted_tools, vec![HostedTool::WebSearch]);
-    }
-
-    #[test]
-    fn capabilities_with_web_search_incompatible_model() {
-        let cfg = OpenAIProviderConfig {
-            model: "gpt-4o".to_string(),
-            web_search: Some(OpenAIWebSearchConfig {
-                search_context_size: None,
-                user_location: None,
-            }),
-            ..Default::default()
-        };
-        let provider = OpenAIProvider::new(cfg, "test-key").expect("should build");
-        let caps = provider.capabilities();
-        assert!(
-            caps.hosted_tools.is_empty(),
-            "should not advertise WebSearch for incompatible model"
+        assert_eq!(
+            caps.hosted_tools,
+            vec![HostedTool::WebSearch],
+            "Responses API web search works on all models"
         );
     }
 
     #[test]
-    fn model_supports_web_search_prefix_matching() {
-        assert!(model_supports_web_search("gpt-4o-search-preview"));
-        assert!(model_supports_web_search(
-            "gpt-4o-search-preview-2025-03-11"
-        ));
-        assert!(model_supports_web_search("gpt-4o-mini-search-preview"));
-        assert!(model_supports_web_search("gpt-5-search-api"));
-        assert!(!model_supports_web_search("gpt-4o"));
-        assert!(!model_supports_web_search("gpt-4.1"));
-        assert!(!model_supports_web_search("o3-mini"));
+    fn capabilities_with_web_search_any_model() {
+        // Responses API web search works with gpt-4o, gpt-5, o4-mini, etc.
+        for model in ["gpt-4o", "gpt-5", "o4-mini", "gpt-4.1"] {
+            let cfg = OpenAIProviderConfig {
+                model: model.to_string(),
+                web_search: Some(OpenAIWebSearchConfig {
+                    search_context_size: None,
+                    user_location: None,
+                }),
+                ..Default::default()
+            };
+            let provider = OpenAIProvider::new(cfg, "test-key").expect("should build");
+            let caps = provider.capabilities();
+            assert_eq!(
+                caps.hosted_tools,
+                vec![HostedTool::WebSearch],
+                "web search should work on model {model}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_input_items_multimodal() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("Look at this".to_string()),
+                ContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    data: "base64data".to_string(),
+                },
+            ],
+        }];
+        let items = build_input_items(&history);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            InputItem::EasyMessage(msg) => {
+                assert_eq!(msg.role, Role::User);
+            }
+            _ => panic!("Expected EasyMessage with content list"),
+        }
+    }
+
+    #[test]
+    fn find_preceding_call_id_matches_correctly() {
+        let items = vec![
+            InputItem::Item(Item::FunctionCall(FunctionToolCall {
+                arguments: "{}".to_string(),
+                call_id: "call_1".to_string(),
+                name: "tool-a".to_string(),
+                id: None,
+                status: Some(OutputStatus::Completed),
+            })),
+            InputItem::Item(Item::FunctionCallOutput(FunctionCallOutputItemParam {
+                call_id: "call_1".to_string(),
+                output: FunctionCallOutput::Text("done".to_string()),
+                id: None,
+                status: None,
+            })),
+            InputItem::Item(Item::FunctionCall(FunctionToolCall {
+                arguments: "{}".to_string(),
+                call_id: "call_2".to_string(),
+                name: "tool-b".to_string(),
+                id: None,
+                status: Some(OutputStatus::Completed),
+            })),
+        ];
+        // call_1 is matched, call_2 is unmatched → should return call_2
+        let id = find_preceding_call_id(&items);
+        assert_eq!(id, "call_2");
     }
 }
