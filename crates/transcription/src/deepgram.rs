@@ -7,6 +7,7 @@ use anyhow::{bail, Context};
 use async_trait::async_trait;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, warn};
+use url::Url;
 
 use crate::provider::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
 
@@ -25,15 +26,14 @@ pub struct DeepgramProvider {
 }
 
 impl DeepgramProvider {
-    pub fn new(api_key: impl Into<String>) -> Self {
-        let client = assistant_llm::build_http_client(DEFAULT_TIMEOUT_SECS)
-            .expect("Failed to build HTTP client for Deepgram provider");
-        Self {
+    pub fn new(api_key: impl Into<String>) -> anyhow::Result<Self> {
+        let client = assistant_llm::build_http_client(DEFAULT_TIMEOUT_SECS)?;
+        Ok(Self {
             api_key: api_key.into(),
             model: "nova-3".to_string(),
             base_url: "https://api.deepgram.com/v1".to_string(),
             client,
-        }
+        })
     }
 
     /// Override the model name.
@@ -98,18 +98,19 @@ impl TranscriptionProvider for DeepgramProvider {
             "Transcribing audio via Deepgram"
         );
 
-        let mut url = format!(
-            "{}/listen?model={}&smart_format=true&detect_language=true",
-            self.base_url, self.model
-        );
-
+        let mut url = Url::parse(&format!("{}/listen", self.base_url))
+            .context("Invalid Deepgram base URL")?;
+        url.query_pairs_mut()
+            .append_pair("model", &self.model)
+            .append_pair("smart_format", "true")
+            .append_pair("detect_language", "true");
         if let Some(lang) = &request.language {
-            url.push_str(&format!("&language={lang}"));
+            url.query_pairs_mut().append_pair("language", lang);
         }
 
         let resp = self
             .client
-            .post(&url)
+            .post(url)
             .header("Authorization", format!("Token {}", self.api_key))
             .header("Content-Type", &request.mime_type)
             .body(request.audio_data)

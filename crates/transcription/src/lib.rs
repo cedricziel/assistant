@@ -69,7 +69,7 @@ pub fn build_provider(
                     )
                 })?;
 
-            let mut provider = WhisperProvider::new(api_key);
+            let mut provider = WhisperProvider::new(api_key)?;
             if let Some(ref url) = config.base_url {
                 provider = provider.with_base_url(url);
             }
@@ -79,7 +79,7 @@ pub fn build_provider(
             Ok(Arc::new(provider))
         }
         TranscriptionProviderKind::Ollama => {
-            let mut provider = OllamaTranscriptionProvider::new();
+            let mut provider = OllamaTranscriptionProvider::new()?;
             if let Some(ref url) = config.base_url {
                 provider = provider.with_base_url(url);
             }
@@ -100,7 +100,7 @@ pub fn build_provider(
                     )
                 })?;
 
-            let mut provider = DeepgramProvider::new(api_key);
+            let mut provider = DeepgramProvider::new(api_key)?;
             if let Some(ref url) = config.base_url {
                 provider = provider.with_base_url(url);
             }

@@ -140,6 +140,10 @@ struct SlackCallbackState {
     storage: Arc<StorageLayer>,
     /// Audio transcription provider (if configured).
     transcription: Option<Arc<dyn TranscriptionProvider>>,
+    /// BCP-47 language hint for transcription (e.g. `"en"`, `"de"`).
+    transcription_language: Option<String>,
+    /// Shared HTTP client for downloading Slack file attachments.
+    http_client: reqwest::Client,
     /// Per-conversation serialisation mutex.
     ///
     /// Each conversation has a single `Mutex<()>` token; holding it means
@@ -240,6 +244,7 @@ const SLACK_FILE_DOWNLOAD_TIMEOUT_SECS: u64 = 15;
 async fn download_slack_file_as_content_block(
     file: &SlackFile,
     bot_token: &str,
+    http_client: &reqwest::Client,
 ) -> Option<ContentBlock> {
     let mime = file.mimetype.as_ref().map(|m| m.to_string())?;
     if !IMAGE_MIME_PREFIXES.iter().any(|p| mime.starts_with(p)) {
@@ -258,13 +263,7 @@ async fn download_slack_file_as_content_block(
 
     debug!(file_id = %file.id.0, mime = %mime, "Downloading Slack file for vision");
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(
-            SLACK_FILE_DOWNLOAD_TIMEOUT_SECS,
-        ))
-        .build()
-        .ok()?;
-    let resp = client
+    let resp = http_client
         .get(url.as_str())
         .header("Authorization", format!("Bearer {bot_token}"))
         .send()
@@ -322,6 +321,7 @@ const MAX_AUDIO_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 async fn download_slack_audio_file(
     file: &SlackFile,
     bot_token: &str,
+    http_client: &reqwest::Client,
 ) -> Option<(Vec<u8>, String, Option<String>)> {
     let mime = file.mimetype.as_ref().map(|m| m.to_string())?;
     if !assistant_transcription::is_audio_mime(&mime) {
@@ -341,13 +341,7 @@ async fn download_slack_audio_file(
 
     debug!(file_id = %file.id.0, mime = %mime, "Downloading Slack audio file for transcription");
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(
-            SLACK_FILE_DOWNLOAD_TIMEOUT_SECS,
-        ))
-        .build()
-        .ok()?;
-    let resp = client
+    let resp = http_client
         .get(url.as_str())
         .header("Authorization", format!("Bearer {bot_token}"))
         .send()
@@ -396,12 +390,14 @@ async fn download_slack_audio_file(
 async fn transcribe_slack_audio_files(
     files: &[SlackFile],
     bot_token: &str,
+    http_client: &reqwest::Client,
     provider: &dyn TranscriptionProvider,
     language: Option<&str>,
 ) -> String {
     let mut transcripts = Vec::new();
     for file in files {
-        let Some((audio_data, mime, filename)) = download_slack_audio_file(file, bot_token).await
+        let Some((audio_data, mime, filename)) =
+            download_slack_audio_file(file, bot_token, http_client).await
         else {
             continue;
         };
@@ -582,6 +578,8 @@ async fn on_push_event(
         started_at,
         storage,
         transcription,
+        transcription_language,
+        http_client,
         conv_locks,
         pending_messages,
     ) = {
@@ -603,6 +601,8 @@ async fn on_push_event(
             s.started_at,
             s.storage.clone(),
             s.transcription.clone(),
+            s.transcription_language.clone(),
+            s.http_client.clone(),
             s.conv_locks.clone(),
             s.pending_messages.clone(),
         )
@@ -863,7 +863,9 @@ async fn on_push_event(
     let bot_token_str = bot_token.token_value.0.as_str();
     let mut attachments = Vec::new();
     for file in &slack_files {
-        if let Some(block) = download_slack_file_as_content_block(file, bot_token_str).await {
+        if let Some(block) =
+            download_slack_file_as_content_block(file, bot_token_str, &http_client).await
+        {
             attachments.push(block);
         }
     }
@@ -877,9 +879,14 @@ async fn on_push_event(
     // Transcribe audio files (voice messages) if a transcription provider is configured.
     let mut text = text;
     if let Some(ref provider) = transcription {
-        let transcript =
-            transcribe_slack_audio_files(&slack_files, bot_token_str, provider.as_ref(), None)
-                .await;
+        let transcript = transcribe_slack_audio_files(
+            &slack_files,
+            bot_token_str,
+            &http_client,
+            provider.as_ref(),
+            transcription_language.as_deref(),
+        )
+        .await;
         if !transcript.is_empty() {
             // Prepend the transcript so the LLM sees it before any file metadata.
             text = if text.trim().is_empty() {
@@ -1109,6 +1116,7 @@ pub struct SlackInterface {
     orchestrator: Arc<Orchestrator>,
     storage: Arc<StorageLayer>,
     transcription: Option<Arc<dyn TranscriptionProvider>>,
+    transcription_language: Option<String>,
 }
 
 impl SlackInterface {
@@ -1122,12 +1130,18 @@ impl SlackInterface {
             orchestrator,
             storage,
             transcription: None,
+            transcription_language: None,
         }
     }
 
     /// Enable automatic audio transcription for voice messages.
-    pub fn with_transcription(mut self, provider: Arc<dyn TranscriptionProvider>) -> Self {
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
         self.transcription = Some(provider);
+        self.transcription_language = language;
         self
     }
 
@@ -1300,6 +1314,13 @@ impl SlackInterface {
                 started_at,
                 storage: self.storage.clone(),
                 transcription: self.transcription.clone(),
+                transcription_language: self.transcription_language.clone(),
+                http_client: reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(
+                        SLACK_FILE_DOWNLOAD_TIMEOUT_SECS,
+                    ))
+                    .build()
+                    .expect("Failed to build HTTP client for Slack file downloads"),
                 conv_locks: conv_locks.clone(),
                 pending_messages: Arc::new(Mutex::new(HashMap::new())),
             };

@@ -28,6 +28,21 @@ pub struct TranscriptionResult {
     pub duration_secs: Option<f64>,
 }
 
+/// Guess a reasonable filename extension from a MIME type so transcription
+/// APIs can detect the codec when the original filename is unavailable.
+pub(crate) fn extension_for_mime(mime: &str) -> &str {
+    match mime {
+        "audio/ogg" | "audio/opus" => "ogg",
+        "audio/mpeg" | "audio/mp3" => "mp3",
+        "audio/mp4" | "audio/m4a" | "audio/x-m4a" => "m4a",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "audio/flac" | "audio/x-flac" => "flac",
+        "audio/webm" => "webm",
+        "audio/aac" => "aac",
+        _ => "bin",
+    }
+}
+
 /// Pluggable backend for converting audio to text.
 ///
 /// Follows the same `Arc<dyn Trait>` pattern as [`LlmProvider`] so providers

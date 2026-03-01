@@ -683,6 +683,11 @@ async fn main() -> Result<()> {
     );
 
     // 7b. Build transcription provider (shared across interfaces).
+    let transcription_language = bs
+        .config
+        .transcription
+        .as_ref()
+        .and_then(|tc| tc.language.clone());
     let transcription_provider = bs
         .config
         .transcription
@@ -703,7 +708,7 @@ async fn main() -> Result<()> {
         )?;
         let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator, bs.storage);
         if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone());
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
         }
 
         // Register ambient tools (slack-post, slack-send-dm, slack-list-channels)
@@ -742,9 +747,8 @@ async fn main() -> Result<()> {
         let slack_cfg = bs.config.slack.clone().unwrap_or_default();
         let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
         if let Some(ref tp) = transcription_provider {
-            iface = iface.with_transcription(tp.clone());
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
         }
-
         // Register proactive Slack posting tool.
         for handler in iface.ambient_tools() {
             let tool_name = handler.name().to_string();

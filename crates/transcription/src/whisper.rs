@@ -10,7 +10,9 @@ use reqwest::multipart;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, warn};
 
-use crate::provider::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
+use crate::provider::{
+    extension_for_mime, TranscriptionProvider, TranscriptionRequest, TranscriptionResult,
+};
 
 /// Default timeout for transcription requests (120 s — audio can be long).
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -27,15 +29,14 @@ pub struct WhisperProvider {
 }
 
 impl WhisperProvider {
-    pub fn new(api_key: impl Into<String>) -> Self {
-        let client = assistant_llm::build_http_client(DEFAULT_TIMEOUT_SECS)
-            .expect("Failed to build HTTP client for Whisper provider");
-        Self {
+    pub fn new(api_key: impl Into<String>) -> anyhow::Result<Self> {
+        let client = assistant_llm::build_http_client(DEFAULT_TIMEOUT_SECS)?;
+        Ok(Self {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: api_key.into(),
             model: "whisper-1".to_string(),
             client,
-        }
+        })
     }
 
     /// Override the base URL (useful for LocalAI or other compatible servers).
@@ -48,20 +49,6 @@ impl WhisperProvider {
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
         self
-    }
-}
-
-/// Guess a reasonable filename extension from a MIME type so the Whisper API
-/// can detect the codec when the original filename is unavailable.
-fn extension_for_mime(mime: &str) -> &str {
-    match mime {
-        "audio/ogg" | "audio/opus" => "ogg",
-        "audio/mpeg" | "audio/mp3" => "mp3",
-        "audio/mp4" | "audio/m4a" | "audio/x-m4a" => "m4a",
-        "audio/wav" | "audio/x-wav" => "wav",
-        "audio/flac" | "audio/x-flac" => "flac",
-        "audio/webm" => "webm",
-        _ => "bin",
     }
 }
 
