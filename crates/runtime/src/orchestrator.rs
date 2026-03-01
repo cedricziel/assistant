@@ -778,7 +778,16 @@ impl Orchestrator {
                 &all_specs,
             );
             let llm_start = std::time::Instant::now();
-            let response = self.llm.chat(&system_prompt, &history, &all_specs).await;
+            let mut response = self.llm.chat(&system_prompt, &history, &all_specs).await;
+            // Context-length recovery: compact history and retry once.
+            if let Err(ref e) = response {
+                if Self::is_context_too_long(e) {
+                    warn!("Context too long, attempting history compaction");
+                    if self.compact_history(&mut history).await.unwrap_or(false) {
+                        response = self.llm.chat(&system_prompt, &history, &all_specs).await;
+                    }
+                }
+            }
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
@@ -1340,11 +1349,23 @@ impl Orchestrator {
                 &tool_specs,
             );
             let llm_start = std::time::Instant::now();
-            let response = self
+            let mut response = self
                 .llm
                 .chat(&system_prompt, &history, &tool_specs)
                 .instrument(iteration_span.clone())
                 .await;
+            if let Err(ref e) = response {
+                if Self::is_context_too_long(e) {
+                    warn!("Context too long in run_turn, attempting history compaction");
+                    if self.compact_history(&mut history).await.unwrap_or(false) {
+                        response = self
+                            .llm
+                            .chat(&system_prompt, &history, &tool_specs)
+                            .instrument(iteration_span.clone())
+                            .await;
+                    }
+                }
+            }
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
@@ -1646,7 +1667,7 @@ impl Orchestrator {
                 &tool_specs,
             );
             let llm_start = std::time::Instant::now();
-            let response = self
+            let mut response = self
                 .llm
                 .chat_streaming(
                     &system_prompt,
@@ -1656,6 +1677,22 @@ impl Orchestrator {
                 )
                 .instrument(iteration_span.clone())
                 .await;
+            if let Err(ref e) = response {
+                if Self::is_context_too_long(e) {
+                    warn!("Context too long in run_turn_streaming, attempting history compaction");
+                    if self.compact_history(&mut history).await.unwrap_or(false) {
+                        response = self
+                            .llm
+                            .chat_streaming(
+                                &system_prompt,
+                                &history,
+                                &tool_specs,
+                                Some(token_sink.clone()),
+                            )
+                            .await;
+                    }
+                }
+            }
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
@@ -2087,7 +2124,155 @@ impl Orchestrator {
         }
     }
 
-    /// Persist a synthetic assistant message so the conversation history
+    // -- Context compaction --------------------------------------------------
+
+    /// Minimum number of recent messages to preserve during compaction.
+    /// Keeps enough context for the current interaction to make sense.
+    const COMPACT_KEEP_RECENT: usize = 10;
+
+    /// Maximum character length for the conversation text sent to the
+    /// summarisation call.  Prevents the summary call itself from exceeding
+    /// the context window.
+    const COMPACT_MAX_SUMMARY_INPUT_CHARS: usize = 80_000;
+
+    /// Returns `true` when an LLM error looks like a context-length /
+    /// prompt-too-long rejection.  Works across Anthropic, OpenAI and Ollama.
+    fn is_context_too_long(err: &anyhow::Error) -> bool {
+        let msg = err.to_string().to_lowercase();
+        msg.contains("prompt is too long")
+            || msg.contains("prompt_too_long")
+            || msg.contains("context_length_exceeded")
+            || msg.contains("maximum context length")
+            || msg.contains("too many tokens")
+            || msg.contains("token limit")
+            || msg.contains("request too large")
+    }
+
+    /// Format a slice of history messages as human-readable text suitable for
+    /// summarisation by the LLM.
+    fn format_history_for_summary(messages: &[ChatHistoryMessage]) -> String {
+        let mut buf = String::new();
+        for msg in messages {
+            match msg {
+                ChatHistoryMessage::Text { role, content } => {
+                    let label = match role {
+                        ChatRole::User => "User",
+                        ChatRole::Assistant => "Assistant",
+                        ChatRole::System => "System",
+                        ChatRole::Tool => "Tool",
+                    };
+                    buf.push_str(&format!("{label}: {content}\n\n"));
+                }
+                ChatHistoryMessage::MultimodalUser { .. } => {
+                    buf.push_str("User: [sent an image or multimodal content]\n\n");
+                }
+                ChatHistoryMessage::AssistantToolCalls(calls) => {
+                    let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+                    buf.push_str(&format!(
+                        "Assistant: [called tools: {}]\n\n",
+                        names.join(", ")
+                    ));
+                }
+                ChatHistoryMessage::ToolResult { name, content } => {
+                    // Truncate long tool outputs for the summary.
+                    let truncated: String = content.chars().take(500).collect();
+                    let suffix = if content.len() > 500 { "…" } else { "" };
+                    buf.push_str(&format!("Tool ({name}): {truncated}{suffix}\n\n"));
+                }
+            }
+        }
+        buf
+    }
+
+    /// Attempt to compact conversation history by summarising older turns.
+    ///
+    /// Splits history into *old* (beginning) and *recent* (tail) segments,
+    /// asks the LLM to produce a concise summary of the old segment, and
+    /// replaces the old messages with a single summary message.
+    ///
+    /// Returns `true` if compaction was performed, `false` if the history is
+    /// already too short to compact.
+    async fn compact_history(&self, history: &mut Vec<ChatHistoryMessage>) -> Result<bool> {
+        if history.len() <= Self::COMPACT_KEEP_RECENT + 2 {
+            debug!(
+                len = history.len(),
+                "History too short to compact, skipping"
+            );
+            return Ok(false);
+        }
+
+        let split_at = history.len().saturating_sub(Self::COMPACT_KEEP_RECENT);
+        let old_messages = &history[..split_at];
+
+        let mut conversation_text = Self::format_history_for_summary(old_messages);
+        if conversation_text.len() > Self::COMPACT_MAX_SUMMARY_INPUT_CHARS {
+            // Keep the tail so the summary captures the most relevant context
+            // leading into the recent messages.
+            conversation_text = conversation_text
+                .chars()
+                .skip(conversation_text.chars().count() - Self::COMPACT_MAX_SUMMARY_INPUT_CHARS)
+                .collect();
+        }
+
+        let summary_system = "\
+You are a concise summariser.  Given a conversation transcript, produce \
+a short summary (at most a few paragraphs) that preserves:\n\
+- Key decisions and outcomes\n\
+- Important facts, names, numbers, file paths, code references\n\
+- The current state of any ongoing tasks\n\
+Omit pleasantries, repetitive tool outputs, and verbatim code blocks.";
+
+        let summary_history = vec![ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: format!("Summarise the following conversation:\n\n{conversation_text}"),
+        }];
+
+        info!(
+            old_messages = split_at,
+            recent_messages = history.len() - split_at,
+            "Compacting history via LLM summarisation"
+        );
+
+        let summary_response = self.llm.chat(summary_system, &summary_history, &[]).await;
+
+        let summary_text = match summary_response {
+            Ok(LlmResponse::FinalAnswer(text, _)) => text,
+            Ok(other) => {
+                warn!(
+                    ?other,
+                    "Unexpected LLM response during compaction, using fallback"
+                );
+                format!(
+                    "[Earlier conversation context ({split_at} messages) could not \
+                     be summarised and was dropped to fit within the context window.]"
+                )
+            }
+            Err(e) => {
+                warn!(%e, "LLM summarisation call failed, using fallback");
+                format!(
+                    "[Earlier conversation context ({split_at} messages) was dropped \
+                     to fit within the context window.]"
+                )
+            }
+        };
+
+        // Replace old messages with the summary.
+        let recent: Vec<ChatHistoryMessage> = history.drain(split_at..).collect();
+        history.clear();
+        history.push(ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: format!("[Conversation summary]\n{summary_text}"),
+        });
+        history.push(ChatHistoryMessage::Text {
+            role: ChatRole::Assistant,
+            content: "Understood — I have the summarised context. Continuing.".to_string(),
+        });
+        history.extend(recent);
+
+        info!(new_len = history.len(), "History compacted successfully");
+        Ok(true)
+    }
+
     /// maintains proper User→Assistant alternation after a turn error.
     ///
     /// Called when the tool-calling loop (or the LLM call itself) fails.
@@ -2339,11 +2524,23 @@ impl SubagentRunner for Orchestrator {
                     &tool_specs,
                 );
                 let llm_start = std::time::Instant::now();
-                let response = self
+                let mut response = self
                     .llm
                     .chat(&system_prompt, &history, &tool_specs)
                     .instrument(iteration_span.clone())
                     .await;
+                if let Err(ref e) = response {
+                    if Self::is_context_too_long(e) {
+                        warn!("Context too long in run_subagent, attempting history compaction");
+                        if self.compact_history(&mut history).await.unwrap_or(false) {
+                            response = self
+                                .llm
+                                .chat(&system_prompt, &history, &tool_specs)
+                                .instrument(iteration_span.clone())
+                                .await;
+                        }
+                    }
+                }
                 let llm_elapsed = llm_start.elapsed();
                 let response = match response {
                     Ok(r) => r,
