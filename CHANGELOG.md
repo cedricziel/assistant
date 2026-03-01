@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.25](https://github.com/cedricziel/assistant/compare/v0.1.24...v0.1.25) (2026-03-01)
+
+
+### Bug Fixes
+
+* **ci:** add make vendor to release build workflow ([38aba3d](https://github.com/cedricziel/assistant/commit/38aba3d1aa08659c2e68e31a41d606922012d3ec))
+
 ## [0.1.24](https://github.com/cedricziel/assistant/compare/v0.1.23...v0.1.24) (2026-03-01)
 
 
