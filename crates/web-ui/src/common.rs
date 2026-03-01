@@ -1,8 +1,14 @@
 //! Shared helpers used across web-ui page modules.
 
+use askama::Template;
 use axum::http::StatusCode;
+use axum::response::{Html, IntoResponse, Response};
+use tracing::warn;
 
 /// HTML-escape a string to prevent XSS in server-rendered pages.
+///
+/// Still needed by legacy pages that build HTML via `format!()`.
+/// Askama-based pages get auto-escaping for free.
 pub fn html_escape(input: &str) -> String {
     input
         .replace('&', "&amp;")
@@ -64,4 +70,18 @@ pub fn render_sidebar(active: &str) -> String {
          </div>",
         heading = heading,
     )
+}
+
+/// Render an Askama template into an axum [`Response`].
+///
+/// On success returns `200 OK` with `text/html`.  On failure logs a
+/// warning and returns `500 Internal Server Error`.
+pub fn render_template(tmpl: impl Template) -> Response {
+    match tmpl.render() {
+        Ok(html) => Html(html).into_response(),
+        Err(e) => {
+            warn!("Template render error: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
 }

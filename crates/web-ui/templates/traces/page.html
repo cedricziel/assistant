@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}Traces{% endblock %}
+
+{% block breadcrumb %}
+<span class="breadcrumb-page">Observability</span>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Traces</span>
+{% endblock %}
+
+{% block extra_css %}
+{% include "partials/default_css.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand"><p>assistant</p><h2>Telemetry</h2></div>
+
+      <div class="facet-group">
+        <h3>Service</h3>
+        <ul>
+          {% for facet in skill_facets %}
+          <li><a class="facet-link{% if facet.active %} active{% endif %}" href="{{ facet.url }}">
+            <span>{{ facet.name }}</span><em>{{ facet.count }}</em></a></li>
+          {% endfor %}
+          {% if skill_facets.is_empty() %}
+          <li class="muted">No skill activity yet</li>
+          {% endif %}
+        </ul>
+      </div>
+
+      <div class="facet-group">
+        <h3>Status</h3>
+        <form method="get">
+          {% if let Some(skill) = selected_skill %}
+          <input type="hidden" name="skill" value="{{ skill }}">
+          {% endif %}
+          {% if let Some(conv) = selected_conversation %}
+          <input type="hidden" name="conversation" value="{{ conv }}">
+          {% endif %}
+          {% if let Some(dur) = min_duration_ms %}
+          <input type="hidden" name="min_duration_ms" value="{{ dur }}">
+          {% endif %}
+          {% for opt in status_options %}
+          <label class="radio-label">
+            <input type="radio" name="status" value="{{ opt.value }}"
+                   onchange="this.form.submit()"{% if opt.checked %} checked{% endif %}>
+            {{ opt.label }}
+          </label>
+          {% endfor %}
+        </form>
+      </div>
+
+      <div class="facet-group">
+        <h3>Min Duration</h3>
+        <form method="get" class="min-dur-row">
+          {% if let Some(skill) = selected_skill %}
+          <input type="hidden" name="skill" value="{{ skill }}">
+          {% endif %}
+          {% if let Some(conv) = selected_conversation %}
+          <input type="hidden" name="conversation" value="{{ conv }}">
+          {% endif %}
+          {% if let Some(status) = selected_status %}
+          <input type="hidden" name="status" value="{{ status }}">
+          {% endif %}
+          <input type="number" name="min_duration_ms" value="{{ min_duration_str }}" placeholder="e.g. 500" min="0">
+          <button type="submit">Go</button>
+        </form>
+      </div>
+
+      <div class="facet-footer">
+        <span class="trace-count">Showing {{ filtered_count }} of {{ total_count }} traces</span>
+        <a href="/traces">Reset filters</a>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    {% if traces.is_empty() %}
+    <div class="panel trace-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Traces</h2>
+          <p>No traces match this query yet. Trigger a skill or soften the filters.</p>
+        </div>
+      </div>
+      <p class="empty">No rows to display.</p>
+    </div>
+    {% else %}
+    <div class="panel trace-panel">
+      <div class="panel-head">
+        <div><h2>Traces</h2></div>
+        <span class="pill">{{ filtered_count }} of {{ total_count }}</span>
+      </div>
+      <table class="trace-table">
+        <thead>
+          <tr>
+            <th>Trace ID</th>
+            <th>Service</th>
+            <th>Duration</th>
+            <th>Spans</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in traces %}
+          <tr onclick="window.location='/trace/{{ t.trace_url }}'">
+            <td><span class="trace-id">{{ t.short_id }}&hellip;</span></td>
+            <td>
+              {% if let Some(name) = t.service %}
+              {{ name }}
+              {% else %}
+              <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td>{{ t.duration }}</td>
+            <td>{{ t.span_count }}</td>
+            <td>
+              {% if t.is_error %}
+              <span class="status-err">&#x2717;</span>
+              {% else %}
+              <span class="status-ok">&#x2713;</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

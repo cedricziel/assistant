@@ -169,7 +169,7 @@ async fn chat_page(State(state): State<ChatState>) -> Response {
         active_id: None,
     };
 
-    render_template(tmpl)
+    common::render_template(tmpl)
 }
 
 /// `GET /chat/conversations?q=...` — htmx partial: filtered conversation list.
@@ -206,7 +206,7 @@ async fn conversation_list(
         active_id: None,
     };
 
-    render_template(tmpl)
+    common::render_template(tmpl)
 }
 
 /// `POST /chat/new` — create a new conversation.
@@ -240,7 +240,7 @@ async fn new_conversation(State(state): State<ChatState>, headers: HeaderMap) ->
                 all.iter().map(conv_to_view).collect()
             },
         };
-        let mut resp = render_template(tmpl);
+        let mut resp = common::render_template(tmpl);
         // Tell htmx to also load the new conversation into the chat panel
         resp.headers_mut().insert(
             "HX-Trigger-After-Swap",
@@ -291,7 +291,7 @@ async fn load_conversation(
             title,
             messages,
         };
-        render_template(tmpl)
+        common::render_template(tmpl)
     } else {
         // Full page with this conversation selected
         let convs = store.list_conversations().await.unwrap_or_default();
@@ -307,7 +307,7 @@ async fn load_conversation(
             }),
             active_id: Some(id),
         };
-        render_template(tmpl)
+        common::render_template(tmpl)
     }
 }
 
@@ -521,17 +521,6 @@ async fn delete_conversation(
 }
 
 // -- Helpers -----------------------------------------------------------------
-
-/// Render an Askama template into an axum `Response`.
-fn render_template(tmpl: impl Template) -> Response {
-    match tmpl.render() {
-        Ok(html) => Html(html).into_response(),
-        Err(e) => {
-            warn!("Template render error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
-}
 
 /// Convert a `ConversationRecord` to the view model used by templates.
 fn conv_to_view(c: &ConversationRecord) -> ConversationView {
