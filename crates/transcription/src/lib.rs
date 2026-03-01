@@ -11,6 +11,7 @@
 //! bytes to the configured provider, and inject the resulting transcript into
 //! the normal text message flow.
 
+mod converter;
 mod deepgram;
 mod ollama;
 mod provider;
@@ -20,6 +21,7 @@ use std::sync::Arc;
 
 use assistant_core::{TranscriptionConfig, TranscriptionProviderKind};
 
+pub use converter::{AudioConverter, AudioFormat, ConversionResult};
 pub use deepgram::DeepgramProvider;
 pub use ollama::OllamaTranscriptionProvider;
 pub use provider::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
@@ -107,6 +109,8 @@ pub fn build_provider(
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
+            // Enable audio conversion for formats not supported by Deepgram (e.g., M4A)
+            provider = provider.with_audio_conversion(AudioConverter::new());
             Ok(Arc::new(provider))
         }
     }
