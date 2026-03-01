@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, closed]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,6 +18,7 @@ env:
 jobs:
   check:
     name: Check
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -43,6 +45,7 @@ jobs:
 
   test:
     name: Test
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -66,6 +69,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -97,6 +101,7 @@ jobs:
 
   format:
     name: Format
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -111,6 +116,7 @@ jobs:
 
   visual-regression:
     name: Visual Regression
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
@@ -333,8 +339,32 @@ jobs:
               await github.rest.git.deleteRef({ owner, repo, ref: `heads/visual-diffs/pr-${prNumber}` });
             } catch { /* branch may not exist */ }
 
+  visual-diff-cleanup:
+    name: Clean up visual diff branch
+    if: github.event.pull_request.state == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete visual-diffs branch for this PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/visual-diffs/pr-${prNumber}`,
+              });
+              core.info(`Deleted branch visual-diffs/pr-${prNumber}`);
+            } catch (e) {
+              core.info(`No branch visual-diffs/pr-${prNumber} to clean up`);
+            }
+
   integration:
     name: Integration (smoke)
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
