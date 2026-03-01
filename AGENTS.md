@@ -20,9 +20,13 @@ cargo test -p assistant-runtime test_name
 cargo test -p assistant-tool-executor test_name -- --nocapture
 ```
 
+Run targets: `make run` (REPL), `make run-mcp` (MCP stdio), `make run-slack`, `make run-mattermost`.
+
 **Always run `make lint` and `make format` before committing.** Pre-commit hooks
 enforce `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo machete --with-metadata`.
 Install hooks after cloning: `make install-hooks`.
+
+**Note:** `cargo check --all-features` and the `signal` feature require `protoc` (protobuf compiler).
 
 ## Workspace Structure
 
@@ -30,22 +34,24 @@ Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 
 | Crate (package name)             | Path                          | Purpose                                              |
 |----------------------------------|-------------------------------|------------------------------------------------------|
-| `assistant-core`                 | `crates/core`                 | Shared types, ToolHandler trait, MessageBus trait      |
-| `assistant-llm`                  | `crates/llm`                  | LlmProvider trait, EmbeddingProvider, LlmClient       |
-| `assistant-provider-ollama`      | `crates/provider-ollama`      | Ollama LlmProvider implementation                     |
-| `assistant-provider-anthropic`   | `crates/provider-anthropic`   | Anthropic LlmProvider implementation                  |
-| `assistant-provider-openai`      | `crates/provider-openai`      | OpenAI LlmProvider implementation                     |
-| `assistant-skills`               | `crates/skills`               | Skill parsing, validation, embedded builtins          |
-| `assistant-storage`              | `crates/storage`              | SQLite (sqlx), SkillRegistry, TraceStore, MessageBus  |
-| `assistant-runtime`              | `crates/runtime`              | Orchestrator (main ReAct loop), SafetyGate, Scheduler |
-| `assistant-tool-executor`        | `crates/tool-executor`        | ToolHandler registry, builtin tools, dispatch         |
-| `assistant-mcp-server`           | `crates/mcp-server`           | stdio JSON-RPC 2.0 MCP server                        |
-| `assistant-cli`                  | `crates/interface-cli`        | Unified binary: REPL + subcommands                    |
-| `assistant-interface-slack`      | `crates/interface-slack`      | Slack bot library                                     |
-| `assistant-interface-mattermost` | `crates/interface-mattermost` | Mattermost bot library                                |
-| `assistant-interface-signal`     | `crates/interface-signal`     | Signal interface stub (feature-gated)                 |
-| `assistant-web-ui`               | `crates/web-ui`               | Trace analysis web UI + A2A protocol server           |
-| `assistant-integration-tests`    | `crates/integration-tests`    | End-to-end smoke tests                                |
+| `assistant-core`                 | `crates/core`                 | Shared types, ToolHandler trait, MessageBus trait     |
+| `assistant-llm`                  | `crates/llm`                  | LlmProvider trait, EmbeddingProvider, LlmClient      |
+| `assistant-provider-ollama`      | `crates/provider-ollama`      | Ollama LlmProvider implementation                    |
+| `assistant-provider-anthropic`   | `crates/provider-anthropic`   | Anthropic LlmProvider implementation                 |
+| `assistant-provider-openai`      | `crates/provider-openai`      | OpenAI LlmProvider implementation                    |
+| `assistant-skills`               | `crates/skills`               | Skill parsing, validation, embedded builtins         |
+| `assistant-storage`              | `crates/storage`              | SQLite (sqlx), SkillRegistry, TraceStore, MessageBus |
+| `assistant-runtime`              | `crates/runtime`              | Orchestrator (main ReAct loop), SafetyGate, Scheduler|
+| `assistant-tool-executor`        | `crates/tool-executor`        | ToolHandler registry, builtin tools, dispatch        |
+| `assistant-mcp-server`           | `crates/mcp-server`           | stdio JSON-RPC 2.0 MCP server                       |
+| `assistant-cli`                  | `crates/interface-cli`        | Unified binary: REPL + subcommands                   |
+| `assistant-interface-slack`      | `crates/interface-slack`      | Slack bot library                                    |
+| `assistant-interface-mattermost` | `crates/interface-mattermost` | Mattermost bot library                               |
+| `assistant-interface-signal`     | `crates/interface-signal`     | Signal interface stub (feature-gated)                |
+| `assistant-web-ui`               | `crates/web-ui`               | Trace analysis web UI + A2A protocol server          |
+| `assistant-a2a-proto`            | `crates/a2a-proto`            | A2A protocol protobuf definitions                    |
+| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`      | A2A protocol JSON Schema types                       |
+| `assistant-integration-tests`    | `crates/integration-tests`    | End-to-end smoke tests                               |
 
 Dependency order (no cycles):
 ```
@@ -86,10 +92,8 @@ use crate::helpers::build_context;
 
 ### Error Handling
 
-- **`anyhow::Result`** everywhere. This is the standard return type for all functions.
-- **`thiserror`** only at library boundary errors (rare).
-- **`anyhow::bail!`** for early error returns.
-- **`anyhow::Context`** via `.with_context(|| "descriptive msg")` to add context to errors.
+- **`anyhow::Result`** everywhere. **`thiserror`** only at library boundary errors (rare).
+- **`anyhow::bail!`** for early error returns; `.with_context(|| "msg")` to add context.
 - Tool handlers return `Ok(ToolOutput::error(...))` for non-fatal tool errors (shown to LLM), reserving `Err(...)` for truly unrecoverable failures.
 
 ### Async
@@ -102,17 +106,17 @@ use crate::helpers::build_context;
 
 ### Naming Conventions
 
-| Element          | Convention        | Example                                      |
-|------------------|-------------------|----------------------------------------------|
-| Crate names      | `assistant-*`     | `assistant-core`, `assistant-tool-executor`   |
-| Module files     | `snake_case`      | `skill_registry.rs`, `tool_executor.rs`       |
-| Structs          | `PascalCase`      | `ToolExecutor`, `FileReadHandler`             |
-| Traits           | `PascalCase`      | `ToolHandler`, `LlmProvider`                  |
-| Handler structs  | `<Feature>Handler` | `FileReadHandler`, `BashHandler`             |
-| Tool names (str) | `kebab-case`      | `"file-read"`, `"web-fetch"`, `"memory-get"`  |
-| Skill names      | `kebab-case`      | Must match directory name exactly              |
+| Element          | Convention         | Example                                      |
+|------------------|--------------------|----------------------------------------------|
+| Crate names      | `assistant-*`      | `assistant-core`, `assistant-tool-executor`   |
+| Module files     | `snake_case`       | `skill_registry.rs`, `tool_executor.rs`       |
+| Structs          | `PascalCase`       | `ToolExecutor`, `FileReadHandler`             |
+| Traits           | `PascalCase`       | `ToolHandler`, `LlmProvider`                  |
+| Handler structs  | `<Feature>Handler` | `FileReadHandler`, `BashHandler`              |
+| Tool names (str) | `kebab-case`       | `"file-read"`, `"web-fetch"`, `"memory-get"`  |
+| Skill names      | `kebab-case`       | Must match directory name exactly              |
 | Constants        | `SCREAMING_SNAKE`  | `DEFAULT_LIMIT`, `BOOTSTRAP_MAX_CHARS`        |
-| Enum variants    | `PascalCase`      | `MessageRole::User`, `Interface::Cli`         |
+| Enum variants    | `PascalCase`       | `MessageRole::User`, `Interface::Cli`         |
 
 ### Type Patterns
 
@@ -120,23 +124,15 @@ use crate::helpers::build_context;
 - `Arc<T>` for shared ownership (`Arc<StorageLayer>`, `Arc<SkillRegistry>`).
 - `RwLock<HashMap<...>>` for mutable registries.
 - `HashMap<String, serde_json::Value>` for dynamic tool parameters.
-- `ToolOutput` with `success()`/`error()` constructors and `with_data()` builder.
+- `ToolOutput` with `success()`/`error()` constructors, `with_data()` and `with_attachment()` builders.
 - Builder-style `with_*` methods for optional configuration on structs.
 
-### Logging
+### Logging & Dependencies
 
-Use `tracing` macros only: `debug!`, `info!`, `warn!`, `error!`. No `println!` in library crates.
-
-### Doc Comments
-
-- Module-level: `//!` at the top of the file.
-- Functions/methods: `///` with `# Parameters` sections for public APIs.
-- Section dividers: `// -- Section Name --` with em-dashes.
-
-### Dependencies
-
-- **No `serde_yaml`**: use `gray_matter` for SKILL.md frontmatter parsing.
-- All shared dependencies are declared in `[workspace.dependencies]` in root `Cargo.toml`.
+- Use `tracing` macros only: `debug!`, `info!`, `warn!`, `error!`. No `println!` in library crates.
+- Module-level docs: `//!`; function docs: `///`; section dividers: `// -- Name --`.
+- Use `gray_matter` for SKILL.md frontmatter parsing (`serde_yaml` only in A2A agent store).
+- All shared dependencies declared in `[workspace.dependencies]` in root `Cargo.toml`.
 
 ## Commit Style
 
@@ -147,7 +143,9 @@ Prefixes: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.
 ## Adding a Builtin Tool
 
 1. Create `crates/tool-executor/src/builtins/<name>.rs` with a handler struct.
-2. Implement `#[async_trait] impl ToolHandler` with `name()`, `description()`, `params_schema()`, `run()`.
+2. Implement `#[async_trait] impl ToolHandler` -- 4 required methods: `name()`, `description()`,
+   `params_schema()`, `run()`. Optionally override `is_mutating()`, `requires_confirmation()`,
+   or `output_schema()`.
 3. Export from `crates/tool-executor/src/builtins/mod.rs`.
 4. Register in `ToolExecutor::register_builtins()` in `executor.rs`.
 5. Optionally add `skills/<name>/SKILL.md` for documentation.
@@ -156,12 +154,13 @@ Prefixes: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.
 
 - Unit tests in `#[cfg(test)] mod tests` at the bottom of each file.
 - Use `#[tokio::test]` for all async tests.
-- `StorageLayer::new_in_memory()` for test databases (no disk I/O).
-- `wiremock` for HTTP mocking (Ollama API responses).
+- `StorageLayer::new_in_memory()` for test databases (no disk I/O, fully migrated).
+- `wiremock` for HTTP mocking (Ollama/provider API responses).
 - Helper functions for fixtures: `make_skill()`, `build()`, `mount_answer()`.
 - Use `assert_eq!` with descriptive messages as the third argument.
 
 ## CI
 
 GitHub Actions runs on push to `main` and PRs: check, test, lint (clippy), format.
+CI also lints the `signal` feature separately: `cargo clippy -p assistant-interface-signal --features signal`.
 Integration tests run with `continue-on-error: true` (require Ollama).
