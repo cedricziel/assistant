@@ -90,6 +90,8 @@ pub enum Interface {
     Mcp,
     Slack,
     Mattermost,
+    /// Web UI chat interface.
+    Web,
     /// Background scheduled tasks and heartbeats — non-interactive.
     Scheduler,
 }

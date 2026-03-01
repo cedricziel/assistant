@@ -104,6 +104,7 @@ fn parse_interface(s: &str) -> Interface {
         "mcp" => Interface::Mcp,
         "slack" => Interface::Slack,
         "mattermost" => Interface::Mattermost,
+        "web" => Interface::Web,
         "scheduler" => Interface::Scheduler,
         _ => Interface::Cli,
     }
