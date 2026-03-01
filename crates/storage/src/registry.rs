@@ -83,6 +83,9 @@ impl SkillRegistry {
     pub async fn load_embedded(&self) -> Result<()> {
         for def in assistant_skills::embedded_builtin_skills() {
             info!("Registering embedded builtin skill '{}'", def.name);
+            if let Some(compat) = &def.compatibility {
+                info!(skill = %def.name, compatibility = %compat, "Skill has runtime requirements");
+            }
             self.register(def).await?;
         }
         Ok(())

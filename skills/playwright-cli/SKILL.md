@@ -6,6 +6,7 @@ description: >
   test web apps, or run any multi-step browser workflow. Requires no display
   (headless mode supported).
 license: MIT
+compatibility: "Requires: npx (@playwright/mcp)"
 ---
 
 # playwright-cli
