@@ -66,6 +66,15 @@ enum FinalAnswerOutcome {
     Retry,
 }
 
+/// Outcome of dispatching a single global (executor) tool call inside
+/// [`Orchestrator::dispatch_global_tool`].
+enum DispatchOutcome {
+    /// The user denied execution via the confirmation gate.
+    Denied,
+    /// The tool was executed and its result finalized.
+    Executed,
+}
+
 /// Per-conversation extension tool registration consumed by the worker.
 ///
 /// Interfaces (Slack, Mattermost) register their per-turn tools and
@@ -544,71 +553,24 @@ impl Orchestrator {
                                 tool = %name,
                                 source = "builtin"
                             );
-                            // Confirmation gate.
-                            let requires_confirm = tool_handlers
-                                .iter()
-                                .find(|h| h.name() == name)
-                                .map(|h| h.requires_confirmation())
-                                .unwrap_or(false);
-
-                            if requires_confirm && ctx.interactive {
-                                if let Some(cb) = &self.confirmation_callback {
-                                    if !cb.confirm(&name, &params) {
-                                        let observation =
-                                            format!("User denied execution of '{name}'.");
-                                        info!(%observation);
-                                        otel_span
-                                            .set_attribute(KeyValue::new("tool_status", "denied"));
-                                        otel_span.set_attribute(KeyValue::new(
-                                            "tool_error",
-                                            observation.clone(),
-                                        ));
-                                        crate::history::append_tool_result(
-                                            &mut history,
-                                            &name,
-                                            &observation,
-                                        );
-                                        let tr_msg = Self::make_tool_result_message(
-                                            conversation_id,
-                                            turn_index,
-                                            &name,
-                                            &observation,
-                                        );
-                                        if let Err(e) = conv_store
-                                            .save_message(&tr_msg)
-                                            .instrument(builtin_span.clone())
-                                            .await
-                                        {
-                                            warn!("Failed to persist tool-result message: {e}");
-                                        }
-                                        otel_span.end();
-                                        continue;
-                                    }
-                                }
-                            }
-
-                            let params_map = value_to_params_map(&params);
-
-                            let start = std::time::Instant::now();
-                            let exec_result = self
-                                .executor
-                                .execute(&name, params_map, &ctx)
-                                .instrument(builtin_span.clone())
+                            let outcome = self
+                                .dispatch_global_tool(
+                                    &name,
+                                    &params,
+                                    &ctx,
+                                    &mut otel_span,
+                                    &mut history,
+                                    &conv_store,
+                                    conversation_id,
+                                    turn_index,
+                                    &mut turn_attachments,
+                                    &tool_handlers,
+                                    &builtin_span,
+                                )
                                 .await;
-                            let elapsed = start.elapsed();
-
-                            self.finalize_tool_result(
-                                &name,
-                                exec_result,
-                                elapsed,
-                                &mut otel_span,
-                                &mut history,
-                                &conv_store,
-                                conversation_id,
-                                turn_index,
-                                &mut turn_attachments,
-                            )
-                            .await;
+                            if matches!(outcome, DispatchOutcome::Denied) {
+                                continue;
+                            }
                         }
 
                         // Mark the turn as acknowledged if any posting, reply,
@@ -864,69 +826,24 @@ impl Orchestrator {
                             &turn_cx,
                         );
 
-                        // Confirmation gate.
-                        let requires_confirm = tool_handlers
-                            .iter()
-                            .find(|h| h.name() == name)
-                            .map(|h| h.requires_confirmation())
-                            .unwrap_or(false);
-
-                        if requires_confirm && ctx.interactive {
-                            if let Some(cb) = &self.confirmation_callback {
-                                if !cb.confirm(&name, &params) {
-                                    let observation = format!("User denied execution of '{name}'.");
-                                    info!(%observation);
-                                    otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
-                                    otel_span.set_attribute(KeyValue::new(
-                                        "tool_error",
-                                        observation.clone(),
-                                    ));
-                                    crate::history::append_tool_result(
-                                        &mut history,
-                                        &name,
-                                        &observation,
-                                    );
-                                    let tr_msg = Self::make_tool_result_message(
-                                        conversation_id,
-                                        turn_index,
-                                        &name,
-                                        &observation,
-                                    );
-                                    if let Err(e) = conv_store
-                                        .save_message(&tr_msg)
-                                        .instrument(iteration_span.clone())
-                                        .await
-                                    {
-                                        warn!("Failed to persist tool-result message: {e}");
-                                    }
-                                    otel_span.end();
-                                    continue;
-                                }
-                            }
-                        }
-
-                        let params_map = value_to_params_map(&params);
-
-                        let start = std::time::Instant::now();
-                        let exec_result = self
-                            .executor
-                            .execute(&name, params_map, &ctx)
-                            .instrument(iteration_span.clone())
+                        let outcome = self
+                            .dispatch_global_tool(
+                                &name,
+                                &params,
+                                &ctx,
+                                &mut otel_span,
+                                &mut history,
+                                &conv_store,
+                                conversation_id,
+                                turn_index,
+                                &mut turn_attachments,
+                                &tool_handlers,
+                                &iteration_span,
+                            )
                             .await;
-                        let elapsed = start.elapsed();
-
-                        self.finalize_tool_result(
-                            &name,
-                            exec_result,
-                            elapsed,
-                            &mut otel_span,
-                            &mut history,
-                            &conv_store,
-                            conversation_id,
-                            turn_index,
-                            &mut turn_attachments,
-                        )
-                        .await;
+                        if matches!(outcome, DispatchOutcome::Denied) {
+                            continue;
+                        }
                     }
                 }
 
@@ -1421,6 +1338,91 @@ impl Orchestrator {
         }
 
         observation
+    }
+
+    /// Dispatch a single tool call through the global executor, applying the
+    /// confirmation gate when required.
+    ///
+    /// This is the common dispatch step shared by `run_turn_with_tools_impl`
+    /// and `run_turn_core`.  It checks whether the tool requires user
+    /// confirmation, records the denial in OTel/history/DB when refused,
+    /// and otherwise executes and finalizes the result.
+    ///
+    /// The caller-provided `instrument_span` is used for `.instrument()` calls
+    /// on both the confirmation-denied persist and the tool execution itself.
+    #[allow(clippy::too_many_arguments)]
+    async fn dispatch_global_tool(
+        &self,
+        name: &str,
+        params: &serde_json::Value,
+        ctx: &ExecutionContext,
+        otel_span: &mut opentelemetry::global::BoxedSpan,
+        history: &mut Vec<ChatHistoryMessage>,
+        conv_store: &ConversationStore,
+        conversation_id: Uuid,
+        turn_index: i64,
+        turn_attachments: &mut Vec<Attachment>,
+        tool_handlers: &[Arc<dyn ToolHandler>],
+        instrument_span: &tracing::Span,
+    ) -> DispatchOutcome {
+        // Confirmation gate.
+        let requires_confirm = tool_handlers
+            .iter()
+            .find(|h| h.name() == name)
+            .map(|h| h.requires_confirmation())
+            .unwrap_or(false);
+
+        if requires_confirm && ctx.interactive {
+            if let Some(cb) = &self.confirmation_callback {
+                if !cb.confirm(name, params) {
+                    let observation = format!("User denied execution of '{name}'.");
+                    info!(%observation);
+                    otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
+                    otel_span.set_attribute(KeyValue::new("tool_error", observation.clone()));
+                    crate::history::append_tool_result(history, name, &observation);
+                    let tr_msg = Self::make_tool_result_message(
+                        conversation_id,
+                        turn_index,
+                        name,
+                        &observation,
+                    );
+                    if let Err(e) = conv_store
+                        .save_message(&tr_msg)
+                        .instrument(instrument_span.clone())
+                        .await
+                    {
+                        warn!("Failed to persist tool-result message: {e}");
+                    }
+                    otel_span.end();
+                    return DispatchOutcome::Denied;
+                }
+            }
+        }
+
+        let params_map = value_to_params_map(params);
+
+        let start = std::time::Instant::now();
+        let exec_result = self
+            .executor
+            .execute(name, params_map, ctx)
+            .instrument(instrument_span.clone())
+            .await;
+        let elapsed = start.elapsed();
+
+        self.finalize_tool_result(
+            name,
+            exec_result,
+            elapsed,
+            otel_span,
+            history,
+            conv_store,
+            conversation_id,
+            turn_index,
+            turn_attachments,
+        )
+        .await;
+
+        DispatchOutcome::Executed
     }
 
     /// Record tool calls in the chat history and persist them to the database.
