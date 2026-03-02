@@ -236,7 +236,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install repo tools
@@ -271,16 +271,19 @@ jobs:
       - name: Add .deb packages and regenerate APT index
         run: |
           mkdir -p repo/apt
+          rm -f repo/apt/*.deb
           cp new-packages/*.deb repo/apt/
           cd repo/apt
-          dpkg-scanpackages --multiversion . > Packages
+          dpkg-scanpackages . > Packages
           gzip -k -f Packages
 
       - name: Add .rpm packages and regenerate YUM index
         run: |
           mkdir -p repo/rpm
+          rm -f repo/rpm/*.rpm
           cp new-packages/*.rpm repo/rpm/
-          createrepo_c --update repo/rpm/
+          rm -rf repo/rpm/repodata
+          createrepo_c repo/rpm/
 
       - name: Ensure .nojekyll
         run: touch repo/.nojekyll
@@ -328,12 +331,12 @@ jobs:
           HTMLDOC
           sed -i "s/TAG_PLACEHOLDER/${TAG}/" repo/index.html
 
-      - name: Commit and push
+      - name: Commit and force-push (single orphan commit keeps branch small)
         run: |
           cd repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan tmp-pages
           git add -A
-          git diff --cached --quiet || \
-            git commit -m "chore: update package repo for ${{ needs.release-please.outputs.tag_name }}"
-          git push origin gh-pages
+          git commit -m "chore: update package repo for ${{ needs.release-please.outputs.tag_name }}"
+          git push --force origin tmp-pages:gh-pages
