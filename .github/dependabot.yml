@@ -6,9 +6,12 @@ updates:
       interval: weekly
       day: monday
     groups:
-      all-cargo:
+      opentelemetry:
         patterns:
-          - "*"
+          - "opentelemetry*"
+      reqwest:
+        patterns:
+          - "reqwest*"
 
   - package-ecosystem: docker
     directory: /docker
