@@ -1804,3 +1804,72 @@ fn value_to_params_map_non_object_returns_empty() {
         assert!(map.is_empty(), "non-object {val} should produce empty map");
     }
 }
+
+// ── Thinking persistence tests ────────────────────────────────────────────────
+
+/// Ollama response with empty content but non-empty thinking — triggers
+/// LlmResponse::Thinking in the LLM client parser.
+fn ollama_thinking(thought: &str) -> Value {
+    json!({
+        "model": "test",
+        "message": { "role": "assistant", "content": "", "thinking": thought },
+        "done": true
+    })
+}
+
+#[tokio::test]
+async fn subagent_thinking_step_persisted_to_db() {
+    let server = MockServer::start().await;
+
+    // First call: LLM returns a thinking step (empty content + thinking field).
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ollama_thinking("deep thought")))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    // Second call: LLM returns a normal final answer.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+        .mount(&server)
+        .await;
+
+    let (orch, storage) = build(&server.uri()).await;
+
+    let spawn = AgentSpawn {
+        agent_id: "thinking-agent".into(),
+        task: "think about it".into(),
+        system_prompt: None,
+        model: None,
+        allowed_tools: vec![],
+    };
+
+    let report = orch.run_subagent(spawn, 0).await.unwrap();
+    assert_eq!(report.status, AgentReportStatus::Completed);
+
+    // Retrieve the subagent's conversation_id from the agent record.
+    let agent_store = storage.agent_store();
+    let record = agent_store
+        .get("thinking-agent")
+        .await
+        .unwrap()
+        .expect("agent record should exist");
+    let conv_id =
+        Uuid::parse_str(&record.conversation_id).expect("conversation_id should be a valid UUID");
+
+    // Load persisted messages and verify the thinking step is present.
+    let conv_store = storage.conversation_store();
+    let messages = conv_store.load_history(conv_id).await.unwrap();
+    let thinking_msg = messages.iter().find(|m| m.content.contains("<think>"));
+    assert!(
+        thinking_msg.is_some(),
+        "thinking step should be persisted to DB; messages: {:?}",
+        messages.iter().map(|m| &m.content).collect::<Vec<_>>()
+    );
+    assert!(
+        thinking_msg.unwrap().content.contains("deep thought"),
+        "persisted thinking message should contain the thought text"
+    );
+}

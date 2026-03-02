@@ -358,6 +358,20 @@ impl SubagentRunner for Orchestrator {
                             agent_id = %spawn.agent_id,
                             "Subagent emitted thinking step"
                         );
+                        // Persist to DB so thinking is preserved for trace
+                        // inspection, matching the behavior of the other two
+                        // turn variants.
+                        let thinking_msg = {
+                            let mut m = Message::assistant(
+                                conversation_id,
+                                format!("<think>{text}</think>"),
+                            );
+                            m.turn = base_turn + iteration as i64 + 1;
+                            m
+                        };
+                        if let Err(e) = conv_store.save_message(&thinking_msg).await {
+                            warn!("Failed to persist subagent thinking step: {e}");
+                        }
                         history.push(ChatHistoryMessage::Text {
                             role: ChatRole::Assistant,
                             content: text,
