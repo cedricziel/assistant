@@ -7,6 +7,9 @@ description: "Local self-improving AI assistant (unified: REPL + MCP + Slack + M
 homepage: "https://github.com/cedricziel/assistant"
 license: "MIT"
 
+depends:
+  - ffmpeg
+
 scripts:
   postinstall: packaging/scripts/postinstall.sh
   preremove: packaging/scripts/preremove.sh
