@@ -133,6 +133,14 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         .await?;
     sqlx::query("PRAGMA foreign_keys=ON;").execute(pool).await?;
 
+    // Wait up to 5 s when the database is locked by another connection instead
+    // of returning SQLITE_BUSY immediately.  This is critical because the OTel
+    // exporters, the orchestrator, and the message bus all share the same pool
+    // and contend for the single SQLite write lock.
+    sqlx::query("PRAGMA busy_timeout = 5000;")
+        .execute(pool)
+        .await?;
+
     // Migration tracking table — created once, never dropped.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS _migrations (
