@@ -307,7 +307,7 @@ fn compute_code_challenge(verifier: &str) -> String {
 /// Generate a random base64url-encoded string of the given byte length.
 fn generate_random_string(byte_len: usize) -> String {
     let mut buf = vec![0u8; byte_len];
-    getrandom::getrandom(&mut buf).expect("getrandom should not fail");
+    getrandom::fill(&mut buf).expect("getrandom should not fail");
     URL_SAFE_NO_PAD.encode(&buf)
 }
 

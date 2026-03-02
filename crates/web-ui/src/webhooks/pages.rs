@@ -500,7 +500,7 @@ fn generate_secret() -> String {
 /// Collect 32 random bytes from the OS CSPRNG.
 fn rand_bytes() -> [u8; 32] {
     let mut buf = [0u8; 32];
-    getrandom::getrandom(&mut buf).expect("OS RNG should be available");
+    getrandom::fill(&mut buf).expect("OS RNG should be available");
     buf
 }
 

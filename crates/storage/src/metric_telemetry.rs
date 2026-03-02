@@ -4,16 +4,17 @@
 //! join tables (`resources`, `metric_scopes`) to avoid duplicating
 //! identical metadata on every data-point row.
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use opentelemetry::metrics::MetricsError;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::{KeyValue, Value};
-use opentelemetry_sdk::metrics::data::{self, ResourceMetrics, Temporality};
-use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
-use opentelemetry_sdk::metrics::reader::{
-    AggregationSelector, DefaultAggregationSelector, TemporalitySelector,
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+use opentelemetry_sdk::metrics::data::{
+    AggregatedMetrics, GaugeDataPoint, HistogramDataPoint, MetricData, ResourceMetrics,
+    SumDataPoint,
 };
-use opentelemetry_sdk::metrics::{Aggregation, InstrumentKind};
+use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
+use opentelemetry_sdk::metrics::Temporality;
+use opentelemetry_sdk::Resource;
 use serde_json::{Map, Number};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -33,10 +34,7 @@ impl SqliteMetricExporter {
     }
 
     /// Upsert the resource and return its row id.
-    async fn ensure_resource(
-        &self,
-        resource: &opentelemetry_sdk::Resource,
-    ) -> Result<i64, sqlx::Error> {
+    async fn ensure_resource(&self, resource: &Resource) -> Result<i64, sqlx::Error> {
         let fingerprint = resource_fingerprint(resource);
         let attrs_json = resource_to_json(resource);
 
@@ -55,12 +53,9 @@ impl SqliteMetricExporter {
     }
 
     /// Upsert the instrumentation scope and return its row id.
-    async fn ensure_scope(
-        &self,
-        scope: &opentelemetry::InstrumentationLibrary,
-    ) -> Result<i64, sqlx::Error> {
-        let name = scope.name.as_ref();
-        let version = scope.version.as_deref().unwrap_or("");
+    async fn ensure_scope(&self, scope: &InstrumentationScope) -> Result<i64, sqlx::Error> {
+        let name = scope.name();
+        let version = scope.version().unwrap_or("");
 
         sqlx::query("INSERT OR IGNORE INTO metric_scopes (name, version) VALUES (?1, ?2)")
             .bind(name)
@@ -78,9 +73,9 @@ impl SqliteMetricExporter {
         Ok(id)
     }
 
-    /// Persist a single counter/gauge data point (f64).
+    /// Persist a single sum data point (f64).
     #[allow(clippy::too_many_arguments)]
-    async fn insert_scalar(
+    async fn insert_sum_scalar(
         &self,
         resource_id: i64,
         scope_id: i64,
@@ -88,12 +83,15 @@ impl SqliteMetricExporter {
         kind: &str,
         unit: &str,
         description: &str,
-        dp: &data::DataPoint<f64>,
+        dp: &SumDataPoint<f64>,
+        sum_start_time: std::time::SystemTime,
+        sum_time: std::time::SystemTime,
     ) -> Result<(), sqlx::Error> {
-        let da = extract_denormalized(&dp.attributes);
-        let attrs_json = keyvalues_to_json(&dp.attributes);
-        let start_time = non_epoch_time(dp.start_time);
-        let recorded_at = resolve_time(dp.time);
+        let attrs: Vec<KeyValue> = dp.attributes().cloned().collect();
+        let da = extract_denormalized(&attrs);
+        let attrs_json = keyvalues_to_json(&attrs);
+        let start_time = non_epoch_time(Some(sum_start_time));
+        let recorded_at: DateTime<Utc> = sum_time.into();
 
         sqlx::query(
             "INSERT INTO metric_points \
@@ -108,7 +106,7 @@ impl SqliteMetricExporter {
         .bind(kind)
         .bind(unit)
         .bind(description)
-        .bind(dp.value)
+        .bind(dp.value())
         .bind(&attrs_json)
         .bind(start_time)
         .bind(recorded_at)
@@ -123,9 +121,9 @@ impl SqliteMetricExporter {
         Ok(())
     }
 
-    /// Persist a single counter/gauge data point (i64).
+    /// Persist a single sum data point (i64).
     #[allow(clippy::too_many_arguments)]
-    async fn insert_scalar_i64(
+    async fn insert_sum_scalar_i64(
         &self,
         resource_id: i64,
         scope_id: i64,
@@ -133,12 +131,15 @@ impl SqliteMetricExporter {
         kind: &str,
         unit: &str,
         description: &str,
-        dp: &data::DataPoint<i64>,
+        dp: &SumDataPoint<i64>,
+        sum_start_time: std::time::SystemTime,
+        sum_time: std::time::SystemTime,
     ) -> Result<(), sqlx::Error> {
-        let da = extract_denormalized(&dp.attributes);
-        let attrs_json = keyvalues_to_json(&dp.attributes);
-        let start_time = non_epoch_time(dp.start_time);
-        let recorded_at = resolve_time(dp.time);
+        let attrs: Vec<KeyValue> = dp.attributes().cloned().collect();
+        let da = extract_denormalized(&attrs);
+        let attrs_json = keyvalues_to_json(&attrs);
+        let start_time = non_epoch_time(Some(sum_start_time));
+        let recorded_at: DateTime<Utc> = sum_time.into();
 
         sqlx::query(
             "INSERT INTO metric_points \
@@ -153,10 +154,94 @@ impl SqliteMetricExporter {
         .bind(kind)
         .bind(unit)
         .bind(description)
-        .bind(dp.value as f64)
+        .bind(dp.value() as f64)
         .bind(&attrs_json)
         .bind(start_time)
         .bind(recorded_at)
+        .bind(&da.model)
+        .bind(&da.provider)
+        .bind(&da.operation)
+        .bind(&da.skill)
+        .bind(&da.interface)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Persist a single gauge data point (f64).
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_gauge_scalar(
+        &self,
+        resource_id: i64,
+        scope_id: i64,
+        name: &str,
+        unit: &str,
+        description: &str,
+        dp: &GaugeDataPoint<f64>,
+    ) -> Result<(), sqlx::Error> {
+        let attrs: Vec<KeyValue> = dp.attributes().cloned().collect();
+        let da = extract_denormalized(&attrs);
+        let attrs_json = keyvalues_to_json(&attrs);
+
+        sqlx::query(
+            "INSERT INTO metric_points \
+                (resource_id, scope_id, metric_name, metric_kind, unit, description, \
+                 value, attributes, recorded_at, \
+                 model, provider, operation, skill, interface) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        )
+        .bind(resource_id)
+        .bind(scope_id)
+        .bind(name)
+        .bind("gauge")
+        .bind(unit)
+        .bind(description)
+        .bind(dp.value())
+        .bind(&attrs_json)
+        .bind(Utc::now())
+        .bind(&da.model)
+        .bind(&da.provider)
+        .bind(&da.operation)
+        .bind(&da.skill)
+        .bind(&da.interface)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Persist a single gauge data point (i64).
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_gauge_scalar_i64(
+        &self,
+        resource_id: i64,
+        scope_id: i64,
+        name: &str,
+        unit: &str,
+        description: &str,
+        dp: &GaugeDataPoint<i64>,
+    ) -> Result<(), sqlx::Error> {
+        let attrs: Vec<KeyValue> = dp.attributes().cloned().collect();
+        let da = extract_denormalized(&attrs);
+        let attrs_json = keyvalues_to_json(&attrs);
+
+        sqlx::query(
+            "INSERT INTO metric_points \
+                (resource_id, scope_id, metric_name, metric_kind, unit, description, \
+                 value, attributes, recorded_at, \
+                 model, provider, operation, skill, interface) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        )
+        .bind(resource_id)
+        .bind(scope_id)
+        .bind(name)
+        .bind("gauge")
+        .bind(unit)
+        .bind(description)
+        .bind(dp.value() as f64)
+        .bind(&attrs_json)
+        .bind(Utc::now())
         .bind(&da.model)
         .bind(&da.provider)
         .bind(&da.operation)
@@ -169,6 +254,7 @@ impl SqliteMetricExporter {
     }
 
     /// Persist a histogram data point.
+    #[allow(clippy::too_many_arguments)]
     async fn insert_histogram(
         &self,
         resource_id: i64,
@@ -176,14 +262,19 @@ impl SqliteMetricExporter {
         name: &str,
         unit: &str,
         description: &str,
-        dp: &data::HistogramDataPoint<f64>,
+        dp: &HistogramDataPoint<f64>,
+        hist_start_time: std::time::SystemTime,
+        hist_time: std::time::SystemTime,
     ) -> Result<(), sqlx::Error> {
-        let da = extract_denormalized(&dp.attributes);
-        let attrs_json = keyvalues_to_json(&dp.attributes);
-        let start_time = non_epoch_time(Some(dp.start_time));
-        let recorded_at = resolve_time(Some(dp.time));
-        let bounds_json = serde_json::to_string(&dp.bounds).unwrap_or_default();
-        let bucket_counts_json = serde_json::to_string(&dp.bucket_counts).unwrap_or_default();
+        let attrs: Vec<KeyValue> = dp.attributes().cloned().collect();
+        let da = extract_denormalized(&attrs);
+        let attrs_json = keyvalues_to_json(&attrs);
+        let start_time = non_epoch_time(Some(hist_start_time));
+        let recorded_at: DateTime<Utc> = hist_time.into();
+        let bounds: Vec<f64> = dp.bounds().collect();
+        let bucket_counts: Vec<u64> = dp.bucket_counts().collect();
+        let bounds_json = serde_json::to_string(&bounds).unwrap_or_default();
+        let bucket_counts_json = serde_json::to_string(&bucket_counts).unwrap_or_default();
 
         sqlx::query(
             "INSERT INTO metric_points \
@@ -199,10 +290,10 @@ impl SqliteMetricExporter {
         .bind("histogram")
         .bind(unit)
         .bind(description)
-        .bind(dp.count as i64)
-        .bind(dp.sum)
-        .bind(dp.min)
-        .bind(dp.max)
+        .bind(dp.count() as i64)
+        .bind(dp.sum())
+        .bind(dp.min())
+        .bind(dp.max())
         .bind(&bounds_json)
         .bind(&bucket_counts_json)
         .bind(&attrs_json)
@@ -218,105 +309,161 @@ impl SqliteMetricExporter {
 
         Ok(())
     }
-}
 
-impl AggregationSelector for SqliteMetricExporter {
-    fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-        DefaultAggregationSelector::new().aggregation(kind)
-    }
-}
-
-impl TemporalitySelector for SqliteMetricExporter {
-    fn temporality(&self, _kind: InstrumentKind) -> Temporality {
-        // Delta: each export row represents a single collection interval,
-        // mapping naturally to time-series storage.
-        Temporality::Delta
-    }
-}
-
-#[async_trait]
-impl PushMetricsExporter for SqliteMetricExporter {
-    async fn export(&self, metrics: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
-        let resource_id = self
-            .ensure_resource(&metrics.resource)
-            .await
-            .map_err(|e| MetricsError::Other(e.to_string()))?;
-
-        for scope_metrics in &metrics.scope_metrics {
-            let scope_id = self
-                .ensure_scope(&scope_metrics.scope)
-                .await
-                .map_err(|e| MetricsError::Other(e.to_string()))?;
-
-            for metric in &scope_metrics.metrics {
-                let name = &*metric.name;
-                let unit = &*metric.unit;
-                let desc = &*metric.description;
-
-                // -- Counters / UpDownCounters (Sum aggregation) --
-                if let Some(sum) = metric.data.as_any().downcast_ref::<data::Sum<f64>>() {
-                    let kind = if sum.is_monotonic {
-                        "counter"
-                    } else {
-                        "up_down_counter"
-                    };
-                    for dp in &sum.data_points {
-                        if let Err(e) = self
-                            .insert_scalar(resource_id, scope_id, name, kind, unit, desc, dp)
-                            .await
-                        {
-                            warn!(metric = name, error = %e, "failed to persist f64 sum");
-                        }
-                    }
-                } else if let Some(sum) = metric.data.as_any().downcast_ref::<data::Sum<i64>>() {
-                    let kind = if sum.is_monotonic {
-                        "counter"
-                    } else {
-                        "up_down_counter"
-                    };
-                    for dp in &sum.data_points {
-                        if let Err(e) = self
-                            .insert_scalar_i64(resource_id, scope_id, name, kind, unit, desc, dp)
-                            .await
-                        {
-                            warn!(metric = name, error = %e, "failed to persist i64 sum");
-                        }
-                    }
-                // -- Gauges --
-                } else if let Some(gauge) = metric.data.as_any().downcast_ref::<data::Gauge<f64>>()
-                {
-                    for dp in &gauge.data_points {
-                        if let Err(e) = self
-                            .insert_scalar(resource_id, scope_id, name, "gauge", unit, desc, dp)
-                            .await
-                        {
-                            warn!(metric = name, error = %e, "failed to persist f64 gauge");
-                        }
-                    }
-                } else if let Some(gauge) = metric.data.as_any().downcast_ref::<data::Gauge<i64>>()
-                {
-                    for dp in &gauge.data_points {
-                        if let Err(e) = self
-                            .insert_scalar_i64(resource_id, scope_id, name, "gauge", unit, desc, dp)
-                            .await
-                        {
-                            warn!(metric = name, error = %e, "failed to persist i64 gauge");
-                        }
-                    }
-                // -- Histograms --
-                } else if let Some(hist) =
-                    metric.data.as_any().downcast_ref::<data::Histogram<f64>>()
-                {
-                    for dp in &hist.data_points {
-                        if let Err(e) = self
-                            .insert_histogram(resource_id, scope_id, name, unit, desc, dp)
-                            .await
-                        {
-                            warn!(metric = name, error = %e, "failed to persist histogram");
-                        }
-                    }
+    /// Process a single `MetricData<f64>` value.
+    async fn process_f64_metric(
+        &self,
+        resource_id: i64,
+        scope_id: i64,
+        name: &str,
+        unit: &str,
+        desc: &str,
+        metric_data: &MetricData<f64>,
+    ) {
+        match metric_data {
+            MetricData::Sum(sum) => {
+                let kind = if sum.is_monotonic() {
+                    "counter"
                 } else {
-                    warn!(metric = name, "unsupported metric data type, skipping");
+                    "up_down_counter"
+                };
+                for dp in sum.data_points() {
+                    if let Err(e) = self
+                        .insert_sum_scalar(
+                            resource_id,
+                            scope_id,
+                            name,
+                            kind,
+                            unit,
+                            desc,
+                            dp,
+                            sum.start_time(),
+                            sum.time(),
+                        )
+                        .await
+                    {
+                        warn!(metric = name, error = %e, "failed to persist f64 sum");
+                    }
+                }
+            }
+            MetricData::Gauge(gauge) => {
+                for dp in gauge.data_points() {
+                    if let Err(e) = self
+                        .insert_gauge_scalar(resource_id, scope_id, name, unit, desc, dp)
+                        .await
+                    {
+                        warn!(metric = name, error = %e, "failed to persist f64 gauge");
+                    }
+                }
+            }
+            MetricData::Histogram(hist) => {
+                for dp in hist.data_points() {
+                    if let Err(e) = self
+                        .insert_histogram(
+                            resource_id,
+                            scope_id,
+                            name,
+                            unit,
+                            desc,
+                            dp,
+                            hist.start_time(),
+                            hist.time(),
+                        )
+                        .await
+                    {
+                        warn!(metric = name, error = %e, "failed to persist f64 histogram");
+                    }
+                }
+            }
+            _ => {
+                warn!(metric = name, "unsupported f64 metric data type, skipping");
+            }
+        }
+    }
+
+    /// Process a single `MetricData<i64>` value.
+    async fn process_i64_metric(
+        &self,
+        resource_id: i64,
+        scope_id: i64,
+        name: &str,
+        unit: &str,
+        desc: &str,
+        metric_data: &MetricData<i64>,
+    ) {
+        match metric_data {
+            MetricData::Sum(sum) => {
+                let kind = if sum.is_monotonic() {
+                    "counter"
+                } else {
+                    "up_down_counter"
+                };
+                for dp in sum.data_points() {
+                    if let Err(e) = self
+                        .insert_sum_scalar_i64(
+                            resource_id,
+                            scope_id,
+                            name,
+                            kind,
+                            unit,
+                            desc,
+                            dp,
+                            sum.start_time(),
+                            sum.time(),
+                        )
+                        .await
+                    {
+                        warn!(metric = name, error = %e, "failed to persist i64 sum");
+                    }
+                }
+            }
+            MetricData::Gauge(gauge) => {
+                for dp in gauge.data_points() {
+                    if let Err(e) = self
+                        .insert_gauge_scalar_i64(resource_id, scope_id, name, unit, desc, dp)
+                        .await
+                    {
+                        warn!(metric = name, error = %e, "failed to persist i64 gauge");
+                    }
+                }
+            }
+            _ => {
+                warn!(metric = name, "unsupported i64 metric data type, skipping");
+            }
+        }
+    }
+}
+
+impl PushMetricExporter for SqliteMetricExporter {
+    async fn export(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
+        let resource_id = self
+            .ensure_resource(metrics.resource())
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
+
+        for scope_metrics in metrics.scope_metrics() {
+            let scope_id = self
+                .ensure_scope(scope_metrics.scope())
+                .await
+                .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
+
+            for metric in scope_metrics.metrics() {
+                let name = metric.name();
+                let unit = metric.unit();
+                let desc = metric.description();
+
+                match metric.data() {
+                    AggregatedMetrics::F64(data) => {
+                        self.process_f64_metric(resource_id, scope_id, name, unit, desc, data)
+                            .await;
+                    }
+                    AggregatedMetrics::I64(data) => {
+                        self.process_i64_metric(resource_id, scope_id, name, unit, desc, data)
+                            .await;
+                    }
+                    AggregatedMetrics::U64(_) => {
+                        warn!(metric = name, "u64 metrics not yet supported, skipping");
+                    }
                 }
             }
         }
@@ -324,19 +471,25 @@ impl PushMetricsExporter for SqliteMetricExporter {
         Ok(())
     }
 
-    async fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         Ok(())
     }
 
-    fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+    fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
         Ok(())
+    }
+
+    fn temporality(&self) -> Temporality {
+        // Delta: each export row represents a single collection interval,
+        // mapping naturally to time-series storage.
+        Temporality::Delta
     }
 }
 
 // -- Helpers ------------------------------------------------------------------
 
 /// SHA-256 fingerprint of sorted resource attributes for deduplication.
-fn resource_fingerprint(resource: &opentelemetry_sdk::Resource) -> String {
+fn resource_fingerprint(resource: &Resource) -> String {
     let mut pairs: Vec<(String, String)> = resource
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), format!("{v:?}")))
@@ -346,7 +499,6 @@ fn resource_fingerprint(resource: &opentelemetry_sdk::Resource) -> String {
     let mut hasher = Sha256::new();
     for (k, v) in &pairs {
         hasher.update(k.as_bytes());
-        hasher.update(b"=");
         hasher.update(v.as_bytes());
         hasher.update(b",");
     }
@@ -354,7 +506,7 @@ fn resource_fingerprint(resource: &opentelemetry_sdk::Resource) -> String {
 }
 
 /// Serialize resource attributes to a JSON string (stored once per resource row).
-fn resource_to_json(resource: &opentelemetry_sdk::Resource) -> String {
+fn resource_to_json(resource: &Resource) -> String {
     let mut map = Map::new();
     for (key, value) in resource.iter() {
         map.insert(key.as_str().to_string(), otel_value_to_json(value));
@@ -417,12 +569,6 @@ fn non_epoch_time(t: Option<std::time::SystemTime>) -> Option<DateTime<Utc>> {
     t.filter(|t| *t != std::time::UNIX_EPOCH).map(Into::into)
 }
 
-/// Resolve a data-point timestamp to a concrete `DateTime<Utc>`, falling
-/// back to `Utc::now()` if the SDK left the field unset.
-fn resolve_time(t: Option<std::time::SystemTime>) -> DateTime<Utc> {
-    t.map(Into::into).unwrap_or_else(Utc::now)
-}
-
 fn otel_value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Bool(v) => serde_json::Value::Bool(*v),
@@ -457,7 +603,9 @@ fn otel_value_to_json(value: &Value) -> serde_json::Value {
                     .map(|s| serde_json::Value::String(s.as_str().to_string()))
                     .collect(),
             ),
+            _ => serde_json::Value::String(format!("{array:?}")),
         },
+        _ => serde_json::Value::String(format!("{value:?}")),
     }
 }
 
@@ -471,10 +619,12 @@ mod tests {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let exporter = SqliteMetricExporter::new(storage.pool.clone());
 
-        let resource = opentelemetry_sdk::Resource::new(vec![
-            KeyValue::new("service.name", "test"),
-            KeyValue::new("service.version", "0.1.0"),
-        ]);
+        let resource = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new("service.name", "test"),
+                KeyValue::new("service.version", "0.1.0"),
+            ])
+            .build();
 
         let id1 = exporter.ensure_resource(&resource).await.unwrap();
         let id2 = exporter.ensure_resource(&resource).await.unwrap();
@@ -492,7 +642,7 @@ mod tests {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let exporter = SqliteMetricExporter::new(storage.pool.clone());
 
-        let scope = opentelemetry::InstrumentationLibrary::builder("test-scope")
+        let scope = InstrumentationScope::builder("test-scope")
             .with_version("1.0")
             .build();
 
@@ -503,14 +653,12 @@ mod tests {
 
     #[test]
     fn fingerprint_is_order_independent() {
-        let r1 = opentelemetry_sdk::Resource::new(vec![
-            KeyValue::new("a", "1"),
-            KeyValue::new("b", "2"),
-        ]);
-        let r2 = opentelemetry_sdk::Resource::new(vec![
-            KeyValue::new("b", "2"),
-            KeyValue::new("a", "1"),
-        ]);
+        let r1 = Resource::builder_empty()
+            .with_attributes([KeyValue::new("a", "1"), KeyValue::new("b", "2")])
+            .build();
+        let r2 = Resource::builder_empty()
+            .with_attributes([KeyValue::new("b", "2"), KeyValue::new("a", "1")])
+            .build();
         assert_eq!(
             resource_fingerprint(&r1),
             resource_fingerprint(&r2),
@@ -520,8 +668,12 @@ mod tests {
 
     #[test]
     fn different_resources_get_different_fingerprints() {
-        let r1 = opentelemetry_sdk::Resource::new(vec![KeyValue::new("service.name", "a")]);
-        let r2 = opentelemetry_sdk::Resource::new(vec![KeyValue::new("service.name", "b")]);
+        let r1 = Resource::builder_empty()
+            .with_attributes([KeyValue::new("service.name", "a")])
+            .build();
+        let r2 = Resource::builder_empty()
+            .with_attributes([KeyValue::new("service.name", "b")])
+            .build();
         assert_ne!(resource_fingerprint(&r1), resource_fingerprint(&r2));
     }
 }

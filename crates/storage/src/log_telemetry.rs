@@ -1,11 +1,9 @@
 //! OpenTelemetry log exporter that persists log records into the `logs` SQLite table.
 
-use std::borrow::Cow;
-
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use opentelemetry::logs::{AnyValue, LogError, LogResult, Severity};
-use opentelemetry_sdk::export::logs::{LogData, LogExporter};
+use opentelemetry::logs::{AnyValue, Severity};
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
 use serde_json::{Map, Number};
 use sqlx::SqlitePool;
@@ -23,22 +21,20 @@ impl SqliteLogExporter {
         Self { pool }
     }
 
-    async fn persist_log(pool: SqlitePool, data: &LogData) -> Result<(), sqlx::Error> {
-        let record = &data.record;
-
+    async fn persist_log(pool: SqlitePool, record: &SdkLogRecord) -> Result<(), sqlx::Error> {
         let id = Uuid::new_v4().to_string();
 
-        let timestamp: DateTime<Utc> = record.timestamp.map(Into::into).unwrap_or_else(Utc::now);
+        let timestamp: DateTime<Utc> = record.timestamp().map(Into::into).unwrap_or_else(Utc::now);
 
-        let observed_timestamp: Option<DateTime<Utc>> = record.observed_timestamp.map(Into::into);
+        let observed_timestamp: Option<DateTime<Utc>> = record.observed_timestamp().map(Into::into);
 
-        let severity_number = record.severity_number.map(severity_to_i32);
+        let severity_number = record.severity_number().map(severity_to_i32);
 
-        let severity_text = record.severity_text.as_deref().map(|s| s.to_string());
+        let severity_text = record.severity_text().map(|s| s.to_string());
 
-        let body = record.body.as_ref().map(any_value_to_string);
+        let body = record.body().map(any_value_to_string);
 
-        let (trace_id, span_id) = match &record.trace_context {
+        let (trace_id, span_id) = match record.trace_context() {
             Some(ctx) => (
                 Some(ctx.trace_id.to_string()),
                 Some(ctx.span_id.to_string()),
@@ -46,13 +42,9 @@ impl SqliteLogExporter {
             None => (None, None),
         };
 
-        let target = record.target.as_deref().map(|s| s.to_string());
+        let target = record.target().map(|s| s.to_string());
 
-        let attrs = record
-            .attributes
-            .as_ref()
-            .map(|a| attributes_to_json(a))
-            .unwrap_or_else(|| serde_json::Value::Object(Map::new()));
+        let attrs = attributes_to_json(record);
         let attrs_serialized = attrs.to_string();
 
         sqlx::query(
@@ -79,18 +71,17 @@ impl SqliteLogExporter {
     }
 }
 
-#[async_trait]
 impl LogExporter for SqliteLogExporter {
-    async fn export<'a>(&mut self, batch: Vec<Cow<'a, LogData>>) -> LogResult<()> {
-        for data in &batch {
-            if let Err(err) = Self::persist_log(self.pool.clone(), data.as_ref()).await {
-                return Err(LogError::Other(Box::new(err)));
+    async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
+        for (record, _scope) in batch.iter() {
+            if let Err(err) = Self::persist_log(self.pool.clone(), record).await {
+                return Err(opentelemetry_sdk::error::OTelSdkError::InternalFailure(
+                    format!("SQLite log export failed: {err}"),
+                ));
             }
         }
         Ok(())
     }
-
-    fn shutdown(&mut self) {}
 
     fn set_resource(&mut self, _resource: &Resource) {
         // Resource metadata is not persisted to the logs table.
@@ -137,12 +128,13 @@ fn any_value_to_string(value: &AnyValue) -> String {
         AnyValue::Bytes(v) => format!("{:?}", v),
         AnyValue::ListAny(v) => format!("{:?}", v),
         AnyValue::Map(v) => format!("{:?}", v),
+        _ => format!("{value:?}"),
     }
 }
 
-fn attributes_to_json(attrs: &[(opentelemetry::Key, AnyValue)]) -> serde_json::Value {
+fn attributes_to_json(record: &SdkLogRecord) -> serde_json::Value {
     let mut map = Map::new();
-    for (key, value) in attrs {
+    for (key, value) in record.attributes_iter() {
         map.insert(key.as_str().to_string(), any_value_to_json(value));
     }
     serde_json::Value::Object(map)
@@ -165,6 +157,7 @@ fn any_value_to_json(value: &AnyValue) -> serde_json::Value {
             }
             serde_json::Value::Object(map)
         }
+        _ => serde_json::Value::String(format!("{value:?}")),
     }
 }
 
@@ -172,25 +165,33 @@ fn any_value_to_json(value: &AnyValue) -> serde_json::Value {
 mod tests {
     use super::*;
     use crate::StorageLayer;
-    use opentelemetry::logs::AnyValue;
-    use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
-    use opentelemetry::InstrumentationLibrary;
-    use opentelemetry_sdk::export::logs::LogData;
-    use opentelemetry_sdk::logs::LogRecord;
-    use std::borrow::Cow;
-    use std::time::SystemTime;
+    use opentelemetry::logs::{
+        AnyValue, LogRecord as _, Logger as _, LoggerProvider as _, Severity,
+    };
+    use opentelemetry::trace::{SpanId, TraceFlags, TraceId};
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry_sdk::logs::{SdkLogRecord, SdkLoggerProvider};
 
-    fn make_log(severity: Severity, body: &str, target: &str) -> LogData {
-        let mut record = LogRecord::default();
-        record.severity_number = Some(severity);
-        record.severity_text = Some(severity_text_for(severity).into());
-        record.body = Some(AnyValue::String(body.to_string().into()));
-        record.timestamp = Some(SystemTime::now());
-        record.target = Some(Cow::Owned(target.to_string()));
-        LogData {
-            record,
-            instrumentation: InstrumentationLibrary::default(),
-        }
+    /// Create a logger from a no-op provider so we can call
+    /// `create_log_record()` (which is `pub(crate)` on `SdkLogRecord`).
+    fn new_record() -> SdkLogRecord {
+        let provider = SdkLoggerProvider::builder().build();
+        let logger = provider.logger("test");
+        logger.create_log_record()
+    }
+
+    fn make_log(
+        severity: Severity,
+        body: &str,
+        target: &str,
+    ) -> (SdkLogRecord, InstrumentationScope) {
+        let mut record = new_record();
+        record.set_severity_number(severity);
+        record.set_severity_text(severity_text_for(severity));
+        record.set_body(AnyValue::String(body.to_string().into()));
+        record.set_timestamp(std::time::SystemTime::now());
+        record.set_target(target.to_string());
+        (record, InstrumentationScope::default())
     }
 
     fn make_log_with_trace(
@@ -198,25 +199,17 @@ mod tests {
         body: &str,
         trace_id_hex: &str,
         span_id_hex: &str,
-    ) -> LogData {
-        let mut record = LogRecord::default();
-        record.severity_number = Some(severity);
-        record.severity_text = Some("INFO".into());
-        record.body = Some(AnyValue::String(body.to_string().into()));
-        record.timestamp = Some(SystemTime::now());
-        // Build TraceContext from a SpanContext (the From impl is public).
-        let span_ctx = SpanContext::new(
-            TraceId::from_hex(trace_id_hex).unwrap(),
-            SpanId::from_hex(span_id_hex).unwrap(),
-            TraceFlags::SAMPLED,
-            false,
-            TraceState::default(),
-        );
-        record.trace_context = Some(opentelemetry_sdk::logs::TraceContext::from(&span_ctx));
-        LogData {
-            record,
-            instrumentation: InstrumentationLibrary::default(),
-        }
+    ) -> (SdkLogRecord, InstrumentationScope) {
+        let mut record = new_record();
+        record.set_severity_number(severity);
+        record.set_severity_text("INFO");
+        record.set_body(AnyValue::String(body.to_string().into()));
+        record.set_timestamp(std::time::SystemTime::now());
+        // Set trace context via the LogRecord trait method.
+        let trace_id = TraceId::from_hex(trace_id_hex).unwrap();
+        let span_id = SpanId::from_hex(span_id_hex).unwrap();
+        record.set_trace_context(trace_id, span_id, Some(TraceFlags::SAMPLED));
+        (record, InstrumentationScope::default())
     }
 
     fn severity_text_for(s: Severity) -> &'static str {
@@ -237,16 +230,25 @@ mod tests {
             .unwrap()
     }
 
+    /// Convert owned items into the reference-tuple slice that `LogBatch::new` expects.
+    fn as_batch_refs(
+        items: &[(SdkLogRecord, InstrumentationScope)],
+    ) -> Vec<(&SdkLogRecord, &InstrumentationScope)> {
+        items.iter().map(|(r, s)| (r, s)).collect()
+    }
+
     #[tokio::test]
     async fn test_export_persists_exact_count() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let mut exporter = SqliteLogExporter::new(storage.pool.clone());
+        let exporter = SqliteLogExporter::new(storage.pool.clone());
 
-        let batch: Vec<Cow<'_, LogData>> = vec![
-            Cow::Owned(make_log(Severity::Info, "msg-1", "app")),
-            Cow::Owned(make_log(Severity::Warn, "msg-2", "app")),
-            Cow::Owned(make_log(Severity::Error, "msg-3", "app")),
+        let items: Vec<(SdkLogRecord, InstrumentationScope)> = vec![
+            make_log(Severity::Info, "msg-1", "app"),
+            make_log(Severity::Warn, "msg-2", "app"),
+            make_log(Severity::Error, "msg-3", "app"),
         ];
+        let refs = as_batch_refs(&items);
+        let batch = LogBatch::new(&refs);
 
         exporter.export(batch).await.unwrap();
 
@@ -257,13 +259,15 @@ mod tests {
     #[tokio::test]
     async fn test_export_preserves_severity_and_body() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let mut exporter = SqliteLogExporter::new(storage.pool.clone());
+        let exporter = SqliteLogExporter::new(storage.pool.clone());
 
-        let batch: Vec<Cow<'_, LogData>> = vec![Cow::Owned(make_log(
+        let items: Vec<(SdkLogRecord, InstrumentationScope)> = vec![make_log(
             Severity::Warn,
             "disk almost full",
             "infra::monitor",
-        ))];
+        )];
+        let refs = as_batch_refs(&items);
+        let batch = LogBatch::new(&refs);
         exporter.export(batch).await.unwrap();
 
         let row =
@@ -283,14 +287,16 @@ mod tests {
     #[tokio::test]
     async fn test_export_preserves_trace_context() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let mut exporter = SqliteLogExporter::new(storage.pool.clone());
+        let exporter = SqliteLogExporter::new(storage.pool.clone());
 
-        let batch: Vec<Cow<'_, LogData>> = vec![Cow::Owned(make_log_with_trace(
+        let items: Vec<(SdkLogRecord, InstrumentationScope)> = vec![make_log_with_trace(
             Severity::Info,
             "correlated",
             "0102030405060708090a0b0c0d0e0f10",
             "f1e2d3c4b5a69788",
-        ))];
+        )];
+        let refs = as_batch_refs(&items);
+        let batch = LogBatch::new(&refs);
         exporter.export(batch).await.unwrap();
 
         let row = sqlx::query_as::<_, (Option<String>, Option<String>)>(
@@ -307,10 +313,12 @@ mod tests {
     #[tokio::test]
     async fn test_export_without_trace_context_stores_null() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let mut exporter = SqliteLogExporter::new(storage.pool.clone());
+        let exporter = SqliteLogExporter::new(storage.pool.clone());
 
-        let batch: Vec<Cow<'_, LogData>> =
-            vec![Cow::Owned(make_log(Severity::Debug, "no span", "test"))];
+        let items: Vec<(SdkLogRecord, InstrumentationScope)> =
+            vec![make_log(Severity::Debug, "no span", "test")];
+        let refs = as_batch_refs(&items);
+        let batch = LogBatch::new(&refs);
         exporter.export(batch).await.unwrap();
 
         let row = sqlx::query_as::<_, (Option<String>, Option<String>)>(
