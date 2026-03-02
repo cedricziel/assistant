@@ -476,6 +476,7 @@ impl Orchestrator {
                     .await;
 
                     let has_real_calls = tool_call_items.iter().any(|t| t.name != "end_turn");
+                    let tool_handlers = self.executor.list_tools();
 
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
@@ -544,9 +545,7 @@ impl Orchestrator {
                                 source = "builtin"
                             );
                             // Confirmation gate.
-                            let requires_confirm = self
-                                .executor
-                                .list_tools()
+                            let requires_confirm = tool_handlers
                                 .iter()
                                 .find(|h| h.name() == name)
                                 .map(|h| h.requires_confirmation())
@@ -849,6 +848,8 @@ impl Orchestrator {
                     .instrument(iteration_span.clone())
                     .await;
 
+                    let tool_handlers = self.executor.list_tools();
+
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
@@ -864,9 +865,7 @@ impl Orchestrator {
                         );
 
                         // Confirmation gate.
-                        let requires_confirm = self
-                            .executor
-                            .list_tools()
+                        let requires_confirm = tool_handlers
                             .iter()
                             .find(|h| h.name() == name)
                             .map(|h| h.requires_confirmation())
