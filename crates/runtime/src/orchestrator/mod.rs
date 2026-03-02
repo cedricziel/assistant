@@ -116,9 +116,9 @@ fn parse_interface(s: &str) -> Interface {
 /// 3. Load all registered tool specs from the executor.
 /// 4. Repeatedly call the LLM until it returns a `FinalAnswer` or the
 ///    iteration limit is reached.
-/// 5. For each `ToolCall` response: check disabled-skills list, optionally
-///    confirm with the user, execute the tool, emit an OpenTelemetry span,
-///    and append an `OBSERVATION` to the conversation history.
+/// 5. For each `ToolCall` response: optionally confirm with the user,
+///    execute the tool, emit an OpenTelemetry span, and append an
+///    `OBSERVATION` to the conversation history.
 /// 6. Persist the final assistant message and return [`TurnResult`].
 pub struct Orchestrator {
     llm: Arc<dyn LlmProvider>,
@@ -128,7 +128,6 @@ pub struct Orchestrator {
     /// Durable message bus for decoupled inter-component communication.
     bus: Arc<dyn MessageBus>,
     max_iterations: usize,
-    disabled_skills: Vec<String>,
     confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
     /// Memory loader used to rebuild the system prompt at the start of every
     /// turn so that writes made by memory tools are reflected immediately.
@@ -156,8 +155,8 @@ impl Orchestrator {
     /// * `llm` — the LLM client (Ollama wrapper)
     /// * `storage` — the SQLite storage layer
     /// * `executor` — tool executor (dispatches to all registered ToolHandlers)
-    /// * `config` — assistant configuration (controls iteration limit, disabled
-    ///   skills, and trace logging)
+    /// * `config` — assistant configuration (controls iteration limit and trace
+    ///   logging)
     pub fn new(
         llm: Arc<dyn LlmProvider>,
         storage: Arc<StorageLayer>,
@@ -175,7 +174,6 @@ impl Orchestrator {
             registry,
             bus,
             max_iterations: config.llm.max_iterations,
-            disabled_skills: config.skills.disabled.clone(),
             confirmation_callback: None,
             memory_loader,
             trace_content: config.mirror.trace_content,
@@ -266,9 +264,6 @@ impl Orchestrator {
     ///
     /// Extension tools are injected by the calling interface (e.g. Slack,
     /// Mattermost) and are checked before the global tool executor.  They
-    /// bypass the disabled-skills list — the interface is responsible for vetting
-    /// them before passing them in.
-    ///
     /// Unlike [`run_turn`] / [`run_turn_streaming`], this method does **not**
     /// return the final answer; replies are expected to happen as side-effects
     /// of the extension tool calls (e.g. `reply`).  If the LLM emits a
@@ -802,23 +797,6 @@ impl Orchestrator {
                                 tool = %name,
                                 source = "builtin"
                             );
-                            if let Some(reason) = self
-                                .reject_if_disabled(
-                                    &name,
-                                    &mut history,
-                                    &conv_store,
-                                    conversation_id,
-                                    turn_index,
-                                )
-                                .instrument(builtin_span.clone())
-                                .await
-                            {
-                                otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
-                                otel_span.set_attribute(KeyValue::new("tool_error", reason));
-                                otel_span.end();
-                                continue;
-                            }
-
                             // Confirmation gate.
                             let requires_confirm = self
                                 .executor
@@ -1174,24 +1152,6 @@ impl Orchestrator {
                             &turn_cx,
                         );
 
-                        // Disabled-tools gate.
-                        if let Some(reason) = self
-                            .reject_if_disabled(
-                                &name,
-                                &mut history,
-                                &conv_store,
-                                conversation_id,
-                                turn_index,
-                            )
-                            .instrument(iteration_span.clone())
-                            .await
-                        {
-                            otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
-                            otel_span.set_attribute(KeyValue::new("tool_error", reason));
-                            otel_span.end();
-                            continue;
-                        }
-
                         // Confirmation gate.
                         let requires_confirm = self
                             .executor
@@ -1421,27 +1381,6 @@ impl Orchestrator {
             return true;
         }
         false
-    }
-
-    async fn reject_if_disabled(
-        &self,
-        name: &str,
-        history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
-        conversation_id: Uuid,
-        turn_idx: i64,
-    ) -> Option<String> {
-        if !self.disabled_skills.iter().any(|s| s == name) {
-            return None;
-        }
-        let observation = format!("Tool '{name}' is disabled by configuration.");
-        warn!(%observation);
-        crate::history::append_tool_result(history, name, &observation);
-        let tr_msg = Self::make_tool_result_message(conversation_id, turn_idx, name, &observation);
-        if let Err(e) = conv_store.save_message(&tr_msg).await {
-            warn!("Failed to persist tool-result message: {e}");
-        }
-        Some(observation)
     }
 
     fn make_tool_call_message(

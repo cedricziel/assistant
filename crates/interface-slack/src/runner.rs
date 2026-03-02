@@ -13,9 +13,8 @@
 //!
 //! # Safety
 //!
-//! Skills listed in `disabled_skills` are blocked before dispatch.
-//! Additionally, `allowed_channels` and `allowed_users` allowlists are
-//! checked before dispatching.
+//! `allowed_channels` and `allowed_users` allowlists are checked before
+//! dispatching.
 //!
 //! # Thread conversation context
 //!
