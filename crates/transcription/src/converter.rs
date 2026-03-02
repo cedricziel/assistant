@@ -403,15 +403,26 @@ impl AudioConverter {
             .await
             .with_context(|| format!("Failed to spawn FFmpeg at {}", self.ffmpeg_path))?;
 
-        // Always clean up the input file
-        let _ = tokio::fs::remove_file(&input_path).await;
-
         if !output.status.success() {
+            // Keep the input file around for debugging when conversion fails
+            warn!(
+                input_path = %input_path.display(),
+                "Keeping failed conversion input file for inspection"
+            );
             let _ = tokio::fs::remove_file(&output_path).await;
             let stderr = String::from_utf8_lossy(&output.stderr);
+            // Log the first 16 bytes as hex to identify the actual file format
+            let magic = audio_data
+                .iter()
+                .take(16)
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ");
             warn!(
                 exit_code = ?output.status.code(),
                 stderr = %stderr.trim(),
+                file_magic = %magic,
+                input_size = audio_data.len(),
                 "FFmpeg tempfile conversion failed"
             );
             bail!(
@@ -420,6 +431,9 @@ impl AudioConverter {
                 stderr.trim(),
             );
         }
+
+        // Clean up input file on success
+        let _ = tokio::fs::remove_file(&input_path).await;
 
         let output_data = tokio::fs::read(&output_path).await.with_context(|| {
             format!(
