@@ -1216,20 +1216,8 @@ impl SlackInterface {
         let bot_token = SlackApiToken::new(bot_token_str.into());
         let app_token = SlackApiToken::new(app_token_str.into());
 
-        // Mark the bot as active. This may silently fail for some bot token
-        // configurations; that is acceptable.
-        let session = client.open_session(&bot_token);
-        if let Err(e) = session
-            .users_set_presence(&SlackApiUsersSetPresenceRequest::new("auto".to_string()))
-            .await
-        {
-            debug!(error = %e, "users.setPresence(auto) failed (missing_scope is expected for most bot tokens)");
-        } else {
-            info!("Presence set to auto");
-        }
-
         // Resolve the bot's own user ID via auth.test so we can detect @-mentions.
-        let bot_user_id = match session.auth_test().await {
+        let bot_user_id = match client.open_session(&bot_token).auth_test().await {
             Ok(resp) => {
                 let uid = resp.user_id.to_string();
                 info!(bot_user_id = %uid, "Resolved bot identity via auth.test");
@@ -1357,6 +1345,18 @@ impl SlackInterface {
             };
 
             if connected {
+                // Mark the bot as active on every (re)connect so it appears
+                // online in the Slack sidebar.
+                let session = client.open_session(&bot_token);
+                if let Err(e) = session
+                    .users_set_presence(&SlackApiUsersSetPresenceRequest::new("auto".to_string()))
+                    .await
+                {
+                    debug!(error = %e, "users.setPresence(auto) failed (missing_scope is expected for most bot tokens)");
+                } else {
+                    info!("Presence set to auto");
+                }
+
                 // Race the event-serve loop against shutdown.
                 let clean_close = tokio::select! {
                     _ = socket_mode_listener.serve() => {
