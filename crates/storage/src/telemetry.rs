@@ -1,9 +1,8 @@
-use futures::future::BoxFuture;
-
 use chrono::{DateTime, Utc};
-use opentelemetry::trace::{SpanId, Status, TraceError};
+use opentelemetry::trace::SpanId;
 use opentelemetry::{KeyValue, Value};
-use opentelemetry_sdk::export::trace::{ExportResult, SpanData, SpanExporter};
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+use opentelemetry_sdk::trace::{SpanData, SpanExporter};
 use serde_json::{Map, Number};
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -117,16 +116,15 @@ impl SqliteSpanExporter {
 }
 
 impl SpanExporter for SqliteSpanExporter {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
-        let pool = self.pool.clone();
-        Box::pin(async move {
-            for span in batch {
-                if let Err(err) = SqliteSpanExporter::persist_span(pool.clone(), span).await {
-                    return Err(TraceError::Other(Box::new(err)));
-                }
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        for span in batch {
+            if let Err(err) = SqliteSpanExporter::persist_span(self.pool.clone(), span).await {
+                return Err(OTelSdkError::InternalFailure(format!(
+                    "SQLite span export failed: {err}"
+                )));
             }
-            Ok(())
-        })
+        }
+        Ok(())
     }
 }
 
@@ -172,15 +170,19 @@ fn otel_value_to_json(value: &Value) -> serde_json::Value {
                     .map(|s| serde_json::Value::String(s.as_str().to_string()))
                     .collect(),
             ),
+            _ => serde_json::Value::String(format!("{array:?}")),
         },
+        _ => serde_json::Value::String(format!("{value:?}")),
     }
 }
 
-fn status_fields(status: &Status) -> (&'static str, Option<String>) {
+fn status_fields(status: &opentelemetry::trace::Status) -> (&'static str, Option<String>) {
     match status {
-        Status::Ok => ("ok", None),
-        Status::Unset => ("unset", None),
-        Status::Error { description } => ("error", Some(description.to_string())),
+        opentelemetry::trace::Status::Ok => ("ok", None),
+        opentelemetry::trace::Status::Unset => ("unset", None),
+        opentelemetry::trace::Status::Error { description } => {
+            ("error", Some(description.to_string()))
+        }
     }
 }
 
@@ -188,10 +190,9 @@ fn status_fields(status: &Status) -> (&'static str, Option<String>) {
 mod tests {
     use super::*;
     use crate::StorageLayer;
-    use opentelemetry::trace::{SpanContext, SpanKind, TraceFlags, TraceId, TraceState};
-    use opentelemetry::InstrumentationLibrary;
-    use opentelemetry_sdk::export::trace::SpanData;
-    use opentelemetry_sdk::trace::{SpanEvents, SpanLinks};
+    use opentelemetry::trace::{SpanContext, SpanKind, Status, TraceFlags, TraceId, TraceState};
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry_sdk::trace::{SpanData, SpanEvents, SpanLinks};
     use std::time::{Duration, SystemTime};
 
     fn make_span(name: &str, tool_name: Option<&str>, status: Status) -> SpanData {
@@ -214,6 +215,7 @@ mod tests {
                 TraceState::default(),
             ),
             parent_span_id: SpanId::INVALID,
+            parent_span_is_remote: false,
             span_kind: SpanKind::Internal,
             name: name.to_string().into(),
             start_time: now,
@@ -223,7 +225,7 @@ mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status,
-            instrumentation_lib: InstrumentationLibrary::default(),
+            instrumentation_scope: InstrumentationScope::default(),
         }
     }
 
@@ -247,7 +249,7 @@ mod tests {
     #[tokio::test]
     async fn test_export_persists_exact_count() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let mut exporter = SqliteSpanExporter::new(storage.pool.clone());
+        let exporter = SqliteSpanExporter::new(storage.pool.clone());
 
         let batch = vec![
             make_span("span-1", Some("bash"), Status::Ok),
@@ -264,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn test_export_preserves_tool_metadata() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let mut exporter = SqliteSpanExporter::new(storage.pool.clone());
+        let exporter = SqliteSpanExporter::new(storage.pool.clone());
 
         let batch = vec![make_span("execute_tool bash", Some("bash"), Status::Ok)];
         exporter.export(batch).await.unwrap();
@@ -284,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn test_export_records_duration() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let mut exporter = SqliteSpanExporter::new(storage.pool.clone());
+        let exporter = SqliteSpanExporter::new(storage.pool.clone());
 
         let now = SystemTime::now();
         let trace_id = TraceId::from(uuid::Uuid::new_v4().as_u128());
@@ -299,6 +301,7 @@ mod tests {
                 TraceState::default(),
             ),
             parent_span_id: SpanId::INVALID,
+            parent_span_is_remote: false,
             span_kind: SpanKind::Internal,
             name: "timed".into(),
             start_time: now,
@@ -308,7 +311,7 @@ mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Status::Ok,
-            instrumentation_lib: InstrumentationLibrary::default(),
+            instrumentation_scope: InstrumentationScope::default(),
         };
 
         exporter.export(vec![span]).await.unwrap();
@@ -324,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn test_export_captures_error_status() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let mut exporter = SqliteSpanExporter::new(storage.pool.clone());
+        let exporter = SqliteSpanExporter::new(storage.pool.clone());
 
         let batch = vec![make_span(
             "failing",

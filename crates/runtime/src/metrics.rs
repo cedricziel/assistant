@@ -55,68 +55,68 @@ impl MetricsRecorder {
                 .f64_histogram("gen_ai.client.token.usage")
                 .with_description("Number of input and output tokens used")
                 .with_unit("{token}")
-                .init(),
+                .build(),
 
             operation_duration: meter
                 .f64_histogram("gen_ai.client.operation.duration")
                 .with_description("GenAI operation duration")
                 .with_unit("s")
-                .init(),
+                .build(),
 
             time_to_first_token: meter
                 .f64_histogram("gen_ai.server.time_to_first_token")
                 .with_description("Time to generate first token")
                 .with_unit("s")
-                .init(),
+                .build(),
 
             time_per_output_token: meter
                 .f64_histogram("gen_ai.server.time_per_output_token")
                 .with_description("Time per output token after the first")
                 .with_unit("s")
-                .init(),
+                .build(),
 
             // -- Operational -------------------------------------------------
             turn_count: meter
                 .u64_counter("assistant.turn.count")
                 .with_description("Number of turns processed")
                 .with_unit("{turn}")
-                .init(),
+                .build(),
 
             turn_duration: meter
                 .f64_histogram("assistant.turn.duration")
                 .with_description("Turn processing duration")
                 .with_unit("s")
-                .init(),
+                .build(),
 
             tool_invocations: meter
                 .u64_counter("assistant.tool.invocations")
                 .with_description("Number of tool invocations")
                 .with_unit("{invocation}")
-                .init(),
+                .build(),
 
             tool_duration: meter
                 .f64_histogram("assistant.tool.duration")
                 .with_description("Tool execution duration")
                 .with_unit("s")
-                .init(),
+                .build(),
 
             error_count: meter
                 .u64_counter("assistant.error.count")
                 .with_description("Number of errors")
                 .with_unit("{error}")
-                .init(),
+                .build(),
 
             conversation_count: meter
                 .u64_counter("assistant.conversation.count")
                 .with_description("Number of conversations created")
                 .with_unit("{conversation}")
-                .init(),
+                .build(),
 
             agent_spawn_count: meter
                 .u64_counter("assistant.agent.spawn.count")
                 .with_description("Number of sub-agents spawned")
                 .with_unit("{agent}")
-                .init(),
+                .build(),
         }
     }
 

@@ -71,10 +71,10 @@ rustls = { version = "0.23", features = ["ring"] }
 # Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = { version = "0.24", features = ["trace", "logs", "metrics"] }
-opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic", "tls", "logs", "metrics"] }
-opentelemetry_sdk = { version = "0.24", features = ["trace", "logs", "metrics", "rt-tokio"] }
-opentelemetry-appender-tracing = "0.5"
+opentelemetry = { version = "0.31", features = ["trace", "logs", "metrics"] }
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "tls-roots", "trace", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.31", features = ["trace", "logs", "metrics", "rt-tokio"] }
+opentelemetry-appender-tracing = "0.31"
 # CLI / config
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
@@ -82,7 +82,7 @@ toml = "1.0"
 # Async streams
 futures = "0.3"
 # Terminal line editor
-reedline = "0.45"
+reedline = "0.46"
 # QR code terminal rendering
 qr2term = "0.3"
 # YAML frontmatter parser
@@ -102,7 +102,7 @@ scraper = "0.25"
 # Glob pattern matching for file-glob builtin
 glob = "0.3"
 # JSON Schema validation for tool param checking
-jsonschema = "0.42"
+jsonschema = "0.44"
 # SHA-256 hashing for memory chunk change detection
 sha2 = "0.10"
 # HMAC message authentication (webhook signature verification)
@@ -112,7 +112,7 @@ hex = "0.4"
 # URL parsing
 url = "2"
 # OS-level CSPRNG
-getrandom = "0.2"
+getrandom = "0.4"
 # WASM plugin execution
 extism = "1"
 # Integration testing
