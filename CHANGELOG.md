@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.33](https://github.com/cedricziel/assistant/compare/v0.1.32...v0.1.33) (2026-03-02)
+
+
+### Bug Fixes
+
+* **transcription:** log file magic bytes and preserve input on failure ([#178](https://github.com/cedricziel/assistant/issues/178)) ([8258766](https://github.com/cedricziel/assistant/commit/825876694f0d5d8588a4248d227a7c6decb7e776))
+
 ## [0.1.32](https://github.com/cedricziel/assistant/compare/v0.1.31...v0.1.32) (2026-03-02)
 
 
