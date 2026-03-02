@@ -622,6 +622,8 @@ impl Orchestrator {
         }
 
         crate::history::persist_error_recovery(&conv_store, conversation_id).await;
+        self.metrics
+            .record_error("max_iterations", "run_turn_with_tools");
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -872,6 +874,12 @@ impl Orchestrator {
 
         // Reached iteration limit.
         crate::history::persist_error_recovery(&conv_store, conversation_id).await;
+        let label = if streaming {
+            "run_turn_streaming"
+        } else {
+            "run_turn"
+        };
+        self.metrics.record_error("max_iterations", label);
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations

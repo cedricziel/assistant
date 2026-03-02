@@ -382,6 +382,7 @@ impl SubagentRunner for Orchestrator {
 
             // Reached iteration limit.
             crate::history::persist_error_recovery(&conv_store, conversation_id).await;
+            self.metrics.record_error("max_iterations", "run_subagent");
             let msg = format!(
                 "Subagent '{}' reached max iterations ({}) without a final answer",
                 spawn.agent_id, self.max_iterations
