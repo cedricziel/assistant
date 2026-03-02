@@ -4,8 +4,6 @@
 //! orchestrator to spawn isolated sub-agent conversations with restricted
 //! tool sets and independent cancellation tokens.
 
-use std::collections::HashMap;
-
 use anyhow::Result;
 use assistant_core::{
     AgentReport, AgentReportStatus, AgentSpawn, ExecutionContext, Interface, Message,
@@ -22,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, warn, Instrument};
 use uuid::Uuid;
 
-use super::{tool_result_content, Orchestrator};
+use super::{value_to_params_map, Orchestrator};
 
 #[async_trait]
 impl SubagentRunner for Orchestrator {
@@ -168,15 +166,6 @@ impl SubagentRunner for Orchestrator {
                 );
                 debug!(parent: &iteration_span, iteration, agent_id = %spawn.agent_id, "Subagent tool-calling loop");
 
-                let _ctx = ExecutionContext {
-                    conversation_id,
-                    turn: iteration as i64,
-                    interface: Interface::Scheduler, // non-interactive
-                    interactive: false,
-                    allowed_tools: allowed_tools.clone(),
-                    depth: new_depth,
-                };
-
                 // -- OTel: LLM span (child of agent span) ---------------------
                 let mut llm_span = crate::otel_spans::start_llm_span(
                     self.llm.as_ref(),
@@ -290,21 +279,15 @@ impl SubagentRunner for Orchestrator {
                             "Subagent requested tool execution(s)"
                         );
 
-                        history.push(ChatHistoryMessage::AssistantToolCalls(
-                            tool_call_items.clone(),
-                        ));
-                        let tc_msg = Self::make_tool_call_message(
+                        Self::persist_tool_calls(
+                            &mut history,
+                            &conv_store,
                             conversation_id,
                             base_turn + iteration as i64 + 1,
                             &tool_call_items,
-                        );
-                        if let Err(e) = conv_store
-                            .save_message(&tc_msg)
-                            .instrument(iteration_span.clone())
-                            .await
-                        {
-                            warn!("Failed to persist subagent tool-call message: {e}");
-                        }
+                        )
+                        .instrument(iteration_span.clone())
+                        .await;
 
                         for tool_call_item in tool_call_items {
                             // Check cancellation between individual tool executions.
@@ -331,12 +314,7 @@ impl SubagentRunner for Orchestrator {
                                 &agent_cx,
                             );
 
-                            let params_map: HashMap<String, serde_json::Value> =
-                                if let serde_json::Value::Object(map) = &params {
-                                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                                } else {
-                                    HashMap::new()
-                                };
+                            let params_map = value_to_params_map(&params);
 
                             let ctx = ExecutionContext {
                                 conversation_id,
@@ -348,71 +326,32 @@ impl SubagentRunner for Orchestrator {
                             };
 
                             let start = std::time::Instant::now();
-                            let observation = match self
+                            let exec_result = self
                                 .executor
                                 .execute(&name, params_map, &ctx)
                                 .instrument(iteration_span.clone())
-                                .await
-                            {
-                                Ok(output) => {
-                                    let duration_ms = start.elapsed().as_millis() as i64;
-                                    self.metrics.record_tool_invocation(&name);
-                                    self.metrics
-                                        .record_tool_duration(&name, duration_ms as f64 / 1000.0);
-                                    debug!(
-                                        tool = %name,
-                                        success = output.success,
-                                        agent_id = %spawn.agent_id,
-                                        duration_ms,
-                                        "Subagent tool execution completed"
-                                    );
-                                    otel_span
-                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                    otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-                                    otel_span.set_attribute(KeyValue::new(
-                                        "tool_observation",
-                                        output.content.clone(),
-                                    ));
-                                    tool_result_content(&output.content, output.data.as_ref())
-                                }
-                                Err(err) => {
-                                    let duration_ms = start.elapsed().as_millis() as i64;
-                                    self.metrics.record_tool_invocation(&name);
-                                    self.metrics
-                                        .record_tool_duration(&name, duration_ms as f64 / 1000.0);
-                                    self.metrics.record_error("tool_error", &name);
-                                    warn!(
-                                        tool = %name,
-                                        %err,
-                                        agent_id = %spawn.agent_id,
-                                        "Subagent tool execution failed"
-                                    );
-                                    otel_span
-                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                    otel_span.set_attribute(KeyValue::new("tool_status", "error"));
-                                    otel_span.set_attribute(KeyValue::new(
-                                        "tool_error",
-                                        err.to_string(),
-                                    ));
-                                    format!("Error executing '{name}': {err}")
-                                }
-                            };
+                                .await;
+                            let elapsed = start.elapsed();
+                            let failed = exec_result.is_err();
 
-                            otel_span.end();
-
-                            crate::history::append_tool_result(&mut history, &name, &observation);
-                            let tr_msg = Self::make_tool_result_message(
+                            // Subagent does not surface attachments to
+                            // the parent — pass a scratch vector.
+                            let mut scratch_attachments = Vec::new();
+                            self.finalize_tool_result(
+                                &name,
+                                exec_result,
+                                elapsed,
+                                &mut otel_span,
+                                &mut history,
+                                &conv_store,
                                 conversation_id,
                                 turn_index,
-                                &name,
-                                &observation,
-                            );
-                            if let Err(e) = conv_store
-                                .save_message(&tr_msg)
-                                .instrument(iteration_span.clone())
-                                .await
-                            {
-                                warn!("Failed to persist subagent tool-result: {e}");
+                                &mut scratch_attachments,
+                            )
+                            .await;
+
+                            if failed {
+                                self.metrics.record_error("tool_error", &name);
                             }
                         }
                     }
