@@ -8,7 +8,7 @@ use std::process::Stdio;
 
 use anyhow::{bail, Context};
 use tokio::process::Command;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Audio formats that may need conversion before sending to transcription providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,9 +167,21 @@ impl AudioConverter {
         Ok(())
     }
 
+    /// Returns true if this source format requires a seekable input (temp file)
+    /// rather than a pipe.
+    ///
+    /// MP4/M4A containers store the `moov` atom (metadata) at the end of the
+    /// file, so FFmpeg must seek backwards to parse them -- something that
+    /// `pipe:0` (stdin) does not support.
+    fn needs_seekable_input(format: AudioFormat) -> bool {
+        matches!(format, AudioFormat::M4a | AudioFormat::Mp4)
+    }
+
     /// Convert audio data to the target format.
     ///
-    /// The conversion is done in-memory using pipes (no temp files).
+    /// For most formats, conversion is done entirely in-memory via stdin/stdout
+    /// pipes.  MP4/M4A containers, however, require seekable input (the `moov`
+    /// atom may sit at the end of the file) so a temporary file is used instead.
     pub async fn convert(
         &self,
         audio_data: &[u8],
@@ -196,29 +208,45 @@ impl AudioConverter {
             "Converting audio format"
         );
 
-        let (output_format, mime_type) = match self.target_format {
-            AudioFormat::Wav => ("wav", "audio/wav"),
-            AudioFormat::Mp3 => ("mp3", "audio/mpeg"),
-            AudioFormat::Ogg => ("ogg", "audio/ogg"),
-            AudioFormat::Flac => ("flac", "audio/flac"),
-            _ => bail!("Unsupported target format: {:?}", self.target_format),
-        };
+        if Self::needs_seekable_input(source_format) {
+            self.convert_via_tempfile(audio_data, source_format).await
+        } else {
+            self.convert_via_pipe(audio_data, source_format).await
+        }
+    }
 
-        // Build FFmpeg command
-        // Input from stdin (pipe:0), output to stdout (pipe:1)
+    /// Target format as FFmpeg output format name and MIME type.
+    fn output_format_info(&self) -> anyhow::Result<(&'static str, &'static str)> {
+        match self.target_format {
+            AudioFormat::Wav => Ok(("wav", "audio/wav")),
+            AudioFormat::Mp3 => Ok(("mp3", "audio/mpeg")),
+            AudioFormat::Ogg => Ok(("ogg", "audio/ogg")),
+            AudioFormat::Flac => Ok(("flac", "audio/flac")),
+            _ => bail!("Unsupported target format: {:?}", self.target_format),
+        }
+    }
+
+    /// Convert audio by piping data through FFmpeg's stdin/stdout.
+    async fn convert_via_pipe(
+        &self,
+        audio_data: &[u8],
+        source_format: AudioFormat,
+    ) -> anyhow::Result<ConversionResult> {
+        let (output_format, mime_type) = self.output_format_info()?;
+
         let mut cmd = Command::new(&self.ffmpeg_path);
         cmd.arg("-i")
-            .arg("pipe:0") // Input from stdin
+            .arg("pipe:0")
             .arg("-f")
-            .arg(output_format) // Output format
+            .arg(output_format)
             .arg("-ar")
-            .arg(self.sample_rate.to_string()) // Sample rate
+            .arg(self.sample_rate.to_string())
             .arg("-ac")
-            .arg(self.channels.to_string()) // Channels
+            .arg(self.channels.to_string())
             .arg("-loglevel")
-            .arg("error") // Only log errors
-            .arg("-y") // Overwrite output
-            .arg("pipe:1"); // Output to stdout
+            .arg("error")
+            .arg("-y")
+            .arg("pipe:1");
 
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
@@ -228,7 +256,6 @@ impl AudioConverter {
             .spawn()
             .with_context(|| format!("Failed to spawn FFmpeg at {}", self.ffmpeg_path))?;
 
-        // Write input data to stdin
         let stdin = child
             .stdin
             .take()
@@ -241,15 +268,18 @@ impl AudioConverter {
             if let Err(e) = stdin.write_all(&input_data).await {
                 warn!(error = %e, "Failed to write to FFmpeg stdin");
             }
-            // Close stdin to signal EOF
             let _ = stdin.shutdown().await;
         });
 
-        // Read output from stdout
         let stdout = child
             .stdout
             .take()
             .context("Failed to get FFmpeg stdout handle")?;
+
+        let stderr = child
+            .stderr
+            .take()
+            .context("Failed to get FFmpeg stderr handle")?;
 
         let read_task = tokio::spawn(async move {
             use tokio::io::AsyncReadExt;
@@ -261,11 +291,17 @@ impl AudioConverter {
             buffer
         });
 
-        // Wait for all tasks to complete
-        let (write_result, output_data, status) =
-            tokio::join!(write_task, read_task, child.wait(),);
+        let stderr_task = tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut stderr = stderr;
+            let mut buffer = Vec::new();
+            let _ = stderr.read_to_end(&mut buffer).await;
+            String::from_utf8_lossy(&buffer).to_string()
+        });
 
-        // Check for task errors
+        let (write_result, output_data, stderr_output, status) =
+            tokio::join!(write_task, read_task, stderr_task, child.wait(),);
+
         if let Err(e) = write_result {
             bail!("FFmpeg stdin write task failed: {}", e);
         }
@@ -273,16 +309,15 @@ impl AudioConverter {
         let output_data =
             output_data.map_err(|e| anyhow::anyhow!("FFmpeg stdout read task failed: {}", e))?;
 
+        let stderr_text = stderr_output.unwrap_or_default();
+
         let status = status.context("Failed to wait for FFmpeg process")?;
 
         if !status.success() {
-            // Try to get stderr for better error messages
-            // Note: Since we already consumed stdout, we need to capture stderr separately
-            // For simplicity, we'll just report the exit code
             bail!(
-                "FFmpeg conversion failed with exit code: {:?}. \
-                 Ensure FFmpeg is installed and supports the input format.",
-                status.code()
+                "FFmpeg conversion failed (exit code {:?}): {}",
+                status.code(),
+                stderr_text.trim(),
             );
         }
 
@@ -290,11 +325,7 @@ impl AudioConverter {
             bail!("FFmpeg produced empty output");
         }
 
-        debug!(
-            input_size = audio_data.len(),
-            output_size = output_data.len(),
-            "Audio conversion successful"
-        );
+        self.log_success(audio_data.len(), output_data.len());
 
         Ok(ConversionResult {
             data: output_data,
@@ -302,6 +333,92 @@ impl AudioConverter {
             original_format: source_format,
             target_format: self.target_format,
         })
+    }
+
+    /// Convert audio via a temporary file (required for MP4/M4A whose `moov`
+    /// atom prevents pure-pipe processing).
+    async fn convert_via_tempfile(
+        &self,
+        audio_data: &[u8],
+        source_format: AudioFormat,
+    ) -> anyhow::Result<ConversionResult> {
+        let (output_format, mime_type) = self.output_format_info()?;
+
+        // Write input to a temp file so FFmpeg can seek
+        let tmp_dir = std::env::temp_dir();
+        let input_path = tmp_dir.join(format!(
+            "assistant-audio-in-{}.{}",
+            std::process::id(),
+            source_format.extension()
+        ));
+        let output_path = tmp_dir.join(format!(
+            "assistant-audio-out-{}.{}",
+            std::process::id(),
+            self.target_format.extension()
+        ));
+
+        tokio::fs::write(&input_path, audio_data)
+            .await
+            .context("Failed to write audio to temp file")?;
+
+        info!(
+            input_path = %input_path.display(),
+            input_size = audio_data.len(),
+            source_format = ?source_format,
+            "Using temp file for seekable MP4/M4A input"
+        );
+
+        let output = Command::new(&self.ffmpeg_path)
+            .arg("-i")
+            .arg(&input_path)
+            .arg("-f")
+            .arg(output_format)
+            .arg("-ar")
+            .arg(self.sample_rate.to_string())
+            .arg("-ac")
+            .arg(self.channels.to_string())
+            .arg("-loglevel")
+            .arg("error")
+            .arg("-y")
+            .arg(&output_path)
+            .output()
+            .await
+            .with_context(|| format!("Failed to spawn FFmpeg at {}", self.ffmpeg_path))?;
+
+        // Always clean up the input file
+        let _ = tokio::fs::remove_file(&input_path).await;
+
+        if !output.status.success() {
+            let _ = tokio::fs::remove_file(&output_path).await;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "FFmpeg conversion failed (exit code {:?}): {}",
+                output.status.code(),
+                stderr.trim(),
+            );
+        }
+
+        let output_data = tokio::fs::read(&output_path)
+            .await
+            .context("Failed to read FFmpeg output file")?;
+        let _ = tokio::fs::remove_file(&output_path).await;
+
+        if output_data.is_empty() {
+            bail!("FFmpeg produced empty output");
+        }
+
+        self.log_success(audio_data.len(), output_data.len());
+
+        Ok(ConversionResult {
+            data: output_data,
+            mime_type: mime_type.to_string(),
+            original_format: source_format,
+            target_format: self.target_format,
+        })
+    }
+
+    fn log_success(&self, input_size: usize, output_size: usize) {
+        debug!(input_size, output_size, "Audio conversion successful");
     }
 
     /// Convenience method to convert audio if needed for Deepgram.
