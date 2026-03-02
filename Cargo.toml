@@ -82,7 +82,7 @@ toml = "1.0"
 # Async streams
 futures = "0.3"
 # Terminal line editor
-reedline = "0.45"
+reedline = "0.46"
 # QR code terminal rendering
 qr2term = "0.3"
 # YAML frontmatter parser
