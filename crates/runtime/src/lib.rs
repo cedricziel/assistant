@@ -1,4 +1,5 @@
 pub mod bootstrap;
+pub(crate) mod history;
 pub mod metrics;
 pub mod orchestrator;
 pub(crate) mod otel_spans;

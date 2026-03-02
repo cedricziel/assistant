@@ -1263,7 +1263,7 @@ async fn run_turn_with_tools_collects_attachments_from_extension() {
 #[test]
 fn sanitize_history_empty_is_noop() {
     let mut history = vec![];
-    Orchestrator::sanitize_history(&mut history);
+    crate::history::sanitize_history(&mut history);
     assert!(history.is_empty());
 }
 
@@ -1279,7 +1279,7 @@ fn sanitize_history_valid_alternation_is_noop() {
             content: "hi".into(),
         },
     ];
-    Orchestrator::sanitize_history(&mut history);
+    crate::history::sanitize_history(&mut history);
     assert_eq!(history.len(), 2, "valid alternation should not be modified");
 }
 
@@ -1289,7 +1289,7 @@ fn sanitize_history_trailing_user_inserts_assistant() {
         role: ChatRole::User,
         content: "orphaned".into(),
     }];
-    Orchestrator::sanitize_history(&mut history);
+    crate::history::sanitize_history(&mut history);
     assert_eq!(
         history.len(),
         2,
@@ -1314,7 +1314,7 @@ fn sanitize_history_trailing_multimodal_user_inserts_assistant() {
     let mut history = vec![ChatHistoryMessage::MultimodalUser {
         content: vec![assistant_llm::ContentBlock::Text("image msg".into())],
     }];
-    Orchestrator::sanitize_history(&mut history);
+    crate::history::sanitize_history(&mut history);
     assert_eq!(history.len(), 2);
     assert!(matches!(
         &history[1],
@@ -1350,7 +1350,7 @@ fn sanitize_history_orphaned_tool_calls_get_synthetic_results() {
             content: "ok".into(),
         },
     ];
-    Orchestrator::sanitize_history(&mut history);
+    crate::history::sanitize_history(&mut history);
     // Should have: User, AssistantToolCalls, ToolResult(a), ToolResult(b-synthetic)
     assert_eq!(history.len(), 4, "missing tool result should be inserted");
     match &history[3] {
@@ -1386,7 +1386,7 @@ fn sanitize_history_fully_orphaned_tool_calls_all_results_inserted() {
         ]),
         // No ToolResult at all — process crashed right after persisting tool calls.
     ];
-    Orchestrator::sanitize_history(&mut history);
+    crate::history::sanitize_history(&mut history);
     // Should have: User, AssistantToolCalls, ToolResult(alpha), ToolResult(beta)
     assert_eq!(
         history.len(),
@@ -1417,7 +1417,7 @@ fn sanitize_history_combined_orphaned_tools_and_trailing_user() {
             content: "turn 2".into(),
         },
     ];
-    Orchestrator::sanitize_history(&mut history);
+    crate::history::sanitize_history(&mut history);
     // Should have: User, AssistantToolCalls, ToolResult(synthetic), User, Assistant(synthetic)
     assert_eq!(history.len(), 5);
     assert!(
