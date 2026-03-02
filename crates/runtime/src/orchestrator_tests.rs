@@ -876,7 +876,7 @@ async fn empty_final_answer_not_persisted_in_run_turn() {
 
 #[test]
 fn serialize_history_multimodal_user_omits_base64_data() {
-    use super::serialize_history_for_span;
+    use crate::otel_spans::serialize_history_for_span;
     use assistant_llm::ContentBlock;
 
     let history = vec![ChatHistoryMessage::MultimodalUser {
