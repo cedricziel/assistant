@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.31](https://github.com/cedricziel/assistant/compare/v0.1.30...v0.1.31) (2026-03-02)
+
+
+### Bug Fixes
+
+* **slack:** set presence on every reconnect so bot appears online ([#172](https://github.com/cedricziel/assistant/issues/172)) ([21fc06d](https://github.com/cedricziel/assistant/commit/21fc06d1e1aa27fb8f35d4bad6cf7b068a73ec3d))
+* **transcription:** use atomic nonce for unique temp file names ([#175](https://github.com/cedricziel/assistant/issues/175)) ([4e21274](https://github.com/cedricziel/assistant/commit/4e21274b2904b8b6827a6e49e099e61f37c1a60f))
+
 ## [0.1.30](https://github.com/cedricziel/assistant/compare/v0.1.29...v0.1.30) (2026-03-02)
 
 
