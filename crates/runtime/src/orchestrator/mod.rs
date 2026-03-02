@@ -48,6 +48,31 @@ pub struct TurnResult {
     pub attachments: Vec<Attachment>,
 }
 
+/// Outcome of processing an `end_turn` tool call inside
+/// [`Orchestrator::handle_end_turn`].
+///
+/// The caller uses the variant to decide loop control flow:
+/// - `Deferred` / `Rejected` → `continue` (another iteration)
+/// - `Accepted` → `break`
+enum EndTurnOutcome {
+    /// `end_turn` was called alongside real tool calls — deferred.
+    Deferred,
+    /// `end_turn` rejected because a reply tool is available but not yet used.
+    Rejected,
+    /// `end_turn` accepted; the turn is complete.
+    Accepted,
+}
+
+/// Outcome of processing a `FinalAnswer` from the LLM inside
+/// [`Orchestrator::handle_final_answer_with_extensions`].
+///
+/// - `Done` → return the `TurnResult` to the caller.
+/// - `Retry` → `continue` the tool-calling loop (empty answer, no reply).
+enum FinalAnswerOutcome {
+    Done(TurnResult),
+    Retry,
+}
+
 /// Per-conversation extension tool registration consumed by the worker.
 ///
 /// Interfaces (Slack, Mattermost) register their per-turn tools and
@@ -371,82 +396,7 @@ impl Orchestrator {
             .collect();
 
         let base_system_prompt = self.compose_system_prompt().await;
-        // When extension tools are present, guide the LLM to use them.
-        let system_prompt = if ext_specs.is_empty() {
-            base_system_prompt
-        } else {
-            // Separate reply tools by purpose so the LLM understands they are
-            // alternatives, not complements — listing them all with "or" is
-            // ambiguous and causes some models to call several at once.
-            let plain_reply: Vec<&str> = ext_specs
-                .iter()
-                .filter(|s| {
-                    (s.name.contains("reply") || s.name.contains("post"))
-                        && !s.name.contains("block")
-                })
-                .map(|s| s.name.as_str())
-                .collect();
-            let block_reply: Vec<&str> = ext_specs
-                .iter()
-                .filter(|s| s.name.contains("block"))
-                .map(|s| s.name.as_str())
-                .collect();
-            let react_tools: Vec<&str> = ext_specs
-                .iter()
-                .filter(|s| s.name.contains("react"))
-                .map(|s| s.name.as_str())
-                .collect();
-
-            let has_reply = !plain_reply.is_empty() || !block_reply.is_empty();
-            let has_react = !react_tools.is_empty();
-
-            let ack_instruction = if has_reply && has_react {
-                let plain_names = plain_reply.join("`, `");
-                let block_names = block_reply.join("`, `");
-                let react_names = react_tools.join("`, `");
-                let block_clause = if !block_names.is_empty() {
-                    format!(" or `{block_names}` for rich Block Kit layouts")
-                } else {
-                    String::new()
-                };
-                format!(
-                    "Before calling `end_turn` you MUST send exactly one reply to the user.\n\
-                     - Use `{plain_names}` for plain-text or mrkdwn responses{block_clause}.\n\
-                     - Use `{react_names}` only for a brief emoji-only acknowledgement \
-                       (e.g. `thumbsup`, `white_check_mark`) when no text is needed.\n\
-                     Call at most ONE reply tool per turn — never call two reply tools \
-                     or call the same tool twice.\n"
-                )
-            } else if has_reply {
-                let plain_names = plain_reply.join("`, `");
-                let block_names = block_reply.join("`, `");
-                let block_clause = if !block_names.is_empty() {
-                    format!(" or `{block_names}` for rich Block Kit layouts")
-                } else {
-                    String::new()
-                };
-                format!(
-                    "Before calling `end_turn` you MUST reply to the user exactly once \
-                     using `{plain_names}`{block_clause}. \
-                     Never call a reply tool more than once per turn.\n"
-                )
-            } else if has_react {
-                let react_names = react_tools.join("`, `");
-                format!(
-                    "Before calling `end_turn` you MUST acknowledge the user \
-                     using `{react_names}` (exactly once).\n"
-                )
-            } else {
-                String::new()
-            };
-
-            format!(
-                "{base_system_prompt}\n\n---\n\n\
-                You are operating inside a messaging interface. \
-                {ack_instruction}\
-                When you have finished all work, call `end_turn` to signal completion."
-            )
-        };
+        let system_prompt = Self::build_extension_system_prompt(&base_system_prompt, &ext_specs);
 
         let mut turn_ended = false;
         let mut replied = false;
@@ -501,110 +451,24 @@ impl Orchestrator {
             match response {
                 // ── Final answer ──────────────────────────────────────────────
                 LlmResponse::FinalAnswer(text, _meta) => {
-                    // When a reply was already posted via an extension tool,
-                    // persist any non-empty wrap-up text and finish the turn.
-                    if replied {
-                        if !text.trim().is_empty() {
-                            let assistant_msg = {
-                                let mut m =
-                                    assistant_core::Message::assistant(conversation_id, &text);
-                                m.turn = base_turn + iteration as i64 + 1;
-                                m
-                            };
-                            if let Err(e) = conv_store.save_message(&assistant_msg).await {
-                                warn!("Failed to persist post-reply assistant message: {e}");
-                            }
+                    let outcome = Self::handle_final_answer_with_extensions(
+                        replied,
+                        &text,
+                        iteration,
+                        base_turn,
+                        conversation_id,
+                        &interface,
+                        &ext_map,
+                        &conv_store,
+                    )
+                    .await?;
+                    match outcome {
+                        FinalAnswerOutcome::Done(mut result) => {
+                            result.attachments = turn_attachments;
+                            return Ok(result);
                         }
-                        return Ok(TurnResult {
-                            answer: String::new(),
-                            attachments: turn_attachments,
-                        });
+                        FinalAnswerOutcome::Retry => continue,
                     }
-
-                    // Empty final answer with no reply sent yet — the user would
-                    // see nothing.  Don't persist the empty message (it pollutes
-                    // history and can cause the model to repeat the pattern on
-                    // subsequent turns) and loop to give the model another chance.
-                    if text.trim().is_empty() {
-                        warn!(
-                            iteration,
-                            "LLM returned empty final answer without a prior reply; retrying"
-                        );
-                        continue;
-                    }
-
-                    // Non-empty answer — persist to DB.
-                    let assistant_msg = {
-                        let mut m = assistant_core::Message::assistant(conversation_id, &text);
-                        m.turn = base_turn + iteration as i64 + 1;
-                        m
-                    };
-                    conv_store.save_message(&assistant_msg).await?;
-
-                    // If a reply-capable extension tool exists, use it to forward
-                    // the answer to the user.
-                    let reply_entry = ext_map
-                        .iter()
-                        .find(|(name, _)| name.contains("reply") && !name.contains("blocks"))
-                        .or_else(|| {
-                            ext_map
-                                .iter()
-                                .find(|(name, _)| name.contains("reply") || name.contains("post"))
-                        });
-
-                    if let Some((reply_name, reply_handler)) = reply_entry {
-                        info!(
-                            iteration,
-                            tool = %reply_name,
-                            "LLM returned final answer; auto-posting via extension reply tool"
-                        );
-                        let mut params_map = HashMap::new();
-                        // Determine which single text parameter the reply tool expects.
-                        // Only auto-post when there is exactly one required field and it
-                        // is a recognised text-like name; skip otherwise to avoid silent
-                        // failures with multi-param or non-text reply tools.
-                        let schema = reply_handler.params_schema();
-                        let text_param = schema
-                            .get("required")
-                            .and_then(|r| r.as_array())
-                            .and_then(|r| if r.len() == 1 { r[0].as_str() } else { None })
-                            .filter(|name| matches!(*name, "text" | "content" | "message"));
-                        let Some(text_param) = text_param else {
-                            warn!(
-                                tool = %reply_name,
-                                "Auto-post skipped: reply tool requires multiple or non-text params"
-                            );
-                            return Ok(TurnResult {
-                                answer: String::new(),
-                                attachments: turn_attachments,
-                            });
-                        };
-                        params_map.insert(
-                            text_param.to_string(),
-                            serde_json::Value::String(text.clone()),
-                        );
-                        let ctx2 = ExecutionContext {
-                            conversation_id,
-                            turn: iteration as i64,
-                            interface: interface.clone(),
-                            interactive: false,
-                            allowed_tools: None,
-                            depth: 0,
-                        };
-                        if let Err(e) = reply_handler.run(params_map, &ctx2).await {
-                            warn!(tool = %reply_name, %e, "Auto-post via reply tool failed");
-                        }
-                    } else {
-                        info!(
-                            iteration,
-                            "LLM returned final answer (no auto-post): no reply tool available"
-                        );
-                    }
-
-                    return Ok(TurnResult {
-                        answer: String::new(),
-                        attachments: turn_attachments,
-                    });
                 }
 
                 // ── Tool calls ────────────────────────────────────────────────
@@ -640,110 +504,26 @@ impl Orchestrator {
                         );
 
                         if name == "end_turn" {
-                            if has_real_calls {
-                                info!(
-                                    iteration,
-                                    "end_turn deferred (called alongside other tools)"
-                                );
-                                let deferred_msg =
-                                    "end_turn deferred: processing other tool calls first";
-                                otel_span.set_attribute(KeyValue::new("tool_status", "deferred"));
-                                otel_span.set_attribute(KeyValue::new(
-                                    "tool_observation",
-                                    deferred_msg.to_string(),
-                                ));
-                                crate::history::append_tool_result(
-                                    &mut history,
-                                    "end_turn",
-                                    deferred_msg,
-                                );
-                                let tr_msg = Self::make_tool_result_message(
-                                    conversation_id,
-                                    turn_index,
-                                    "end_turn",
-                                    deferred_msg,
-                                );
-                                if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                    warn!("Failed to persist deferred end_turn tool-result: {e}");
-                                }
-                                otel_span.end();
-                                continue;
-                            }
-
-                            let reason = params
-                                .get("reason")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("done");
-
-                            // Guard: reject end_turn when a reply/react tool
-                            // exists but the LLM never actually called one.
-                            // This prevents the turn from silently completing
-                            // without delivering a visible response to the
-                            // user in messaging interfaces (e.g. Slack).
-                            // Reactions count as valid acknowledgements per the
-                            // system prompt.
-                            let has_reply_tool = ext_map.keys().any(|n| {
-                                n.contains("reply") || n.contains("post") || n.contains("react")
-                            });
-                            if !replied && has_reply_tool {
-                                warn!(
-                                    iteration,
-                                    reason,
-                                    "end_turn rejected: reply tool available but no reply sent"
-                                );
-                                let reject_msg =
-                                    "end_turn rejected: you MUST call the `reply` tool \
-                                     before ending the turn. The user has not seen any \
-                                     response yet.";
-                                otel_span.set_attribute(KeyValue::new("tool_status", "rejected"));
-                                otel_span.set_attribute(KeyValue::new(
-                                    "tool_observation",
-                                    reject_msg.to_string(),
-                                ));
-                                crate::history::append_tool_result(
-                                    &mut history,
-                                    "end_turn",
-                                    reject_msg,
-                                );
-                                let tr_msg = Self::make_tool_result_message(
-                                    conversation_id,
-                                    turn_index,
-                                    "end_turn",
-                                    reject_msg,
-                                );
-                                if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                    warn!("Failed to persist rejected end_turn tool-result: {e}");
-                                }
-                                otel_span.end();
-                                continue;
-                            }
-
-                            info!(iteration, reason, "end_turn called; stopping turn");
-
-                            let result_text = format!("end_turn: {reason}");
-                            otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-                            otel_span.set_attribute(KeyValue::new(
-                                "tool_observation",
-                                result_text.clone(),
-                            ));
-                            crate::history::append_tool_result(
-                                &mut history,
-                                "end_turn",
-                                &result_text,
-                            );
-                            let tr_msg = Self::make_tool_result_message(
+                            let outcome = Self::handle_end_turn(
+                                has_real_calls,
+                                replied,
+                                &ext_map,
+                                &params,
+                                iteration,
                                 conversation_id,
                                 turn_index,
-                                "end_turn",
-                                &result_text,
-                            );
-                            if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                warn!("Failed to persist end_turn tool-result: {e}");
+                                &mut otel_span,
+                                &mut history,
+                                &conv_store,
+                            )
+                            .await;
+                            match outcome {
+                                EndTurnOutcome::Deferred | EndTurnOutcome::Rejected => continue,
+                                EndTurnOutcome::Accepted => {
+                                    turn_ended = true;
+                                    break;
+                                }
                             }
-
-                            turn_ended = true;
-                            otel_span.end();
-                            break;
                         }
 
                         // Extension tools take priority and bypass the safety gate.
@@ -1328,6 +1108,282 @@ impl Orchestrator {
             warn!("Failed to persist tool-result message: {e}");
         }
         Some(observation)
+    }
+
+    /// Handle a `FinalAnswer` from the LLM when extension tools are active.
+    ///
+    /// Three paths:
+    /// - **Already replied**: persist any non-empty wrap-up text → `Done`.
+    /// - **Empty answer, no reply yet**: warn → `Retry`.
+    /// - **Non-empty answer**: persist and optionally auto-post via a reply
+    ///   extension tool → `Done`.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_final_answer_with_extensions(
+        replied: bool,
+        text: &str,
+        iteration: usize,
+        base_turn: i64,
+        conversation_id: Uuid,
+        interface: &Interface,
+        ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
+        conv_store: &ConversationStore,
+    ) -> Result<FinalAnswerOutcome> {
+        let turn_index = base_turn + iteration as i64 + 1;
+
+        // 1. Reply already delivered — persist wrap-up text if any.
+        if replied {
+            if !text.trim().is_empty() {
+                let mut m = Message::assistant(conversation_id, text);
+                m.turn = turn_index;
+                if let Err(e) = conv_store.save_message(&m).await {
+                    warn!("Failed to persist post-reply assistant message: {e}");
+                }
+            }
+            return Ok(FinalAnswerOutcome::Done(TurnResult {
+                answer: String::new(),
+                attachments: Vec::new(),
+            }));
+        }
+
+        // 2. Empty answer with no prior reply — retry.
+        if text.trim().is_empty() {
+            warn!(
+                iteration,
+                "LLM returned empty final answer without a prior reply; retrying"
+            );
+            return Ok(FinalAnswerOutcome::Retry);
+        }
+
+        // 3. Non-empty answer — persist to DB.
+        let mut m = Message::assistant(conversation_id, text);
+        m.turn = turn_index;
+        conv_store.save_message(&m).await?;
+
+        // Auto-post via reply extension tool if one is available.
+        let reply_entry = ext_map
+            .iter()
+            .find(|(name, _)| name.contains("reply") && !name.contains("blocks"))
+            .or_else(|| {
+                ext_map
+                    .iter()
+                    .find(|(name, _)| name.contains("reply") || name.contains("post"))
+            });
+
+        if let Some((reply_name, reply_handler)) = reply_entry {
+            info!(
+                iteration,
+                tool = %reply_name,
+                "LLM returned final answer; auto-posting via extension reply tool"
+            );
+            // Only auto-post when there is exactly one required field and it
+            // is a recognised text-like name.
+            let schema = reply_handler.params_schema();
+            let text_param = schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .and_then(|r| if r.len() == 1 { r[0].as_str() } else { None })
+                .filter(|name| matches!(*name, "text" | "content" | "message"));
+
+            if let Some(param_name) = text_param {
+                let mut params_map = HashMap::new();
+                params_map.insert(
+                    param_name.to_string(),
+                    serde_json::Value::String(text.to_string()),
+                );
+                let ctx = ExecutionContext {
+                    conversation_id,
+                    turn: iteration as i64,
+                    interface: interface.clone(),
+                    interactive: false,
+                    allowed_tools: None,
+                    depth: 0,
+                };
+                if let Err(e) = reply_handler.run(params_map, &ctx).await {
+                    warn!(tool = %reply_name, %e, "Auto-post via reply tool failed");
+                }
+            } else {
+                warn!(
+                    tool = %reply_name,
+                    "Auto-post skipped: reply tool requires multiple or non-text params"
+                );
+            }
+        } else {
+            info!(
+                iteration,
+                "LLM returned final answer (no auto-post): no reply tool available"
+            );
+        }
+
+        Ok(FinalAnswerOutcome::Done(TurnResult {
+            answer: String::new(),
+            attachments: Vec::new(),
+        }))
+    }
+
+    /// Evaluate an `end_turn` tool call and return the appropriate outcome.
+    ///
+    /// Three possible paths:
+    /// - **Deferred**: `end_turn` was called alongside real tool calls — tell the
+    ///   LLM we will process the real calls first.
+    /// - **Rejected**: a reply/react extension tool exists but the LLM never
+    ///   called it — nudge it to reply before ending.
+    /// - **Accepted**: the turn ends normally.
+    ///
+    /// In every case this helper records the OTel span, appends the tool result
+    /// to `history`, and persists it to the database.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_end_turn(
+        has_real_calls: bool,
+        replied: bool,
+        ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
+        params: &serde_json::Value,
+        iteration: usize,
+        conversation_id: Uuid,
+        turn_index: i64,
+        otel_span: &mut opentelemetry::global::BoxedSpan,
+        history: &mut Vec<ChatHistoryMessage>,
+        conv_store: &ConversationStore,
+    ) -> EndTurnOutcome {
+        // --- Deferred: called alongside real tool calls ---
+        if has_real_calls {
+            info!(
+                iteration,
+                "end_turn deferred (called alongside other tools)"
+            );
+            let msg = "end_turn deferred: processing other tool calls first";
+            otel_span.set_attribute(KeyValue::new("tool_status", "deferred"));
+            otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
+            crate::history::append_tool_result(history, "end_turn", msg);
+            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
+            if let Err(e) = conv_store.save_message(&tr).await {
+                warn!("Failed to persist deferred end_turn tool-result: {e}");
+            }
+            otel_span.end();
+            return EndTurnOutcome::Deferred;
+        }
+
+        let reason = params
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("done");
+
+        // --- Rejected: reply tool available but never used ---
+        let has_reply_tool = ext_map
+            .keys()
+            .any(|n| n.contains("reply") || n.contains("post") || n.contains("react"));
+        if !replied && has_reply_tool {
+            warn!(
+                iteration,
+                reason, "end_turn rejected: reply tool available but no reply sent"
+            );
+            let msg = "end_turn rejected: you MUST call the `reply` tool \
+                       before ending the turn. The user has not seen any \
+                       response yet.";
+            otel_span.set_attribute(KeyValue::new("tool_status", "rejected"));
+            otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
+            crate::history::append_tool_result(history, "end_turn", msg);
+            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
+            if let Err(e) = conv_store.save_message(&tr).await {
+                warn!("Failed to persist rejected end_turn tool-result: {e}");
+            }
+            otel_span.end();
+            return EndTurnOutcome::Rejected;
+        }
+
+        // --- Accepted: turn ends normally ---
+        info!(iteration, reason, "end_turn called; stopping turn");
+        let result_text = format!("end_turn: {reason}");
+        otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+        otel_span.set_attribute(KeyValue::new("tool_observation", result_text.clone()));
+        crate::history::append_tool_result(history, "end_turn", &result_text);
+        let tr =
+            Self::make_tool_result_message(conversation_id, turn_index, "end_turn", &result_text);
+        if let Err(e) = conv_store.save_message(&tr).await {
+            warn!("Failed to persist end_turn tool-result: {e}");
+        }
+        otel_span.end();
+        EndTurnOutcome::Accepted
+    }
+
+    /// Build the system prompt for a turn that has extension tools.
+    ///
+    /// When no extension tool specs are provided, the base prompt is returned
+    /// unchanged.  Otherwise we append instructions that tell the LLM how to
+    /// use reply / react / block-reply tools and when to call `end_turn`.
+    fn build_extension_system_prompt(base_system_prompt: &str, ext_specs: &[ToolSpec]) -> String {
+        if ext_specs.is_empty() {
+            return base_system_prompt.to_string();
+        }
+
+        // Classify the extension tools so the LLM understands they are
+        // alternatives, not complements.
+        let plain_reply: Vec<&str> = ext_specs
+            .iter()
+            .filter(|s| {
+                (s.name.contains("reply") || s.name.contains("post")) && !s.name.contains("block")
+            })
+            .map(|s| s.name.as_str())
+            .collect();
+        let block_reply: Vec<&str> = ext_specs
+            .iter()
+            .filter(|s| s.name.contains("block"))
+            .map(|s| s.name.as_str())
+            .collect();
+        let react_tools: Vec<&str> = ext_specs
+            .iter()
+            .filter(|s| s.name.contains("react"))
+            .map(|s| s.name.as_str())
+            .collect();
+
+        let has_reply = !plain_reply.is_empty() || !block_reply.is_empty();
+        let has_react = !react_tools.is_empty();
+
+        let ack_instruction = if has_reply && has_react {
+            let plain_names = plain_reply.join("`, `");
+            let block_names = block_reply.join("`, `");
+            let react_names = react_tools.join("`, `");
+            let block_clause = if !block_names.is_empty() {
+                format!(" or `{block_names}` for rich Block Kit layouts")
+            } else {
+                String::new()
+            };
+            format!(
+                "Before calling `end_turn` you MUST send exactly one reply to the user.\n\
+                 - Use `{plain_names}` for plain-text or mrkdwn responses{block_clause}.\n\
+                 - Use `{react_names}` only for a brief emoji-only acknowledgement \
+                   (e.g. `thumbsup`, `white_check_mark`) when no text is needed.\n\
+                 Call at most ONE reply tool per turn — never call two reply tools \
+                 or call the same tool twice.\n"
+            )
+        } else if has_reply {
+            let plain_names = plain_reply.join("`, `");
+            let block_names = block_reply.join("`, `");
+            let block_clause = if !block_names.is_empty() {
+                format!(" or `{block_names}` for rich Block Kit layouts")
+            } else {
+                String::new()
+            };
+            format!(
+                "Before calling `end_turn` you MUST reply to the user exactly once \
+                 using `{plain_names}`{block_clause}. \
+                 Never call a reply tool more than once per turn.\n"
+            )
+        } else if has_react {
+            let react_names = react_tools.join("`, `");
+            format!(
+                "Before calling `end_turn` you MUST acknowledge the user \
+                 using `{react_names}` (exactly once).\n"
+            )
+        } else {
+            String::new()
+        };
+
+        format!(
+            "{base_system_prompt}\n\n---\n\n\
+             You are operating inside a messaging interface. \
+             {ack_instruction}\
+             When you have finished all work, call `end_turn` to signal completion."
+        )
     }
 
     /// Process a tool execution result: record metrics, set OTel span
