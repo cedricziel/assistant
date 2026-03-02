@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.32](https://github.com/cedricziel/assistant/compare/v0.1.31...v0.1.32) (2026-03-02)
+
+
+### Bug Fixes
+
+* **transcription:** improve error logging for audio conversion failures ([#176](https://github.com/cedricziel/assistant/issues/176)) ([23b34c6](https://github.com/cedricziel/assistant/commit/23b34c601c768614abd404299be4144a3f92d143))
+
 ## [0.1.31](https://github.com/cedricziel/assistant/compare/v0.1.30...v0.1.31) (2026-03-02)
 
 
