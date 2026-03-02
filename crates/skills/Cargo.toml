@@ -12,3 +12,6 @@ anyhow = { workspace = true }
 gray_matter = { workspace = true }
 include_dir = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

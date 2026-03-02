@@ -501,6 +501,26 @@ async fn bootstrap(
         .await
         .context("Failed to load embedded builtin skills")?;
 
+    // Sync embedded builtin skills to ~/.assistant/skills/ so on-disk copies
+    // stay in sync with the binary.  Stale or missing files are overwritten;
+    // user skills with different names are never touched.
+    if let Some(home) = dirs::home_dir() {
+        let builtin_target = home.join(".assistant").join("skills");
+        match registry.sync_builtins_to_disk(&builtin_target) {
+            Ok(updated) if !updated.is_empty() => {
+                tracing::info!(
+                    "Synced {} built-in skill(s) to disk: {}",
+                    updated.len(),
+                    updated.join(", ")
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to sync built-in skills to disk: {e}");
+            }
+            _ => {}
+        }
+    }
+
     registry
         .load_from_dirs(&dirs_ref)
         .await

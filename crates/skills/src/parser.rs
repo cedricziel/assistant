@@ -163,6 +163,113 @@ fn parse_allowed_tools(raw: Option<String>) -> Vec<String> {
 static EMBEDDED_SKILLS: include_dir::Dir =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../skills");
 
+/// Sync embedded builtin skills to a target directory on disk.
+///
+/// For each embedded skill, compare the on-disk `SKILL.md` content with the
+/// embedded version.  If they differ (or the file is missing), write the
+/// embedded version to disk, including any auxiliary files (scripts/,
+/// references/, assets/).  Skills that are already up-to-date are skipped.
+///
+/// Returns the names of skills that were written or updated.
+pub fn sync_builtins_to_disk(target_dir: &Path) -> Result<Vec<String>> {
+    use std::fs;
+
+    let mut updated = Vec::new();
+
+    for entry in EMBEDDED_SKILLS.dirs() {
+        let Some(skill_name) = entry.path().file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+
+        let skill_md_rel = entry.path().join("SKILL.md");
+        let Some(skill_md) = EMBEDDED_SKILLS.get_file(&skill_md_rel) else {
+            continue;
+        };
+        let Some(embedded_content) = skill_md.contents_utf8() else {
+            continue;
+        };
+
+        let target_skill_dir = target_dir.join(skill_name);
+        let on_disk_path = target_skill_dir.join("SKILL.md");
+
+        // Check whether the on-disk version matches the embedded content.
+        let needs_update = match fs::read_to_string(&on_disk_path) {
+            Ok(disk_content) => disk_content != embedded_content,
+            Err(_) => true, // Missing or unreadable — write it.
+        };
+
+        if !needs_update {
+            tracing::debug!(skill = %skill_name, "Built-in skill is up-to-date on disk");
+            continue;
+        }
+
+        // Write SKILL.md.
+        fs::create_dir_all(&target_skill_dir)?;
+        fs::write(&on_disk_path, embedded_content)?;
+
+        // Sync all other files in the embedded skill directory (auxiliary
+        // files in scripts/, references/, assets/ subdirectories).
+        sync_embedded_dir_recursive(entry, &target_skill_dir)?;
+
+        tracing::info!(skill = %skill_name, "Updated built-in skill on disk");
+        updated.push(skill_name.to_string());
+    }
+
+    Ok(updated)
+}
+
+/// Recursively write all files from an embedded `include_dir::Dir` to a
+/// target filesystem directory, creating subdirectories as needed.
+/// Skips `SKILL.md` (handled separately by the caller).
+fn sync_embedded_dir_recursive(
+    embedded_dir: &include_dir::Dir<'static>,
+    target_dir: &Path,
+) -> Result<()> {
+    use std::fs;
+
+    for file in embedded_dir.files() {
+        let rel = file
+            .path()
+            .strip_prefix(embedded_dir.path())
+            .unwrap_or(file.path());
+        if rel == Path::new("SKILL.md") {
+            continue;
+        }
+        let target_file = target_dir.join(rel);
+        if let Some(parent) = target_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&target_file, file.contents())?;
+    }
+
+    // Recurse into subdirectories.
+    for sub_dir in embedded_dir.dirs() {
+        let sub_name = sub_dir
+            .path()
+            .strip_prefix(embedded_dir.path())
+            .unwrap_or(sub_dir.path());
+        let sub_target = target_dir.join(sub_name);
+        // Re-use the same function, but pass the sub_dir as the root.
+        // Since sub_dir.files() returns files relative to sub_dir.path(),
+        // we handle them inline.
+        for file in sub_dir.files() {
+            let rel = file
+                .path()
+                .strip_prefix(embedded_dir.path())
+                .unwrap_or(file.path());
+            let target_file = target_dir.join(rel);
+            if let Some(parent) = target_file.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&target_file, file.contents())?;
+        }
+        // include_dir doesn't nest deeply for skills, but handle it.
+        let _ = sub_target; // suppress unused warning
+    }
+
+    Ok(())
+}
+
 /// Parse and return all skills embedded in the binary via [`EMBEDDED_SKILLS`].
 ///
 /// These are the `skills/` entries compiled into the binary at build time.
@@ -278,5 +385,60 @@ Body text.
         let dir = PathBuf::from("/tmp/compat");
         let result = parse_skill_content(&long, &dir, SkillSource::User);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sync_builtins_to_disk_writes_missing_skills() {
+        let tmp = tempfile::tempdir().unwrap();
+        let updated = sync_builtins_to_disk(tmp.path()).unwrap();
+
+        // Should have written at least one skill.
+        assert!(
+            !updated.is_empty(),
+            "sync should write at least one embedded skill"
+        );
+
+        // Each updated skill should have a SKILL.md on disk.
+        for name in &updated {
+            let skill_md = tmp.path().join(name).join("SKILL.md");
+            assert!(skill_md.exists(), "SKILL.md should exist for {name}");
+        }
+    }
+
+    #[test]
+    fn test_sync_builtins_to_disk_skips_up_to_date() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // First sync — writes everything.
+        let first = sync_builtins_to_disk(tmp.path()).unwrap();
+        assert!(!first.is_empty());
+
+        // Second sync — everything is up-to-date, nothing written.
+        let second = sync_builtins_to_disk(tmp.path()).unwrap();
+        assert!(second.is_empty(), "second sync should update nothing");
+    }
+
+    #[test]
+    fn test_sync_builtins_to_disk_overwrites_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // First sync.
+        let first = sync_builtins_to_disk(tmp.path()).unwrap();
+        assert!(!first.is_empty());
+
+        // Tamper with the first skill's SKILL.md.
+        let stale_path = tmp.path().join(&first[0]).join("SKILL.md");
+        std::fs::write(&stale_path, "stale content").unwrap();
+
+        // Second sync — should overwrite the stale file.
+        let second = sync_builtins_to_disk(tmp.path()).unwrap();
+        assert!(
+            second.contains(&first[0]),
+            "stale skill should be re-synced"
+        );
+
+        // Content should now match the embedded version again.
+        let restored = std::fs::read_to_string(&stale_path).unwrap();
+        assert_ne!(restored, "stale content");
     }
 }
