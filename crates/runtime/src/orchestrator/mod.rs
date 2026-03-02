@@ -371,82 +371,7 @@ impl Orchestrator {
             .collect();
 
         let base_system_prompt = self.compose_system_prompt().await;
-        // When extension tools are present, guide the LLM to use them.
-        let system_prompt = if ext_specs.is_empty() {
-            base_system_prompt
-        } else {
-            // Separate reply tools by purpose so the LLM understands they are
-            // alternatives, not complements — listing them all with "or" is
-            // ambiguous and causes some models to call several at once.
-            let plain_reply: Vec<&str> = ext_specs
-                .iter()
-                .filter(|s| {
-                    (s.name.contains("reply") || s.name.contains("post"))
-                        && !s.name.contains("block")
-                })
-                .map(|s| s.name.as_str())
-                .collect();
-            let block_reply: Vec<&str> = ext_specs
-                .iter()
-                .filter(|s| s.name.contains("block"))
-                .map(|s| s.name.as_str())
-                .collect();
-            let react_tools: Vec<&str> = ext_specs
-                .iter()
-                .filter(|s| s.name.contains("react"))
-                .map(|s| s.name.as_str())
-                .collect();
-
-            let has_reply = !plain_reply.is_empty() || !block_reply.is_empty();
-            let has_react = !react_tools.is_empty();
-
-            let ack_instruction = if has_reply && has_react {
-                let plain_names = plain_reply.join("`, `");
-                let block_names = block_reply.join("`, `");
-                let react_names = react_tools.join("`, `");
-                let block_clause = if !block_names.is_empty() {
-                    format!(" or `{block_names}` for rich Block Kit layouts")
-                } else {
-                    String::new()
-                };
-                format!(
-                    "Before calling `end_turn` you MUST send exactly one reply to the user.\n\
-                     - Use `{plain_names}` for plain-text or mrkdwn responses{block_clause}.\n\
-                     - Use `{react_names}` only for a brief emoji-only acknowledgement \
-                       (e.g. `thumbsup`, `white_check_mark`) when no text is needed.\n\
-                     Call at most ONE reply tool per turn — never call two reply tools \
-                     or call the same tool twice.\n"
-                )
-            } else if has_reply {
-                let plain_names = plain_reply.join("`, `");
-                let block_names = block_reply.join("`, `");
-                let block_clause = if !block_names.is_empty() {
-                    format!(" or `{block_names}` for rich Block Kit layouts")
-                } else {
-                    String::new()
-                };
-                format!(
-                    "Before calling `end_turn` you MUST reply to the user exactly once \
-                     using `{plain_names}`{block_clause}. \
-                     Never call a reply tool more than once per turn.\n"
-                )
-            } else if has_react {
-                let react_names = react_tools.join("`, `");
-                format!(
-                    "Before calling `end_turn` you MUST acknowledge the user \
-                     using `{react_names}` (exactly once).\n"
-                )
-            } else {
-                String::new()
-            };
-
-            format!(
-                "{base_system_prompt}\n\n---\n\n\
-                You are operating inside a messaging interface. \
-                {ack_instruction}\
-                When you have finished all work, call `end_turn` to signal completion."
-            )
-        };
+        let system_prompt = Self::build_extension_system_prompt(&base_system_prompt, &ext_specs);
 
         let mut turn_ended = false;
         let mut replied = false;
@@ -1328,6 +1253,87 @@ impl Orchestrator {
             warn!("Failed to persist tool-result message: {e}");
         }
         Some(observation)
+    }
+
+    /// Build the system prompt for a turn that has extension tools.
+    ///
+    /// When no extension tool specs are provided, the base prompt is returned
+    /// unchanged.  Otherwise we append instructions that tell the LLM how to
+    /// use reply / react / block-reply tools and when to call `end_turn`.
+    fn build_extension_system_prompt(base_system_prompt: &str, ext_specs: &[ToolSpec]) -> String {
+        if ext_specs.is_empty() {
+            return base_system_prompt.to_string();
+        }
+
+        // Classify the extension tools so the LLM understands they are
+        // alternatives, not complements.
+        let plain_reply: Vec<&str> = ext_specs
+            .iter()
+            .filter(|s| {
+                (s.name.contains("reply") || s.name.contains("post")) && !s.name.contains("block")
+            })
+            .map(|s| s.name.as_str())
+            .collect();
+        let block_reply: Vec<&str> = ext_specs
+            .iter()
+            .filter(|s| s.name.contains("block"))
+            .map(|s| s.name.as_str())
+            .collect();
+        let react_tools: Vec<&str> = ext_specs
+            .iter()
+            .filter(|s| s.name.contains("react"))
+            .map(|s| s.name.as_str())
+            .collect();
+
+        let has_reply = !plain_reply.is_empty() || !block_reply.is_empty();
+        let has_react = !react_tools.is_empty();
+
+        let ack_instruction = if has_reply && has_react {
+            let plain_names = plain_reply.join("`, `");
+            let block_names = block_reply.join("`, `");
+            let react_names = react_tools.join("`, `");
+            let block_clause = if !block_names.is_empty() {
+                format!(" or `{block_names}` for rich Block Kit layouts")
+            } else {
+                String::new()
+            };
+            format!(
+                "Before calling `end_turn` you MUST send exactly one reply to the user.\n\
+                 - Use `{plain_names}` for plain-text or mrkdwn responses{block_clause}.\n\
+                 - Use `{react_names}` only for a brief emoji-only acknowledgement \
+                   (e.g. `thumbsup`, `white_check_mark`) when no text is needed.\n\
+                 Call at most ONE reply tool per turn — never call two reply tools \
+                 or call the same tool twice.\n"
+            )
+        } else if has_reply {
+            let plain_names = plain_reply.join("`, `");
+            let block_names = block_reply.join("`, `");
+            let block_clause = if !block_names.is_empty() {
+                format!(" or `{block_names}` for rich Block Kit layouts")
+            } else {
+                String::new()
+            };
+            format!(
+                "Before calling `end_turn` you MUST reply to the user exactly once \
+                 using `{plain_names}`{block_clause}. \
+                 Never call a reply tool more than once per turn.\n"
+            )
+        } else if has_react {
+            let react_names = react_tools.join("`, `");
+            format!(
+                "Before calling `end_turn` you MUST acknowledge the user \
+                 using `{react_names}` (exactly once).\n"
+            )
+        } else {
+            String::new()
+        };
+
+        format!(
+            "{base_system_prompt}\n\n---\n\n\
+             You are operating inside a messaging interface. \
+             {ack_instruction}\
+             When you have finished all work, call `end_turn` to signal completion."
+        )
     }
 
     /// Process a tool execution result: record metrics, set OTel span
