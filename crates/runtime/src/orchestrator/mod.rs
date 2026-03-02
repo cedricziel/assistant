@@ -1315,7 +1315,7 @@ impl Orchestrator {
                 if !output.attachments.is_empty() {
                     turn_attachments.extend(output.attachments);
                 }
-                tool_result_content(&output.content, output.data.as_ref())
+                output.content.clone()
             }
             Err(err) => {
                 warn!(tool = %tool_name, %err, "Tool execution failed");
@@ -1485,14 +1485,6 @@ fn setup_turn_trace(
 
 /// Build the tool result content from a tool output.
 ///
-/// Always returns the human-readable `content` string so the LLM receives
-/// a consistent, formatted observation. The structured `data` field is for
-/// downstream callers that need machine-readable output; it is not sent to
-/// the model directly.
-fn tool_result_content(content: &str, _data: Option<&serde_json::Value>) -> String {
-    content.to_string()
-}
-
 fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {
     let path = skill.dir.join("SKILL.md");
     if path.exists() {
