@@ -17,7 +17,7 @@ use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::Resource;
 use serde_json::{Map, Number};
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use tracing::warn;
 
 /// OpenTelemetry metric exporter that persists data points into the
@@ -34,40 +34,46 @@ impl SqliteMetricExporter {
     }
 
     /// Upsert the resource and return its row id.
-    async fn ensure_resource(&self, resource: &Resource) -> Result<i64, sqlx::Error> {
+    async fn ensure_resource(
+        conn: &mut SqliteConnection,
+        resource: &Resource,
+    ) -> Result<i64, sqlx::Error> {
         let fingerprint = resource_fingerprint(resource);
         let attrs_json = resource_to_json(resource);
 
         sqlx::query("INSERT OR IGNORE INTO resources (fingerprint, attributes) VALUES (?1, ?2)")
             .bind(&fingerprint)
             .bind(&attrs_json)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
 
         let id: i64 = sqlx::query_scalar("SELECT id FROM resources WHERE fingerprint = ?1")
             .bind(&fingerprint)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *conn)
             .await?;
 
         Ok(id)
     }
 
     /// Upsert the instrumentation scope and return its row id.
-    async fn ensure_scope(&self, scope: &InstrumentationScope) -> Result<i64, sqlx::Error> {
+    async fn ensure_scope(
+        conn: &mut SqliteConnection,
+        scope: &InstrumentationScope,
+    ) -> Result<i64, sqlx::Error> {
         let name = scope.name();
         let version = scope.version().unwrap_or("");
 
         sqlx::query("INSERT OR IGNORE INTO metric_scopes (name, version) VALUES (?1, ?2)")
             .bind(name)
             .bind(version)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
 
         let id: i64 =
             sqlx::query_scalar("SELECT id FROM metric_scopes WHERE name = ?1 AND version = ?2")
                 .bind(name)
                 .bind(version)
-                .fetch_one(&self.pool)
+                .fetch_one(&mut *conn)
                 .await?;
 
         Ok(id)
@@ -76,7 +82,7 @@ impl SqliteMetricExporter {
     /// Persist a single sum data point (f64).
     #[allow(clippy::too_many_arguments)]
     async fn insert_sum_scalar(
-        &self,
+        conn: &mut SqliteConnection,
         resource_id: i64,
         scope_id: i64,
         name: &str,
@@ -115,7 +121,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
@@ -124,7 +130,7 @@ impl SqliteMetricExporter {
     /// Persist a single sum data point (i64).
     #[allow(clippy::too_many_arguments)]
     async fn insert_sum_scalar_i64(
-        &self,
+        conn: &mut SqliteConnection,
         resource_id: i64,
         scope_id: i64,
         name: &str,
@@ -163,7 +169,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
@@ -172,7 +178,7 @@ impl SqliteMetricExporter {
     /// Persist a single gauge data point (f64).
     #[allow(clippy::too_many_arguments)]
     async fn insert_gauge_scalar(
-        &self,
+        conn: &mut SqliteConnection,
         resource_id: i64,
         scope_id: i64,
         name: &str,
@@ -205,7 +211,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
@@ -214,7 +220,7 @@ impl SqliteMetricExporter {
     /// Persist a single gauge data point (i64).
     #[allow(clippy::too_many_arguments)]
     async fn insert_gauge_scalar_i64(
-        &self,
+        conn: &mut SqliteConnection,
         resource_id: i64,
         scope_id: i64,
         name: &str,
@@ -247,7 +253,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
@@ -256,7 +262,7 @@ impl SqliteMetricExporter {
     /// Persist a histogram data point.
     #[allow(clippy::too_many_arguments)]
     async fn insert_histogram(
-        &self,
+        conn: &mut SqliteConnection,
         resource_id: i64,
         scope_id: i64,
         name: &str,
@@ -304,7 +310,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
@@ -312,7 +318,7 @@ impl SqliteMetricExporter {
 
     /// Process a single `MetricData<f64>` value.
     async fn process_f64_metric(
-        &self,
+        conn: &mut SqliteConnection,
         resource_id: i64,
         scope_id: i64,
         name: &str,
@@ -328,19 +334,19 @@ impl SqliteMetricExporter {
                     "up_down_counter"
                 };
                 for dp in sum.data_points() {
-                    if let Err(e) = self
-                        .insert_sum_scalar(
-                            resource_id,
-                            scope_id,
-                            name,
-                            kind,
-                            unit,
-                            desc,
-                            dp,
-                            sum.start_time(),
-                            sum.time(),
-                        )
-                        .await
+                    if let Err(e) = Self::insert_sum_scalar(
+                        &mut *conn,
+                        resource_id,
+                        scope_id,
+                        name,
+                        kind,
+                        unit,
+                        desc,
+                        dp,
+                        sum.start_time(),
+                        sum.time(),
+                    )
+                    .await
                     {
                         warn!(metric = name, error = %e, "failed to persist f64 sum");
                     }
@@ -348,9 +354,16 @@ impl SqliteMetricExporter {
             }
             MetricData::Gauge(gauge) => {
                 for dp in gauge.data_points() {
-                    if let Err(e) = self
-                        .insert_gauge_scalar(resource_id, scope_id, name, unit, desc, dp)
-                        .await
+                    if let Err(e) = Self::insert_gauge_scalar(
+                        &mut *conn,
+                        resource_id,
+                        scope_id,
+                        name,
+                        unit,
+                        desc,
+                        dp,
+                    )
+                    .await
                     {
                         warn!(metric = name, error = %e, "failed to persist f64 gauge");
                     }
@@ -358,18 +371,18 @@ impl SqliteMetricExporter {
             }
             MetricData::Histogram(hist) => {
                 for dp in hist.data_points() {
-                    if let Err(e) = self
-                        .insert_histogram(
-                            resource_id,
-                            scope_id,
-                            name,
-                            unit,
-                            desc,
-                            dp,
-                            hist.start_time(),
-                            hist.time(),
-                        )
-                        .await
+                    if let Err(e) = Self::insert_histogram(
+                        &mut *conn,
+                        resource_id,
+                        scope_id,
+                        name,
+                        unit,
+                        desc,
+                        dp,
+                        hist.start_time(),
+                        hist.time(),
+                    )
+                    .await
                     {
                         warn!(metric = name, error = %e, "failed to persist f64 histogram");
                     }
@@ -383,7 +396,7 @@ impl SqliteMetricExporter {
 
     /// Process a single `MetricData<i64>` value.
     async fn process_i64_metric(
-        &self,
+        conn: &mut SqliteConnection,
         resource_id: i64,
         scope_id: i64,
         name: &str,
@@ -399,19 +412,19 @@ impl SqliteMetricExporter {
                     "up_down_counter"
                 };
                 for dp in sum.data_points() {
-                    if let Err(e) = self
-                        .insert_sum_scalar_i64(
-                            resource_id,
-                            scope_id,
-                            name,
-                            kind,
-                            unit,
-                            desc,
-                            dp,
-                            sum.start_time(),
-                            sum.time(),
-                        )
-                        .await
+                    if let Err(e) = Self::insert_sum_scalar_i64(
+                        &mut *conn,
+                        resource_id,
+                        scope_id,
+                        name,
+                        kind,
+                        unit,
+                        desc,
+                        dp,
+                        sum.start_time(),
+                        sum.time(),
+                    )
+                    .await
                     {
                         warn!(metric = name, error = %e, "failed to persist i64 sum");
                     }
@@ -419,9 +432,16 @@ impl SqliteMetricExporter {
             }
             MetricData::Gauge(gauge) => {
                 for dp in gauge.data_points() {
-                    if let Err(e) = self
-                        .insert_gauge_scalar_i64(resource_id, scope_id, name, unit, desc, dp)
-                        .await
+                    if let Err(e) = Self::insert_gauge_scalar_i64(
+                        &mut *conn,
+                        resource_id,
+                        scope_id,
+                        name,
+                        unit,
+                        desc,
+                        dp,
+                    )
+                    .await
                     {
                         warn!(metric = name, error = %e, "failed to persist i64 gauge");
                     }
@@ -436,14 +456,18 @@ impl SqliteMetricExporter {
 
 impl PushMetricExporter for SqliteMetricExporter {
     async fn export(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
-        let resource_id = self
-            .ensure_resource(metrics.resource())
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
+
+        let resource_id = Self::ensure_resource(&mut tx, metrics.resource())
             .await
             .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 
         for scope_metrics in metrics.scope_metrics() {
-            let scope_id = self
-                .ensure_scope(scope_metrics.scope())
+            let scope_id = Self::ensure_scope(&mut tx, scope_metrics.scope())
                 .await
                 .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 
@@ -454,12 +478,28 @@ impl PushMetricExporter for SqliteMetricExporter {
 
                 match metric.data() {
                     AggregatedMetrics::F64(data) => {
-                        self.process_f64_metric(resource_id, scope_id, name, unit, desc, data)
-                            .await;
+                        Self::process_f64_metric(
+                            &mut tx,
+                            resource_id,
+                            scope_id,
+                            name,
+                            unit,
+                            desc,
+                            data,
+                        )
+                        .await;
                     }
                     AggregatedMetrics::I64(data) => {
-                        self.process_i64_metric(resource_id, scope_id, name, unit, desc, data)
-                            .await;
+                        Self::process_i64_metric(
+                            &mut tx,
+                            resource_id,
+                            scope_id,
+                            name,
+                            unit,
+                            desc,
+                            data,
+                        )
+                        .await;
                     }
                     AggregatedMetrics::U64(_) => {
                         warn!(metric = name, "u64 metrics not yet supported, skipping");
@@ -467,6 +507,10 @@ impl PushMetricExporter for SqliteMetricExporter {
                 }
             }
         }
+
+        tx.commit()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
 
         Ok(())
     }
@@ -617,7 +661,6 @@ mod tests {
     #[tokio::test]
     async fn resource_upsert_is_idempotent() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteMetricExporter::new(storage.pool.clone());
 
         let resource = Resource::builder_empty()
             .with_attributes([
@@ -626,8 +669,13 @@ mod tests {
             ])
             .build();
 
-        let id1 = exporter.ensure_resource(&resource).await.unwrap();
-        let id2 = exporter.ensure_resource(&resource).await.unwrap();
+        let mut conn = storage.pool.acquire().await.unwrap();
+        let id1 = SqliteMetricExporter::ensure_resource(&mut *conn, &resource)
+            .await
+            .unwrap();
+        let id2 = SqliteMetricExporter::ensure_resource(&mut *conn, &resource)
+            .await
+            .unwrap();
         assert_eq!(id1, id2, "same resource must return same id");
 
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM resources")
@@ -640,14 +688,18 @@ mod tests {
     #[tokio::test]
     async fn scope_upsert_is_idempotent() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteMetricExporter::new(storage.pool.clone());
 
         let scope = InstrumentationScope::builder("test-scope")
             .with_version("1.0")
             .build();
 
-        let id1 = exporter.ensure_scope(&scope).await.unwrap();
-        let id2 = exporter.ensure_scope(&scope).await.unwrap();
+        let mut conn = storage.pool.acquire().await.unwrap();
+        let id1 = SqliteMetricExporter::ensure_scope(&mut *conn, &scope)
+            .await
+            .unwrap();
+        let id2 = SqliteMetricExporter::ensure_scope(&mut *conn, &scope)
+            .await
+            .unwrap();
         assert_eq!(id1, id2, "same scope must return same id");
     }
 
