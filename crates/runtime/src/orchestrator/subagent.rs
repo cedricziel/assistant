@@ -4,8 +4,6 @@
 //! orchestrator to spawn isolated sub-agent conversations with restricted
 //! tool sets and independent cancellation tokens.
 
-use std::collections::HashMap;
-
 use anyhow::Result;
 use assistant_core::{
     AgentReport, AgentReportStatus, AgentSpawn, ExecutionContext, Interface, Message,
@@ -22,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, warn, Instrument};
 use uuid::Uuid;
 
-use super::{tool_result_content, Orchestrator};
+use super::{tool_result_content, value_to_params_map, Orchestrator};
 
 #[async_trait]
 impl SubagentRunner for Orchestrator {
@@ -331,12 +329,7 @@ impl SubagentRunner for Orchestrator {
                                 &agent_cx,
                             );
 
-                            let params_map: HashMap<String, serde_json::Value> =
-                                if let serde_json::Value::Object(map) = &params {
-                                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                                } else {
-                                    HashMap::new()
-                                };
+                            let params_map = value_to_params_map(&params);
 
                             let ctx = ExecutionContext {
                                 conversation_id,

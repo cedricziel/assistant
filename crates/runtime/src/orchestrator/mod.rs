@@ -748,12 +748,7 @@ impl Orchestrator {
                         let observation = if let Some(handler) = ext_map.get(&name) {
                             debug!(tool = %name, "Dispatching to extension handler");
 
-                            let params_map: HashMap<String, serde_json::Value> =
-                                if let serde_json::Value::Object(map) = &params {
-                                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                                } else {
-                                    HashMap::new()
-                                };
+                            let params_map = value_to_params_map(&params);
 
                             let start = std::time::Instant::now();
                             let exec_result = handler.run(params_map, &ctx).await;
@@ -835,12 +830,7 @@ impl Orchestrator {
                                 }
                             }
 
-                            let params_map: HashMap<String, serde_json::Value> =
-                                if let serde_json::Value::Object(map) = &params {
-                                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                                } else {
-                                    HashMap::new()
-                                };
+                            let params_map = value_to_params_map(&params);
 
                             let start = std::time::Instant::now();
                             let exec_result = self
@@ -1195,12 +1185,7 @@ impl Orchestrator {
                             }
                         }
 
-                        let params_map: HashMap<String, serde_json::Value> =
-                            if let serde_json::Value::Object(map) = &params {
-                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                            } else {
-                                HashMap::new()
-                            };
+                        let params_map = value_to_params_map(&params);
 
                         let start = std::time::Instant::now();
                         let exec_result = self
@@ -1475,6 +1460,20 @@ fn escape_xml(input: &str) -> String {
         }
     }
     escaped
+}
+
+/// Convert a [`serde_json::Value`] to a flat `HashMap<String, Value>`.
+///
+/// If the value is an `Object`, its entries are cloned into the map.
+/// Any other variant (or `Null`) yields an empty map.  This is the
+/// canonical way to prepare tool-call parameters for
+/// [`ToolHandler::run`](assistant_core::ToolHandler::run).
+pub(crate) fn value_to_params_map(value: &serde_json::Value) -> HashMap<String, serde_json::Value> {
+    if let serde_json::Value::Object(map) = value {
+        map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    } else {
+        HashMap::new()
+    }
 }
 
 mod worker;
