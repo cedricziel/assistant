@@ -16,16 +16,9 @@ pub struct MetricsRecorder {
     pub token_usage: Histogram<f64>,
     /// `gen_ai.client.operation.duration` — end-to-end LLM operation duration.
     pub operation_duration: Histogram<f64>,
-    /// `gen_ai.server.time_to_first_token` — time to first token in streaming.
-    pub time_to_first_token: Histogram<f64>,
-    /// `gen_ai.server.time_per_output_token` — per-token decode latency.
-    pub time_per_output_token: Histogram<f64>,
-
     // -- Operational metrics -------------------------------------------------
     /// `assistant.turn.count` — turns processed.
     pub turn_count: Counter<u64>,
-    /// `assistant.turn.duration` — turn processing time.
-    pub turn_duration: Histogram<f64>,
     /// `assistant.tool.invocations` — tool calls executed.
     pub tool_invocations: Counter<u64>,
     /// `assistant.tool.duration` — tool execution time.
@@ -63,29 +56,11 @@ impl MetricsRecorder {
                 .with_unit("s")
                 .build(),
 
-            time_to_first_token: meter
-                .f64_histogram("gen_ai.server.time_to_first_token")
-                .with_description("Time to generate first token")
-                .with_unit("s")
-                .build(),
-
-            time_per_output_token: meter
-                .f64_histogram("gen_ai.server.time_per_output_token")
-                .with_description("Time per output token after the first")
-                .with_unit("s")
-                .build(),
-
             // -- Operational -------------------------------------------------
             turn_count: meter
                 .u64_counter("assistant.turn.count")
                 .with_description("Number of turns processed")
                 .with_unit("{turn}")
-                .build(),
-
-            turn_duration: meter
-                .f64_histogram("assistant.turn.duration")
-                .with_description("Turn processing duration")
-                .with_unit("s")
                 .build(),
 
             tool_invocations: meter
@@ -176,15 +151,6 @@ impl MetricsRecorder {
         self.turn_count.add(1, &attrs);
     }
 
-    /// Record turn duration.
-    pub fn record_turn_duration(&self, duration_s: f64, skill: Option<&str>, interface: &str) {
-        let mut attrs = vec![KeyValue::new("interface", interface.to_string())];
-        if let Some(s) = skill {
-            attrs.push(KeyValue::new("skill", s.to_string()));
-        }
-        self.turn_duration.record(duration_s, &attrs);
-    }
-
     /// Record a tool invocation.
     pub fn record_tool_invocation(&self, tool_name: &str) {
         let attrs = [KeyValue::new("tool.name", tool_name.to_string())];
@@ -204,23 +170,5 @@ impl MetricsRecorder {
             KeyValue::new("source", source.to_string()),
         ];
         self.error_count.add(1, &attrs);
-    }
-
-    /// Record time-to-first-token for a streaming response.
-    pub fn record_ttft(&self, model: &str, provider: &str, ttft_s: f64) {
-        let attrs = [
-            KeyValue::new("gen_ai.request.model", model.to_string()),
-            KeyValue::new("gen_ai.provider.name", provider.to_string()),
-        ];
-        self.time_to_first_token.record(ttft_s, &attrs);
-    }
-
-    /// Record per-token output latency.
-    pub fn record_time_per_token(&self, model: &str, provider: &str, per_token_s: f64) {
-        let attrs = [
-            KeyValue::new("gen_ai.request.model", model.to_string()),
-            KeyValue::new("gen_ai.provider.name", provider.to_string()),
-        ];
-        self.time_per_output_token.record(per_token_s, &attrs);
     }
 }
