@@ -614,17 +614,14 @@ impl Orchestrator {
                         iteration, "LLM requested tool execution(s)"
                     );
 
-                    history.push(ChatHistoryMessage::AssistantToolCalls(
-                        tool_call_items.clone(),
-                    ));
-                    let tc_msg = Self::make_tool_call_message(
+                    Self::persist_tool_calls(
+                        &mut history,
+                        &conv_store,
                         conversation_id,
                         base_turn + iteration as i64 + 1,
                         &tool_call_items,
-                    );
-                    if let Err(e) = conv_store.save_message(&tc_msg).await {
-                        warn!("Failed to persist tool-call message: {e}");
-                    }
+                    )
+                    .await;
 
                     let has_real_calls = tool_call_items.iter().any(|t| t.name != "end_turn");
 
@@ -1134,21 +1131,15 @@ impl Orchestrator {
                         iteration, "LLM requested tool execution(s)"
                     );
 
-                    history.push(ChatHistoryMessage::AssistantToolCalls(
-                        tool_call_items.clone(),
-                    ));
-                    let tc_msg = Self::make_tool_call_message(
+                    Self::persist_tool_calls(
+                        &mut history,
+                        &conv_store,
                         conversation_id,
                         base_turn + iteration as i64 + 1,
                         &tool_call_items,
-                    );
-                    if let Err(e) = conv_store
-                        .save_message(&tc_msg)
-                        .instrument(iteration_span.clone())
-                        .await
-                    {
-                        warn!("Failed to persist tool-call message: {e}");
-                    }
+                    )
+                    .instrument(iteration_span.clone())
+                    .await;
 
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
@@ -1427,6 +1418,27 @@ impl Orchestrator {
             warn!("Failed to persist tool-result message: {e}");
         }
         Some(observation)
+    }
+
+    /// Record tool calls in the chat history and persist them to the database.
+    ///
+    /// This is the common pre-execution step shared by all three turn variants
+    /// (extension-tools, core, and subagent).  It clones the items into the
+    /// running history and saves a tool-call message to the conversation store.
+    async fn persist_tool_calls(
+        history: &mut Vec<ChatHistoryMessage>,
+        conv_store: &ConversationStore,
+        conversation_id: Uuid,
+        turn_index: i64,
+        tool_call_items: &[assistant_llm::ToolCallItem],
+    ) {
+        history.push(ChatHistoryMessage::AssistantToolCalls(
+            tool_call_items.to_vec(),
+        ));
+        let tc_msg = Self::make_tool_call_message(conversation_id, turn_index, tool_call_items);
+        if let Err(e) = conv_store.save_message(&tc_msg).await {
+            warn!("Failed to persist tool-call message: {e}");
+        }
     }
 
     fn make_tool_call_message(
