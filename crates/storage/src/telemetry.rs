@@ -4,7 +4,7 @@ use opentelemetry::{KeyValue, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{SpanData, SpanExporter};
 use serde_json::{Map, Number};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 /// OpenTelemetry span exporter that persists spans into the `distributed_traces`
@@ -19,7 +19,7 @@ impl SqliteSpanExporter {
         Self { pool }
     }
 
-    async fn persist_span(pool: SqlitePool, span: SpanData) -> Result<(), sqlx::Error> {
+    async fn persist_span(conn: &mut SqliteConnection, span: SpanData) -> Result<(), sqlx::Error> {
         let mut attrs = attributes_to_map(&span.attributes);
         let (status_code, status_message) = status_fields(&span.status);
         attrs.insert(
@@ -108,7 +108,7 @@ impl SqliteSpanExporter {
         .bind(attrs_serialized)
         .bind(input_tokens)
         .bind(output_tokens)
-        .execute(&pool)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
@@ -117,13 +117,24 @@ impl SqliteSpanExporter {
 
 impl SpanExporter for SqliteSpanExporter {
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
+
         for span in batch {
-            if let Err(err) = SqliteSpanExporter::persist_span(self.pool.clone(), span).await {
+            if let Err(err) = SqliteSpanExporter::persist_span(&mut tx, span).await {
                 return Err(OTelSdkError::InternalFailure(format!(
                     "SQLite span export failed: {err}"
                 )));
             }
         }
+
+        tx.commit()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
+
         Ok(())
     }
 }

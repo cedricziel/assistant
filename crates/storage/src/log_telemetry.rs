@@ -2,11 +2,11 @@
 
 use chrono::{DateTime, Utc};
 use opentelemetry::logs::{AnyValue, Severity};
-use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
 use serde_json::{Map, Number};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 /// OpenTelemetry log exporter that persists log records into the `logs`
@@ -21,7 +21,10 @@ impl SqliteLogExporter {
         Self { pool }
     }
 
-    async fn persist_log(pool: SqlitePool, record: &SdkLogRecord) -> Result<(), sqlx::Error> {
+    async fn persist_log(
+        conn: &mut SqliteConnection,
+        record: &SdkLogRecord,
+    ) -> Result<(), sqlx::Error> {
         let id = Uuid::new_v4().to_string();
 
         let timestamp: DateTime<Utc> = record.timestamp().map(Into::into).unwrap_or_else(Utc::now);
@@ -64,7 +67,7 @@ impl SqliteLogExporter {
         .bind(&span_id)
         .bind(&target)
         .bind(&attrs_serialized)
-        .execute(&pool)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
@@ -73,13 +76,24 @@ impl SqliteLogExporter {
 
 impl LogExporter for SqliteLogExporter {
     async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
+
         for (record, _scope) in batch.iter() {
-            if let Err(err) = Self::persist_log(self.pool.clone(), record).await {
-                return Err(opentelemetry_sdk::error::OTelSdkError::InternalFailure(
-                    format!("SQLite log export failed: {err}"),
-                ));
+            if let Err(err) = Self::persist_log(&mut tx, record).await {
+                return Err(OTelSdkError::InternalFailure(format!(
+                    "SQLite log export failed: {err}"
+                )));
             }
         }
+
+        tx.commit()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
+
         Ok(())
     }
 
