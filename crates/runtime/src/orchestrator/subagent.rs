@@ -332,7 +332,6 @@ impl SubagentRunner for Orchestrator {
                                 .instrument(iteration_span.clone())
                                 .await;
                             let elapsed = start.elapsed();
-                            let failed = exec_result.is_err();
 
                             // Subagent does not surface attachments to
                             // the parent — pass a scratch vector.
@@ -349,10 +348,6 @@ impl SubagentRunner for Orchestrator {
                                 &mut scratch_attachments,
                             )
                             .await;
-
-                            if failed {
-                                self.metrics.record_error("tool_error", &name);
-                            }
                         }
                     }
 

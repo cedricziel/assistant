@@ -1392,6 +1392,7 @@ impl Orchestrator {
             }
             Err(err) => {
                 warn!(tool = %tool_name, %err, "Tool execution failed");
+                self.metrics.record_error("tool_error", tool_name);
                 let msg = err.to_string();
                 otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
                 otel_span.set_attribute(KeyValue::new("tool_status", "error"));
