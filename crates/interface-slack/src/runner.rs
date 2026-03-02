@@ -422,7 +422,7 @@ async fn transcribe_slack_audio_files(
             Err(e) => {
                 warn!(
                     file_id = %file.id.0,
-                    error = %e,
+                    error = ?e,
                     "Audio transcription failed"
                 );
                 transcripts.push("[Voice message: transcription failed]".to_string());
