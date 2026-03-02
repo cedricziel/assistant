@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.30](https://github.com/cedricziel/assistant/compare/v0.1.29...v0.1.30) (2026-03-02)
+
+
+### Features
+
+* **runtime:** extract shared helpers and decompose ReAct loops ([#164](https://github.com/cedricziel/assistant/issues/164)) ([080b427](https://github.com/cedricziel/assistant/commit/080b427c304b5a9ffa87fc1f5be7e2508ac55db6))
+
+
+### Bug Fixes
+
+* **runtime:** persist subagent thinking steps to DB ([#167](https://github.com/cedricziel/assistant/issues/167)) ([92e1ab0](https://github.com/cedricziel/assistant/commit/92e1ab0d51ab862ee61ebdae100c989489545f74))
+* **runtime:** record max_iterations error in metrics ([#169](https://github.com/cedricziel/assistant/issues/169)) ([f8cdd46](https://github.com/cedricziel/assistant/commit/f8cdd4677baefa2bfe5b8ea5178facb065ce1ff5))
+* **runtime:** use tokio::fs for BOOT.md and HEARTBEAT.md reads ([#170](https://github.com/cedricziel/assistant/issues/170)) ([9b39de5](https://github.com/cedricziel/assistant/commit/9b39de5501eff5be94e86a406c23e7cabc438235))
+
 ## [0.1.29](https://github.com/cedricziel/assistant/compare/v0.1.28...v0.1.29) (2026-03-02)
 
 
