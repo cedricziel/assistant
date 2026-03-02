@@ -339,4 +339,4 @@ jobs:
           git checkout --orphan tmp-pages
           git add -A
           git commit -m "chore: update package repo for ${{ needs.release-please.outputs.tag_name }}"
-          git push --force origin tmp-pages:gh-pages
+          git push --force-with-lease origin tmp-pages:gh-pages
