@@ -1114,14 +1114,29 @@ impl Orchestrator {
         m.turn = turn_index;
         conv_store.save_message(&m).await?;
 
-        let reply_entry = ext_map
-            .iter()
-            .find(|(name, _)| name.contains("reply") && !name.contains("blocks"))
-            .or_else(|| {
-                ext_map
-                    .iter()
-                    .find(|(name, _)| name.contains("reply") || name.contains("post"))
+        // Collect candidates and sort deterministically so the chosen tool
+        // doesn't depend on HashMap iteration order.
+        // Priority: prefer "reply" over "post", prefer non-"blocks" variants,
+        // alphabetical tiebreaker.
+        let reply_entry = {
+            let mut candidates: Vec<_> = ext_map
+                .iter()
+                .filter(|(name, _)| name.contains("reply") || name.contains("post"))
+                .collect();
+            candidates.sort_by(|(a, _), (b, _)| {
+                let rank = |n: &str| -> u8 {
+                    if n.contains("reply") && !n.contains("blocks") {
+                        0
+                    } else if n.contains("reply") {
+                        1
+                    } else {
+                        2
+                    }
+                };
+                rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
             });
+            candidates.into_iter().next()
+        };
 
         if let Some((reply_name, reply_handler)) = reply_entry {
             info!(

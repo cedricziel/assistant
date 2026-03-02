@@ -1781,9 +1781,13 @@ async fn subagent_llm_error_records_failed_status() {
 fn value_to_params_map_converts_object() {
     let val = json!({"foo": "bar", "n": 42});
     let map = super::value_to_params_map(&val);
-    assert_eq!(map.len(), 2);
-    assert_eq!(map["foo"], json!("bar"));
-    assert_eq!(map["n"], json!(42));
+    assert_eq!(
+        map.len(),
+        2,
+        "object with two keys should produce two params"
+    );
+    assert_eq!(map["foo"], json!("bar"), "foo should map to \"bar\"");
+    assert_eq!(map["n"], json!(42), "n should map to 42");
 }
 
 #[test]
