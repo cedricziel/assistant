@@ -787,7 +787,7 @@ impl Orchestrator {
                     // Save a synthetic assistant message so the conversation
                     // keeps proper alternation and subsequent turns are not
                     // poisoned by an orphaned user message.
-                    Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    crate::history::persist_error_recovery(&conv_store, conversation_id).await;
                     self.metrics
                         .record_error("llm_error", "run_turn_with_tools");
                     return Err(e);
@@ -958,7 +958,11 @@ impl Orchestrator {
                                     "tool_observation",
                                     deferred_msg.to_string(),
                                 ));
-                                self.append_tool_result(&mut history, "end_turn", deferred_msg);
+                                crate::history::append_tool_result(
+                                    &mut history,
+                                    "end_turn",
+                                    deferred_msg,
+                                );
                                 let tr_msg = Self::make_tool_result_message(
                                     conversation_id,
                                     turn_index,
@@ -1002,7 +1006,11 @@ impl Orchestrator {
                                     "tool_observation",
                                     reject_msg.to_string(),
                                 ));
-                                self.append_tool_result(&mut history, "end_turn", reject_msg);
+                                crate::history::append_tool_result(
+                                    &mut history,
+                                    "end_turn",
+                                    reject_msg,
+                                );
                                 let tr_msg = Self::make_tool_result_message(
                                     conversation_id,
                                     turn_index,
@@ -1024,7 +1032,11 @@ impl Orchestrator {
                                 "tool_observation",
                                 result_text.clone(),
                             ));
-                            self.append_tool_result(&mut history, "end_turn", &result_text);
+                            crate::history::append_tool_result(
+                                &mut history,
+                                "end_turn",
+                                &result_text,
+                            );
                             let tr_msg = Self::make_tool_result_message(
                                 conversation_id,
                                 turn_index,
@@ -1125,7 +1137,11 @@ impl Orchestrator {
                                         let observation =
                                             format!("User denied execution of '{name}'.");
                                         info!(%observation);
-                                        self.append_tool_result(&mut history, &name, &observation);
+                                        crate::history::append_tool_result(
+                                            &mut history,
+                                            &name,
+                                            &observation,
+                                        );
                                         let tr_msg = Self::make_tool_result_message(
                                             conversation_id,
                                             base_turn + iteration as i64 + 1,
@@ -1206,7 +1222,7 @@ impl Orchestrator {
                             replied = true;
                         }
 
-                        self.append_tool_result(&mut history, &name, &observation);
+                        crate::history::append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
                             base_turn + iteration as i64 + 1,
@@ -1251,7 +1267,7 @@ impl Orchestrator {
             }
         }
 
-        Self::persist_error_recovery(&conv_store, conversation_id).await;
+        crate::history::persist_error_recovery(&conv_store, conversation_id).await;
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -1349,7 +1365,7 @@ impl Orchestrator {
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
-                    Self::persist_error_recovery(&conv_store, conversation_id)
+                    crate::history::persist_error_recovery(&conv_store, conversation_id)
                         .instrument(iteration_span.clone())
                         .await;
                     self.metrics.record_error("llm_error", "run_turn");
@@ -1464,7 +1480,11 @@ impl Orchestrator {
                                         "tool_error",
                                         observation.clone(),
                                     ));
-                                    self.append_tool_result(&mut history, &name, &observation);
+                                    crate::history::append_tool_result(
+                                        &mut history,
+                                        &name,
+                                        &observation,
+                                    );
                                     let tr_msg = Self::make_tool_result_message(
                                         conversation_id,
                                         turn_index,
@@ -1533,7 +1553,7 @@ impl Orchestrator {
                             }
                         };
 
-                        self.append_tool_result(&mut history, &name, &observation);
+                        crate::history::append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
                             turn_index,
@@ -1562,7 +1582,7 @@ impl Orchestrator {
         }
 
         // Reached iteration limit.
-        Self::persist_error_recovery(&conv_store, conversation_id).await;
+        crate::history::persist_error_recovery(&conv_store, conversation_id).await;
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -1660,7 +1680,7 @@ impl Orchestrator {
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
-                    Self::persist_error_recovery(&conv_store, conversation_id)
+                    crate::history::persist_error_recovery(&conv_store, conversation_id)
                         .instrument(iteration_span.clone())
                         .await;
                     self.metrics.record_error("llm_error", "run_turn_streaming");
@@ -1771,7 +1791,11 @@ impl Orchestrator {
                                         "tool_error",
                                         observation.clone(),
                                     ));
-                                    self.append_tool_result(&mut history, &name, &observation);
+                                    crate::history::append_tool_result(
+                                        &mut history,
+                                        &name,
+                                        &observation,
+                                    );
                                     let tr_msg = Self::make_tool_result_message(
                                         conversation_id,
                                         turn_index,
@@ -1832,7 +1856,7 @@ impl Orchestrator {
                                 format!("Error executing '{name}': {msg}")
                             }
                         };
-                        self.append_tool_result(&mut history, &name, &observation);
+                        crate::history::append_tool_result(&mut history, &name, &observation);
                         let tr_msg = Self::make_tool_result_message(
                             conversation_id,
                             turn_index,
@@ -1860,7 +1884,7 @@ impl Orchestrator {
             }
         }
 
-        Self::persist_error_recovery(&conv_store, conversation_id).await;
+        crate::history::persist_error_recovery(&conv_store, conversation_id).await;
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -1905,7 +1929,7 @@ impl Orchestrator {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    async fn prepare_history(
+    pub(crate) async fn prepare_history(
         &self,
         user_message: &str,
         conversation_id: Uuid,
@@ -1930,51 +1954,10 @@ impl Orchestrator {
         };
         conv_store.save_message(&user_msg).await?;
 
-        let mut history: Vec<ChatHistoryMessage> = prior
-            .into_iter()
-            .filter_map(|m| match m.role {
-                MessageRole::User => Some(ChatHistoryMessage::Text {
-                    role: ChatRole::User,
-                    content: m.content,
-                }),
-                MessageRole::Assistant => {
-                    if let Some(tc_json) = m.tool_calls_json {
-                        if let Ok(items) =
-                            serde_json::from_str::<Vec<assistant_llm::ToolCallItem>>(&tc_json)
-                        {
-                            if !items.is_empty() {
-                                return Some(ChatHistoryMessage::AssistantToolCalls(items));
-                            }
-                        }
-                    }
-                    Some(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: m.content,
-                    })
-                }
-                MessageRole::Tool => Some(ChatHistoryMessage::ToolResult {
-                    name: m.skill_name.unwrap_or_default(),
-                    content: m.content,
-                }),
-                _ => None,
-            })
-            .collect();
+        let mut history = crate::history::messages_to_chat_history(prior);
 
-        // -- History sanitisation --------------------------------------------------
-        //
-        // A prior turn may have failed after persisting the user message but
-        // before any assistant response was saved.  This leaves an orphaned
-        // trailing user message in the database.  When we append the *current*
-        // user message below, consecutive user messages would violate the
-        // alternation requirement of some providers (Anthropic) and can confuse
-        // tool-calling models.
-        //
-        // Similarly, a crash between persisting an AssistantToolCalls message
-        // and persisting its ToolResult messages leaves orphaned tool calls.
-        // Some providers reject the request when tool results are missing.
-        //
-        // Walk the loaded history and patch these structural issues.
-        Self::sanitize_history(&mut history);
+        // Repair structural issues (orphaned messages, missing tool results).
+        crate::history::sanitize_history(&mut history);
 
         // When attachments are present, emit a MultimodalUser message so
         // vision-capable providers receive the inline images.  Otherwise
@@ -1991,124 +1974,6 @@ impl Orchestrator {
         }
 
         Ok((conv_store, history, base_turn))
-    }
-
-    /// Repair structural problems in a loaded conversation history.
-    ///
-    /// Two issues are addressed:
-    ///
-    /// 1. **Trailing orphaned user message** – a prior turn may have failed
-    ///    after persisting the user message but before any assistant response
-    ///    was saved.  A synthetic assistant message is inserted so the caller
-    ///    can safely append a new user message without creating consecutive
-    ///    user entries (which Anthropic rejects outright and which confuse
-    ///    most tool-calling models).
-    ///
-    /// 2. **Orphaned `AssistantToolCalls`** – the process may have crashed
-    ///    after persisting a tool-call message but before all `ToolResult`
-    ///    messages were written.  Missing results are filled in with a
-    ///    synthetic error result so providers that require tool results
-    ///    (Ollama, Anthropic) do not reject the request.
-    fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
-        if history.is_empty() {
-            return;
-        }
-
-        // --- Pass 1: fill in missing tool results for orphaned tool calls ------
-        //
-        // Walk the history and, for every AssistantToolCalls, count how many
-        // ToolResult messages follow (before the next non-ToolResult entry or
-        // the end of the list).  If fewer results exist than calls, insert
-        // synthetic ones.
-        let mut i = 0;
-        while i < history.len() {
-            if let ChatHistoryMessage::AssistantToolCalls(calls) = &history[i] {
-                let expected = calls.len();
-                let call_names: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
-
-                // Count consecutive ToolResult messages immediately following.
-                let mut result_count = 0;
-                while i + 1 + result_count < history.len() {
-                    if matches!(
-                        history[i + 1 + result_count],
-                        ChatHistoryMessage::ToolResult { .. }
-                    ) {
-                        result_count += 1;
-                    } else {
-                        break;
-                    }
-                }
-
-                if result_count < expected {
-                    let insert_at = i + 1 + result_count;
-                    let missing = expected - result_count;
-                    debug!(
-                        expected,
-                        result_count,
-                        missing,
-                        "Sanitizing history: inserting synthetic tool results"
-                    );
-                    for j in result_count..expected {
-                        let name = call_names
-                            .get(j)
-                            .cloned()
-                            .unwrap_or_else(|| "unknown".to_string());
-                        history.insert(
-                            insert_at + (j - result_count),
-                            ChatHistoryMessage::ToolResult {
-                                name,
-                                content: "[error: result lost due to a prior crash]".to_string(),
-                            },
-                        );
-                    }
-                    // Advance past the newly inserted results.
-                    i = insert_at + missing;
-                    continue;
-                }
-            }
-            i += 1;
-        }
-
-        // --- Pass 2: trailing orphaned user message ----------------------------
-        let is_trailing_user = matches!(
-            history.last(),
-            Some(ChatHistoryMessage::Text {
-                role: ChatRole::User,
-                ..
-            }) | Some(ChatHistoryMessage::MultimodalUser { .. })
-        );
-
-        if is_trailing_user {
-            debug!("Sanitizing history: inserting synthetic assistant message after orphaned user message");
-            history.push(ChatHistoryMessage::Text {
-                role: ChatRole::Assistant,
-                content: "[An error occurred processing the previous message.]".to_string(),
-            });
-        }
-    }
-
-    /// Persist a synthetic assistant message so the conversation history
-    /// maintains proper User→Assistant alternation after a turn error.
-    ///
-    /// Called when the tool-calling loop (or the LLM call itself) fails.
-    /// The user message was already persisted by `prepare_history`; without
-    /// this recovery message the orphaned user entry would poison subsequent
-    /// turns.
-    async fn persist_error_recovery(conv_store: &ConversationStore, conversation_id: Uuid) {
-        let error_msg = Message::assistant(
-            conversation_id,
-            "[An error occurred processing this message.]",
-        );
-        if let Err(e) = conv_store.save_message(&error_msg).await {
-            warn!("Failed to persist error recovery assistant message: {e}");
-        }
-    }
-
-    fn append_tool_result(&self, history: &mut Vec<ChatHistoryMessage>, name: &str, content: &str) {
-        history.push(ChatHistoryMessage::ToolResult {
-            name: name.to_string(),
-            content: content.to_string(),
-        });
     }
 
     fn filter_tool_specs(specs: Vec<ToolSpec>, caps: &Capabilities) -> Vec<ToolSpec> {
@@ -2141,7 +2006,7 @@ impl Orchestrator {
         }
         let observation = format!("Tool '{name}' is disabled by configuration.");
         warn!(%observation);
-        self.append_tool_result(history, name, &observation);
+        crate::history::append_tool_result(history, name, &observation);
         let tr_msg = Self::make_tool_result_message(conversation_id, turn_idx, name, &observation);
         if let Err(e) = conv_store.save_message(&tr_msg).await {
             warn!("Failed to persist tool-result message: {e}");
@@ -2292,7 +2157,7 @@ impl SubagentRunner for Orchestrator {
                         iteration,
                         "Subagent cancelled before iteration"
                     );
-                    Self::persist_error_recovery(&conv_store, conversation_id).await;
+                    crate::history::persist_error_recovery(&conv_store, conversation_id).await;
                     let msg = format!("Subagent '{}' was cancelled", spawn.agent_id);
                     let _ = agent_store
                         .complete(
@@ -2351,7 +2216,7 @@ impl SubagentRunner for Orchestrator {
                         llm_span.set_attribute(KeyValue::new("error", true));
                         llm_span.set_attribute(KeyValue::new("error.message", e.to_string()));
                         llm_span.end();
-                        Self::persist_error_recovery(&conv_store, conversation_id)
+                        crate::history::persist_error_recovery(&conv_store, conversation_id)
                             .instrument(iteration_span.clone())
                             .await;
                         self.metrics.record_error("llm_error", "run_subagent");
@@ -2551,7 +2416,7 @@ impl SubagentRunner for Orchestrator {
 
                             otel_span.end();
 
-                            self.append_tool_result(&mut history, &name, &observation);
+                            crate::history::append_tool_result(&mut history, &name, &observation);
                             let tr_msg = Self::make_tool_result_message(
                                 conversation_id,
                                 turn_index,
@@ -2584,7 +2449,7 @@ impl SubagentRunner for Orchestrator {
             }
 
             // Reached iteration limit.
-            Self::persist_error_recovery(&conv_store, conversation_id).await;
+            crate::history::persist_error_recovery(&conv_store, conversation_id).await;
             let msg = format!(
                 "Subagent '{}' reached max iterations ({}) without a final answer",
                 spawn.agent_id, self.max_iterations
