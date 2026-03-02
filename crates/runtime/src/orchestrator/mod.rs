@@ -558,6 +558,12 @@ impl Orchestrator {
                                         let observation =
                                             format!("User denied execution of '{name}'.");
                                         info!(%observation);
+                                        otel_span
+                                            .set_attribute(KeyValue::new("tool_status", "denied"));
+                                        otel_span.set_attribute(KeyValue::new(
+                                            "tool_error",
+                                            observation.clone(),
+                                        ));
                                         crate::history::append_tool_result(
                                             &mut history,
                                             &name,
@@ -565,7 +571,7 @@ impl Orchestrator {
                                         );
                                         let tr_msg = Self::make_tool_result_message(
                                             conversation_id,
-                                            base_turn + iteration as i64 + 1,
+                                            turn_index,
                                             &name,
                                             &observation,
                                         );
@@ -576,6 +582,7 @@ impl Orchestrator {
                                         {
                                             warn!("Failed to persist tool-result message: {e}");
                                         }
+                                        otel_span.end();
                                         continue;
                                     }
                                 }
