@@ -141,7 +141,7 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         return Ok(());
     }
 
-    let raw = std::fs::read_to_string(heartbeat_path)?;
+    let raw = tokio::fs::read_to_string(heartbeat_path).await?;
     let prompt = strip_html_comments(&raw);
 
     if prompt.is_empty() {

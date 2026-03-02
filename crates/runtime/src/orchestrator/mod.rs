@@ -255,7 +255,8 @@ impl Orchestrator {
             return Ok(false);
         }
 
-        let raw = std::fs::read_to_string(boot_path)
+        let raw = tokio::fs::read_to_string(boot_path)
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to read BOOT.md: {e}"))?;
 
         // Strip HTML comments and whitespace — an empty/comment-only file is
