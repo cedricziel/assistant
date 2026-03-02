@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.34](https://github.com/cedricziel/assistant/compare/v0.1.33...v0.1.34) (2026-03-02)
+
+
+### Bug Fixes
+
+* **ci:** use force-with-lease for gh-pages deploy safety ([#181](https://github.com/cedricziel/assistant/issues/181)) ([26f63cf](https://github.com/cedricziel/assistant/commit/26f63cfe0fbefcc925676cdb0c2f2bbe872a3b06))
+
 ## [0.1.33](https://github.com/cedricziel/assistant/compare/v0.1.32...v0.1.33) (2026-03-02)
 
 
