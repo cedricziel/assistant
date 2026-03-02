@@ -747,46 +747,26 @@ impl Orchestrator {
                         }
 
                         // Extension tools take priority and bypass the safety gate.
-                        let observation = if let Some(handler) = ext_map.get(&name) {
+                        if let Some(handler) = ext_map.get(&name) {
                             debug!(tool = %name, "Dispatching to extension handler");
 
                             let params_map = value_to_params_map(&params);
-
                             let start = std::time::Instant::now();
                             let exec_result = handler.run(params_map, &ctx).await;
-                            let duration_ms = start.elapsed().as_millis() as i64;
-                            self.metrics.record_tool_invocation(&name);
-                            self.metrics
-                                .record_tool_duration(&name, duration_ms as f64 / 1000.0);
+                            let elapsed = start.elapsed();
 
-                            let obs = match exec_result {
-                                Ok(output) => {
-                                    otel_span
-                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                    otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-                                    otel_span.set_attribute(KeyValue::new(
-                                        "tool_observation",
-                                        output.content.clone(),
-                                    ));
-                                    debug!(observation = %output.content, "extension observation");
-                                    // Collect any attachments from the extension tool.
-                                    if !output.attachments.is_empty() {
-                                        turn_attachments.extend(output.attachments);
-                                    }
-                                    output.content
-                                }
-                                Err(err) => {
-                                    warn!(tool = %name, %err, "Extension tool execution failed");
-                                    let msg = err.to_string();
-                                    otel_span
-                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                    otel_span.set_attribute(KeyValue::new("tool_status", "error"));
-                                    otel_span
-                                        .set_attribute(KeyValue::new("tool_error", msg.clone()));
-                                    format!("Error executing '{name}': {msg}")
-                                }
-                            };
-                            obs
+                            self.finalize_tool_result(
+                                &name,
+                                exec_result,
+                                elapsed,
+                                &mut otel_span,
+                                &mut history,
+                                &conv_store,
+                                conversation_id,
+                                turn_index,
+                                &mut turn_attachments,
+                            )
+                            .await;
                         } else {
                             // Global executor path.
                             let builtin_span = info_span!(
@@ -850,47 +830,27 @@ impl Orchestrator {
                             }
 
                             let params_map = value_to_params_map(&params);
-
                             let start = std::time::Instant::now();
                             let exec_result = self
                                 .executor
                                 .execute(&name, params_map, &ctx)
                                 .instrument(builtin_span.clone())
                                 .await;
-                            let duration_ms = start.elapsed().as_millis() as i64;
-                            self.metrics.record_tool_invocation(&name);
-                            self.metrics
-                                .record_tool_duration(&name, duration_ms as f64 / 1000.0);
+                            let elapsed = start.elapsed();
 
-                            let obs = match exec_result {
-                                Ok(output) => {
-                                    debug!(tool = %name, duration_ms, "Tool execution completed");
-                                    otel_span
-                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                    otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-                                    otel_span.set_attribute(KeyValue::new(
-                                        "tool_observation",
-                                        output.content.clone(),
-                                    ));
-                                    // Collect any attachments from the global tool.
-                                    if !output.attachments.is_empty() {
-                                        turn_attachments.extend(output.attachments);
-                                    }
-                                    tool_result_content(&output.content, output.data.as_ref())
-                                }
-                                Err(err) => {
-                                    warn!(tool = %name, %err, "Tool execution failed");
-                                    let msg = err.to_string();
-                                    otel_span
-                                        .set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                    otel_span.set_attribute(KeyValue::new("tool_status", "error"));
-                                    otel_span
-                                        .set_attribute(KeyValue::new("tool_error", msg.clone()));
-                                    format!("Error executing '{name}': {msg}")
-                                }
-                            };
-                            obs
-                        };
+                            self.finalize_tool_result(
+                                &name,
+                                exec_result,
+                                elapsed,
+                                &mut otel_span,
+                                &mut history,
+                                &conv_store,
+                                conversation_id,
+                                turn_index,
+                                &mut turn_attachments,
+                            )
+                            .await;
+                        }
 
                         // Mark the turn as acknowledged if any posting, reply,
                         // or reaction tool was called — regardless of whether it
@@ -905,18 +865,6 @@ impl Orchestrator {
                         {
                             replied = true;
                         }
-
-                        crate::history::append_tool_result(&mut history, &name, &observation);
-                        let tr_msg = Self::make_tool_result_message(
-                            conversation_id,
-                            base_turn + iteration as i64 + 1,
-                            &name,
-                            &observation,
-                        );
-                        if let Err(e) = conv_store.save_message(&tr_msg).await {
-                            warn!("Failed to persist tool-result message: {e}");
-                        }
-                        otel_span.end();
                     }
 
                     if turn_ended || replied {
@@ -1217,64 +1165,26 @@ impl Orchestrator {
                         }
 
                         let params_map = value_to_params_map(&params);
-
                         let start = std::time::Instant::now();
                         let exec_result = self
                             .executor
                             .execute(&name, params_map, &ctx)
                             .instrument(iteration_span.clone())
                             .await;
-                        let duration_ms = start.elapsed().as_millis() as i64;
-                        self.metrics.record_tool_invocation(&name);
-                        self.metrics
-                            .record_tool_duration(&name, duration_ms as f64 / 1000.0);
+                        let elapsed = start.elapsed();
 
-                        let observation = match exec_result {
-                            Ok(output) => {
-                                debug!(
-                                    tool = %name,
-                                    duration_ms,
-                                    success = output.success,
-                                    attachments = output.attachments.len(),
-                                    "Tool execution completed"
-                                );
-                                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-                                otel_span.set_attribute(KeyValue::new(
-                                    "tool_observation",
-                                    output.content.clone(),
-                                ));
-                                // Collect any attachments from the tool output.
-                                if !output.attachments.is_empty() {
-                                    turn_attachments.extend(output.attachments);
-                                }
-                                tool_result_content(&output.content, output.data.as_ref())
-                            }
-                            Err(err) => {
-                                warn!(tool = %name, %err, "Tool execution failed");
-                                let msg = err.to_string();
-                                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                otel_span.set_attribute(KeyValue::new("tool_status", "error"));
-                                otel_span.set_attribute(KeyValue::new("tool_error", msg.clone()));
-                                format!("Error executing '{name}': {msg}")
-                            }
-                        };
-
-                        crate::history::append_tool_result(&mut history, &name, &observation);
-                        let tr_msg = Self::make_tool_result_message(
+                        self.finalize_tool_result(
+                            &name,
+                            exec_result,
+                            elapsed,
+                            &mut otel_span,
+                            &mut history,
+                            &conv_store,
                             conversation_id,
                             turn_index,
-                            &name,
-                            &observation,
-                        );
-                        if let Err(e) = conv_store
-                            .save_message(&tr_msg)
-                            .instrument(iteration_span.clone())
-                            .await
-                        {
-                            warn!("Failed to persist tool-result message: {e}");
-                        }
-                        otel_span.end();
+                            &mut turn_attachments,
+                        )
+                        .await;
                     }
                 }
 
@@ -1418,6 +1328,70 @@ impl Orchestrator {
             warn!("Failed to persist tool-result message: {e}");
         }
         Some(observation)
+    }
+
+    /// Process a tool execution result: record metrics, set OTel span
+    /// attributes, collect attachments, end the span, append to history,
+    /// and persist the tool-result message to the database.
+    ///
+    /// Returns the observation string that was fed back to the LLM.
+    ///
+    /// This is the common post-execution step shared by all turn variants
+    /// (extension-tools, core, and subagent).
+    #[allow(clippy::too_many_arguments)]
+    async fn finalize_tool_result(
+        &self,
+        tool_name: &str,
+        exec_result: Result<assistant_core::ToolOutput>,
+        elapsed: std::time::Duration,
+        otel_span: &mut opentelemetry::global::BoxedSpan,
+        history: &mut Vec<ChatHistoryMessage>,
+        conv_store: &ConversationStore,
+        conversation_id: Uuid,
+        turn_index: i64,
+        turn_attachments: &mut Vec<Attachment>,
+    ) -> String {
+        let duration_ms = elapsed.as_millis() as i64;
+        self.metrics.record_tool_invocation(tool_name);
+        self.metrics
+            .record_tool_duration(tool_name, duration_ms as f64 / 1000.0);
+
+        let observation = match exec_result {
+            Ok(output) => {
+                debug!(
+                    tool = %tool_name,
+                    duration_ms,
+                    success = output.success,
+                    "Tool execution completed"
+                );
+                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
+                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+                otel_span.set_attribute(KeyValue::new("tool_observation", output.content.clone()));
+                if !output.attachments.is_empty() {
+                    turn_attachments.extend(output.attachments);
+                }
+                tool_result_content(&output.content, output.data.as_ref())
+            }
+            Err(err) => {
+                warn!(tool = %tool_name, %err, "Tool execution failed");
+                let msg = err.to_string();
+                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
+                otel_span.set_attribute(KeyValue::new("tool_status", "error"));
+                otel_span.set_attribute(KeyValue::new("tool_error", msg.clone()));
+                format!("Error executing '{tool_name}': {msg}")
+            }
+        };
+
+        otel_span.end();
+
+        crate::history::append_tool_result(history, tool_name, &observation);
+        let tr_msg =
+            Self::make_tool_result_message(conversation_id, turn_index, tool_name, &observation);
+        if let Err(e) = conv_store.save_message(&tr_msg).await {
+            warn!("Failed to persist tool-result message: {e}");
+        }
+
+        observation
     }
 
     /// Record tool calls in the chat history and persist them to the database.
