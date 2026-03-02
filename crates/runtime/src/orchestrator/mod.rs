@@ -63,6 +63,16 @@ enum EndTurnOutcome {
     Accepted,
 }
 
+/// Outcome of processing a `FinalAnswer` from the LLM inside
+/// [`Orchestrator::handle_final_answer_with_extensions`].
+///
+/// - `Done` → return the `TurnResult` to the caller.
+/// - `Retry` → `continue` the tool-calling loop (empty answer, no reply).
+enum FinalAnswerOutcome {
+    Done(TurnResult),
+    Retry,
+}
+
 /// Per-conversation extension tool registration consumed by the worker.
 ///
 /// Interfaces (Slack, Mattermost) register their per-turn tools and
@@ -441,110 +451,24 @@ impl Orchestrator {
             match response {
                 // ── Final answer ──────────────────────────────────────────────
                 LlmResponse::FinalAnswer(text, _meta) => {
-                    // When a reply was already posted via an extension tool,
-                    // persist any non-empty wrap-up text and finish the turn.
-                    if replied {
-                        if !text.trim().is_empty() {
-                            let assistant_msg = {
-                                let mut m =
-                                    assistant_core::Message::assistant(conversation_id, &text);
-                                m.turn = base_turn + iteration as i64 + 1;
-                                m
-                            };
-                            if let Err(e) = conv_store.save_message(&assistant_msg).await {
-                                warn!("Failed to persist post-reply assistant message: {e}");
-                            }
+                    let outcome = Self::handle_final_answer_with_extensions(
+                        replied,
+                        &text,
+                        iteration,
+                        base_turn,
+                        conversation_id,
+                        &interface,
+                        &ext_map,
+                        &conv_store,
+                    )
+                    .await?;
+                    match outcome {
+                        FinalAnswerOutcome::Done(mut result) => {
+                            result.attachments = turn_attachments;
+                            return Ok(result);
                         }
-                        return Ok(TurnResult {
-                            answer: String::new(),
-                            attachments: turn_attachments,
-                        });
+                        FinalAnswerOutcome::Retry => continue,
                     }
-
-                    // Empty final answer with no reply sent yet — the user would
-                    // see nothing.  Don't persist the empty message (it pollutes
-                    // history and can cause the model to repeat the pattern on
-                    // subsequent turns) and loop to give the model another chance.
-                    if text.trim().is_empty() {
-                        warn!(
-                            iteration,
-                            "LLM returned empty final answer without a prior reply; retrying"
-                        );
-                        continue;
-                    }
-
-                    // Non-empty answer — persist to DB.
-                    let assistant_msg = {
-                        let mut m = assistant_core::Message::assistant(conversation_id, &text);
-                        m.turn = base_turn + iteration as i64 + 1;
-                        m
-                    };
-                    conv_store.save_message(&assistant_msg).await?;
-
-                    // If a reply-capable extension tool exists, use it to forward
-                    // the answer to the user.
-                    let reply_entry = ext_map
-                        .iter()
-                        .find(|(name, _)| name.contains("reply") && !name.contains("blocks"))
-                        .or_else(|| {
-                            ext_map
-                                .iter()
-                                .find(|(name, _)| name.contains("reply") || name.contains("post"))
-                        });
-
-                    if let Some((reply_name, reply_handler)) = reply_entry {
-                        info!(
-                            iteration,
-                            tool = %reply_name,
-                            "LLM returned final answer; auto-posting via extension reply tool"
-                        );
-                        let mut params_map = HashMap::new();
-                        // Determine which single text parameter the reply tool expects.
-                        // Only auto-post when there is exactly one required field and it
-                        // is a recognised text-like name; skip otherwise to avoid silent
-                        // failures with multi-param or non-text reply tools.
-                        let schema = reply_handler.params_schema();
-                        let text_param = schema
-                            .get("required")
-                            .and_then(|r| r.as_array())
-                            .and_then(|r| if r.len() == 1 { r[0].as_str() } else { None })
-                            .filter(|name| matches!(*name, "text" | "content" | "message"));
-                        let Some(text_param) = text_param else {
-                            warn!(
-                                tool = %reply_name,
-                                "Auto-post skipped: reply tool requires multiple or non-text params"
-                            );
-                            return Ok(TurnResult {
-                                answer: String::new(),
-                                attachments: turn_attachments,
-                            });
-                        };
-                        params_map.insert(
-                            text_param.to_string(),
-                            serde_json::Value::String(text.clone()),
-                        );
-                        let ctx2 = ExecutionContext {
-                            conversation_id,
-                            turn: iteration as i64,
-                            interface: interface.clone(),
-                            interactive: false,
-                            allowed_tools: None,
-                            depth: 0,
-                        };
-                        if let Err(e) = reply_handler.run(params_map, &ctx2).await {
-                            warn!(tool = %reply_name, %e, "Auto-post via reply tool failed");
-                        }
-                    } else {
-                        info!(
-                            iteration,
-                            "LLM returned final answer (no auto-post): no reply tool available"
-                        );
-                    }
-
-                    return Ok(TurnResult {
-                        answer: String::new(),
-                        attachments: turn_attachments,
-                    });
                 }
 
                 // ── Tool calls ────────────────────────────────────────────────
@@ -1184,6 +1108,116 @@ impl Orchestrator {
             warn!("Failed to persist tool-result message: {e}");
         }
         Some(observation)
+    }
+
+    /// Handle a `FinalAnswer` from the LLM when extension tools are active.
+    ///
+    /// Three paths:
+    /// - **Already replied**: persist any non-empty wrap-up text → `Done`.
+    /// - **Empty answer, no reply yet**: warn → `Retry`.
+    /// - **Non-empty answer**: persist and optionally auto-post via a reply
+    ///   extension tool → `Done`.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_final_answer_with_extensions(
+        replied: bool,
+        text: &str,
+        iteration: usize,
+        base_turn: i64,
+        conversation_id: Uuid,
+        interface: &Interface,
+        ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
+        conv_store: &ConversationStore,
+    ) -> Result<FinalAnswerOutcome> {
+        let turn_index = base_turn + iteration as i64 + 1;
+
+        // 1. Reply already delivered — persist wrap-up text if any.
+        if replied {
+            if !text.trim().is_empty() {
+                let mut m = Message::assistant(conversation_id, text);
+                m.turn = turn_index;
+                if let Err(e) = conv_store.save_message(&m).await {
+                    warn!("Failed to persist post-reply assistant message: {e}");
+                }
+            }
+            return Ok(FinalAnswerOutcome::Done(TurnResult {
+                answer: String::new(),
+                attachments: Vec::new(),
+            }));
+        }
+
+        // 2. Empty answer with no prior reply — retry.
+        if text.trim().is_empty() {
+            warn!(
+                iteration,
+                "LLM returned empty final answer without a prior reply; retrying"
+            );
+            return Ok(FinalAnswerOutcome::Retry);
+        }
+
+        // 3. Non-empty answer — persist to DB.
+        let mut m = Message::assistant(conversation_id, text);
+        m.turn = turn_index;
+        conv_store.save_message(&m).await?;
+
+        // Auto-post via reply extension tool if one is available.
+        let reply_entry = ext_map
+            .iter()
+            .find(|(name, _)| name.contains("reply") && !name.contains("blocks"))
+            .or_else(|| {
+                ext_map
+                    .iter()
+                    .find(|(name, _)| name.contains("reply") || name.contains("post"))
+            });
+
+        if let Some((reply_name, reply_handler)) = reply_entry {
+            info!(
+                iteration,
+                tool = %reply_name,
+                "LLM returned final answer; auto-posting via extension reply tool"
+            );
+            // Only auto-post when there is exactly one required field and it
+            // is a recognised text-like name.
+            let schema = reply_handler.params_schema();
+            let text_param = schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .and_then(|r| if r.len() == 1 { r[0].as_str() } else { None })
+                .filter(|name| matches!(*name, "text" | "content" | "message"));
+
+            if let Some(param_name) = text_param {
+                let mut params_map = HashMap::new();
+                params_map.insert(
+                    param_name.to_string(),
+                    serde_json::Value::String(text.to_string()),
+                );
+                let ctx = ExecutionContext {
+                    conversation_id,
+                    turn: iteration as i64,
+                    interface: interface.clone(),
+                    interactive: false,
+                    allowed_tools: None,
+                    depth: 0,
+                };
+                if let Err(e) = reply_handler.run(params_map, &ctx).await {
+                    warn!(tool = %reply_name, %e, "Auto-post via reply tool failed");
+                }
+            } else {
+                warn!(
+                    tool = %reply_name,
+                    "Auto-post skipped: reply tool requires multiple or non-text params"
+                );
+            }
+        } else {
+            info!(
+                iteration,
+                "LLM returned final answer (no auto-post): no reply tool available"
+            );
+        }
+
+        Ok(FinalAnswerOutcome::Done(TurnResult {
+            answer: String::new(),
+            attachments: Vec::new(),
+        }))
     }
 
     /// Evaluate an `end_turn` tool call and return the appropriate outcome.
