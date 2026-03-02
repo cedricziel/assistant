@@ -5,10 +5,15 @@
 //! supported formats (WAV/MP3).
 
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{bail, Context};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
+
+/// Monotonic counter used to make temp file names unique across concurrent
+/// conversions within the same process.
+static TEMP_FILE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 /// Audio formats that may need conversion before sending to transcription providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,16 +349,20 @@ impl AudioConverter {
     ) -> anyhow::Result<ConversionResult> {
         let (output_format, mime_type) = self.output_format_info()?;
 
-        // Write input to a temp file so FFmpeg can seek
+        // Write input to a temp file so FFmpeg can seek.
+        // Use PID + atomic nonce to avoid collisions across concurrent calls.
         let tmp_dir = std::env::temp_dir();
+        let nonce = TEMP_FILE_NONCE.fetch_add(1, Ordering::Relaxed);
         let input_path = tmp_dir.join(format!(
-            "assistant-audio-in-{}.{}",
+            "assistant-audio-in-{}-{}.{}",
             std::process::id(),
+            nonce,
             source_format.extension()
         ));
         let output_path = tmp_dir.join(format!(
-            "assistant-audio-out-{}.{}",
+            "assistant-audio-out-{}-{}.{}",
             std::process::id(),
+            nonce,
             self.target_format.extension()
         ));
 
