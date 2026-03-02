@@ -158,7 +158,7 @@ jobs:
         run: cargo build -p assistant-web-ui
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -176,7 +176,7 @@ jobs:
 
       - name: Upload HTML report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: crates/web-ui/e2e/playwright-report/
@@ -184,7 +184,7 @@ jobs:
 
       - name: Upload diff images
         if: steps.playwright.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-diff-images
           path: crates/web-ui/e2e/test-results/
@@ -192,7 +192,7 @@ jobs:
 
       - name: Post visual diff comment on PR
         if: steps.playwright.outcome == 'failure' && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
@@ -327,7 +327,7 @@ jobs:
 
       - name: Clear stale visual diff comment
         if: steps.playwright.outcome == 'success' && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const owner = context.repo.owner;
@@ -362,7 +362,7 @@ jobs:
       contents: write
     steps:
       - name: Delete visual-diffs branch for this PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const prNumber = context.issue.number;
