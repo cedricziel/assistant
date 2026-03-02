@@ -1006,10 +1006,53 @@ impl Orchestrator {
         interface: Interface,
         trace_cx: Option<&OtelContext>,
     ) -> Result<TurnResult> {
+        self.run_turn_core(user_message, conversation_id, interface, None, trace_cx)
+            .await
+    }
+
+    /// Like [`run_turn`] but streams final-answer tokens through `token_sink`
+    /// as they are generated.
+    ///
+    /// Tool-call and observation steps are silent — only the tokens that make
+    /// up the final answer are forwarded.  The complete answer is also
+    /// returned in [`TurnResult`] so callers can persist or process it.
+    pub async fn run_turn_streaming(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        token_sink: mpsc::Sender<String>,
+        trace_cx: Option<&OtelContext>,
+    ) -> Result<TurnResult> {
+        self.run_turn_core(
+            user_message,
+            conversation_id,
+            interface,
+            Some(token_sink),
+            trace_cx,
+        )
+        .await
+    }
+
+    /// Shared implementation for [`run_turn`] and [`run_turn_streaming`].
+    ///
+    /// When `token_sink` is `Some`, final-answer tokens are streamed via
+    /// [`LlmProvider::chat_streaming`]; otherwise the non-streaming
+    /// [`LlmProvider::chat`] is used.
+    async fn run_turn_core(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        token_sink: Option<mpsc::Sender<String>>,
+        trace_cx: Option<&OtelContext>,
+    ) -> Result<TurnResult> {
+        let streaming = token_sink.is_some();
         self.metrics.record_turn(None, &format!("{interface:?}"));
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
+            streaming,
             "Starting turn"
         );
 
@@ -1073,11 +1116,17 @@ impl Orchestrator {
                 &tool_specs,
             );
             let llm_start = std::time::Instant::now();
-            let response = self
-                .llm
-                .chat(&system_prompt, &history, &tool_specs)
-                .instrument(iteration_span.clone())
-                .await;
+            let response = if let Some(ref sink) = token_sink {
+                self.llm
+                    .chat_streaming(&system_prompt, &history, &tool_specs, Some(sink.clone()))
+                    .instrument(iteration_span.clone())
+                    .await
+            } else {
+                self.llm
+                    .chat(&system_prompt, &history, &tool_specs)
+                    .instrument(iteration_span.clone())
+                    .await
+            };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
@@ -1085,7 +1134,12 @@ impl Orchestrator {
                     crate::history::persist_error_recovery(&conv_store, conversation_id)
                         .instrument(iteration_span.clone())
                         .await;
-                    self.metrics.record_error("llm_error", "run_turn");
+                    let label = if streaming {
+                        "run_turn_streaming"
+                    } else {
+                        "run_turn"
+                    };
+                    self.metrics.record_error("llm_error", label);
                     return Err(e);
                 }
             };
@@ -1127,7 +1181,7 @@ impl Orchestrator {
                 LlmResponse::ToolCalls(tool_call_items, _meta) => {
                     info!(
                         count = tool_call_items.len(),
-                        "LLM requested tool execution(s)"
+                        iteration, "LLM requested tool execution(s)"
                     );
 
                     history.push(ChatHistoryMessage::AssistantToolCalls(
@@ -1284,6 +1338,7 @@ impl Orchestrator {
                         {
                             warn!("Failed to persist tool-result message: {e}");
                         }
+                        otel_span.end();
                     }
                 }
 
@@ -1299,308 +1354,6 @@ impl Orchestrator {
         }
 
         // Reached iteration limit.
-        crate::history::persist_error_recovery(&conv_store, conversation_id).await;
-        anyhow::bail!(
-            "Max iterations ({}) reached without a final answer",
-            self.max_iterations
-        );
-    }
-
-    /// Like [`run_turn`] but streams final-answer tokens through `token_sink`
-    /// as they are generated.
-    ///
-    /// Tool-call and observation steps are silent — only the tokens that make
-    /// up the final answer are forwarded.  The complete answer is also
-    /// returned in [`TurnResult`] so callers can persist or process it.
-    pub async fn run_turn_streaming(
-        &self,
-        user_message: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        token_sink: mpsc::Sender<String>,
-        trace_cx: Option<&OtelContext>,
-    ) -> Result<TurnResult> {
-        self.metrics.record_turn(None, &format!("{interface:?}"));
-        info!(
-            conversation_id = %conversation_id,
-            interface = ?interface,
-            "Starting streaming turn"
-        );
-
-        // -- OTel trace hierarchy --
-        let tracer = global::tracer("assistant.orchestrator");
-        let _conv_cx = match trace_cx {
-            Some(cx) => cx.clone(),
-            None => {
-                let mut span = tracer.start("conversation");
-                span.set_attribute(KeyValue::new(
-                    "conversation_id",
-                    conversation_id.to_string(),
-                ));
-                span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
-                OtelContext::current().with_span(span)
-            }
-        };
-        let mut otel_turn = tracer.start_with_context("turn", &_conv_cx);
-        otel_turn.set_attribute(KeyValue::new(
-            "conversation_id",
-            conversation_id.to_string(),
-        ));
-        otel_turn.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
-        let turn_cx = _conv_cx.with_span(otel_turn);
-
-        let (conv_store, mut history, base_turn) = self
-            .prepare_history(user_message, conversation_id, Vec::new())
-            .await?;
-
-        let provider_caps = self.llm.capabilities();
-        let tool_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
-
-        let system_prompt = self.compose_system_prompt().await;
-
-        let mut turn_attachments: Vec<Attachment> = Vec::new();
-
-        for iteration in 0..self.max_iterations {
-            let iteration_span = info_span!("turn_iteration", iteration);
-            debug!(parent: &iteration_span, iteration, "Streaming tool-calling loop iteration");
-
-            let ctx = ExecutionContext {
-                conversation_id,
-                turn: iteration as i64,
-                interface: interface.clone(),
-                interactive: matches!(interface, Interface::Cli),
-                allowed_tools: None,
-                depth: 0,
-            };
-
-            let mut llm_span = crate::otel_spans::start_llm_span(
-                self.llm.as_ref(),
-                iteration,
-                &turn_cx,
-                self.trace_content,
-                &system_prompt,
-                &history,
-                &tool_specs,
-            );
-            let llm_start = std::time::Instant::now();
-            let response = self
-                .llm
-                .chat_streaming(
-                    &system_prompt,
-                    &history,
-                    &tool_specs,
-                    Some(token_sink.clone()),
-                )
-                .instrument(iteration_span.clone())
-                .await;
-            let llm_elapsed = llm_start.elapsed();
-            let response = match response {
-                Ok(r) => r,
-                Err(e) => {
-                    crate::history::persist_error_recovery(&conv_store, conversation_id)
-                        .instrument(iteration_span.clone())
-                        .await;
-                    self.metrics.record_error("llm_error", "run_turn_streaming");
-                    return Err(e);
-                }
-            };
-            crate::otel_spans::finish_llm_span(
-                &mut llm_span,
-                response.meta(),
-                &response,
-                self.trace_content,
-                Some((&self.metrics, self.llm.provider_name(), llm_elapsed)),
-            );
-
-            match response {
-                LlmResponse::FinalAnswer(text, _meta) => {
-                    info!(iteration, "Streaming LLM returned final answer");
-
-                    // Don't persist empty final answers — they pollute the
-                    // conversation history and can confuse the model on
-                    // subsequent turns.
-                    if !text.trim().is_empty() {
-                        let assistant_msg = {
-                            let mut m = Message::assistant(conversation_id, &text);
-                            m.turn = base_turn + iteration as i64 + 1;
-                            m
-                        };
-                        conv_store
-                            .save_message(&assistant_msg)
-                            .instrument(iteration_span.clone())
-                            .await?;
-                    }
-
-                    return Ok(TurnResult {
-                        answer: text,
-                        attachments: turn_attachments,
-                    });
-                }
-
-                LlmResponse::ToolCalls(tool_call_items, _meta) => {
-                    info!(
-                        count = tool_call_items.len(),
-                        iteration, "Streaming LLM requested tool execution(s)"
-                    );
-
-                    history.push(ChatHistoryMessage::AssistantToolCalls(
-                        tool_call_items.clone(),
-                    ));
-                    let tc_msg = Self::make_tool_call_message(
-                        conversation_id,
-                        base_turn + iteration as i64 + 1,
-                        &tool_call_items,
-                    );
-                    if let Err(e) = conv_store
-                        .save_message(&tc_msg)
-                        .instrument(iteration_span.clone())
-                        .await
-                    {
-                        warn!("Failed to persist tool-call message: {e}");
-                    }
-
-                    for tool_call_item in tool_call_items {
-                        let name = tool_call_item.name;
-                        let params = tool_call_item.params;
-                        let turn_index = base_turn + iteration as i64 + 1;
-                        let mut otel_span = crate::otel_spans::start_tool_span(
-                            conversation_id,
-                            iteration,
-                            turn_index,
-                            &interface,
-                            &name,
-                            &params,
-                            &turn_cx,
-                        );
-
-                        if let Some(reason) = self
-                            .reject_if_disabled(
-                                &name,
-                                &mut history,
-                                &conv_store,
-                                conversation_id,
-                                turn_index,
-                            )
-                            .instrument(iteration_span.clone())
-                            .await
-                        {
-                            otel_span.set_attribute(KeyValue::new("tool_status", "blocked"));
-                            otel_span.set_attribute(KeyValue::new("tool_error", reason));
-                            otel_span.end();
-                            continue;
-                        }
-
-                        let requires_confirm = self
-                            .executor
-                            .list_tools()
-                            .iter()
-                            .find(|h| h.name() == name)
-                            .map(|h| h.requires_confirmation())
-                            .unwrap_or(false);
-
-                        if requires_confirm && ctx.interactive {
-                            if let Some(cb) = &self.confirmation_callback {
-                                if !cb.confirm(&name, &params) {
-                                    let observation = format!("User denied execution of '{name}'.");
-                                    info!(%observation);
-                                    otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
-                                    otel_span.set_attribute(KeyValue::new(
-                                        "tool_error",
-                                        observation.clone(),
-                                    ));
-                                    crate::history::append_tool_result(
-                                        &mut history,
-                                        &name,
-                                        &observation,
-                                    );
-                                    let tr_msg = Self::make_tool_result_message(
-                                        conversation_id,
-                                        turn_index,
-                                        &name,
-                                        &observation,
-                                    );
-                                    if let Err(e) = conv_store
-                                        .save_message(&tr_msg)
-                                        .instrument(iteration_span.clone())
-                                        .await
-                                    {
-                                        warn!("Failed to persist tool-result message: {e}");
-                                    }
-                                    otel_span.end();
-                                    continue;
-                                }
-                            }
-                        }
-
-                        let params_map: HashMap<String, serde_json::Value> =
-                            if let serde_json::Value::Object(map) = &params {
-                                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                            } else {
-                                HashMap::new()
-                            };
-
-                        let start = std::time::Instant::now();
-                        let exec_result = self
-                            .executor
-                            .execute(&name, params_map, &ctx)
-                            .instrument(iteration_span.clone())
-                            .await;
-                        let duration_ms = start.elapsed().as_millis() as i64;
-                        self.metrics.record_tool_invocation(&name);
-                        self.metrics
-                            .record_tool_duration(&name, duration_ms as f64 / 1000.0);
-
-                        let observation = match exec_result {
-                            Ok(output) => {
-                                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-                                otel_span.set_attribute(KeyValue::new(
-                                    "tool_observation",
-                                    output.content.clone(),
-                                ));
-                                // Collect any attachments from the tool output.
-                                if !output.attachments.is_empty() {
-                                    turn_attachments.extend(output.attachments);
-                                }
-                                tool_result_content(&output.content, output.data.as_ref())
-                            }
-                            Err(err) => {
-                                warn!(tool = %name, %err, "Tool execution failed");
-                                let msg = err.to_string();
-                                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                                otel_span.set_attribute(KeyValue::new("tool_status", "error"));
-                                otel_span.set_attribute(KeyValue::new("tool_error", msg.clone()));
-                                format!("Error executing '{name}': {msg}")
-                            }
-                        };
-                        crate::history::append_tool_result(&mut history, &name, &observation);
-                        let tr_msg = Self::make_tool_result_message(
-                            conversation_id,
-                            turn_index,
-                            &name,
-                            &observation,
-                        );
-                        if let Err(e) = conv_store
-                            .save_message(&tr_msg)
-                            .instrument(iteration_span.clone())
-                            .await
-                        {
-                            warn!("Failed to persist tool-result message: {e}");
-                        }
-                        otel_span.end();
-                    }
-                }
-
-                LlmResponse::Thinking(text, _meta) => {
-                    debug!(iteration, "Streaming LLM emitted thinking step");
-                    history.push(ChatHistoryMessage::Text {
-                        role: ChatRole::Assistant,
-                        content: text,
-                    });
-                }
-            }
-        }
-
         crate::history::persist_error_recovery(&conv_store, conversation_id).await;
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
