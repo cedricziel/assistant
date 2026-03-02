@@ -320,27 +320,7 @@ impl Orchestrator {
         self.metrics.record_turn(None, &format!("{interface:?}"));
         info!("Starting turn with extension tools");
 
-        // -- OTel trace hierarchy --
-        let tracer = global::tracer("assistant.orchestrator");
-        let _conv_cx = match trace_cx {
-            Some(cx) => cx.clone(),
-            None => {
-                let mut span = tracer.start("conversation");
-                span.set_attribute(KeyValue::new(
-                    "conversation_id",
-                    conversation_id.to_string(),
-                ));
-                span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
-                OtelContext::current().with_span(span)
-            }
-        };
-        let mut otel_turn = tracer.start_with_context("turn", &_conv_cx);
-        otel_turn.set_attribute(KeyValue::new(
-            "conversation_id",
-            conversation_id.to_string(),
-        ));
-        otel_turn.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
-        let turn_cx = _conv_cx.with_span(otel_turn);
+        let (_conv_cx, turn_cx) = setup_turn_trace(trace_cx, conversation_id, &interface);
 
         // Build extension lookup: name → handler.
         let ext_map: HashMap<String, Arc<dyn ToolHandler>> = extensions
@@ -1056,27 +1036,7 @@ impl Orchestrator {
             "Starting turn"
         );
 
-        // -- OTel trace hierarchy --
-        let tracer = global::tracer("assistant.orchestrator");
-        let _conv_cx = match trace_cx {
-            Some(cx) => cx.clone(),
-            None => {
-                let mut span = tracer.start("conversation");
-                span.set_attribute(KeyValue::new(
-                    "conversation_id",
-                    conversation_id.to_string(),
-                ));
-                span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
-                OtelContext::current().with_span(span)
-            }
-        };
-        let mut otel_turn = tracer.start_with_context("turn", &_conv_cx);
-        otel_turn.set_attribute(KeyValue::new(
-            "conversation_id",
-            conversation_id.to_string(),
-        ));
-        otel_turn.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
-        let turn_cx = _conv_cx.with_span(otel_turn);
+        let (_conv_cx, turn_cx) = setup_turn_trace(trace_cx, conversation_id, &interface);
 
         // 1-3. Set up conversation, load prior history, persist user message.
         let (conv_store, mut history, base_turn) = self
@@ -1511,6 +1471,38 @@ impl Orchestrator {
 mod subagent;
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
+
+/// Set up the two-level OTel trace hierarchy used by every turn variant.
+///
+/// Returns `(conv_cx, turn_cx)`.  The caller **must** keep `conv_cx` alive
+/// (bind it to `_conv_cx`) so the conversation span is not dropped early.
+fn setup_turn_trace(
+    trace_cx: Option<&OtelContext>,
+    conversation_id: Uuid,
+    interface: &Interface,
+) -> (OtelContext, OtelContext) {
+    let tracer = global::tracer("assistant.orchestrator");
+    let conv_cx = match trace_cx {
+        Some(cx) => cx.clone(),
+        None => {
+            let mut span = tracer.start("conversation");
+            span.set_attribute(KeyValue::new(
+                "conversation_id",
+                conversation_id.to_string(),
+            ));
+            span.set_attribute(KeyValue::new("interface", format!("{interface:?}")));
+            OtelContext::current().with_span(span)
+        }
+    };
+    let mut otel_turn = tracer.start_with_context("turn", &conv_cx);
+    otel_turn.set_attribute(KeyValue::new(
+        "conversation_id",
+        conversation_id.to_string(),
+    ));
+    otel_turn.set_attribute(KeyValue::new("interface", format!("{interface:?}")));
+    let turn_cx = conv_cx.with_span(otel_turn);
+    (conv_cx, turn_cx)
+}
 
 /// Build the tool result content from a tool output.
 ///
