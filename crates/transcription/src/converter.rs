@@ -370,9 +370,18 @@ impl AudioConverter {
             .await
             .context("Failed to write audio to temp file")?;
 
+        // Verify the file was actually written
+        let written_meta = tokio::fs::metadata(&input_path).await.with_context(|| {
+            format!(
+                "Temp input file missing after write: {}",
+                input_path.display()
+            )
+        })?;
+
         info!(
             input_path = %input_path.display(),
             input_size = audio_data.len(),
+            written_size = written_meta.len(),
             source_format = ?source_format,
             "Using temp file for seekable MP4/M4A input"
         );
@@ -400,6 +409,11 @@ impl AudioConverter {
         if !output.status.success() {
             let _ = tokio::fs::remove_file(&output_path).await;
             let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!(
+                exit_code = ?output.status.code(),
+                stderr = %stderr.trim(),
+                "FFmpeg tempfile conversion failed"
+            );
             bail!(
                 "FFmpeg conversion failed (exit code {:?}): {}",
                 output.status.code(),
@@ -407,9 +421,12 @@ impl AudioConverter {
             );
         }
 
-        let output_data = tokio::fs::read(&output_path)
-            .await
-            .context("Failed to read FFmpeg output file")?;
+        let output_data = tokio::fs::read(&output_path).await.with_context(|| {
+            format!(
+                "Failed to read FFmpeg output file at {}",
+                output_path.display()
+            )
+        })?;
         let _ = tokio::fs::remove_file(&output_path).await;
 
         if output_data.is_empty() {
