@@ -1873,3 +1873,79 @@ async fn subagent_thinking_step_persisted_to_db() {
         "persisted thinking message should contain the thought text"
     );
 }
+
+// ── Max-iterations error tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn run_turn_max_iterations_returns_error() {
+    let server = MockServer::start().await;
+
+    // LLM always returns tool calls, never a final answer.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["unknown-tool"])),
+        )
+        .mount(&server)
+        .await;
+
+    let mut config = AssistantConfig::default();
+    config.memory.enabled = false;
+    config.llm.max_iterations = 2;
+    let (orch, _) = build_with_config(&server.uri(), config).await;
+
+    let result = orch
+        .run_turn("trigger loop", Uuid::new_v4(), Interface::Cli, None)
+        .await;
+
+    match result {
+        Ok(_) => panic!("should fail when max iterations reached"),
+        Err(e) => {
+            let err_msg = e.to_string();
+            assert!(
+                err_msg.contains("Max iterations"),
+                "error should mention max iterations: {err_msg}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn subagent_max_iterations_returns_failed_status() {
+    let server = MockServer::start().await;
+
+    // LLM always returns tool calls, never a final answer.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["unknown-tool"])),
+        )
+        .mount(&server)
+        .await;
+
+    let mut config = AssistantConfig::default();
+    config.memory.enabled = false;
+    config.llm.max_iterations = 2;
+    let (orch, _) = build_with_config(&server.uri(), config).await;
+
+    let spawn = AgentSpawn {
+        agent_id: "loop-agent".into(),
+        task: "infinite loop".into(),
+        system_prompt: None,
+        model: None,
+        allowed_tools: vec![],
+    };
+
+    let report = orch.run_subagent(spawn, 0).await.unwrap();
+
+    assert_eq!(
+        report.status,
+        AgentReportStatus::Failed,
+        "subagent should report Failed when max iterations reached"
+    );
+    assert!(
+        report.content.contains("max iterations"),
+        "error should mention max iterations: {}",
+        report.content
+    );
+}
