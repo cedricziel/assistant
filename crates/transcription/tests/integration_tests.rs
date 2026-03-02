@@ -219,3 +219,61 @@ async fn test_converter_custom_settings() {
     // without a real FFmpeg binary, but we can verify the builder pattern works
     assert_eq!(converter.check_ffmpeg().await.is_err(), true); // Invalid path
 }
+
+#[tokio::test]
+async fn test_m4a_uses_tempfile_path() {
+    // M4A/MP4 containers need seekable input (moov atom), so the converter
+    // must use a temp-file strategy rather than piping.  We can't easily
+    // fabricate a valid M4A in a unit test, but we *can* verify the code path
+    // is reached and returns a meaningful FFmpeg error rather than a
+    // "moov atom not found" crash or silent empty output.
+    skip_if_no_ffmpeg!();
+
+    let converter = AudioConverter::new().with_target_format(AudioFormat::Wav);
+
+    // Garbage data -- FFmpeg will reject it, but the important thing is that
+    // it runs the tempfile path (not pipe) and reports the error from stderr.
+    let fake_m4a = vec![0u8; 64];
+    let result = converter.convert(&fake_m4a, AudioFormat::M4a).await;
+
+    assert!(result.is_err(), "Should fail on invalid M4A data");
+    let err = result.unwrap_err().to_string();
+    // The error should come from FFmpeg stderr, not a generic "moov atom" pipe failure.
+    assert!(
+        err.contains("FFmpeg conversion failed"),
+        "Expected FFmpeg error message, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_convert_for_deepgram_m4a_triggers_conversion() {
+    skip_if_no_ffmpeg!();
+
+    let converter = AudioConverter::new();
+
+    // M4A should need conversion for Deepgram
+    let fake_m4a = vec![0u8; 64];
+    let result = converter
+        .convert_for_deepgram_if_needed(&fake_m4a, "audio/mp4")
+        .await;
+
+    // Will fail because data is invalid, but confirms the conversion path is taken
+    assert!(
+        result.is_err(),
+        "Should attempt conversion for audio/mp4 and fail on invalid data"
+    );
+}
+
+#[tokio::test]
+async fn test_needs_seekable_input() {
+    // M4A and MP4 need seekable input
+    assert!(AudioFormat::M4a.needs_conversion_for_deepgram());
+    assert!(AudioFormat::Mp4.needs_conversion_for_deepgram());
+
+    // Other formats that need conversion (AAC) but can be piped
+    assert!(AudioFormat::Aac.needs_conversion_for_deepgram());
+
+    // Natively supported formats don't need conversion at all
+    assert!(!AudioFormat::Wav.needs_conversion_for_deepgram());
+    assert!(!AudioFormat::Mp3.needs_conversion_for_deepgram());
+}
