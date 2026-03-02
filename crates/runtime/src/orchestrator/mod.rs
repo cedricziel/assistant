@@ -48,6 +48,21 @@ pub struct TurnResult {
     pub attachments: Vec<Attachment>,
 }
 
+/// Outcome of processing an `end_turn` tool call inside
+/// [`Orchestrator::handle_end_turn`].
+///
+/// The caller uses the variant to decide loop control flow:
+/// - `Deferred` / `Rejected` → `continue` (another iteration)
+/// - `Accepted` → `break`
+enum EndTurnOutcome {
+    /// `end_turn` was called alongside real tool calls — deferred.
+    Deferred,
+    /// `end_turn` rejected because a reply tool is available but not yet used.
+    Rejected,
+    /// `end_turn` accepted; the turn is complete.
+    Accepted,
+}
+
 /// Per-conversation extension tool registration consumed by the worker.
 ///
 /// Interfaces (Slack, Mattermost) register their per-turn tools and
@@ -565,110 +580,26 @@ impl Orchestrator {
                         );
 
                         if name == "end_turn" {
-                            if has_real_calls {
-                                info!(
-                                    iteration,
-                                    "end_turn deferred (called alongside other tools)"
-                                );
-                                let deferred_msg =
-                                    "end_turn deferred: processing other tool calls first";
-                                otel_span.set_attribute(KeyValue::new("tool_status", "deferred"));
-                                otel_span.set_attribute(KeyValue::new(
-                                    "tool_observation",
-                                    deferred_msg.to_string(),
-                                ));
-                                crate::history::append_tool_result(
-                                    &mut history,
-                                    "end_turn",
-                                    deferred_msg,
-                                );
-                                let tr_msg = Self::make_tool_result_message(
-                                    conversation_id,
-                                    turn_index,
-                                    "end_turn",
-                                    deferred_msg,
-                                );
-                                if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                    warn!("Failed to persist deferred end_turn tool-result: {e}");
-                                }
-                                otel_span.end();
-                                continue;
-                            }
-
-                            let reason = params
-                                .get("reason")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("done");
-
-                            // Guard: reject end_turn when a reply/react tool
-                            // exists but the LLM never actually called one.
-                            // This prevents the turn from silently completing
-                            // without delivering a visible response to the
-                            // user in messaging interfaces (e.g. Slack).
-                            // Reactions count as valid acknowledgements per the
-                            // system prompt.
-                            let has_reply_tool = ext_map.keys().any(|n| {
-                                n.contains("reply") || n.contains("post") || n.contains("react")
-                            });
-                            if !replied && has_reply_tool {
-                                warn!(
-                                    iteration,
-                                    reason,
-                                    "end_turn rejected: reply tool available but no reply sent"
-                                );
-                                let reject_msg =
-                                    "end_turn rejected: you MUST call the `reply` tool \
-                                     before ending the turn. The user has not seen any \
-                                     response yet.";
-                                otel_span.set_attribute(KeyValue::new("tool_status", "rejected"));
-                                otel_span.set_attribute(KeyValue::new(
-                                    "tool_observation",
-                                    reject_msg.to_string(),
-                                ));
-                                crate::history::append_tool_result(
-                                    &mut history,
-                                    "end_turn",
-                                    reject_msg,
-                                );
-                                let tr_msg = Self::make_tool_result_message(
-                                    conversation_id,
-                                    turn_index,
-                                    "end_turn",
-                                    reject_msg,
-                                );
-                                if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                    warn!("Failed to persist rejected end_turn tool-result: {e}");
-                                }
-                                otel_span.end();
-                                continue;
-                            }
-
-                            info!(iteration, reason, "end_turn called; stopping turn");
-
-                            let result_text = format!("end_turn: {reason}");
-                            otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-                            otel_span.set_attribute(KeyValue::new(
-                                "tool_observation",
-                                result_text.clone(),
-                            ));
-                            crate::history::append_tool_result(
-                                &mut history,
-                                "end_turn",
-                                &result_text,
-                            );
-                            let tr_msg = Self::make_tool_result_message(
+                            let outcome = Self::handle_end_turn(
+                                has_real_calls,
+                                replied,
+                                &ext_map,
+                                &params,
+                                iteration,
                                 conversation_id,
                                 turn_index,
-                                "end_turn",
-                                &result_text,
-                            );
-                            if let Err(e) = conv_store.save_message(&tr_msg).await {
-                                warn!("Failed to persist end_turn tool-result: {e}");
+                                &mut otel_span,
+                                &mut history,
+                                &conv_store,
+                            )
+                            .await;
+                            match outcome {
+                                EndTurnOutcome::Deferred | EndTurnOutcome::Rejected => continue,
+                                EndTurnOutcome::Accepted => {
+                                    turn_ended = true;
+                                    break;
+                                }
                             }
-
-                            turn_ended = true;
-                            otel_span.end();
-                            break;
                         }
 
                         // Extension tools take priority and bypass the safety gate.
@@ -1253,6 +1184,91 @@ impl Orchestrator {
             warn!("Failed to persist tool-result message: {e}");
         }
         Some(observation)
+    }
+
+    /// Evaluate an `end_turn` tool call and return the appropriate outcome.
+    ///
+    /// Three possible paths:
+    /// - **Deferred**: `end_turn` was called alongside real tool calls — tell the
+    ///   LLM we will process the real calls first.
+    /// - **Rejected**: a reply/react extension tool exists but the LLM never
+    ///   called it — nudge it to reply before ending.
+    /// - **Accepted**: the turn ends normally.
+    ///
+    /// In every case this helper records the OTel span, appends the tool result
+    /// to `history`, and persists it to the database.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_end_turn(
+        has_real_calls: bool,
+        replied: bool,
+        ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
+        params: &serde_json::Value,
+        iteration: usize,
+        conversation_id: Uuid,
+        turn_index: i64,
+        otel_span: &mut opentelemetry::global::BoxedSpan,
+        history: &mut Vec<ChatHistoryMessage>,
+        conv_store: &ConversationStore,
+    ) -> EndTurnOutcome {
+        // --- Deferred: called alongside real tool calls ---
+        if has_real_calls {
+            info!(
+                iteration,
+                "end_turn deferred (called alongside other tools)"
+            );
+            let msg = "end_turn deferred: processing other tool calls first";
+            otel_span.set_attribute(KeyValue::new("tool_status", "deferred"));
+            otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
+            crate::history::append_tool_result(history, "end_turn", msg);
+            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
+            if let Err(e) = conv_store.save_message(&tr).await {
+                warn!("Failed to persist deferred end_turn tool-result: {e}");
+            }
+            otel_span.end();
+            return EndTurnOutcome::Deferred;
+        }
+
+        let reason = params
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("done");
+
+        // --- Rejected: reply tool available but never used ---
+        let has_reply_tool = ext_map
+            .keys()
+            .any(|n| n.contains("reply") || n.contains("post") || n.contains("react"));
+        if !replied && has_reply_tool {
+            warn!(
+                iteration,
+                reason, "end_turn rejected: reply tool available but no reply sent"
+            );
+            let msg = "end_turn rejected: you MUST call the `reply` tool \
+                       before ending the turn. The user has not seen any \
+                       response yet.";
+            otel_span.set_attribute(KeyValue::new("tool_status", "rejected"));
+            otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
+            crate::history::append_tool_result(history, "end_turn", msg);
+            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
+            if let Err(e) = conv_store.save_message(&tr).await {
+                warn!("Failed to persist rejected end_turn tool-result: {e}");
+            }
+            otel_span.end();
+            return EndTurnOutcome::Rejected;
+        }
+
+        // --- Accepted: turn ends normally ---
+        info!(iteration, reason, "end_turn called; stopping turn");
+        let result_text = format!("end_turn: {reason}");
+        otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
+        otel_span.set_attribute(KeyValue::new("tool_observation", result_text.clone()));
+        crate::history::append_tool_result(history, "end_turn", &result_text);
+        let tr =
+            Self::make_tool_result_message(conversation_id, turn_index, "end_turn", &result_text);
+        if let Err(e) = conv_store.save_message(&tr).await {
+            warn!("Failed to persist end_turn tool-result: {e}");
+        }
+        otel_span.end();
+        EndTurnOutcome::Accepted
     }
 
     /// Build the system prompt for a turn that has extension tools.
