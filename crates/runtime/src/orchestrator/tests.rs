@@ -1774,3 +1774,31 @@ async fn subagent_llm_error_records_failed_status() {
         .expect("agent record should exist");
     assert_eq!(record.status, assistant_storage::AgentStatus::Failed);
 }
+
+// ── value_to_params_map tests ─────────────────────────────────────────────
+
+#[test]
+fn value_to_params_map_converts_object() {
+    use super::value_to_params_map;
+    let input = json!({"key": "value", "num": 42});
+    let map = value_to_params_map(&input);
+    assert_eq!(map.len(), 2);
+    assert_eq!(map["key"], json!("value"));
+    assert_eq!(map["num"], json!(42));
+}
+
+#[test]
+fn value_to_params_map_empty_object() {
+    use super::value_to_params_map;
+    let map = value_to_params_map(&json!({}));
+    assert!(map.is_empty());
+}
+
+#[test]
+fn value_to_params_map_non_object_returns_empty() {
+    use super::value_to_params_map;
+    assert!(value_to_params_map(&json!("string")).is_empty());
+    assert!(value_to_params_map(&json!(42)).is_empty());
+    assert!(value_to_params_map(&json!(null)).is_empty());
+    assert!(value_to_params_map(&json!([1, 2])).is_empty());
+}
