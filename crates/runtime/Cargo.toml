@@ -9,6 +9,7 @@ description = "ReAct orchestrator and safety gate for the assistant runtime"
 assistant-core = { path = "../core" }
 assistant-llm = { path = "../llm" }
 assistant-storage = { path = "../storage" }
+opentelemetry-exporter-sqlite = { path = "../opentelemetry-exporter-sqlite" }
 assistant-skills = { path = "../skills" }
 assistant-tool-executor = { path = "../tool-executor" }
 async-trait = { workspace = true }

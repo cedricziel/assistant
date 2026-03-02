@@ -1,0 +1,19 @@
+[package]
+name = "opentelemetry-exporter-sqlite"
+version = "0.1.28"
+license.workspace = true
+edition.workspace = true
+description = "OpenTelemetry SQLite exporters for spans, logs, and metrics"
+
+[dependencies]
+chrono = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

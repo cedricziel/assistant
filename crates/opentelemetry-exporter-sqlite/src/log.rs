@@ -178,7 +178,6 @@ fn any_value_to_json(value: &AnyValue) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StorageLayer;
     use opentelemetry::logs::{
         AnyValue, LogRecord as _, Logger as _, LoggerProvider as _, Severity,
     };
@@ -253,8 +252,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_persists_exact_count() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteLogExporter::new(storage.pool.clone());
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteLogExporter::new(pool.clone());
 
         let items: Vec<(SdkLogRecord, InstrumentationScope)> = vec![
             make_log(Severity::Info, "msg-1", "app"),
@@ -266,14 +265,14 @@ mod tests {
 
         exporter.export(batch).await.unwrap();
 
-        let count = row_count(&storage.pool, "logs").await;
+        let count = row_count(&pool, "logs").await;
         assert_eq!(count, 3, "exporter must produce exactly one row per record");
     }
 
     #[tokio::test]
     async fn test_export_preserves_severity_and_body() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteLogExporter::new(storage.pool.clone());
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteLogExporter::new(pool.clone());
 
         let items: Vec<(SdkLogRecord, InstrumentationScope)> = vec![make_log(
             Severity::Warn,
@@ -288,7 +287,7 @@ mod tests {
             sqlx::query_as::<_, (Option<i32>, Option<String>, Option<String>, Option<String>)>(
                 "SELECT severity_number, severity_text, body, target FROM logs LIMIT 1",
             )
-            .fetch_one(&storage.pool)
+            .fetch_one(&pool)
             .await
             .unwrap();
 
@@ -300,8 +299,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_preserves_trace_context() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteLogExporter::new(storage.pool.clone());
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteLogExporter::new(pool.clone());
 
         let items: Vec<(SdkLogRecord, InstrumentationScope)> = vec![make_log_with_trace(
             Severity::Info,
@@ -316,7 +315,7 @@ mod tests {
         let row = sqlx::query_as::<_, (Option<String>, Option<String>)>(
             "SELECT trace_id, span_id FROM logs LIMIT 1",
         )
-        .fetch_one(&storage.pool)
+        .fetch_one(&pool)
         .await
         .unwrap();
 
@@ -326,8 +325,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_without_trace_context_stores_null() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteLogExporter::new(storage.pool.clone());
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteLogExporter::new(pool.clone());
 
         let items: Vec<(SdkLogRecord, InstrumentationScope)> =
             vec![make_log(Severity::Debug, "no span", "test")];
@@ -338,7 +337,7 @@ mod tests {
         let row = sqlx::query_as::<_, (Option<String>, Option<String>)>(
             "SELECT trace_id, span_id FROM logs LIMIT 1",
         )
-        .fetch_one(&storage.pool)
+        .fetch_one(&pool)
         .await
         .unwrap();
 

@@ -509,6 +509,7 @@ dependencies = [
  "dirs",
  "opentelemetry",
  "opentelemetry-appender-tracing",
+ "opentelemetry-exporter-sqlite",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "serde_json",
@@ -545,12 +546,8 @@ dependencies = [
  "async-trait",
  "chrono",
  "dirs",
- "futures",
- "opentelemetry",
- "opentelemetry_sdk",
  "serde",
  "serde_json",
- "sha2",
  "sqlx",
  "tokio",
  "tracing",
@@ -3770,6 +3767,21 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "opentelemetry-exporter-sqlite"
+version = "0.1.28"
+dependencies = [
+ "chrono",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -1,32 +1,26 @@
 pub mod agents;
 pub mod conversations;
-pub mod log_telemetry;
 pub mod logs;
 pub mod memory_chunks;
 pub mod message_bus;
-pub mod metric_telemetry;
 pub mod metrics;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
-pub mod telemetry;
 pub mod traces;
 pub mod webhooks;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
 pub use conversations::{ConversationRecord, ConversationStore};
-pub use log_telemetry::SqliteLogExporter;
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
 pub use message_bus::SqliteMessageBus;
-pub use metric_telemetry::SqliteMetricExporter;
 pub use metrics::{
     MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord, TimeSeriesPoint, ToolUsageStats,
 };
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
-pub use telemetry::SqliteSpanExporter;
 pub use traces::{RecordedSpan, TraceStats, TraceStore, TraceSummary};
 pub use webhooks::{WebhookRecord, WebhookStore};
 
