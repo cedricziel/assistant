@@ -1,6 +1,6 @@
 [package]
 name = "assistant-provider-ollama"
-version = "0.1.28"
+version = "0.1.29"
 license.workspace = true
 edition.workspace = true
 description = "Ollama LLM provider implementing the assistant LlmProvider trait"
