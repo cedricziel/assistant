@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.29](https://github.com/cedricziel/assistant/compare/v0.1.28...v0.1.29) (2026-03-02)
+
+
+### Features
+
+* **deps:** upgrade opentelemetry 0.24 to 0.31 and related crates ([#145](https://github.com/cedricziel/assistant/issues/145)) ([c08f192](https://github.com/cedricziel/assistant/commit/c08f1926be0b8c18a0e8e47b660ad78a33efadfd))
+* **skills:** sync embedded builtin skills to disk on startup ([#140](https://github.com/cedricziel/assistant/issues/140)) ([ca5c9cf](https://github.com/cedricziel/assistant/commit/ca5c9cfd7a997e8ad831e396154278ea6bcc5b5c)), closes [#81](https://github.com/cedricziel/assistant/issues/81)
+
+
+### Bug Fixes
+
+* **storage:** set global PRAGMA busy_timeout to avoid SQLITE_BUSY ([#152](https://github.com/cedricziel/assistant/issues/152)) ([09e9cb3](https://github.com/cedricziel/assistant/commit/09e9cb315220b3b708460b392a062ebc1b02b6c8))
+
+
+### Performance Improvements
+
+* **storage:** wrap OTel SQLite exporters in batch transactions ([#151](https://github.com/cedricziel/assistant/issues/151)) ([8ec7a28](https://github.com/cedricziel/assistant/commit/8ec7a283ceac3d3211eee593d0577bf67bd2ef87))
+
 ## [0.1.28](https://github.com/cedricziel/assistant/compare/v0.1.27...v0.1.28) (2026-03-01)
 
 
