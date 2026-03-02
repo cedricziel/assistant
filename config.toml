@@ -156,9 +156,6 @@ timeout_secs = 120
 # skills are picked up automatically.
 # extra_dirs = ["~/.claude/skills", "./.claude/skills"]
 
-# Skills to disable (by name)
-# disabled = []
-
 [mcp]
 # Enable the MCP server
 enabled = true

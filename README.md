@@ -83,7 +83,7 @@ ollama pull qwen2.5:14b
 | `memory-write`  | Write a persistent key/value entry                                 | builtin |
 | `memory-search` | Substring-search across memory entries                             | builtin |
 | `web-fetch`     | Fetch a URL and return page text                                   | builtin |
-| `bash`          | Run a bash command (mutating; ask for confirmation on risky turns)  | builtin |
+| `bash`          | Run a bash command (mutating; ask for confirmation on risky turns) | builtin |
 | `list-skills`   | List all registered skills                                         | builtin |
 | `self-analyze`  | Analyse execution traces and propose SKILL.md improvements         | builtin |
 | `schedule-task` | Register a recurring cron-style prompt                             | builtin |
@@ -177,8 +177,6 @@ model = "qwen2.5:7b"          # any Ollama model with tool-calling support
 base_url = "http://localhost:11434"
 max_iterations = 80
 
-[skills]
-disabled = []                   # optional list of tool names to disable
 ```
 
 For cloud providers, set the provider and API key:
@@ -192,7 +190,7 @@ api_key  = "sk-ant-..."       # or set ANTHROPIC_API_KEY env var
 
 #### Embeddings
 
-Ollama and OpenAI support embeddings natively.  When using Anthropic (which
+Ollama and OpenAI support embeddings natively. When using Anthropic (which
 lacks built-in embeddings), configure a dedicated embedding provider:
 
 ```toml

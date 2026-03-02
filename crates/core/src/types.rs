@@ -550,16 +550,12 @@ pub struct SkillsConfig {
     /// Defaults cover Claude Code / NanoClaw shared skill folders.
     #[serde(default = "default_skill_extra_dirs")]
     pub extra_dirs: Vec<String>,
-    /// Skills to disable globally.
-    #[serde(default)]
-    pub disabled: Vec<String>,
 }
 
 impl Default for SkillsConfig {
     fn default() -> Self {
         Self {
             extra_dirs: default_skill_extra_dirs(),
-            disabled: Vec::new(),
         }
     }
 }
