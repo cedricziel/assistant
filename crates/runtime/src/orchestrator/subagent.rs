@@ -166,15 +166,6 @@ impl SubagentRunner for Orchestrator {
                 );
                 debug!(parent: &iteration_span, iteration, agent_id = %spawn.agent_id, "Subagent tool-calling loop");
 
-                let _ctx = ExecutionContext {
-                    conversation_id,
-                    turn: iteration as i64,
-                    interface: Interface::Scheduler, // non-interactive
-                    interactive: false,
-                    allowed_tools: allowed_tools.clone(),
-                    depth: new_depth,
-                };
-
                 // -- OTel: LLM span (child of agent span) ---------------------
                 let mut llm_span = crate::otel_spans::start_llm_span(
                     self.llm.as_ref(),
