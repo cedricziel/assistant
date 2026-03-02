@@ -200,7 +200,6 @@ fn status_fields(status: &opentelemetry::trace::Status) -> (&'static str, Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StorageLayer;
     use opentelemetry::trace::{SpanContext, SpanKind, Status, TraceFlags, TraceId, TraceState};
     use opentelemetry::InstrumentationScope;
     use opentelemetry_sdk::trace::{SpanData, SpanEvents, SpanLinks};
@@ -259,8 +258,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_persists_exact_count() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteSpanExporter::new(storage.pool.clone());
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteSpanExporter::new(pool.clone());
 
         let batch = vec![
             make_span("span-1", Some("bash"), Status::Ok),
@@ -270,14 +269,14 @@ mod tests {
 
         exporter.export(batch).await.unwrap();
 
-        let count = row_count(&storage.pool, "distributed_traces").await;
+        let count = row_count(&pool, "distributed_traces").await;
         assert_eq!(count, 3, "exporter must produce exactly one row per span");
     }
 
     #[tokio::test]
     async fn test_export_preserves_tool_metadata() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteSpanExporter::new(storage.pool.clone());
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteSpanExporter::new(pool.clone());
 
         let batch = vec![make_span("execute_tool bash", Some("bash"), Status::Ok)];
         exporter.export(batch).await.unwrap();
@@ -285,7 +284,7 @@ mod tests {
         let row = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
             "SELECT name, tool_name, tool_status FROM distributed_traces LIMIT 1",
         )
-        .fetch_one(&storage.pool)
+        .fetch_one(&pool)
         .await
         .unwrap();
 
@@ -296,8 +295,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_records_duration() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteSpanExporter::new(storage.pool.clone());
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteSpanExporter::new(pool.clone());
 
         let now = SystemTime::now();
         let trace_id = TraceId::from(uuid::Uuid::new_v4().as_u128());
@@ -328,7 +327,7 @@ mod tests {
         exporter.export(vec![span]).await.unwrap();
 
         let dur: i64 = sqlx::query_scalar("SELECT duration_ms FROM distributed_traces LIMIT 1")
-            .fetch_one(&storage.pool)
+            .fetch_one(&pool)
             .await
             .unwrap();
 
@@ -337,8 +336,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_captures_error_status() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
-        let exporter = SqliteSpanExporter::new(storage.pool.clone());
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteSpanExporter::new(pool.clone());
 
         let batch = vec![make_span(
             "failing",
@@ -351,7 +350,7 @@ mod tests {
 
         let attrs_str: String =
             sqlx::query_scalar("SELECT attributes FROM distributed_traces LIMIT 1")
-                .fetch_one(&storage.pool)
+                .fetch_one(&pool)
                 .await
                 .unwrap();
         let attrs: serde_json::Value = serde_json::from_str(&attrs_str).unwrap();

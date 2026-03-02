@@ -28,6 +28,7 @@ members = [
     "crates/web-ui",
     "crates/a2a-proto",
     "crates/a2a-json-schema",
+    "crates/opentelemetry-exporter-sqlite",
 ]
 default-members = [
     "crates/interface-cli",
@@ -127,6 +128,7 @@ slack-morphism = { version = "2", features = ["hyper"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 mattermost_api = "0.8"
 # Internal crates
+opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
 core = { path = "crates/core" }
 skills = { path = "crates/skills" }
 llm = { path = "crates/llm" }

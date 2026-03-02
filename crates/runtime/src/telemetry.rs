@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use assistant_storage::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry::{global, KeyValue};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_exporter_sqlite::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry_sdk::{
     logs::{BatchLogProcessor, SdkLoggerProvider},
     metrics::{PeriodicReader, SdkMeterProvider},

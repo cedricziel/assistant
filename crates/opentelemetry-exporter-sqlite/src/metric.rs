@@ -656,11 +656,10 @@ fn otel_value_to_json(value: &Value) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StorageLayer;
 
     #[tokio::test]
     async fn resource_upsert_is_idempotent() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let pool = crate::test_utils::test_pool().await;
 
         let resource = Resource::builder_empty()
             .with_attributes([
@@ -669,7 +668,7 @@ mod tests {
             ])
             .build();
 
-        let mut conn = storage.pool.acquire().await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
         let id1 = SqliteMetricExporter::ensure_resource(&mut *conn, &resource)
             .await
             .unwrap();
@@ -679,7 +678,7 @@ mod tests {
         assert_eq!(id1, id2, "same resource must return same id");
 
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM resources")
-            .fetch_one(&storage.pool)
+            .fetch_one(&pool)
             .await
             .unwrap();
         assert_eq!(count, 1, "only one resource row should exist");
@@ -687,13 +686,13 @@ mod tests {
 
     #[tokio::test]
     async fn scope_upsert_is_idempotent() {
-        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let pool = crate::test_utils::test_pool().await;
 
         let scope = InstrumentationScope::builder("test-scope")
             .with_version("1.0")
             .build();
 
-        let mut conn = storage.pool.acquire().await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
         let id1 = SqliteMetricExporter::ensure_scope(&mut *conn, &scope)
             .await
             .unwrap();
