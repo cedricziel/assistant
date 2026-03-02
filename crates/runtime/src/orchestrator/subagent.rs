@@ -288,21 +288,15 @@ impl SubagentRunner for Orchestrator {
                             "Subagent requested tool execution(s)"
                         );
 
-                        history.push(ChatHistoryMessage::AssistantToolCalls(
-                            tool_call_items.clone(),
-                        ));
-                        let tc_msg = Self::make_tool_call_message(
+                        Self::persist_tool_calls(
+                            &mut history,
+                            &conv_store,
                             conversation_id,
                             base_turn + iteration as i64 + 1,
                             &tool_call_items,
-                        );
-                        if let Err(e) = conv_store
-                            .save_message(&tc_msg)
-                            .instrument(iteration_span.clone())
-                            .await
-                        {
-                            warn!("Failed to persist subagent tool-call message: {e}");
-                        }
+                        )
+                        .instrument(iteration_span.clone())
+                        .await;
 
                         for tool_call_item in tool_call_items {
                             // Check cancellation between individual tool executions.
