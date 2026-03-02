@@ -112,7 +112,7 @@ hex = "0.4"
 # URL parsing
 url = "2"
 # OS-level CSPRNG
-getrandom = "0.2"
+getrandom = "0.4"
 # WASM plugin execution
 extism = "1"
 # Integration testing
