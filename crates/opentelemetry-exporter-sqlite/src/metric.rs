@@ -18,19 +18,92 @@ use opentelemetry_sdk::Resource;
 use serde_json::{Map, Number};
 use sha2::{Digest, Sha256};
 use sqlx::{SqliteConnection, SqlitePool};
+use tokio::runtime::Handle;
 use tracing::warn;
 
 /// OpenTelemetry metric exporter that persists data points into the
 /// `metric_points` SQLite table, with resources and scopes normalized
 /// into join tables.
+///
+/// See [`SqliteLogExporter`](crate::SqliteLogExporter) for details on why
+/// we capture a Tokio [`Handle`].
 #[derive(Clone, Debug)]
 pub struct SqliteMetricExporter {
     pool: SqlitePool,
+    rt_handle: Handle,
 }
 
 impl SqliteMetricExporter {
+    /// Create a new exporter.
+    ///
+    /// # Panics
+    /// Panics if called outside a Tokio runtime.
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            rt_handle: Handle::current(),
+        }
+    }
+
+    /// Inner export logic, always called with a Tokio context available.
+    async fn export_inner(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
+
+        let resource_id = Self::ensure_resource(&mut tx, metrics.resource())
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
+
+        for scope_metrics in metrics.scope_metrics() {
+            let scope_id = Self::ensure_scope(&mut tx, scope_metrics.scope())
+                .await
+                .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
+
+            for metric in scope_metrics.metrics() {
+                let name = metric.name();
+                let unit = metric.unit();
+                let desc = metric.description();
+
+                match metric.data() {
+                    AggregatedMetrics::F64(data) => {
+                        Self::process_f64_metric(
+                            &mut tx,
+                            resource_id,
+                            scope_id,
+                            name,
+                            unit,
+                            desc,
+                            data,
+                        )
+                        .await;
+                    }
+                    AggregatedMetrics::I64(data) => {
+                        Self::process_i64_metric(
+                            &mut tx,
+                            resource_id,
+                            scope_id,
+                            name,
+                            unit,
+                            desc,
+                            data,
+                        )
+                        .await;
+                    }
+                    AggregatedMetrics::U64(_) => {
+                        warn!(metric = name, "u64 metrics not yet supported, skipping");
+                    }
+                }
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
+
+        Ok(())
     }
 
     /// Upsert the resource and return its row id.
@@ -456,63 +529,11 @@ impl SqliteMetricExporter {
 
 impl PushMetricExporter for SqliteMetricExporter {
     async fn export(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
-
-        let resource_id = Self::ensure_resource(&mut tx, metrics.resource())
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
-
-        for scope_metrics in metrics.scope_metrics() {
-            let scope_id = Self::ensure_scope(&mut tx, scope_metrics.scope())
-                .await
-                .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
-
-            for metric in scope_metrics.metrics() {
-                let name = metric.name();
-                let unit = metric.unit();
-                let desc = metric.description();
-
-                match metric.data() {
-                    AggregatedMetrics::F64(data) => {
-                        Self::process_f64_metric(
-                            &mut tx,
-                            resource_id,
-                            scope_id,
-                            name,
-                            unit,
-                            desc,
-                            data,
-                        )
-                        .await;
-                    }
-                    AggregatedMetrics::I64(data) => {
-                        Self::process_i64_metric(
-                            &mut tx,
-                            resource_id,
-                            scope_id,
-                            name,
-                            unit,
-                            desc,
-                            data,
-                        )
-                        .await;
-                    }
-                    AggregatedMetrics::U64(_) => {
-                        warn!(metric = name, "u64 metrics not yet supported, skipping");
-                    }
-                }
-            }
+        if Handle::try_current().is_ok() {
+            self.export_inner(metrics).await
+        } else {
+            self.rt_handle.block_on(self.export_inner(metrics))
         }
-
-        tx.commit()
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
-
-        Ok(())
     }
 
     fn force_flush(&self) -> OTelSdkResult {

@@ -5,18 +5,53 @@ use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{SpanData, SpanExporter};
 use serde_json::{Map, Number};
 use sqlx::{SqliteConnection, SqlitePool};
+use tokio::runtime::Handle;
 use uuid::Uuid;
 
 /// OpenTelemetry span exporter that persists spans into the `distributed_traces`
 /// SQLite table.
+///
+/// See [`SqliteLogExporter`](crate::SqliteLogExporter) for details on why
+/// we capture a Tokio [`Handle`].
 #[derive(Clone, Debug)]
 pub struct SqliteSpanExporter {
     pool: SqlitePool,
+    rt_handle: Handle,
 }
 
 impl SqliteSpanExporter {
+    /// Create a new exporter.
+    ///
+    /// # Panics
+    /// Panics if called outside a Tokio runtime.
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            rt_handle: Handle::current(),
+        }
+    }
+
+    /// Inner export logic, always called with a Tokio context available.
+    async fn export_inner(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
+
+        for span in batch {
+            if let Err(err) = SqliteSpanExporter::persist_span(&mut tx, span).await {
+                return Err(OTelSdkError::InternalFailure(format!(
+                    "SQLite span export failed: {err}"
+                )));
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
+
+        Ok(())
     }
 
     async fn persist_span(conn: &mut SqliteConnection, span: SpanData) -> Result<(), sqlx::Error> {
@@ -117,25 +152,11 @@ impl SqliteSpanExporter {
 
 impl SpanExporter for SqliteSpanExporter {
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
-
-        for span in batch {
-            if let Err(err) = SqliteSpanExporter::persist_span(&mut tx, span).await {
-                return Err(OTelSdkError::InternalFailure(format!(
-                    "SQLite span export failed: {err}"
-                )));
-            }
+        if Handle::try_current().is_ok() {
+            self.export_inner(batch).await
+        } else {
+            self.rt_handle.block_on(self.export_inner(batch))
         }
-
-        tx.commit()
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
-
-        Ok(())
     }
 }
 
