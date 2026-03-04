@@ -6,12 +6,17 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{expand_tilde, AssistantConfig};
+use assistant_core::{expand_tilde, AssistantConfig, MemoryConfig};
+use assistant_llm::LlmProvider;
 use assistant_skills::SkillSource;
+use assistant_storage::StorageLayer;
 use tracing::info;
 
+use crate::memory_indexer::MemoryIndexer;
 use crate::orchestrator::ConfirmationCallback;
 
 // ── Auto-deny confirmation callback ───────────────────────────────────────────
@@ -116,10 +121,49 @@ pub fn skill_dirs(
     dirs
 }
 
-/// Placeholder — previously started a memory indexer from the legacy skills executor.
-/// This function is kept for API compatibility but does nothing.
-#[allow(dead_code)]
-pub fn start_memory_indexer_noop() {}
+/// Spawn the memory indexer as a background task.
+///
+/// The indexer periodically scans memory files, computes content hashes,
+/// and generates embeddings for changed content.
+pub fn spawn_memory_indexer(
+    config: &MemoryConfig,
+    storage: Arc<StorageLayer>,
+    llm: Arc<dyn LlmProvider>,
+) -> tokio::task::JoinHandle<()> {
+    let interval = Duration::from_secs(config.indexing_interval_seconds.unwrap_or(300));
+    let enabled = config.enabled;
+
+    // Create a minimal AssistantConfig with just the memory section
+    // for the MemoryIndexer
+    let assistant_config = Arc::new(AssistantConfig {
+        memory: config.clone(),
+        ..AssistantConfig::default()
+    });
+
+    let indexer = Arc::new(MemoryIndexer::new(assistant_config, storage, llm));
+
+    tokio::spawn(async move {
+        if !enabled {
+            info!("Memory indexer disabled, not starting");
+            return;
+        }
+
+        info!("Memory indexer started (interval: {:?})", interval);
+
+        // Run initial indexing
+        if let Err(e) = indexer.index_all().await {
+            tracing::warn!("Initial memory indexing failed: {}", e);
+        }
+
+        loop {
+            tokio::time::sleep(interval).await;
+
+            if let Err(e) = indexer.index_all().await {
+                tracing::warn!("Memory indexing failed: {}", e);
+            }
+        }
+    })
+}
 
 fn resolve_extra_dir(raw: &str, project_root: Option<&Path>) -> PathBuf {
     if raw.starts_with("./") || raw.starts_with("../") {

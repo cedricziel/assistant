@@ -18,7 +18,7 @@ use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::{OllamaConfig, OllamaProvider};
 use assistant_provider_openai::{OpenAIProvider, OpenAIProviderConfig};
 use assistant_runtime::{
-    init_tracing, orchestrator::ConfirmationCallback, scheduler::spawn_scheduler,
+    init_tracing, orchestrator::ConfirmationCallback, spawn_memory_indexer, spawn_scheduler,
     start_conversation_context, Orchestrator,
 };
 use assistant_skills::SkillSource;
@@ -473,6 +473,7 @@ struct Bootstrap {
     executor: Arc<ToolExecutor>,
     orchestrator: Arc<Orchestrator>,
     user_skills_dir: PathBuf,
+    llm: Arc<dyn LlmProvider>,
 }
 
 async fn bootstrap(
@@ -589,6 +590,9 @@ async fn bootstrap(
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());
 
+    // Keep a reference to the LLM for the memory indexer.
+    let llm = orchestrator.llm.clone();
+
     Ok(Bootstrap {
         config,
         storage,
@@ -596,6 +600,7 @@ async fn bootstrap(
         executor,
         orchestrator,
         user_skills_dir,
+        llm,
     })
 }
 
@@ -702,6 +707,13 @@ async fn main() -> Result<()> {
         Duration::from_secs(60),
     );
 
+    // 7a. Start the memory indexer background task.
+    let _memory_indexer = spawn_memory_indexer(
+        &bs.config.memory,
+        bs.storage.clone(),
+        bs.llm.clone(),
+    );
+
     // 7b. Build transcription provider (shared across interfaces).
     let transcription_language = bs
         .config
@@ -740,7 +752,7 @@ async fn main() -> Result<()> {
         }
 
         info!("Starting Slack-only mode");
-        return iface.run().await;
+        return iface.run(&bs.config.memory).await;
     }
 
     // 9. Mattermost-only mode.
@@ -777,8 +789,9 @@ async fn main() -> Result<()> {
         }
 
         // Spawn the Slack listener in the background.
+        let memory_config = bs.config.memory.clone();
         tokio::spawn(async move {
-            if let Err(e) = iface.run().await {
+            if let Err(e) = iface.run(&memory_config).await {
                 tracing::error!("Slack interface error: {e}");
             }
         });

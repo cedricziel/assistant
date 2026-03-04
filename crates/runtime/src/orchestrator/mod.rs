@@ -148,7 +148,8 @@ fn parse_interface(s: &str) -> Interface {
 ///    `OBSERVATION` to the conversation history.
 /// 6. Persist the final assistant message and return [`TurnResult`].
 pub struct Orchestrator {
-    llm: Arc<dyn LlmProvider>,
+    /// The LLM provider used for chat and embeddings.
+    pub llm: Arc<dyn LlmProvider>,
     storage: Arc<StorageLayer>,
     executor: Arc<ToolExecutor>,
     registry: Arc<SkillRegistry>,

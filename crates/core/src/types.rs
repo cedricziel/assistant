@@ -635,6 +635,13 @@ pub struct MemoryConfig {
     pub heartbeat_path: Option<String>,
     /// Path to BOOT.md — per-session startup hook
     pub boot_path: Option<String>,
+    /// How often to run the memory indexer (in seconds). Default: 300 (5 minutes).
+    #[serde(default = "default_indexing_interval")]
+    pub indexing_interval_seconds: Option<u64>,
+}
+
+fn default_indexing_interval() -> Option<u64> {
+    Some(300)
 }
 
 impl Default for MemoryConfig {
@@ -651,6 +658,7 @@ impl Default for MemoryConfig {
             bootstrap_path: None,
             heartbeat_path: None,
             boot_path: None,
+            indexing_interval_seconds: Some(300),
         }
     }
 }
