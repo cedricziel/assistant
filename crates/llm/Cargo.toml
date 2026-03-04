@@ -16,6 +16,7 @@ async-trait = { workspace = true }
 # HTTP client for native Ollama API calls
 reqwest = { workspace = true }
 reqwest-middleware = { workspace = true }
+reqwest-retry = { workspace = true }
 reqwest-tracing = { workspace = true }
 # Async stream utilities (for streaming responses)
 futures = { workspace = true }

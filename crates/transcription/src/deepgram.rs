@@ -30,7 +30,10 @@ pub struct DeepgramProvider {
 
 impl DeepgramProvider {
     pub fn new(api_key: impl Into<String>) -> anyhow::Result<Self> {
-        let client = assistant_llm::build_http_client(DEFAULT_TIMEOUT_SECS)?;
+        let client = assistant_llm::build_http_client(
+            DEFAULT_TIMEOUT_SECS,
+            &assistant_llm::RetryConfig::default(),
+        )?;
         Ok(Self {
             api_key: api_key.into(),
             model: "nova-3".to_string(),
