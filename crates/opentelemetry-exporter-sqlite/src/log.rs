@@ -7,18 +7,58 @@ use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
 use serde_json::{Map, Number};
 use sqlx::{SqliteConnection, SqlitePool};
+use tokio::runtime::Handle;
 use uuid::Uuid;
 
 /// OpenTelemetry log exporter that persists log records into the `logs`
 /// SQLite table.
+///
+/// The OTel SDK's `BatchLogProcessor` runs its export loop on a plain OS
+/// thread (not a Tokio task), so `sqlx` operations would panic with
+/// *"this functionality requires a Tokio context"*.  We capture the Tokio
+/// [`Handle`] at construction time and use [`Handle::block_on`] when no
+/// Tokio context is available (batch processor thread), falling back to
+/// direct async execution when one already exists (e.g. unit tests).
 #[derive(Clone, Debug)]
 pub struct SqliteLogExporter {
     pool: SqlitePool,
+    rt_handle: Handle,
 }
 
 impl SqliteLogExporter {
+    /// Create a new exporter.
+    ///
+    /// # Panics
+    /// Panics if called outside a Tokio runtime (the handle is captured
+    /// via [`Handle::current()`]).
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            rt_handle: Handle::current(),
+        }
+    }
+
+    /// Inner export logic, always called with a Tokio context available.
+    async fn export_inner(&self, batch: LogBatch<'_>) -> OTelSdkResult {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
+
+        for (record, _scope) in batch.iter() {
+            if let Err(err) = Self::persist_log(&mut tx, record).await {
+                return Err(OTelSdkError::InternalFailure(format!(
+                    "SQLite log export failed: {err}"
+                )));
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
+
+        Ok(())
     }
 
     async fn persist_log(
@@ -76,25 +116,14 @@ impl SqliteLogExporter {
 
 impl LogExporter for SqliteLogExporter {
     async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
-
-        for (record, _scope) in batch.iter() {
-            if let Err(err) = Self::persist_log(&mut tx, record).await {
-                return Err(OTelSdkError::InternalFailure(format!(
-                    "SQLite log export failed: {err}"
-                )));
-            }
+        // The BatchLogProcessor calls us from a plain OS thread with no
+        // Tokio runtime.  When a Tokio context already exists (tests), we
+        // await directly; otherwise we block on the captured Handle.
+        if Handle::try_current().is_ok() {
+            self.export_inner(batch).await
+        } else {
+            self.rt_handle.block_on(self.export_inner(batch))
         }
-
-        tx.commit()
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite commit failed: {e}")))?;
-
-        Ok(())
     }
 
     fn set_resource(&mut self, _resource: &Resource) {
