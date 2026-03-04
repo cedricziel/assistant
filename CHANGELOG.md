@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.35](https://github.com/cedricziel/assistant/compare/v0.1.34...v0.1.35) (2026-03-04)
+
+
+### Features
+
+* **llm:** add retry with exponential backoff for transient API errors ([#186](https://github.com/cedricziel/assistant/issues/186)) ([088a0c1](https://github.com/cedricziel/assistant/commit/088a0c17f7c31dd6e6f220d00700a21f6385693b)), closes [#183](https://github.com/cedricziel/assistant/issues/183)
+
+
+### Bug Fixes
+
+* **otel-exporter-sqlite:** provide Tokio context for batch processor threads ([#184](https://github.com/cedricziel/assistant/issues/184)) ([f635b3c](https://github.com/cedricziel/assistant/commit/f635b3c082f3afad7fbb9e1a6e2539b0f22923bd))
+
 ## [0.1.34](https://github.com/cedricziel/assistant/compare/v0.1.33...v0.1.34) (2026-03-02)
 
 
