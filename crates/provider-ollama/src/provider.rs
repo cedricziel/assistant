@@ -65,7 +65,10 @@ impl OllamaProvider {
             base_url: config.base_url.clone(),
             timeout_secs: config.timeout_secs,
         };
-        let http = assistant_llm::build_http_client(config.timeout_secs)?;
+        let http = assistant_llm::build_http_client(
+            config.timeout_secs,
+            &assistant_llm::RetryConfig::default(),
+        )?;
         Ok(Self {
             inner: LlmClient::new(client_config)?,
             base_url: config.base_url,

@@ -164,7 +164,10 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// Create from explicit config.
     pub fn new(config: AnthropicConfig) -> anyhow::Result<Self> {
-        let http = assistant_llm::build_http_client(config.timeout_secs)?;
+        let http = assistant_llm::build_http_client(
+            config.timeout_secs,
+            &assistant_llm::RetryConfig::default(),
+        )?;
         Ok(Self { config, http })
     }
 

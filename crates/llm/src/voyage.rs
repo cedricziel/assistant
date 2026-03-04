@@ -87,7 +87,7 @@ pub struct VoyageEmbedder {
 impl VoyageEmbedder {
     /// Create a new Voyage AI embedding client.
     pub fn new(config: VoyageConfig) -> anyhow::Result<Self> {
-        let http = crate::http::build_http_client(30)?;
+        let http = crate::http::build_http_client(30, &crate::retry::RetryConfig::default())?;
         Ok(Self { config, http })
     }
 }

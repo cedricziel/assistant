@@ -157,7 +157,10 @@ pub struct LlmClient {
 impl LlmClient {
     /// Create a new client from the given configuration.
     pub fn new(config: LlmClientConfig) -> anyhow::Result<Self> {
-        let http = crate::http::build_http_client(config.timeout_secs)?;
+        let http = crate::http::build_http_client(
+            config.timeout_secs,
+            &crate::retry::RetryConfig::default(),
+        )?;
 
         Ok(Self { config, http })
     }

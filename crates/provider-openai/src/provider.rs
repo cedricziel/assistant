@@ -30,8 +30,9 @@ use tracing::{debug, warn};
 use assistant_core::types::OpenAIUserLocation;
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, ToolCallItem, ToolSpec, ToolSupport,
+    is_transient_error_message, with_retry, Capabilities, ChatHistoryMessage, ChatRole,
+    ContentBlock, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, RetryConfig, ToolCallItem,
+    ToolSpec, ToolSupport,
 };
 
 use crate::oauth::OAuthManager;
@@ -242,12 +243,25 @@ impl OpenAIProvider {
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build OpenAI Responses request: {e}"))?;
 
-        let client = self.client.read().await;
-        let response = client
-            .responses()
-            .create(request)
-            .await
-            .map_err(|e| anyhow::anyhow!("OpenAI Responses request failed: {e}"))?;
+        let retry_config = RetryConfig::default();
+        let response = with_retry(
+            &retry_config,
+            "OpenAI",
+            |e: &anyhow::Error| is_transient_error_message(&e.to_string()),
+            || {
+                let client = &self.client;
+                let req = request.clone();
+                async move {
+                    let client = client.read().await;
+                    client
+                        .responses()
+                        .create(req)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("OpenAI Responses request failed: {e}"))
+                }
+            },
+        )
+        .await?;
 
         debug!("OpenAI Responses API response received");
 
@@ -288,12 +302,23 @@ impl OpenAIProvider {
             anyhow::anyhow!("Failed to build OpenAI streaming Responses request: {e}")
         })?;
 
-        let client = self.client.read().await;
-        let mut stream = client
-            .responses()
-            .create_stream(request)
-            .await
-            .map_err(|e| anyhow::anyhow!("OpenAI streaming Responses request failed: {e}"))?;
+        let retry_config = RetryConfig::default();
+        let mut stream = with_retry(
+            &retry_config,
+            "OpenAI",
+            |e: &anyhow::Error| is_transient_error_message(&e.to_string()),
+            || {
+                let client = &self.client;
+                let req = request.clone();
+                async move {
+                    let client = client.read().await;
+                    client.responses().create_stream(req).await.map_err(|e| {
+                        anyhow::anyhow!("OpenAI streaming Responses request failed: {e}")
+                    })
+                }
+            },
+        )
+        .await?;
 
         // Accumulate text deltas and watch for the completed response.
         let mut text_buf = String::new();

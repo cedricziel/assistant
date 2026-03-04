@@ -25,8 +25,9 @@ use tracing::{debug, warn};
 
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, ToolCallItem, ToolSpec, ToolSupport,
+    is_transient_error_message, with_retry, Capabilities, ChatHistoryMessage, ChatRole,
+    ContentBlock, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, RetryConfig, ToolCallItem,
+    ToolSpec, ToolSupport,
 };
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
@@ -76,7 +77,8 @@ impl MoonshotProvider {
         let http = build_reqwest_client(timeout_secs)?;
         let client = Client::with_config(oai_cfg).with_http_client(http);
 
-        let traced_client = assistant_llm::build_http_client(timeout_secs)?;
+        let traced_client =
+            assistant_llm::build_http_client(timeout_secs, &assistant_llm::RetryConfig::default())?;
 
         debug!(
             model = %model,
@@ -161,12 +163,24 @@ impl MoonshotProvider {
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build Moonshot request: {e}"))?;
 
-        let response = self
-            .client
-            .chat()
-            .create(request)
-            .await
-            .map_err(|e| anyhow::anyhow!("Moonshot request failed: {e}"))?;
+        let retry_config = RetryConfig::default();
+        let response = with_retry(
+            &retry_config,
+            "Moonshot",
+            |e: &anyhow::Error| is_transient_error_message(&e.to_string()),
+            || {
+                let req = request.clone();
+                let client = &self.client;
+                async move {
+                    client
+                        .chat()
+                        .create(req)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Moonshot request failed: {e}"))
+                }
+            },
+        )
+        .await?;
 
         debug!("Moonshot response received");
 
@@ -217,12 +231,24 @@ impl MoonshotProvider {
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build Moonshot streaming request: {e}"))?;
 
-        let mut stream = self
-            .client
-            .chat()
-            .create_stream(request)
-            .await
-            .map_err(|e| anyhow::anyhow!("Moonshot streaming request failed: {e}"))?;
+        let retry_config = RetryConfig::default();
+        let mut stream = with_retry(
+            &retry_config,
+            "Moonshot",
+            |e: &anyhow::Error| is_transient_error_message(&e.to_string()),
+            || {
+                let req = request.clone();
+                let client = &self.client;
+                async move {
+                    client
+                        .chat()
+                        .create_stream(req)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Moonshot streaming request failed: {e}"))
+                }
+            },
+        )
+        .await?;
 
         let mut text_buf = String::new();
         let mut tool_map: Vec<(String, String, String)> = Vec::new();
