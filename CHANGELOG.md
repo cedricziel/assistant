@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.36](https://github.com/cedricziel/assistant/compare/v0.1.35...v0.1.36) (2026-03-05)
+
+
+### Features
+
+* **runtime:** re-implement memory indexer ([#188](https://github.com/cedricziel/assistant/issues/188)) ([97d9016](https://github.com/cedricziel/assistant/commit/97d90163ba1c90424aa35c487148000c0f4da8b8))
+
 ## [0.1.35](https://github.com/cedricziel/assistant/compare/v0.1.34...v0.1.35) (2026-03-04)
 
 
