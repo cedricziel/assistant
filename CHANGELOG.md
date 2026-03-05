@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.37](https://github.com/cedricziel/assistant/compare/v0.1.36...v0.1.37) (2026-03-05)
+
+
+### Bug Fixes
+
+* **ci:** include both amd64 and arm64 debs in APT Packages index ([d375a1b](https://github.com/cedricziel/assistant/commit/d375a1b2431981a396af050bc6a32293a285a963))
+
 ## [0.1.36](https://github.com/cedricziel/assistant/compare/v0.1.35...v0.1.36) (2026-03-05)
 
 
