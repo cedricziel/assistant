@@ -1,0 +1,32 @@
+Package: assistant
+Version: 0.1.39
+Architecture: amd64
+Maintainer: Cedric Ziel <cedric@cedric-ziel.com>
+Installed-Size: 59190
+Depends: ffmpeg
+Filename: ./assistant_0.1.39_amd64.deb
+Size: 24636638
+MD5sum: 3e28ca479919d5b4a8ed33378520ff30
+SHA1: 905b0ff99c3e8478862aed71ecda90ea2b050305
+SHA256: 4ed88a8b068391a81f7d9792f870cf9ec828b9dd2345331ff5f265eec7527210
+Priority: optional
+Homepage: https://github.com/cedricziel/assistant
+Description: Local self-improving AI assistant (unified: REPL + MCP + Slack + Mattermost)
+License: MIT
+
+Package: assistant
+Version: 0.1.39
+Architecture: arm64
+Maintainer: Cedric Ziel <cedric@cedric-ziel.com>
+Installed-Size: 54361
+Depends: ffmpeg
+Filename: ./assistant_0.1.39_arm64.deb
+Size: 23659052
+MD5sum: 15b8b104df736a90a620adc86bfbd469
+SHA1: 11b62a193c84592c2b276617497361d81fc029a2
+SHA256: bfad8c45af6a5e4d1cadce7cbe9f31205aa2737708148d73b71b9ac7ec485716
+Priority: optional
+Homepage: https://github.com/cedricziel/assistant
+Description: Local self-improving AI assistant (unified: REPL + MCP + Slack + Mattermost)
+License: MIT
+

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>assistant – package repository</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    pre  { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: .9rem; }
+    h2   { margin-top: 2rem; border-bottom: 1px solid #e0e0e0; padding-bottom: .4rem; }
+    a    { color: #0066cc; }
+  </style>
+</head>
+<body>
+  <h1>assistant</h1>
+  <p>Local self-improving AI assistant. Latest: <strong>v0.1.39</strong></p>
+
+  <h2>APT &ndash; Debian / Ubuntu</h2>
+  <pre>echo "deb [trusted=yes] https://cedricziel.github.io/assistant/apt ./" | sudo tee /etc/apt/sources.list.d/assistant.list
+sudo apt update &amp;&amp; sudo apt install assistant</pre>
+
+  <h2>YUM / DNF &ndash; Fedora / RHEL / Rocky</h2>
+  <pre>sudo tee /etc/yum.repos.d/assistant.repo &lt;&lt; 'EOF'
+[assistant]
+name=assistant
+baseurl=https://cedricziel.github.io/assistant/rpm/
+enabled=1
+gpgcheck=0
+EOF
+sudo dnf install assistant</pre>
+
+  <h2>Tarball</h2>
+  <p>Pre-built tarballs for Linux (x86_64, aarch64) and macOS (arm64, x86_64) are available on the
+    <a href="https://github.com/cedricziel/assistant/releases">GitHub Releases</a> page.</p>
+</body>
+</html>
