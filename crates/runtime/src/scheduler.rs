@@ -73,6 +73,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
             prompt: task.prompt.clone(),
             conversation_id,
             extension_tools: vec![],
+            timestamp: Some(Utc::now()),
         };
 
         let dispatched = match bus
@@ -155,6 +156,7 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         prompt,
         conversation_id,
         extension_tools: vec![],
+        timestamp: Some(Utc::now()),
     };
 
     orchestrator

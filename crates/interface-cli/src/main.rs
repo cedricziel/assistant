@@ -24,6 +24,7 @@ use assistant_runtime::{
 use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use tokio::sync::mpsc;
@@ -966,8 +967,9 @@ async fn main() -> Result<()> {
                 // finds the registered sink, and calls run_turn_streaming.
                 let orch = bs.orchestrator.clone();
                 let prompt = input.to_string();
+                let msg_ts = Utc::now();
                 let submit = tokio::spawn(async move {
-                    orch.submit_turn(&prompt, conversation_id, Interface::Cli)
+                    orch.submit_turn(&prompt, conversation_id, Interface::Cli, Some(msg_ts))
                         .await
                 });
 

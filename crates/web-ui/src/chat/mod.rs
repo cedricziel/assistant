@@ -434,7 +434,7 @@ async fn stream_response(State(state): State<ChatState>, Path(id): Path<String>)
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
             let result = orchestrator
-                .submit_turn(&user_text, conv_id, Interface::Web)
+                .submit_turn(&user_text, conv_id, Interface::Web, None)
                 .await;
             let _ = tx.send(result);
         });

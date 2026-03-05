@@ -87,6 +87,7 @@ impl SignalInterface {
 
         use assistant_core::Interface;
         use assistant_runtime::start_conversation_context;
+        use chrono::Utc;
         use opentelemetry::Context as OtelContext;
         use uuid::Uuid;
 
@@ -231,7 +232,7 @@ impl SignalInterface {
                     let orchestrator_start = std::time::Instant::now();
                     let turn_result = self
                         .orchestrator
-                        .submit_turn(&text, conversation_id, Interface::Signal)
+                        .submit_turn(&text, conversation_id, Interface::Signal, Some(Utc::now()))
                         .await;
                     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 

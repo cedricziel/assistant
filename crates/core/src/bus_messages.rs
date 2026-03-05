@@ -18,6 +18,7 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -58,6 +59,12 @@ pub struct TurnRequest {
     /// These are interface-specific tools that the interface provides.
     #[serde(default)]
     pub extension_tools: Vec<String>,
+    /// When the message was received by the interface.
+    ///
+    /// Used to inject a `[YYYY-MM-DD HH:MM:SS TZ]` prefix into the prompt so
+    /// the agent knows exactly when each message arrived.
+    #[serde(default)]
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
 /// The final result of a completed turn.
@@ -214,6 +221,7 @@ mod tests {
             prompt: "hello world".into(),
             conversation_id: Uuid::new_v4(),
             extension_tools: vec!["reply".into(), "react".into()],
+            timestamp: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         let back: TurnRequest = serde_json::from_value(json).unwrap();

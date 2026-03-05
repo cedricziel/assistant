@@ -169,8 +169,8 @@ impl MemoryLoader {
             day.trim_start_matches('0'),
             year
         );
-        parts.push(time_context);
         total_chars += time_context.len();
+        parts.push(time_context);
 
         // Inject today's and yesterday's daily notes (same size caps apply).
         if total_chars < BOOTSTRAP_MAX_CHARS_TOTAL {

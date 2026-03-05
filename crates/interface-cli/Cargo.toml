@@ -35,6 +35,7 @@ assistant-interface-slack = { path = "../interface-slack", optional = true }
 assistant-interface-mattermost = { path = "../interface-mattermost", optional = true }
 assistant-mcp-server = { path = "../mcp-server", optional = true }
 assistant-transcription = { path = "../transcription" }
+chrono = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 assistant-core = { path = "../core" }
 assistant-runtime = { path = "../runtime" }
+chrono = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
