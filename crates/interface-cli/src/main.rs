@@ -1,10 +1,16 @@
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use chrono::Utc;
+use clap::{Parser, Subcommand};
+use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
+use tokio::sync::mpsc;
+use tracing::{info, warn};
+use uuid::Uuid;
+
 use assistant_core::{
     AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, Interface, LlmProviderKind,
     MemoryLoader, MessageBus,
@@ -24,12 +30,6 @@ use assistant_runtime::{
 use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
-use chrono::Utc;
-use clap::{Parser, Subcommand};
-use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
-use tokio::sync::mpsc;
-use tracing::{info, warn};
-use uuid::Uuid;
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
