@@ -24,6 +24,7 @@ use anyhow::Result;
 use assistant_core::Interface;
 use assistant_runtime::Orchestrator;
 use async_trait::async_trait;
+use chrono::DateTime;
 use lru::LruCache;
 use mattermost_api::prelude::*;
 use mattermost_api::socket::WebsocketEventType;
@@ -167,9 +168,11 @@ impl WebsocketHandler for MattermostHandler {
             .await;
 
         let orchestrator_start = std::time::Instant::now();
+        // Parse Mattermost's create_at (milliseconds since epoch) to UTC.
+        let msg_ts = DateTime::from_timestamp_millis(post.create_at);
         let turn_result = self
             .orchestrator
-            .submit_turn(&text, conversation_id, Interface::Mattermost)
+            .submit_turn(&text, conversation_id, Interface::Mattermost, msg_ts)
             .await;
         let elapsed_ms = orchestrator_start.elapsed().as_millis();
 

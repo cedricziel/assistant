@@ -36,6 +36,7 @@ use assistant_runtime::Orchestrator;
 use assistant_storage::StorageLayer;
 use assistant_transcription::TranscriptionProvider;
 use base64::Engine as _;
+use chrono::{DateTime, Utc};
 
 use slack_morphism::prelude::*;
 use tokio::sync::Mutex;
@@ -1024,8 +1025,19 @@ async fn on_push_event(
         attachment_count = all_attachments.len(),
         "submit_turn →"
     );
+    // Parse the last message's Slack timestamp ("unix.microseconds") to UTC.
+    let msg_ts: Option<DateTime<Utc>> = last.msg_ts.0.parse::<f64>().ok().and_then(|f| {
+        let secs = f as i64;
+        let nsecs = (f.fract() * 1_000_000_000.0) as u32;
+        DateTime::from_timestamp(secs, nsecs)
+    });
     let turn_result = orchestrator
-        .submit_turn(&contextualized_text, conversation_id, Interface::Slack)
+        .submit_turn(
+            &contextualized_text,
+            conversation_id,
+            Interface::Slack,
+            msg_ts,
+        )
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
 

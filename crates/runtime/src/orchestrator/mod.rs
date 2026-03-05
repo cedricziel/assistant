@@ -270,7 +270,7 @@ impl Orchestrator {
 
         info!(path = %boot_path.display(), "Running BOOT.md startup hook");
         match self
-            .submit_turn(&stripped, conversation_id, interface)
+            .submit_turn(&stripped, conversation_id, interface, None)
             .await
         {
             Ok(turn) => {

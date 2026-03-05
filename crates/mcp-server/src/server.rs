@@ -107,7 +107,7 @@ pub async fn handle_request(
                     );
                 };
                 return match orchestrator
-                    .submit_turn(prompt, Uuid::new_v4(), Interface::Mcp)
+                    .submit_turn(prompt, Uuid::new_v4(), Interface::Mcp, None)
                     .await
                 {
                     Ok(turn) => {

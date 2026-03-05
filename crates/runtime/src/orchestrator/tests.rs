@@ -1471,6 +1471,7 @@ async fn run_worker_processes_turn_request() {
         prompt: "hello from bus".to_string(),
         conversation_id: conv_id,
         extension_tools: vec![],
+        timestamp: None,
     };
     orch.bus()
         .publish(
@@ -1535,7 +1536,7 @@ async fn submit_turn_publishes_and_waits_for_result() {
 
     let conv_id = Uuid::new_v4();
     let result = orch
-        .submit_turn("hello via submit", conv_id, Interface::Cli)
+        .submit_turn("hello via submit", conv_id, Interface::Cli, None)
         .await
         .unwrap();
     assert_eq!(result.answer, "submitted answer");

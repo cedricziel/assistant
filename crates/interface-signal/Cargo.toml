@@ -18,6 +18,7 @@ assistant-storage = { path = "../storage" }
 assistant-provider-ollama = { path = "../provider-ollama" }
 assistant-skills = { path = "../skills" }
 assistant-tool-executor = { path = "../tool-executor" }
+chrono = { workspace = true }
 opentelemetry = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }

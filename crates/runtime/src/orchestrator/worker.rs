@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::Result;
 use assistant_core::{bus_messages, topic, ClaimFilter, Interface, PublishRequest, ToolHandler};
 use assistant_llm::ContentBlock;
+use chrono::{DateTime, Local, Utc};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -120,6 +121,19 @@ impl Orchestrator {
                         "Processing turn request"
                     );
 
+                    // Prepend a timestamp prefix so the agent knows when the
+                    // message arrived: `[YYYY-MM-DD HH:MM:SS TZ] <prompt>`.
+                    let prompt = if let Some(ts) = turn_req.timestamp {
+                        let local = ts.with_timezone(&Local);
+                        format!(
+                            "[{}] {}",
+                            local.format("%Y-%m-%d %H:%M:%S %Z"),
+                            turn_req.prompt
+                        )
+                    } else {
+                        turn_req.prompt.clone()
+                    };
+
                     // Check for registered side-channel resources.
                     let ext = self.extension_registrations.write().await.remove(&conv_id);
                     let token_sink = self.token_sinks.write().await.remove(&conv_id);
@@ -128,7 +142,7 @@ impl Orchestrator {
                     let result: Result<TurnResult> = if let Some(reg) = ext {
                         // Extension-tool turn (Slack, Mattermost).
                         self.run_turn_with_tools(
-                            &turn_req.prompt,
+                            &prompt,
                             conv_id,
                             interface,
                             reg.tools,
@@ -138,12 +152,11 @@ impl Orchestrator {
                         .await
                     } else if let Some(sink) = token_sink {
                         // Streaming turn (CLI, Signal).
-                        self.run_turn_streaming(&turn_req.prompt, conv_id, interface, sink, None)
+                        self.run_turn_streaming(&prompt, conv_id, interface, sink, None)
                             .await
                     } else {
                         // Standard non-streaming turn.
-                        self.run_turn(&turn_req.prompt, conv_id, interface, None)
-                            .await
+                        self.run_turn(&prompt, conv_id, interface, None).await
                     };
 
                     match result {
@@ -241,17 +254,21 @@ impl Orchestrator {
     /// * `prompt` — the user message
     /// * `conversation_id` — conversation to continue (or start)
     /// * `interface` — originating interface
+    /// * `timestamp` — when the message was received (injected as a prefix into
+    ///   the prompt by the worker)
     pub async fn submit_turn(
         &self,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
         let request_id = Uuid::new_v4();
         let turn_req = bus_messages::TurnRequest {
             prompt: prompt.to_string(),
             conversation_id,
             extension_tools: vec![],
+            timestamp,
         };
 
         self.bus
