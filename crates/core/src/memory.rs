@@ -155,6 +155,23 @@ impl MemoryLoader {
             }
         }
 
+        // Add current date/time context for task scheduling and time-aware responses.
+        let now = Local::now();
+        let weekday = now.format("%A").to_string();
+        let month = now.format("%B").to_string();
+        let day = now.format("%d").to_string();
+        let year = now.format("%Y").to_string();
+        let time_context = format!(
+            "## Current Context\nCurrent date and time: {} ({}, {} {}, {})\n",
+            now.format("%Y-%m-%d %H:%M:%S"),
+            weekday,
+            month,
+            day.trim_start_matches('0'),
+            year
+        );
+        parts.push(time_context);
+        total_chars += time_context.len();
+
         // Inject today's and yesterday's daily notes (same size caps apply).
         if total_chars < BOOTSTRAP_MAX_CHARS_TOTAL {
             for note_section in self.load_daily_notes() {
