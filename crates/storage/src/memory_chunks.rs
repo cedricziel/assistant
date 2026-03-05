@@ -175,6 +175,53 @@ impl MemoryChunkStore {
             .collect())
     }
 
+    /// Atomically replace all chunks for a file in a single transaction.
+    ///
+    /// Deletes existing chunks and inserts the new ones so that a failure
+    /// mid-way leaves the old data intact rather than a partial update.
+    pub async fn replace_file_chunks(
+        &self,
+        file_path: &str,
+        file_hash: &str,
+        chunks: &[String],
+    ) -> Result<()> {
+        let mut tx = self.0.begin().await?;
+
+        sqlx::query("DELETE FROM memory_chunks WHERE file_path = ?")
+            .bind(file_path)
+            .execute(&mut *tx)
+            .await?;
+
+        if chunks.is_empty() {
+            // Persist a hash-only sentinel so `get_file_hash` still returns
+            // the hash on the next cycle and the file is not re-indexed.
+            sqlx::query(
+                "INSERT INTO memory_chunks (file_path, file_hash, chunk_index, content)
+                 VALUES (?, ?, -1, '')",
+            )
+            .bind(file_path)
+            .bind(file_hash)
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            for (idx, content) in chunks.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO memory_chunks (file_path, file_hash, chunk_index, content)
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(file_path)
+                .bind(file_hash)
+                .bind(idx as i32)
+                .bind(content)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Return the total number of indexed chunks.
     pub async fn count(&self) -> Result<i64> {
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_chunks")

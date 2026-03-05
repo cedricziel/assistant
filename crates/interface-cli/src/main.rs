@@ -18,7 +18,7 @@ use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::{OllamaConfig, OllamaProvider};
 use assistant_provider_openai::{OpenAIProvider, OpenAIProviderConfig};
 use assistant_runtime::{
-    init_tracing, orchestrator::ConfirmationCallback, scheduler::spawn_scheduler,
+    init_tracing, orchestrator::ConfirmationCallback, spawn_memory_indexer, spawn_scheduler,
     start_conversation_context, Orchestrator,
 };
 use assistant_skills::SkillSource;
@@ -473,6 +473,7 @@ struct Bootstrap {
     executor: Arc<ToolExecutor>,
     orchestrator: Arc<Orchestrator>,
     user_skills_dir: PathBuf,
+    llm: Arc<dyn LlmProvider>,
 }
 
 async fn bootstrap(
@@ -589,6 +590,9 @@ async fn bootstrap(
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());
 
+    // Keep a reference to the LLM for the memory indexer.
+    let llm = orchestrator.llm.clone();
+
     Ok(Bootstrap {
         config,
         storage,
@@ -596,6 +600,7 @@ async fn bootstrap(
         executor,
         orchestrator,
         user_skills_dir,
+        llm,
     })
 }
 
@@ -701,6 +706,10 @@ async fn main() -> Result<()> {
         bs.orchestrator.clone(),
         Duration::from_secs(60),
     );
+
+    // 7a. Start the memory indexer background task.
+    let _memory_indexer =
+        spawn_memory_indexer(&bs.config.memory, bs.storage.clone(), bs.llm.clone());
 
     // 7b. Build transcription provider (shared across interfaces).
     let transcription_language = bs

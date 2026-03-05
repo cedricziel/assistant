@@ -1,11 +1,13 @@
 pub mod bootstrap;
 pub(crate) mod history;
+pub mod memory_indexer;
 pub mod metrics;
 pub mod orchestrator;
 pub(crate) mod otel_spans;
 pub mod scheduler;
 pub mod telemetry;
 
+pub use bootstrap::spawn_memory_indexer;
 pub use metrics::MetricsRecorder;
 pub use orchestrator::{Orchestrator, TurnResult};
 pub use otel_spans::start_conversation_context;

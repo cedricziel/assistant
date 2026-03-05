@@ -6,10 +6,13 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::{expand_tilde, AssistantConfig};
+use assistant_core::{expand_tilde, AssistantConfig, MemoryConfig};
+use assistant_llm::LlmProvider;
 use assistant_skills::SkillSource;
+use assistant_storage::StorageLayer;
 use tracing::info;
 
 use crate::orchestrator::ConfirmationCallback;
@@ -116,10 +119,17 @@ pub fn skill_dirs(
     dirs
 }
 
-/// Placeholder — previously started a memory indexer from the legacy skills executor.
-/// This function is kept for API compatibility but does nothing.
-#[allow(dead_code)]
-pub fn start_memory_indexer_noop() {}
+/// Spawn the memory indexer as a background task.
+///
+/// Delegates to [`crate::memory_indexer::spawn_memory_indexer`] so there is
+/// a single canonical implementation.
+pub fn spawn_memory_indexer(
+    config: &MemoryConfig,
+    storage: Arc<StorageLayer>,
+    llm: Arc<dyn LlmProvider>,
+) -> tokio::task::JoinHandle<()> {
+    crate::memory_indexer::spawn_memory_indexer(config, storage, llm)
+}
 
 fn resolve_extra_dir(raw: &str, project_root: Option<&Path>) -> PathBuf {
     if raw.starts_with("./") || raw.starts_with("../") {

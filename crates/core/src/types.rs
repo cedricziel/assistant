@@ -635,6 +635,13 @@ pub struct MemoryConfig {
     pub heartbeat_path: Option<String>,
     /// Path to BOOT.md — per-session startup hook
     pub boot_path: Option<String>,
+    /// How often to run the memory indexer (in seconds). Default: 300 (5 minutes).
+    #[serde(default = "default_indexing_interval")]
+    pub indexing_interval_seconds: Option<u64>,
+}
+
+fn default_indexing_interval() -> Option<u64> {
+    Some(300)
 }
 
 impl Default for MemoryConfig {
@@ -651,6 +658,7 @@ impl Default for MemoryConfig {
             bootstrap_path: None,
             heartbeat_path: None,
             boot_path: None,
+            indexing_interval_seconds: default_indexing_interval(),
         }
     }
 }
@@ -807,6 +815,35 @@ mod tests {
             cfg.embeddings.is_none(),
             "Default config should have no embedding override"
         );
+    }
+
+    // -- MemoryConfig indexing_interval_seconds --------------------------------
+
+    #[test]
+    fn memory_config_default_has_indexing_interval() {
+        let cfg = MemoryConfig::default();
+        assert_eq!(cfg.indexing_interval_seconds, Some(300));
+    }
+
+    #[test]
+    fn memory_config_omitted_interval_uses_serde_default() {
+        let toml_str = r#"enabled = true"#;
+        let cfg: MemoryConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            cfg.indexing_interval_seconds,
+            Some(300),
+            "omitted field should default to 300 via serde"
+        );
+    }
+
+    #[test]
+    fn memory_config_explicit_interval_is_preserved() {
+        let toml_str = r#"
+            enabled = true
+            indexing_interval_seconds = 60
+        "#;
+        let cfg: MemoryConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.indexing_interval_seconds, Some(60));
     }
 
     #[test]
