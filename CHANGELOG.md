@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.38](https://github.com/cedricziel/assistant/compare/v0.1.37...v0.1.38) (2026-03-05)
+
+
+### Features
+
+* **llm:** increase default retry to 20 attempts with 60s max delay ([de7c625](https://github.com/cedricziel/assistant/commit/de7c625114a99c33be7f20ea1e20d72d134471fc))
+
 ## [0.1.37](https://github.com/cedricziel/assistant/compare/v0.1.36...v0.1.37) (2026-03-05)
 
 
