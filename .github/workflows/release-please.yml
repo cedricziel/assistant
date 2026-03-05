@@ -274,7 +274,7 @@ jobs:
           rm -f repo/apt/*.deb
           cp new-packages/*.deb repo/apt/
           cd repo/apt
-          dpkg-scanpackages . > Packages
+          dpkg-scanpackages --multiversion . > Packages
           gzip -k -f Packages
 
       - name: Add .rpm packages and regenerate YUM index
