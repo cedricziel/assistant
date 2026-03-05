@@ -31,10 +31,10 @@ pub struct RetryConfig {
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
-            max_retries: 3,
+            max_retries: 20,
             initial_delay_ms: 1_000,
             multiplier: 2.0,
-            max_delay_ms: 30_000,
+            max_delay_ms: 60_000,
             jitter: true,
         }
     }
@@ -183,10 +183,10 @@ mod tests {
     #[test]
     fn default_config_values() {
         let cfg = RetryConfig::default();
-        assert_eq!(cfg.max_retries, 3);
+        assert_eq!(cfg.max_retries, 20);
         assert_eq!(cfg.initial_delay_ms, 1_000);
         assert!((cfg.multiplier - 2.0).abs() < f64::EPSILON);
-        assert_eq!(cfg.max_delay_ms, 30_000);
+        assert_eq!(cfg.max_delay_ms, 60_000);
         assert!(cfg.jitter);
     }
 
