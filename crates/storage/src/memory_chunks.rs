@@ -192,17 +192,30 @@ impl MemoryChunkStore {
             .execute(&mut *tx)
             .await?;
 
-        for (idx, content) in chunks.iter().enumerate() {
+        if chunks.is_empty() {
+            // Persist a hash-only sentinel so `get_file_hash` still returns
+            // the hash on the next cycle and the file is not re-indexed.
             sqlx::query(
                 "INSERT INTO memory_chunks (file_path, file_hash, chunk_index, content)
-                 VALUES (?, ?, ?, ?)",
+                 VALUES (?, ?, -1, '')",
             )
             .bind(file_path)
             .bind(file_hash)
-            .bind(idx as i32)
-            .bind(content)
             .execute(&mut *tx)
             .await?;
+        } else {
+            for (idx, content) in chunks.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO memory_chunks (file_path, file_hash, chunk_index, content)
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(file_path)
+                .bind(file_hash)
+                .bind(idx as i32)
+                .bind(content)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
 
         tx.commit().await?;

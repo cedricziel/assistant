@@ -112,8 +112,8 @@ impl MemoryIndexer {
             return Ok(());
         }
 
-        debug!(file = %path.display(), "Indexing memory file");
         let chunks: Vec<String> = chunk_text(&content).collect();
+        debug!(file = %path.display(), chunks = chunks.len(), "Indexing memory file");
         store.replace_file_chunks(&path_str, &hash, &chunks).await?;
 
         Ok(())
@@ -130,7 +130,11 @@ impl MemoryIndexer {
                     }
                 }
                 Err(e) => {
-                    // Embedding is optional — log and continue.
+                    let msg = e.to_string();
+                    if msg.contains("not supported") || msg.contains("Not supported") {
+                        debug!("Embedding unsupported by provider; skipping batch");
+                        break;
+                    }
                     debug!(chunk_id = chunk.id, error = %e, "Embedding skipped");
                 }
             }
