@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.39](https://github.com/cedricziel/assistant/compare/v0.1.38...v0.1.39) (2026-03-05)
+
+
+### Features
+
+* add current timestamp to system prompt ([#193](https://github.com/cedricziel/assistant/issues/193)) ([e9c9db8](https://github.com/cedricziel/assistant/commit/e9c9db8a4a6c92ef86255573de72c26e8c94d329))
+
 ## [0.1.38](https://github.com/cedricziel/assistant/compare/v0.1.37...v0.1.38) (2026-03-05)
 
 
