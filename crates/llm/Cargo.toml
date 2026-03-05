@@ -1,6 +1,6 @@
 [package]
 name = "assistant-llm"
-version = "0.1.36"
+version = "0.1.37"
 license.workspace = true
 edition.workspace = true
 description = "Ollama LLM client with native tool-calling for the assistant"
