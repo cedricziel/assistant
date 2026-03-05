@@ -163,7 +163,7 @@ impl MemoryLoader {
         let year = now.format("%Y").to_string();
         let time_context = format!(
             "## Current Context\nCurrent date and time: {} ({}, {} {}, {})\n",
-            now.format("%Y-%m-%d %H:%M:%S"),
+            now.format("%Y-%m-%d %H:%M:%S %:z"),
             weekday,
             month,
             day.trim_start_matches('0'),
