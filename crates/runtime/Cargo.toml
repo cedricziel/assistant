@@ -31,7 +31,7 @@ cron = { workspace = true }
 dirs = { workspace = true }
 toml = { workspace = true }
 sqlx = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }

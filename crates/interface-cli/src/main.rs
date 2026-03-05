@@ -708,11 +708,8 @@ async fn main() -> Result<()> {
     );
 
     // 7a. Start the memory indexer background task.
-    let _memory_indexer = spawn_memory_indexer(
-        &bs.config.memory,
-        bs.storage.clone(),
-        bs.llm.clone(),
-    );
+    let _memory_indexer =
+        spawn_memory_indexer(&bs.config.memory, bs.storage.clone(), bs.llm.clone());
 
     // 7b. Build transcription provider (shared across interfaces).
     let transcription_language = bs
@@ -752,7 +749,7 @@ async fn main() -> Result<()> {
         }
 
         info!("Starting Slack-only mode");
-        return iface.run(&bs.config.memory).await;
+        return iface.run().await;
     }
 
     // 9. Mattermost-only mode.
@@ -789,9 +786,8 @@ async fn main() -> Result<()> {
         }
 
         // Spawn the Slack listener in the background.
-        let memory_config = bs.config.memory.clone();
         tokio::spawn(async move {
-            if let Err(e) = iface.run(&memory_config).await {
+            if let Err(e) = iface.run().await {
                 tracing::error!("Slack interface error: {e}");
             }
         });

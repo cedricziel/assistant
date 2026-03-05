@@ -32,7 +32,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::{Interface, Message, MessageRole};
 use assistant_llm::ContentBlock;
-use assistant_runtime::{spawn_memory_indexer, spawn_scheduler, Orchestrator};
+use assistant_runtime::Orchestrator;
 use assistant_storage::StorageLayer;
 use assistant_transcription::TranscriptionProvider;
 use base64::Engine as _;
@@ -1197,14 +1197,7 @@ impl SlackInterface {
     /// Start the Slack Socket Mode listener loop, reconnecting on disconnect.
     ///
     /// The loop exits cleanly on SIGINT (Ctrl+C) or SIGTERM.
-    pub async fn run(&self, memory_config: &assistant_core::MemoryConfig) -> Result<()> {
-        // Start the memory indexer background task.
-        let _memory_indexer = spawn_memory_indexer(
-            memory_config,
-            self.storage.clone(),
-            self.orchestrator.llm.clone(),
-        );
-
+    pub async fn run(&self) -> Result<()> {
         let bot_token_str = self.config.resolved_bot_token().ok_or_else(|| {
             anyhow::anyhow!(
                 "No Slack bot token configured. Set bot_token in [slack] config \

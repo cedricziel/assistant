@@ -93,6 +93,10 @@ impl MemoryIndexer {
                 .collect()
         })
         .await
+        .map_err(|e| {
+            warn!(error = %e, "Memory file scan task failed");
+            e
+        })
         .unwrap_or_default()
     }
 
@@ -109,13 +113,8 @@ impl MemoryIndexer {
         }
 
         debug!(file = %path.display(), "Indexing memory file");
-        store.delete_file_chunks(&path_str).await?;
-
-        for (idx, chunk) in chunk_text(&content).enumerate() {
-            store
-                .upsert_chunk(&path_str, &hash, idx as i32, &chunk)
-                .await?;
-        }
+        let chunks: Vec<String> = chunk_text(&content).collect();
+        store.replace_file_chunks(&path_str, &hash, &chunks).await?;
 
         Ok(())
     }
@@ -149,7 +148,8 @@ pub fn spawn_memory_indexer(
     storage: Arc<StorageLayer>,
     llm: Arc<dyn LlmProvider>,
 ) -> tokio::task::JoinHandle<()> {
-    let interval = std::time::Duration::from_secs(config.indexing_interval_seconds.unwrap_or(300));
+    let secs = config.indexing_interval_seconds.unwrap_or(300).max(1);
+    let interval = std::time::Duration::from_secs(secs);
     let enabled = config.enabled;
 
     // Create a minimal AssistantConfig with just the memory section

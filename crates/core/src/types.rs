@@ -658,7 +658,7 @@ impl Default for MemoryConfig {
             bootstrap_path: None,
             heartbeat_path: None,
             boot_path: None,
-            indexing_interval_seconds: Some(300),
+            indexing_interval_seconds: default_indexing_interval(),
         }
     }
 }
