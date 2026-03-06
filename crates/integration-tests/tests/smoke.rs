@@ -22,30 +22,44 @@ use testcontainers::{
     runners::AsyncRunner,
     GenericImage,
 };
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 const OLLAMA_PORT: u16 = 11434;
 /// Smallest reliably capable model with native tool-calling support: ~934 MB.
 const MODEL: &str = "qwen2.5:1.5b";
 
-// ── Container helper ──────────────────────────────────────────────────────────
+// ── Shared container (started once for the whole test process) ────────────────
 
-/// Start an Ollama container, pull the small model, and return the base URL.
-async fn start_ollama() -> Result<(impl Drop, String)> {
-    let container = GenericImage::new("ollama/ollama", "latest")
-        .with_exposed_port(OLLAMA_PORT.tcp())
-        .with_wait_for(WaitFor::message_on_stderr("Listening on"))
-        .start()
+static OLLAMA_BASE_URL: OnceCell<String> = OnceCell::const_new();
+
+/// Returns the base URL of the shared Ollama container, starting it on first call.
+///
+/// The container is intentionally leaked via `Box::leak` so that its `Drop` impl
+/// never runs and the container stays alive for the entire test process.
+async fn get_ollama_base_url() -> Result<&'static str> {
+    let url = OLLAMA_BASE_URL
+        .get_or_try_init(|| async {
+            let container = GenericImage::new("ollama/ollama", "latest")
+                .with_exposed_port(OLLAMA_PORT.tcp())
+                .with_wait_for(WaitFor::message_on_stderr("Listening on"))
+                .start()
+                .await?;
+
+            // Leak so the container is never dropped and keeps running.
+            let container: &'static _ = Box::leak(Box::new(container));
+
+            let host = container.get_host().await?;
+            let port = container.get_host_port_ipv4(OLLAMA_PORT.tcp()).await?;
+            let base_url = format!("http://{host}:{port}");
+
+            // Pull the model once before any test exercises it.
+            pull_model(&base_url, MODEL).await?;
+
+            Ok(base_url)
+        })
         .await?;
-
-    let host = container.get_host().await?;
-    let port = container.get_host_port_ipv4(OLLAMA_PORT.tcp()).await?;
-    let base_url = format!("http://{host}:{port}");
-
-    // Pull the model — wait for it to finish before any test starts.
-    pull_model(&base_url, MODEL).await?;
-
-    Ok((container, base_url))
+    Ok(url.as_str())
 }
 
 async fn pull_model(base_url: &str, model: &str) -> Result<()> {
@@ -91,7 +105,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     let llm_config = LlmClientConfig {
         model: MODEL.to_string(),
         base_url: base_url.to_string(),
-        timeout_secs: 120,
+        timeout_secs: 300,
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
 
@@ -130,8 +144,8 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
 async fn test_memory_round_trip() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = start_ollama().await?;
-    let f = build_fixture(&base_url).await?;
+    let base_url = get_ollama_base_url().await?;
+    let f = build_fixture(base_url).await?;
 
     // Ask the agent to remember a preference — should call memory-update target=user.
     f.orchestrator
@@ -169,8 +183,8 @@ async fn test_memory_round_trip() -> Result<()> {
 async fn test_list_skills() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = start_ollama().await?;
-    let f = build_fixture(&base_url).await?;
+    let base_url = get_ollama_base_url().await?;
+    let f = build_fixture(base_url).await?;
 
     let result = f
         .orchestrator
@@ -208,8 +222,8 @@ async fn test_list_skills() -> Result<()> {
 async fn test_tool_loop_terminates() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = start_ollama().await?;
-    let f = build_fixture(&base_url).await?;
+    let base_url = get_ollama_base_url().await?;
+    let f = build_fixture(base_url).await?;
 
     let result = f
         .orchestrator
@@ -226,8 +240,8 @@ async fn test_tool_loop_terminates() -> Result<()> {
 async fn test_self_analyze_runs() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = start_ollama().await?;
-    let f = build_fixture(&base_url).await?;
+    let base_url = get_ollama_base_url().await?;
+    let f = build_fixture(base_url).await?;
 
     // Produce some traces for the memory-write skill.
     f.orchestrator
