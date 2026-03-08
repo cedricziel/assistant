@@ -597,6 +597,21 @@ async fn bootstrap(
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());
 
+    // Connect to configured external MCP servers and register their tools.
+    if !config.mcp.servers.is_empty() {
+        let mcp_manager =
+            assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?;
+        let mcp_tools = mcp_manager.tool_handlers().await;
+        for handler in &mcp_tools {
+            executor.register_ambient_tool(handler.clone());
+        }
+        info!(
+            servers = mcp_manager.server_count().await,
+            tools = mcp_tools.len(),
+            "registered MCP client tools"
+        );
+    }
+
     // Keep a reference to the LLM for the memory indexer.
     let llm = orchestrator.llm.clone();
 

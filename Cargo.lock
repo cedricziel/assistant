@@ -262,6 +262,7 @@ dependencies = [
  "assistant-interface-nextcloud",
  "assistant-interface-slack",
  "assistant-llm",
+ "assistant-mcp-client",
  "assistant-mcp-server",
  "assistant-provider-anthropic",
  "assistant-provider-moonshot",
@@ -371,6 +372,7 @@ version = "0.1.39"
 dependencies = [
  "anyhow",
  "assistant-core",
+ "assistant-mcp-client",
  "assistant-provider-ollama",
  "assistant-runtime",
  "assistant-skills",
@@ -653,6 +655,7 @@ dependencies = [
  "assistant-a2a-json-schema",
  "assistant-core",
  "assistant-llm",
+ "assistant-mcp-client",
  "assistant-provider-anthropic",
  "assistant-provider-moonshot",
  "assistant-provider-ollama",

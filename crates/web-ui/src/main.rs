@@ -268,6 +268,21 @@ async fn main() -> Result<()> {
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());
 
+    // Connect to configured external MCP servers and register their tools.
+    if !config.mcp.servers.is_empty() {
+        let mcp_manager =
+            assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?;
+        let mcp_tools = mcp_manager.tool_handlers().await;
+        for handler in &mcp_tools {
+            executor.register_ambient_tool(handler.clone());
+        }
+        tracing::info!(
+            servers = mcp_manager.server_count().await,
+            tools = mcp_tools.len(),
+            "registered MCP client tools"
+        );
+    }
+
     // 5. Spawn the turn-processing worker (scoped to Web interface only,
     //    so it doesn't steal turns from Slack/Mattermost workers sharing
     //    the same SQLite database).
