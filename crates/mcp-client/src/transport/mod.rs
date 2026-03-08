@@ -36,6 +36,20 @@ pub trait McpTransport: Send + Sync + 'static {
     /// `notifications/tools/list_changed`.
     fn notifications(&self) -> broadcast::Receiver<JsonRpcMessage>;
 
+    /// Start a background listener for server-initiated notifications.
+    ///
+    /// Called after the MCP `initialize` handshake completes so that
+    /// transports requiring session state (e.g. Streamable HTTP with
+    /// `Mcp-Session-Id`) can establish the listener with the correct
+    /// headers.
+    ///
+    /// Transports that already listen for notifications during `connect()`
+    /// (stdio, SSE) may implement this as a no-op.
+    async fn start_notification_listener(&self) -> Result<()> {
+        // Default: no-op. Overridden by StreamableHttpTransport.
+        Ok(())
+    }
+
     /// Check whether the transport is still connected.
     fn is_connected(&self) -> bool;
 

@@ -59,14 +59,21 @@ pub struct JsonRpcMessage {
 }
 
 impl JsonRpcMessage {
+    /// True if the `id` field is absent or `null`.
+    fn id_absent_or_null(&self) -> bool {
+        self.id.as_ref().is_none_or(|v| v.is_null())
+    }
+
     /// True if this is a server-initiated notification (no `id`, has `method`).
+    ///
+    /// Handles servers that send `"id": null` instead of omitting the field.
     pub fn is_notification(&self) -> bool {
-        self.id.is_none() && self.method.is_some()
+        self.id_absent_or_null() && self.method.is_some()
     }
 
     /// True if this is a response to a request we sent.
     pub fn is_response(&self) -> bool {
-        self.id.is_some()
+        !self.id_absent_or_null()
     }
 
     /// Extract the numeric request ID, if present.
@@ -291,6 +298,11 @@ pub struct ResourceContent {
 // ── MCP protocol constants ────────────────────────────────────────────────────
 
 /// The MCP protocol version we advertise during initialization.
+///
+/// `2024-11-05` is the latest stable MCP specification version and is widely
+/// supported by existing servers. Newer draft versions (e.g. `2025-03-26` for
+/// Streamable HTTP) exist but are not yet finalized; update this constant when
+/// a newer stable version is published and server adoption is sufficient.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Standard MCP method names.
@@ -364,6 +376,22 @@ mod tests {
             msg.method.as_deref(),
             Some("notifications/tools/list_changed")
         );
+    }
+
+    #[test]
+    fn json_rpc_message_notification_with_null_id() {
+        // Some servers send `"id": null` instead of omitting the field.
+        let raw = r#"{"jsonrpc":"2.0","id":null,"method":"notifications/tools/list_changed"}"#;
+        let msg: JsonRpcMessage = serde_json::from_str(raw).unwrap();
+        assert!(
+            msg.is_notification(),
+            "null id should be treated as notification"
+        );
+        assert!(
+            !msg.is_response(),
+            "null id should not be treated as response"
+        );
+        assert_eq!(msg.request_id(), None);
     }
 
     #[test]

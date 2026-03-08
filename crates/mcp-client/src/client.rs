@@ -90,6 +90,16 @@ impl McpClient {
         let notif = crate::protocol::JsonRpcRequest::notification(method::INITIALIZED, None);
         self.transport.notify(notif).await?;
 
+        // Start background notification listener (needed for transports like
+        // Streamable HTTP that require a session ID established during init).
+        if let Err(e) = self.transport.start_notification_listener().await {
+            warn!(
+                server = %self.name,
+                error = %e,
+                "failed to start notification listener"
+            );
+        }
+
         self.server_caps = Some(init_result);
         Ok(self.server_caps.as_ref().unwrap())
     }

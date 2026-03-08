@@ -321,6 +321,10 @@ impl McpTransport for StreamableHttpTransport {
         Ok(())
     }
 
+    async fn start_notification_listener(&self) -> Result<()> {
+        self.start_notification_listener().await
+    }
+
     fn notifications(&self) -> broadcast::Receiver<JsonRpcMessage> {
         self.notification_tx.subscribe()
     }
