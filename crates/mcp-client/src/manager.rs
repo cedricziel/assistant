@@ -8,13 +8,15 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use assistant_core::{McpServerEntry, McpTransportConfig, McpTrustLevel, ToolHandler};
 
 use crate::bridge::{self, McpToolHandler};
 use crate::client::McpClient;
+use crate::transport::sse::SseTransport;
 use crate::transport::stdio::StdioTransport;
+use crate::transport::streamable::StreamableHttpTransport;
 
 /// Manages all MCP client connections and their bridged tools.
 pub struct McpClientManager {
@@ -91,13 +93,40 @@ impl McpClientManager {
                     })?;
                 Arc::new(transport)
             }
-            McpTransportConfig::Http { url, headers: _ } => {
-                // HTTP/SSE transport not yet implemented.
-                anyhow::bail!(
-                    "HTTP/SSE transport for MCP server '{}' at {} is not yet implemented",
-                    entry.name,
-                    url
-                );
+            McpTransportConfig::Http { url, headers } => {
+                let resolved_headers = resolve_env_vars(headers);
+                let resolved_env_headers = resolve_env_vars(&entry.env);
+                let mut all_headers = resolved_env_headers;
+                all_headers.extend(resolved_headers);
+
+                // Try Streamable HTTP first (newer protocol), fall back to SSE.
+                match StreamableHttpTransport::connect(url, &all_headers).await {
+                    Ok(transport) => {
+                        debug!(
+                            server = %entry.name,
+                            url = %url,
+                            "connected via streamable HTTP"
+                        );
+                        Arc::new(transport)
+                    }
+                    Err(streamable_err) => {
+                        debug!(
+                            server = %entry.name,
+                            error = %streamable_err,
+                            "streamable HTTP failed, trying SSE"
+                        );
+                        let transport = SseTransport::connect(url, &all_headers)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to connect to MCP server '{}' at {} \
+                                     (tried streamable HTTP and SSE)",
+                                    entry.name, url
+                                )
+                            })?;
+                        Arc::new(transport)
+                    }
+                }
             }
         };
 
@@ -247,9 +276,10 @@ mod tests {
 
     #[test]
     fn resolve_env_value_with_var() {
-        std::env::set_var("TEST_MCP_VAR", "world");
+        // SAFETY: test-only, single-threaded test runner.
+        unsafe { std::env::set_var("TEST_MCP_VAR", "world") };
         assert_eq!(resolve_env_value("hello ${TEST_MCP_VAR}"), "hello world");
-        std::env::remove_var("TEST_MCP_VAR");
+        unsafe { std::env::remove_var("TEST_MCP_VAR") };
     }
 
     #[test]
@@ -262,10 +292,11 @@ mod tests {
 
     #[test]
     fn resolve_env_value_multiple_vars() {
-        std::env::set_var("TEST_A", "foo");
-        std::env::set_var("TEST_B", "bar");
+        // SAFETY: test-only, single-threaded test runner.
+        unsafe { std::env::set_var("TEST_A", "foo") };
+        unsafe { std::env::set_var("TEST_B", "bar") };
         assert_eq!(resolve_env_value("${TEST_A}-${TEST_B}"), "foo-bar");
-        std::env::remove_var("TEST_A");
-        std::env::remove_var("TEST_B");
+        unsafe { std::env::remove_var("TEST_A") };
+        unsafe { std::env::remove_var("TEST_B") };
     }
 }

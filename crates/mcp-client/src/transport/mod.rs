@@ -4,7 +4,9 @@
 //! (stdio subprocess, HTTP/SSE, Streamable HTTP) while the [`McpClient`]
 //! session layer handles the MCP protocol logic on top.
 
+pub mod sse;
 pub mod stdio;
+pub mod streamable;
 
 use anyhow::Result;
 use async_trait::async_trait;
