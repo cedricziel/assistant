@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -619,11 +621,19 @@ fn default_skill_extra_dirs() -> Vec<String> {
     ]
 }
 
-/// MCP server configuration
+/// MCP configuration — covers both the built-in MCP server and external MCP
+/// client connections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConfig {
+    /// Enable the built-in MCP server (JSON-RPC over stdio).
     pub enabled: bool,
+    /// Listen address for the built-in MCP server.
     pub listen: String,
+    /// External MCP servers to connect to as a client.
+    /// Each entry spawns a connection at startup and bridges the server's tools
+    /// into the assistant's tool registry.
+    #[serde(default)]
+    pub servers: Vec<McpServerEntry>,
 }
 
 impl Default for McpConfig {
@@ -631,8 +641,67 @@ impl Default for McpConfig {
         Self {
             enabled: true,
             listen: "127.0.0.1:3000".to_string(),
+            servers: Vec::new(),
         }
     }
+}
+
+/// An external MCP server the assistant connects to as a client.
+///
+/// Tools discovered from the server are registered with the prefix
+/// `mcp__{name}__{tool_name}` to avoid collisions with builtin tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerEntry {
+    /// Unique name for this server (used in tool prefix).
+    /// Must be a valid identifier: lowercase alphanumeric + hyphens.
+    pub name: String,
+    /// Transport configuration — determines how we connect to the server.
+    #[serde(flatten)]
+    pub transport: McpTransportConfig,
+    /// Extra environment variables passed to stdio-spawned servers.
+    /// Values may reference environment variables with `${VAR}` syntax.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// Whether this server is enabled (default: true).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Trust level controlling safety-gate behaviour for this server's tools.
+    #[serde(default)]
+    pub trust: McpTrustLevel,
+}
+
+/// How to connect to an external MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum McpTransportConfig {
+    /// Spawn a local subprocess; communicate via JSON-RPC over stdin/stdout.
+    Stdio {
+        /// Command and its arguments (e.g. `["npx", "-y", "@mcp/server-github"]`).
+        command: Vec<String>,
+    },
+    /// Connect to a remote HTTP endpoint (SSE or Streamable HTTP).
+    Http {
+        /// Server URL (e.g. `"https://example.com/mcp/sse"`).
+        url: String,
+        /// Extra HTTP headers sent with every request.
+        /// Values may reference environment variables with `${VAR}` syntax.
+        #[serde(default)]
+        headers: HashMap<String, String>,
+    },
+}
+
+/// Trust level for tools from an external MCP server.
+///
+/// Controls whether the safety gate requires user confirmation before executing
+/// a tool call from this server.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum McpTrustLevel {
+    /// Every tool call requires explicit user confirmation (default).
+    #[default]
+    Confirm,
+    /// Tools may run without confirmation (use for trusted, read-only servers).
+    Trust,
 }
 
 /// Self-improvement config
@@ -896,6 +965,111 @@ mod tests {
         "#;
         let cfg: MemoryConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.indexing_interval_seconds, Some(60));
+    }
+
+    // -- McpConfig with external servers ---------------------------------------
+
+    #[test]
+    fn mcp_config_default_has_empty_servers() {
+        let cfg = McpConfig::default();
+        assert!(cfg.servers.is_empty());
+        assert!(cfg.enabled);
+    }
+
+    #[test]
+    fn mcp_config_stdio_server() {
+        let toml_str = r#"
+            enabled = true
+            listen = "127.0.0.1:3000"
+
+            [[servers]]
+            name = "github"
+            command = ["npx", "-y", "@modelcontextprotocol/server-github"]
+
+            [servers.env]
+            GITHUB_TOKEN = "gh-token-123"
+        "#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.servers.len(), 1);
+        let s = &cfg.servers[0];
+        assert_eq!(s.name, "github");
+        assert!(s.enabled);
+        assert_eq!(s.trust, McpTrustLevel::Confirm);
+        match &s.transport {
+            McpTransportConfig::Stdio { command } => {
+                assert_eq!(
+                    command,
+                    &["npx", "-y", "@modelcontextprotocol/server-github"]
+                );
+            }
+            other => panic!("expected Stdio, got {other:?}"),
+        }
+        assert_eq!(s.env.get("GITHUB_TOKEN").unwrap(), "gh-token-123");
+    }
+
+    #[test]
+    fn mcp_config_http_server() {
+        let toml_str = r#"
+            enabled = true
+            listen = "127.0.0.1:3000"
+
+            [[servers]]
+            name = "remote-db"
+            url = "https://db.example.com/mcp/sse"
+            trust = "trust"
+
+            [servers.headers]
+            Authorization = "Bearer secret"
+        "#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.servers.len(), 1);
+        let s = &cfg.servers[0];
+        assert_eq!(s.name, "remote-db");
+        assert_eq!(s.trust, McpTrustLevel::Trust);
+        match &s.transport {
+            McpTransportConfig::Http { url, headers } => {
+                assert_eq!(url, "https://db.example.com/mcp/sse");
+                assert_eq!(headers.get("Authorization").unwrap(), "Bearer secret");
+            }
+            other => panic!("expected Http, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mcp_config_multiple_servers() {
+        let toml_str = r#"
+            enabled = true
+            listen = "127.0.0.1:3000"
+
+            [[servers]]
+            name = "fs"
+            command = ["mcp-server-fs", "/tmp"]
+
+            [[servers]]
+            name = "api"
+            url = "https://api.example.com/mcp"
+            enabled = false
+        "#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.servers.len(), 2);
+        assert!(cfg.servers[0].enabled);
+        assert!(!cfg.servers[1].enabled);
+    }
+
+    #[test]
+    fn mcp_config_no_servers_section_defaults_empty() {
+        let toml_str = r#"
+            enabled = true
+            listen = "127.0.0.1:3000"
+        "#;
+        let cfg: McpConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.servers.is_empty());
+    }
+
+    #[test]
+    fn mcp_trust_level_default_is_confirm() {
+        let level = McpTrustLevel::default();
+        assert_eq!(level, McpTrustLevel::Confirm);
     }
 
     #[test]

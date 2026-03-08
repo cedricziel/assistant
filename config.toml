@@ -157,10 +157,34 @@ timeout_secs = 120
 # extra_dirs = ["~/.claude/skills", "./.claude/skills"]
 
 [mcp]
-# Enable the MCP server
+# Enable the built-in MCP server (JSON-RPC over stdio)
 enabled = true
 # Listen address for MCP server
 listen = "127.0.0.1:3000"
+
+# ── External MCP servers (client connections) ─────────────────────────────────
+# Connect to external MCP servers and bridge their tools into the assistant.
+# Tools are namespaced as mcp__{name}__{tool_name} to avoid collisions.
+#
+# Stdio transport — spawns a local subprocess:
+# [[mcp.servers]]
+# name = "github"
+# command = ["npx", "-y", "@modelcontextprotocol/server-github"]
+# trust = "confirm"            # "confirm" (default) or "trust"
+# [mcp.servers.env]
+# GITHUB_TOKEN = "${GITHUB_TOKEN}"
+#
+# [[mcp.servers]]
+# name = "filesystem"
+# command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/user/docs"]
+# trust = "trust"              # read-only server, skip confirmation
+#
+# HTTP/SSE transport — connect to a remote server:
+# [[mcp.servers]]
+# name = "remote-db"
+# url = "https://db.example.com/mcp/sse"
+# [mcp.servers.headers]
+# Authorization = "Bearer ${DB_TOKEN}"
 
 [self_improvement]
 # Enable passive execution trace collection
