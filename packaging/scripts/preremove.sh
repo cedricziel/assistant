@@ -19,7 +19,7 @@ for uid_path in /run/systemd/users/*; do
     if [ "$user_id" -lt 1000 ] 2>/dev/null; then
         continue
     fi
-    for svc in assistant-slack assistant-mattermost assistant-web-ui; do
+    for svc in assistant-slack assistant-mattermost assistant-nextcloud assistant-web-ui; do
         systemctl --user -M "${user_id}@.host" stop "$svc" 2>/dev/null || true
         if [ "$action" = "remove" ]; then
             systemctl --user -M "${user_id}@.host" disable "$svc" 2>/dev/null || true
