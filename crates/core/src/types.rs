@@ -90,6 +90,8 @@ pub enum Interface {
     Mcp,
     Slack,
     Mattermost,
+    /// Nextcloud Talk webhook-based bot interface.
+    Nextcloud,
     /// Web UI chat interface.
     Web,
     /// Background scheduled tasks and heartbeats — non-interactive.
@@ -120,6 +122,9 @@ pub struct AssistantConfig {
     /// Mattermost interface configuration (optional).
     /// Populated from the `[mattermost]` section of `config.toml`.
     pub mattermost: Option<MattermostConfig>,
+    /// Nextcloud Talk interface configuration (optional).
+    /// Populated from the `[nextcloud]` section of `config.toml`.
+    pub nextcloud: Option<NextcloudConfig>,
     /// Audio transcription configuration (optional).
     /// Populated from the `[transcription]` section of `config.toml`.
     #[serde(default)]
@@ -189,6 +194,41 @@ pub struct MattermostConfig {
     /// If non-empty, only dispatch messages from these Mattermost user IDs.
     #[serde(default)]
     pub allowed_users: Vec<String>,
+}
+
+/// Configuration for the Nextcloud Talk interface.
+///
+/// The bot is installed on the Nextcloud server via
+/// `occ talk:bot:install` which sets up the webhook URL and a shared secret.
+/// The assistant runs an HTTP server that receives incoming webhook callbacks
+/// and replies via the Nextcloud Talk Bot REST API.
+///
+/// ```toml
+/// [nextcloud]
+/// server_url = "https://nextcloud.example.com"
+/// secret = "shared-secret-from-occ-install"
+/// listen_addr = "0.0.0.0:8080"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NextcloudConfig {
+    /// Base URL of the Nextcloud server (e.g. `"https://nextcloud.example.com"`).
+    pub server_url: Option<String>,
+    /// Shared secret configured when registering the bot via `occ talk:bot:install`.
+    /// Also checked via `NEXTCLOUD_TALK_SECRET` env var.
+    pub secret: Option<String>,
+    /// Socket address the webhook HTTP server listens on (default: `"0.0.0.0:8080"`).
+    #[serde(default = "default_nextcloud_listen_addr")]
+    pub listen_addr: String,
+    /// If non-empty, only dispatch messages from these conversation tokens.
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+    /// If non-empty, only dispatch messages from these Nextcloud user IDs.
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+}
+
+fn default_nextcloud_listen_addr() -> String {
+    "0.0.0.0:8080".to_string()
 }
 
 // ── Transcription configuration ───────────────────────────────────────────────

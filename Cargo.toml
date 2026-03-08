@@ -23,6 +23,7 @@ members = [
     "crates/interface-signal",
     "crates/interface-slack",
     "crates/interface-mattermost",
+    "crates/interface-nextcloud",
     "crates/transcription",
     "crates/integration-tests",
     "crates/web-ui",
@@ -35,6 +36,7 @@ default-members = [
     "crates/interface-signal",
     "crates/interface-slack",
     "crates/interface-mattermost",
+    "crates/interface-nextcloud",
     "crates/web-ui",
     "crates/mcp-server",
 ]

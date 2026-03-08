@@ -65,6 +65,12 @@ enum Command {
     /// Requires Mattermost server_url and token configured in ~/.assistant/config.toml.
     #[cfg(feature = "mattermost")]
     Mattermost,
+    /// Run only the Nextcloud Talk interface (no interactive REPL).
+    ///
+    /// Requires Nextcloud server_url and secret configured in ~/.assistant/config.toml.
+    /// The bot receives messages via webhooks from the Nextcloud Talk server.
+    #[cfg(feature = "nextcloud")]
+    Nextcloud,
 }
 
 // ── CLI confirmation callback ─────────────────────────────────────────────────
@@ -654,8 +660,13 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "mattermost"))]
     let is_mattermost_only = false;
 
+    #[cfg(feature = "nextcloud")]
+    let is_nextcloud_only = matches!(cli.command, Some(Command::Nextcloud));
+    #[cfg(not(feature = "nextcloud"))]
+    let is_nextcloud_only = false;
+
     let confirmation_cb: Arc<dyn ConfirmationCallback> =
-        if is_mcp || is_slack_only || is_mattermost_only {
+        if is_mcp || is_slack_only || is_mattermost_only || is_nextcloud_only {
             Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
                 interface_name: "background",
             })
@@ -765,6 +776,18 @@ async fn main() -> Result<()> {
         return iface.run().await;
     }
 
+    // 9b. Nextcloud-only mode.
+    #[cfg(feature = "nextcloud")]
+    if let Some(Command::Nextcloud) = &cli.command {
+        use assistant_interface_nextcloud::NextcloudInterface;
+        let nc_cfg = bs.config.nextcloud.clone().context(
+            "Nextcloud is not configured. Add a [nextcloud] section to ~/.assistant/config.toml",
+        )?;
+        let iface = NextcloudInterface::new(nc_cfg, bs.orchestrator);
+        info!("Starting Nextcloud Talk-only mode");
+        return iface.run().await;
+    }
+
     // 10. Default mode: interactive REPL + background interfaces.
     //
     //     Register ambient tools from configured interfaces first, then spawn
@@ -803,6 +826,19 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             if let Err(e) = iface.run().await {
                 tracing::error!("Mattermost interface error: {e}");
+            }
+        });
+    }
+
+    // 10c. Nextcloud Talk — start in background if configured.
+    #[cfg(feature = "nextcloud")]
+    if bs.config.nextcloud.is_some() {
+        use assistant_interface_nextcloud::NextcloudInterface;
+        let nc_cfg = bs.config.nextcloud.clone().unwrap_or_default();
+        let iface = NextcloudInterface::new(nc_cfg, bs.orchestrator.clone());
+        tokio::spawn(async move {
+            if let Err(e) = iface.run().await {
+                tracing::error!("Nextcloud Talk interface error: {e}");
             }
         });
     }

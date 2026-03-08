@@ -128,6 +128,7 @@ fn parse_interface(s: &str) -> Interface {
         "mcp" => Interface::Mcp,
         "slack" => Interface::Slack,
         "mattermost" => Interface::Mattermost,
+        "nextcloud" => Interface::Nextcloud,
         "web" => Interface::Web,
         "scheduler" => Interface::Scheduler,
         _ => Interface::Cli,

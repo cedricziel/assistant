@@ -8,8 +8,9 @@ description = "Interactive CLI REPL for the local AI assistant"
 [features]
 slack = ["dep:assistant-interface-slack"]
 mattermost = ["dep:assistant-interface-mattermost"]
+nextcloud = ["dep:assistant-interface-nextcloud"]
 mcp = ["dep:assistant-mcp-server"]
-default = ["slack", "mattermost", "mcp"]
+default = ["slack", "mattermost", "nextcloud", "mcp"]
 
 [[bin]]
 name = "assistant"
@@ -33,6 +34,7 @@ assistant-runtime = { path = "../runtime" }
 # Optional interface crates (activated by features)
 assistant-interface-slack = { path = "../interface-slack", optional = true }
 assistant-interface-mattermost = { path = "../interface-mattermost", optional = true }
+assistant-interface-nextcloud = { path = "../interface-nextcloud", optional = true }
 assistant-mcp-server = { path = "../mcp-server", optional = true }
 assistant-transcription = { path = "../transcription" }
 chrono = { workspace = true }
