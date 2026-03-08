@@ -436,6 +436,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant-mcp-client"
+version = "0.1.39"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "async-trait",
+ "base64 0.22.1",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "assistant-mcp-server"
 version = "0.1.39"
 dependencies = [
