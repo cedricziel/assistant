@@ -195,8 +195,9 @@ async fn bootstrap() -> Result<(Arc<Orchestrator>, SignalConfig, PathBuf)> {
 
     // Connect to configured external MCP servers and register their tools.
     if !config.mcp.servers.is_empty() {
-        let mcp_manager =
-            assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?;
+        let mcp_manager = std::sync::Arc::new(
+            assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?,
+        );
         let mcp_tools = mcp_manager.tool_handlers().await;
         for handler in &mcp_tools {
             executor.register_ambient_tool(handler.clone());
@@ -205,6 +206,14 @@ async fn bootstrap() -> Result<(Arc<Orchestrator>, SignalConfig, PathBuf)> {
             servers = mcp_manager.server_count().await,
             tools = mcp_tools.len(),
             "registered MCP client tools"
+        );
+
+        // Spawn background health-check loop for reconnection.
+        let exec_register = executor.clone();
+        let exec_unregister = executor.clone();
+        mcp_manager.spawn_health_loop(
+            std::sync::Arc::new(move |h| exec_register.register_ambient_tool(h)),
+            std::sync::Arc::new(move |prefix| exec_unregister.unregister_tools_by_prefix(prefix)),
         );
     }
 

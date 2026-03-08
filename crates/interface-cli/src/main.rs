@@ -600,7 +600,7 @@ async fn bootstrap(
     // Connect to configured external MCP servers and register their tools.
     if !config.mcp.servers.is_empty() {
         let mcp_manager =
-            assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?;
+            Arc::new(assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?);
         let mcp_tools = mcp_manager.tool_handlers().await;
         for handler in &mcp_tools {
             executor.register_ambient_tool(handler.clone());
@@ -609,6 +609,14 @@ async fn bootstrap(
             servers = mcp_manager.server_count().await,
             tools = mcp_tools.len(),
             "registered MCP client tools"
+        );
+
+        // Spawn background health-check loop for reconnection.
+        let exec_register = executor.clone();
+        let exec_unregister = executor.clone();
+        mcp_manager.spawn_health_loop(
+            Arc::new(move |h| exec_register.register_ambient_tool(h)),
+            Arc::new(move |prefix| exec_unregister.unregister_tools_by_prefix(prefix)),
         );
     }
 
