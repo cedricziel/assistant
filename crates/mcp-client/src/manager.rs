@@ -12,6 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use rmcp::model::Tool;
+use rmcp::ServiceExt;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -19,9 +21,6 @@ use assistant_core::{McpServerEntry, McpTransportConfig, McpTrustLevel, ToolHand
 
 use crate::bridge::{self, McpToolHandler};
 use crate::client::McpClient;
-use crate::transport::sse::SseTransport;
-use crate::transport::stdio::StdioTransport;
-use crate::transport::streamable::StreamableHttpTransport;
 
 /// Maximum number of consecutive reconnection attempts before giving up on a
 /// server until the next health-check cycle.
@@ -124,19 +123,31 @@ impl McpClientManager {
         })
     }
 
-    /// Connect to a single MCP server and perform the initialize handshake.
-    async fn connect_one(
-        entry: &McpServerEntry,
-    ) -> Result<(McpClient, Vec<crate::protocol::RemoteTool>)> {
-        let transport: Arc<dyn crate::transport::McpTransport> = match &entry.transport {
+    /// Connect to a single MCP server using rmcp and perform the initialize
+    /// handshake, then list tools.
+    async fn connect_one(entry: &McpServerEntry) -> Result<(McpClient, Vec<Tool>)> {
+        let service = match &entry.transport {
             McpTransportConfig::Stdio { command } => {
                 let resolved_env = resolve_env_vars(&entry.env);
-                let transport = StdioTransport::spawn(command, &resolved_env)
-                    .await
+
+                // Build a tokio::process::Command from the command parts.
+                let (program, args) = command
+                    .split_first()
+                    .ok_or_else(|| anyhow::anyhow!("MCP server '{}': empty command", entry.name))?;
+                let mut cmd = tokio::process::Command::new(program);
+                cmd.args(args);
+                for (k, v) in &resolved_env {
+                    cmd.env(k, v);
+                }
+
+                let transport = rmcp::transport::child_process::TokioChildProcess::new(cmd)
                     .with_context(|| {
                         format!("failed to spawn MCP server '{}': {:?}", entry.name, command)
                     })?;
-                Arc::new(transport)
+
+                ().serve(transport).await.map_err(|e| {
+                    anyhow::anyhow!("MCP initialize handshake failed for '{}': {e}", entry.name)
+                })?
             }
             McpTransportConfig::Http { url, headers } => {
                 let resolved_headers = resolve_env_vars(headers);
@@ -144,42 +155,44 @@ impl McpClientManager {
                 let mut all_headers = resolved_env_headers;
                 all_headers.extend(resolved_headers);
 
-                // Try Streamable HTTP first (newer protocol), fall back to SSE.
-                match StreamableHttpTransport::connect(url, &all_headers).await {
-                    Ok(transport) => {
-                        debug!(
+                // Build rmcp StreamableHttpClientTransportConfig.
+                let mut config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str());
+
+                // Convert string headers to http types.
+                let mut http_headers = HashMap::new();
+                for (k, v) in &all_headers {
+                    if let (Ok(name), Ok(value)) = (
+                        http::HeaderName::try_from(k.as_str()),
+                        http::HeaderValue::try_from(v.as_str()),
+                    ) {
+                        http_headers.insert(name, value);
+                    } else {
+                        warn!(
                             server = %entry.name,
-                            url = %url,
-                            "connected via streamable HTTP"
+                            header = %k,
+                            "skipping invalid HTTP header"
                         );
-                        Arc::new(transport)
-                    }
-                    Err(streamable_err) => {
-                        debug!(
-                            server = %entry.name,
-                            error = %streamable_err,
-                            "streamable HTTP failed, trying SSE"
-                        );
-                        let transport = SseTransport::connect(url, &all_headers)
-                            .await
-                            .with_context(|| {
-                                format!(
-                                    "failed to connect to MCP server '{}' at {} \
-                                     (tried streamable HTTP and SSE)",
-                                    entry.name, url
-                                )
-                            })?;
-                        Arc::new(transport)
                     }
                 }
+                if !http_headers.is_empty() {
+                    config = config.custom_headers(http_headers);
+                }
+
+                let transport =
+                    rmcp::transport::StreamableHttpClientTransport::<reqwest::Client>::from_config(
+                        config,
+                    );
+                ().serve(transport).await.map_err(|e| {
+                    anyhow::anyhow!(
+                        "MCP initialize handshake failed for '{}' at {}: {e}",
+                        entry.name,
+                        url
+                    )
+                })?
             }
         };
 
-        let mut client = McpClient::new(&entry.name, transport);
-        client
-            .initialize()
-            .await
-            .with_context(|| format!("MCP initialize handshake failed for '{}'", entry.name))?;
+        let client = McpClient::new(&entry.name, service);
 
         let tools = client
             .list_tools()

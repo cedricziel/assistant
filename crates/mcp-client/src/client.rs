@@ -1,173 +1,75 @@
-//! MCP client session — handles the MCP protocol handshake and provides
-//! typed methods for `tools/list`, `tools/call`, etc.
-
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+//! MCP client session — thin wrapper around the `rmcp` SDK.
+//!
+//! Stores the `Peer<RoleClient>` for sending requests and the
+//! `RunningService` for lifecycle management.
 
 use anyhow::{Context, Result};
-use tracing::{debug, info, warn};
-
-use crate::protocol::{
-    method, ClientCapabilities, ClientInfo, InitializeParams, InitializeResult, RemoteTool,
-    ToolCallParams, ToolCallResult, ToolListResult, PROTOCOL_VERSION,
-};
-use crate::transport::McpTransport;
+use rmcp::model::{CallToolRequestParams, CallToolResult, Tool};
+use rmcp::service::{Peer, RoleClient, RunningService};
+use tokio::sync::Mutex;
+use tracing::{debug, warn};
 
 /// An active session with a single MCP server.
 ///
-/// Manages the connection lifecycle (initialize → ready) and provides typed
-/// methods that map to MCP protocol calls.
+/// The `Peer` is cheaply clonable (Arc internally) and used for all
+/// request/response interactions.  The `RunningService` owns the
+/// background I/O task and is kept alive for the session duration.
 pub struct McpClient {
     /// User-assigned name for this server connection.
     name: String,
-    /// The underlying transport (stdio, HTTP/SSE, etc.).
-    transport: Arc<dyn McpTransport>,
-    /// Server capabilities received during initialization.
-    server_caps: Option<InitializeResult>,
-    /// Monotonically increasing request ID.
-    next_id: AtomicU64,
+    /// The rmcp peer used for sending requests.
+    peer: Peer<RoleClient>,
+    /// The running service that owns the background I/O task.
+    /// Wrapped in `Mutex<Option<...>>` so we can `close()` it on shutdown.
+    _service: Mutex<Option<RunningService<RoleClient, ()>>>,
 }
 
 impl McpClient {
-    /// Create a new client wrapping an already-connected transport.
-    ///
-    /// Call [`initialize`] before using any other method.
-    pub fn new(name: impl Into<String>, transport: Arc<dyn McpTransport>) -> Self {
+    /// Create a new client wrapping an already-initialized rmcp service.
+    pub fn new(name: impl Into<String>, service: RunningService<RoleClient, ()>) -> Self {
+        let peer = service.peer().clone();
         Self {
             name: name.into(),
-            transport,
-            server_caps: None,
-            next_id: AtomicU64::new(1),
+            peer,
+            _service: Mutex::new(Some(service)),
         }
     }
 
-    /// Allocate the next request ID.
-    fn next_id(&self) -> u64 {
-        self.next_id.fetch_add(1, Ordering::Relaxed)
-    }
-
-    /// Perform the MCP `initialize` handshake.
-    ///
-    /// Sends `initialize` with our client capabilities, waits for the server
-    /// response, then sends the `notifications/initialized` notification.
-    pub async fn initialize(&mut self) -> Result<&InitializeResult> {
-        let params = InitializeParams {
-            protocol_version: PROTOCOL_VERSION.to_string(),
-            capabilities: ClientCapabilities { roots: None },
-            client_info: ClientInfo {
-                name: "assistant".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            },
-        };
-
-        let id = self.next_id();
-        let req = crate::protocol::JsonRpcRequest::call(
-            id,
-            method::INITIALIZE,
-            Some(serde_json::to_value(&params)?),
-        );
-
-        let resp = self
-            .transport
-            .request(req)
-            .await
-            .context("MCP initialize request failed")?;
-
-        let result_value = resp
-            .into_result()
-            .context("MCP initialize returned error")?;
-        let init_result: InitializeResult =
-            serde_json::from_value(result_value).context("failed to parse InitializeResult")?;
-
-        info!(
-            server = %self.name,
-            protocol = %init_result.protocol_version,
-            server_name = init_result.server_info.as_ref().map(|s| s.name.as_str()).unwrap_or("unknown"),
-            "MCP server initialized"
-        );
-
-        // Send `notifications/initialized` to signal we're ready.
-        let notif = crate::protocol::JsonRpcRequest::notification(method::INITIALIZED, None);
-        self.transport.notify(notif).await?;
-
-        // Start background notification listener (needed for transports like
-        // Streamable HTTP that require a session ID established during init).
-        if let Err(e) = self.transport.start_notification_listener().await {
-            warn!(
-                server = %self.name,
-                error = %e,
-                "failed to start notification listener"
-            );
-        }
-
-        self.server_caps = Some(init_result);
-        Ok(self.server_caps.as_ref().unwrap())
-    }
-
-    /// Fetch the list of tools from the remote server.
-    pub async fn list_tools(&self) -> Result<Vec<RemoteTool>> {
-        let id = self.next_id();
-        let req = crate::protocol::JsonRpcRequest::call(id, method::TOOLS_LIST, None);
-
-        let resp = self
-            .transport
-            .request(req)
+    /// Fetch the list of tools from the remote server (handles pagination).
+    pub async fn list_tools(&self) -> Result<Vec<Tool>> {
+        let tools = self
+            .peer
+            .list_all_tools()
             .await
             .context("tools/list request failed")?;
 
-        let value = resp.into_result().context("tools/list returned error")?;
-        let result: ToolListResult =
-            serde_json::from_value(value).context("failed to parse ToolListResult")?;
-
         debug!(
             server = %self.name,
-            count = result.tools.len(),
+            count = tools.len(),
             "discovered remote tools"
         );
 
-        Ok(result.tools)
+        Ok(tools)
     }
 
     /// Call a tool on the remote server.
     pub async fn call_tool(
         &self,
         name: &str,
-        arguments: serde_json::Value,
-    ) -> Result<ToolCallResult> {
-        let params = ToolCallParams {
-            name: name.to_string(),
-            arguments,
-        };
+        arguments: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<CallToolResult> {
+        let mut params = CallToolRequestParams::new(name.to_string());
+        if let Some(args) = arguments {
+            params = params.with_arguments(args);
+        }
 
-        let id = self.next_id();
-        let req = crate::protocol::JsonRpcRequest::call(
-            id,
-            method::TOOLS_CALL,
-            Some(serde_json::to_value(&params)?),
-        );
-
-        let resp = self
-            .transport
-            .request(req)
+        let result = self
+            .peer
+            .call_tool(params)
             .await
             .with_context(|| format!("tools/call '{name}' request failed"))?;
 
-        let value = resp
-            .into_result()
-            .with_context(|| format!("tools/call '{name}' returned error"))?;
-        let result: ToolCallResult =
-            serde_json::from_value(value).context("failed to parse ToolCallResult")?;
-
         Ok(result)
-    }
-
-    /// Send a `ping` and wait for the response.
-    pub async fn ping(&self) -> Result<()> {
-        let id = self.next_id();
-        let req = crate::protocol::JsonRpcRequest::call(id, method::PING, None);
-        let resp = self.transport.request(req).await?;
-        let _ = resp.into_result()?;
-        Ok(())
     }
 
     /// The user-assigned name for this server.
@@ -177,32 +79,29 @@ impl McpClient {
 
     /// Whether the underlying transport is still connected.
     pub fn is_connected(&self) -> bool {
-        self.transport.is_connected()
+        !self.peer.is_transport_closed()
     }
 
-    /// Subscribe to server-initiated notifications.
-    pub fn notifications(
-        &self,
-    ) -> tokio::sync::broadcast::Receiver<crate::protocol::JsonRpcMessage> {
-        self.transport.notifications()
-    }
-
-    /// Server capabilities (available after [`initialize`]).
-    pub fn server_capabilities(&self) -> Option<&InitializeResult> {
-        self.server_caps.as_ref()
+    /// Server capabilities (available after initialization).
+    pub fn server_info(&self) -> Option<&rmcp::model::InitializeResult> {
+        self.peer.peer_info()
     }
 
     /// Whether the server advertised tool-list-changed notifications.
     pub fn supports_tool_list_changed(&self) -> bool {
-        self.server_caps
-            .as_ref()
-            .and_then(|c| c.capabilities.tools.as_ref())
-            .is_some_and(|t| t.list_changed)
+        self.peer
+            .peer_info()
+            .and_then(|info| info.capabilities.tools.as_ref())
+            .is_some_and(|t| t.list_changed.unwrap_or(false))
     }
 
-    /// Gracefully shut down the transport.
+    /// Gracefully shut down the MCP session.
     pub async fn shutdown(&self) -> Result<()> {
         warn!(server = %self.name, "shutting down MCP client");
-        self.transport.shutdown().await
+        let mut service = self._service.lock().await;
+        if let Some(mut svc) = service.take() {
+            let _ = svc.close().await;
+        }
+        Ok(())
     }
 }

@@ -5,21 +5,19 @@
 //!
 //! ```text
 //! McpClientManager
-//!   ├─ McpClient("github")  ← session layer (initialize, tools/list, tools/call)
-//!   │   └─ StdioTransport   ← raw JSON-RPC over subprocess stdin/stdout
+//!   ├─ McpClient("github")  ← thin wrapper around rmcp RunningService/Peer
+//!   │   └─ rmcp stdio transport (TokioChildProcess)
 //!   ├─ McpClient("db")
-//!   │   └─ HttpSseTransport ← raw JSON-RPC over HTTP + SSE
+//!   │   └─ rmcp Streamable HTTP transport
 //!   └─ tool handlers        ← Vec<McpToolHandler> registered as ambient tools
 //! ```
 //!
 //! Each [`McpToolHandler`] implements `assistant_core::ToolHandler` and
-//! forwards `run()` calls to the remote MCP server via the client session.
+//! forwards `run()` calls to the remote MCP server via the rmcp `Peer`.
 
 pub mod bridge;
 pub mod client;
 pub mod manager;
-pub mod protocol;
-pub mod transport;
 
 pub use bridge::McpToolHandler;
 pub use client::McpClient;
