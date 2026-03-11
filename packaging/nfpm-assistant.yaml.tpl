@@ -3,7 +3,7 @@ arch: "ARCH_PLACEHOLDER"
 platform: "linux"
 version: "VERSION_PLACEHOLDER"
 maintainer: "Cedric Ziel <cedric@cedric-ziel.com>"
-description: "Local self-improving AI assistant (unified: REPL + MCP + Slack + Mattermost)"
+description: "Local self-improving AI assistant (unified: REPL + MCP + Slack + Mattermost + Nextcloud)"
 homepage: "https://github.com/cedricziel/assistant"
 license: "MIT"
 
@@ -36,6 +36,7 @@ contents:
   #   systemctl --user enable --now assistant-slack
   #   systemctl --user enable --now assistant-mattermost
   #   systemctl --user enable --now assistant-web-ui
+  #   systemctl --user enable --now assistant-nextcloud
   - src: packaging/systemd/user/assistant-slack.service
     dst: /usr/lib/systemd/user/assistant-slack.service
     file_info:
@@ -43,6 +44,11 @@ contents:
 
   - src: packaging/systemd/user/assistant-mattermost.service
     dst: /usr/lib/systemd/user/assistant-mattermost.service
+    file_info:
+      mode: 0644
+
+  - src: packaging/systemd/user/assistant-nextcloud.service
+    dst: /usr/lib/systemd/user/assistant-nextcloud.service
     file_info:
       mode: 0644
 

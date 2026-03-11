@@ -259,6 +259,7 @@ dependencies = [
  "anyhow",
  "assistant-core",
  "assistant-interface-mattermost",
+ "assistant-interface-nextcloud",
  "assistant-interface-slack",
  "assistant-llm",
  "assistant-mcp-server",
@@ -278,6 +279,7 @@ dependencies = [
  "rustls",
  "serde_json",
  "tokio",
+ "tokio-util",
  "toml",
  "tracing",
  "uuid",
@@ -334,6 +336,30 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "assistant-interface-nextcloud"
+version = "0.1.39"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "assistant-runtime",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "getrandom 0.4.1",
+ "hex",
+ "hmac",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-util",
  "toml",
  "tracing",
  "uuid",

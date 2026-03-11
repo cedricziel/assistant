@@ -23,6 +23,7 @@ members = [
     "crates/interface-signal",
     "crates/interface-slack",
     "crates/interface-mattermost",
+    "crates/interface-nextcloud",
     "crates/transcription",
     "crates/integration-tests",
     "crates/web-ui",
@@ -35,6 +36,7 @@ default-members = [
     "crates/interface-signal",
     "crates/interface-slack",
     "crates/interface-mattermost",
+    "crates/interface-nextcloud",
     "crates/web-ui",
     "crates/mcp-server",
 ]
@@ -81,6 +83,8 @@ opentelemetry-appender-tracing = "0.31"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 toml = "1.0"
+# HTTP server
+axum = { version = "0.8", features = ["macros"] }
 # Async streams
 futures = "0.3"
 # Terminal line editor

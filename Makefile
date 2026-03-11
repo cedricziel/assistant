@@ -54,6 +54,10 @@ run-slack:
 run-mattermost:
 	cargo run -p assistant-cli --features mattermost -- mattermost
 
+# Run only the Nextcloud Talk interface (no interactive REPL)
+run-nextcloud:
+	cargo run -p assistant-cli --features nextcloud -- nextcloud
+
 # Build the Signal interface binary with the presage integration.
 # Requires presage git deps to be resolvable (see crates/interface-signal/README.md).
 build-signal:

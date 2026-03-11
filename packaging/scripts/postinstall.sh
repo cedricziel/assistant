@@ -27,7 +27,7 @@ if [ "$action" = "configure" ] && [ -n "$2" ]; then
         if [ "$user_id" -lt 1000 ] 2>/dev/null; then
             continue
         fi
-        for svc in assistant-slack assistant-mattermost assistant-web-ui; do
+        for svc in assistant-slack assistant-mattermost assistant-nextcloud assistant-web-ui; do
             # Only restart if the unit file exists and was previously enabled.
             if systemctl --user -M "${user_id}@.host" is-enabled "$svc" 2>/dev/null | grep -q enabled; then
                 systemctl --user -M "${user_id}@.host" daemon-reload 2>/dev/null || true
@@ -38,8 +38,8 @@ if [ "$action" = "configure" ] && [ -n "$2" ]; then
 else
     cat <<'MSG'
 
-assistant has been installed.  To run the Slack or Mattermost bot as a
-background service for your user account:
+assistant has been installed.  To run a chat bot as a background service
+for your user account:
 
   1. Make sure ~/.assistant/config.toml contains your credentials.
 
@@ -47,6 +47,7 @@ background service for your user account:
 
        systemctl --user enable --now assistant-slack
        systemctl --user enable --now assistant-mattermost
+       systemctl --user enable --now assistant-nextcloud
 
   3. To have the service start at boot even when you are not logged in:
 
@@ -55,6 +56,7 @@ background service for your user account:
   View logs with:
     journalctl --user -u assistant-slack -f
     journalctl --user -u assistant-mattermost -f
+    journalctl --user -u assistant-nextcloud -f
 
 MSG
 fi
