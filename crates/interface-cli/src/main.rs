@@ -831,11 +831,16 @@ async fn main() -> Result<()> {
     }
 
     // 10c. Nextcloud Talk — start in background if configured.
+    //      Pass a CancellationToken so the HTTP server shuts down without
+    //      installing process-wide signal handlers (which would conflict
+    //      with the REPL's Ctrl-C handling).
     #[cfg(feature = "nextcloud")]
     if bs.config.nextcloud.is_some() {
         use assistant_interface_nextcloud::NextcloudInterface;
         let nc_cfg = bs.config.nextcloud.clone().unwrap_or_default();
-        let iface = NextcloudInterface::new(nc_cfg, bs.orchestrator.clone());
+        let shutdown_token = tokio_util::sync::CancellationToken::new();
+        let iface =
+            NextcloudInterface::new(nc_cfg, bs.orchestrator.clone()).with_shutdown(shutdown_token);
         tokio::spawn(async move {
             if let Err(e) = iface.run().await {
                 tracing::error!("Nextcloud Talk interface error: {e}");

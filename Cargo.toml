@@ -83,6 +83,8 @@ opentelemetry-appender-tracing = "0.31"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 toml = "1.0"
+# HTTP server
+axum = { version = "0.8", features = ["macros"] }
 # Async streams
 futures = "0.3"
 # Terminal line editor

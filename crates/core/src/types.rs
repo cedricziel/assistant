@@ -209,7 +209,7 @@ pub struct MattermostConfig {
 /// secret = "shared-secret-from-occ-install"
 /// listen_addr = "0.0.0.0:8080"
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NextcloudConfig {
     /// Base URL of the Nextcloud server (e.g. `"https://nextcloud.example.com"`).
     pub server_url: Option<String>,
@@ -225,6 +225,18 @@ pub struct NextcloudConfig {
     /// If non-empty, only dispatch messages from these Nextcloud user IDs.
     #[serde(default)]
     pub allowed_users: Vec<String>,
+}
+
+impl Default for NextcloudConfig {
+    fn default() -> Self {
+        Self {
+            server_url: None,
+            secret: None,
+            listen_addr: default_nextcloud_listen_addr(),
+            allowed_channels: Vec::new(),
+            allowed_users: Vec::new(),
+        }
+    }
 }
 
 fn default_nextcloud_listen_addr() -> String {

@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -15,6 +16,123 @@ use tracing::{debug, warn};
 use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 
 use crate::signing::sign_request;
+
+/// Default HTTP timeout for outgoing Nextcloud API requests.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Build a shared [`reqwest::Client`] with a default timeout.
+fn build_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+// ── Message sanitization ─────────────────────────────────────────────────────
+//
+// Strip hidden LLM reasoning and citation markup before posting to Nextcloud.
+// These are duplicated from the Slack interface; a future refactor should move
+// them to a shared utility in `assistant-core`.
+
+/// Remove `<think>...</think>` blocks from a message.
+///
+/// Case-insensitive matching.  If a `<think>` tag is unclosed, everything
+/// from that tag onward is discarded.
+fn strip_think_tags(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let lower = input.to_lowercase();
+    let mut pos = 0;
+    while pos < input.len() {
+        match lower[pos..].find("<think>") {
+            Some(open_rel) => {
+                let open_abs = pos + open_rel;
+                result.push_str(&input[pos..open_abs]);
+                match lower[open_abs..].find("</think>") {
+                    Some(close_rel) => {
+                        pos = open_abs + close_rel + "</think>".len();
+                    }
+                    None => break, // unclosed tag — discard the rest
+                }
+            }
+            None => {
+                result.push_str(&input[pos..]);
+                break;
+            }
+        }
+    }
+    result.trim().to_string()
+}
+
+/// Remove `<cite ...>...</cite>` wrapper tags but preserve the inner content.
+fn strip_cite_tags(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut pos = 0;
+    let bytes = input.as_bytes();
+
+    while pos < bytes.len() {
+        match input[pos..].find("<cite") {
+            Some(open_rel) => {
+                let open_abs = pos + open_rel;
+                let after = open_abs + "<cite".len();
+                if after < input.len() {
+                    let boundary = input.as_bytes()[after];
+                    if boundary != b' '
+                        && boundary != b'>'
+                        && boundary != b'/'
+                        && boundary != b'\t'
+                        && boundary != b'\n'
+                    {
+                        // Not actually a <cite> tag (e.g. <cited>).
+                        result.push_str(&input[pos..open_abs + 1]);
+                        pos = open_abs + 1;
+                        continue;
+                    }
+                }
+                result.push_str(&input[pos..open_abs]);
+                match input[open_abs..].find('>') {
+                    Some(gt_rel) => {
+                        let content_start = open_abs + gt_rel + 1;
+                        match input[content_start..].find("</cite>") {
+                            Some(close_rel) => {
+                                result.push_str(&input[content_start..content_start + close_rel]);
+                                pos = content_start + close_rel + "</cite>".len();
+                            }
+                            None => {
+                                result.push_str(&input[content_start..]);
+                                return result;
+                            }
+                        }
+                    }
+                    None => {
+                        result.push_str(&input[open_abs..]);
+                        return result;
+                    }
+                }
+            }
+            None => {
+                result.push_str(&input[pos..]);
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Sanitize a message for posting to Nextcloud Talk.
+///
+/// Strips `<think>` reasoning blocks and `<cite>` wrapper tags.
+/// Returns `None` if nothing visible remains after sanitization.
+fn sanitize_message(input: &str) -> Option<String> {
+    let cleaned = strip_cite_tags(&strip_think_tags(input));
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+// ── Reply tool ───────────────────────────────────────────────────────────────
 
 /// Per-turn tool that posts a reply message to the current Nextcloud Talk
 /// conversation.
@@ -43,7 +161,7 @@ impl NextcloudReplyHandler {
             secret,
             conversation_token,
             reply_to_id,
-            client: reqwest::Client::new(),
+            client: build_client(),
         }
     }
 }
@@ -83,15 +201,16 @@ impl ToolHandler for NextcloudReplyHandler {
         params: HashMap<String, serde_json::Value>,
         _ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
-        let message = params
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let raw_message = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
 
-        if message.is_empty() {
-            return Ok(ToolOutput::error("message parameter is required"));
-        }
+        let message = match sanitize_message(raw_message) {
+            Some(m) => m,
+            None => {
+                return Ok(ToolOutput::error(
+                    "message is empty after sanitization (was it all <think> content?)",
+                ));
+            }
+        };
 
         let silent = params
             .get("silent")
@@ -111,7 +230,10 @@ impl ToolHandler for NextcloudReplyHandler {
         }
 
         let body_str = body.to_string();
-        let (random, signature) = sign_request(&self.secret, &body_str);
+        let (random, signature) = match sign_request(&self.secret, &body_str) {
+            Ok(pair) => pair,
+            Err(e) => return Ok(ToolOutput::error(format!("Signing failed: {e}"))),
+        };
 
         let url = format!(
             "{}/ocs/v2.php/apps/spreed/api/v1/bot/{}/message",
@@ -155,6 +277,8 @@ impl ToolHandler for NextcloudReplyHandler {
     }
 }
 
+// ── React tool ───────────────────────────────────────────────────────────────
+
 /// Per-turn tool that adds an emoji reaction to the triggering message.
 pub struct NextcloudReactHandler {
     /// Nextcloud server base URL.
@@ -181,7 +305,7 @@ impl NextcloudReactHandler {
             secret,
             conversation_token,
             message_id,
-            client: reqwest::Client::new(),
+            client: build_client(),
         }
     }
 }
@@ -226,7 +350,10 @@ impl ToolHandler for NextcloudReactHandler {
 
         let body = serde_json::json!({ "reaction": reaction });
         let body_str = body.to_string();
-        let (random, signature) = sign_request(&self.secret, &body_str);
+        let (random, signature) = match sign_request(&self.secret, &body_str) {
+            Ok(pair) => pair,
+            Err(e) => return Ok(ToolOutput::error(format!("Signing failed: {e}"))),
+        };
 
         let url = format!(
             "{}/ocs/v2.php/apps/spreed/api/v1/bot/{}/reaction/{}",
@@ -333,5 +460,40 @@ mod tests {
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].name(), "reply");
         assert_eq!(tools[1].name(), "nextcloud-react");
+    }
+
+    // ── Sanitization tests ───────────────────────────────────────────────
+
+    #[test]
+    fn sanitize_strips_think_tags() {
+        let input = "<think>internal reasoning</think>Hello world";
+        assert_eq!(sanitize_message(input).unwrap(), "Hello world");
+    }
+
+    #[test]
+    fn sanitize_strips_cite_tags_preserves_content() {
+        let input = "See <cite index=\"1\">this source</cite> for details.";
+        assert_eq!(
+            sanitize_message(input).unwrap(),
+            "See this source for details."
+        );
+    }
+
+    #[test]
+    fn sanitize_only_think_returns_none() {
+        let input = "<think>all hidden</think>";
+        assert!(sanitize_message(input).is_none());
+    }
+
+    #[test]
+    fn sanitize_combined() {
+        let input = "<think>hmm</think>Result: <cite index=\"1\">answer</cite>!";
+        assert_eq!(sanitize_message(input).unwrap(), "Result: answer!");
+    }
+
+    #[test]
+    fn sanitize_plain_text_unchanged() {
+        let input = "Hello, how can I help?";
+        assert_eq!(sanitize_message(input).unwrap(), input);
     }
 }

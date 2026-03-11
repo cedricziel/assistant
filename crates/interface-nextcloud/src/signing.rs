@@ -3,6 +3,7 @@
 //! All webhook requests from Nextcloud are signed, and all outgoing bot
 //! requests must also be signed using the shared secret.
 
+use anyhow::{Context, Result};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -27,10 +28,10 @@ pub fn verify_signature(secret: &str, random: &str, body: &[u8], signature: &str
 ///
 /// Returns `(random, signature)` where `random` is a 64-char hex string
 /// and `signature` is the HMAC-SHA256 of `random + body` using the secret.
-pub fn sign_request(secret: &str, body: &str) -> (String, String) {
-    let random = generate_random();
+pub fn sign_request(secret: &str, body: &str) -> Result<(String, String)> {
+    let random = generate_random().context("failed to generate random bytes for HMAC signing")?;
     let signature = compute_signature(secret, &random, body.as_bytes());
-    (random, signature)
+    Ok((random, signature))
 }
 
 /// Compute the HMAC-SHA256 signature of `random + body` with the given secret.
@@ -43,10 +44,10 @@ fn compute_signature(secret: &str, random: &str, body: &[u8]) -> String {
 }
 
 /// Generate a 64-character hex random string.
-fn generate_random() -> String {
+fn generate_random() -> Result<String> {
     let mut buf = [0u8; 32];
-    getrandom::fill(&mut buf).expect("getrandom failed");
-    hex::encode(buf)
+    getrandom::fill(&mut buf).context("getrandom failed")?;
+    Ok(hex::encode(buf))
 }
 
 /// Constant-time byte comparison to prevent timing attacks.
@@ -71,7 +72,7 @@ mod tests {
         let secret = "my-secret-key";
         let body = r#"{"type":"Create","actor":{"type":"Person"}}"#;
 
-        let (random, signature) = sign_request(secret, body);
+        let (random, signature) = sign_request(secret, body).unwrap();
         assert!(verify_signature(
             secret,
             &random,
@@ -83,7 +84,7 @@ mod tests {
     #[test]
     fn verify_rejects_wrong_secret() {
         let body = "hello";
-        let (random, signature) = sign_request("correct-secret", body);
+        let (random, signature) = sign_request("correct-secret", body).unwrap();
         assert!(!verify_signature(
             "wrong-secret",
             &random,
@@ -95,7 +96,7 @@ mod tests {
     #[test]
     fn verify_rejects_tampered_body() {
         let secret = "secret";
-        let (random, signature) = sign_request(secret, "original");
+        let (random, signature) = sign_request(secret, "original").unwrap();
         assert!(!verify_signature(secret, &random, b"tampered", &signature));
     }
 
@@ -103,7 +104,7 @@ mod tests {
     fn verify_case_insensitive_signature() {
         let secret = "test";
         let body = "data";
-        let (random, signature) = sign_request(secret, body);
+        let (random, signature) = sign_request(secret, body).unwrap();
         let upper = signature.to_uppercase();
         assert!(verify_signature(secret, &random, body.as_bytes(), &upper));
     }

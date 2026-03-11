@@ -37,6 +37,8 @@ assistant-interface-mattermost = { path = "../interface-mattermost", optional = 
 assistant-interface-nextcloud = { path = "../interface-nextcloud", optional = true }
 assistant-mcp-server = { path = "../mcp-server", optional = true }
 assistant-transcription = { path = "../transcription" }
+# CancellationToken for background Nextcloud shutdown
+tokio-util = { workspace = true }
 chrono = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }

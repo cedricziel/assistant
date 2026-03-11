@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::body::Bytes;
@@ -21,7 +22,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::Router;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -29,9 +30,12 @@ use assistant_core::{Interface, NextcloudConfig};
 use assistant_runtime::Orchestrator;
 
 use crate::config::NextcloudConfigExt;
-use crate::signing::verify_signature;
+use crate::signing::{sign_request, verify_signature};
 use crate::tools::build_nextcloud_tools;
 use crate::types::WebhookEvent;
+
+/// HTTP timeout for reaction helper requests.
+const REACTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ── Shared state ─────────────────────────────────────────────────────────────
 
@@ -43,8 +47,26 @@ struct AppState {
     secret: String,
     /// Nextcloud server URL (for outgoing API calls).
     server_url: String,
-    /// Maps `conversation_token` -> conversation UUID for the orchestrator.
-    conversations: Mutex<HashMap<String, Uuid>>,
+    /// Maps `conversation_token` -> `(conversation_uuid, semaphore)`.
+    ///
+    /// The semaphore (permits=1) serializes turns within the same
+    /// conversation, preventing interleaved `register_extensions()` calls
+    /// from clobbering each other's tool sets.
+    conversations: Mutex<HashMap<String, (Uuid, Arc<Semaphore>)>>,
+    /// HTTP client for reaction helpers (shared, with timeout).
+    reaction_client: reqwest::Client,
+}
+
+impl AppState {
+    /// Look up (or create) the conversation UUID and per-conversation
+    /// semaphore for the given conversation token.
+    async fn get_or_create_conversation(&self, token: &str) -> (Uuid, Arc<Semaphore>) {
+        let mut map = self.conversations.lock().await;
+        let entry = map
+            .entry(token.to_string())
+            .or_insert_with(|| (Uuid::new_v4(), Arc::new(Semaphore::new(1))));
+        (entry.0, entry.1.clone())
+    }
 }
 
 // ── NextcloudInterface ───────────────────────────────────────────────────────
@@ -56,6 +78,11 @@ struct AppState {
 pub struct NextcloudInterface {
     config: NextcloudConfig,
     orchestrator: Arc<Orchestrator>,
+    /// Optional external shutdown signal.  When set, the HTTP server shuts
+    /// down when this token is cancelled instead of installing its own
+    /// process-wide signal handlers.  Used in background mode to avoid
+    /// conflicting with the CLI REPL's Ctrl-C handling.
+    shutdown: Option<tokio_util::sync::CancellationToken>,
 }
 
 impl NextcloudInterface {
@@ -63,7 +90,15 @@ impl NextcloudInterface {
         Self {
             config,
             orchestrator,
+            shutdown: None,
         }
+    }
+
+    /// Attach an external shutdown token.  When cancelled, the HTTP server
+    /// shuts down gracefully without installing process-wide signal handlers.
+    pub fn with_shutdown(mut self, token: tokio_util::sync::CancellationToken) -> Self {
+        self.shutdown = Some(token);
+        self
     }
 
     /// Start the webhook HTTP server and block until shutdown.
@@ -98,12 +133,18 @@ impl NextcloudInterface {
             Err(e) => warn!("BOOT.md startup hook failed: {e}"),
         }
 
+        let reaction_client = reqwest::Client::builder()
+            .timeout(REACTION_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         let state = Arc::new(AppState {
             config: self.config,
             orchestrator: self.orchestrator,
             secret,
             server_url,
             conversations: Mutex::new(HashMap::new()),
+            reaction_client,
         });
 
         let app = Router::new()
@@ -117,11 +158,22 @@ impl NextcloudInterface {
 
         info!(listen_addr = %listen_addr, "Nextcloud Talk bot listening for webhooks");
 
-        // Graceful shutdown on SIGINT/SIGTERM.
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .context("HTTP server error")?;
+        // Choose shutdown strategy: external token (background mode) or
+        // process-wide signals (standalone mode).
+        match self.shutdown {
+            Some(token) => {
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(async move { token.cancelled().await })
+                    .await
+                    .context("HTTP server error")?;
+            }
+            None => {
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown_signal())
+                    .await
+                    .context("HTTP server error")?;
+            }
+        }
 
         info!("Nextcloud Talk bot shut down");
         Ok(())
@@ -274,13 +326,8 @@ async fn handle_message(state: Arc<AppState>, event: WebhookEvent) -> Result<()>
         return Ok(());
     }
 
-    // Map conversation token to a stable UUID.
-    let conversation_id = {
-        let mut conversations = state.conversations.lock().await;
-        *conversations
-            .entry(conversation_token.clone())
-            .or_insert_with(Uuid::new_v4)
-    };
+    // Get (or create) the conversation UUID and per-conversation semaphore.
+    let (conversation_id, semaphore) = state.get_or_create_conversation(&conversation_token).await;
 
     debug!(
         conversation_id = %conversation_id,
@@ -290,18 +337,22 @@ async fn handle_message(state: Arc<AppState>, event: WebhookEvent) -> Result<()>
         "Processing Nextcloud message"
     );
 
-    // Add a "thinking" reaction to acknowledge receipt.
-    let think_result = add_reaction(
-        &state.server_url,
-        &state.secret,
-        &conversation_token,
-        &message_id,
-        "\u{23F3}", // hourglass
-    )
-    .await;
-    if let Err(e) = &think_result {
-        debug!(error = %e, "Failed to add thinking reaction (non-fatal)");
-    }
+    // Add a "thinking" reaction to acknowledge receipt (fire-and-forget).
+    let think_handle = {
+        let client = state.reaction_client.clone();
+        let server_url = state.server_url.clone();
+        let secret = state.secret.clone();
+        let token = conversation_token.clone();
+        let mid = message_id.clone();
+        tokio::spawn(async move {
+            let _ = add_reaction(&client, &server_url, &secret, &token, &mid, "\u{23F3}").await;
+        })
+    };
+
+    // Acquire the per-conversation lock so that concurrent webhooks for the
+    // same room are serialised.  This prevents `register_extensions()` from
+    // being overwritten by a later message before the worker claims the turn.
+    let _permit = semaphore.acquire().await;
 
     // Build per-turn extension tools.
     let tools = build_nextcloud_tools(
@@ -322,24 +373,38 @@ async fn handle_message(state: Arc<AppState>, event: WebhookEvent) -> Result<()>
         .submit_turn(&text, conversation_id, Interface::Nextcloud, None)
         .await;
 
-    // Remove the thinking reaction.
-    if think_result.is_ok() {
-        let _ = remove_reaction(
-            &state.server_url,
-            &state.secret,
-            &conversation_token,
-            &message_id,
-            "\u{23F3}",
-        )
-        .await;
+    // Remove the thinking reaction (fire-and-forget).
+    // Wait for the add to finish first so there's something to remove.
+    let _ = think_handle.await;
+    {
+        let client = state.reaction_client.clone();
+        let server_url = state.server_url.clone();
+        let secret = state.secret.clone();
+        let token = conversation_token.clone();
+        let mid = message_id.clone();
+        tokio::spawn(async move {
+            let _ = remove_reaction(&client, &server_url, &secret, &token, &mid, "\u{23F3}").await;
+        });
     }
 
     match result {
-        Ok(_turn_result) => {
+        Ok(turn_result) => {
             debug!(
                 conversation_id = %conversation_id,
                 "Turn completed successfully"
             );
+
+            // Deliver any file attachments produced by tools.
+            if !turn_result.attachments.is_empty() {
+                deliver_attachments(
+                    &state.server_url,
+                    &state.secret,
+                    &conversation_token,
+                    &message_id,
+                    &turn_result.attachments,
+                )
+                .await;
+            }
         }
         Err(e) => {
             error!(error = %e, "Orchestrator turn failed");
@@ -372,10 +437,91 @@ async fn handle_message(state: Arc<AppState>, event: WebhookEvent) -> Result<()>
     Ok(())
 }
 
+// ── Attachment delivery ──────────────────────────────────────────────────────
+
+/// Post a text notice about each attachment produced during the turn.
+///
+/// Nextcloud Talk's bot API does not support file uploads, so we send a
+/// text message listing the attachments and their sizes.  This ensures the
+/// user knows that results were produced even though we cannot deliver the
+/// raw files.
+async fn deliver_attachments(
+    server_url: &str,
+    secret: &str,
+    conversation_token: &str,
+    reply_to_id: &str,
+    attachments: &[assistant_core::Attachment],
+) {
+    let mut lines = Vec::new();
+    for a in attachments {
+        let kind = if a.is_image() { "image" } else { "file" };
+        let size = a.data.len();
+        lines.push(format!(
+            "- **{}** ({}, {} bytes) [{kind}]",
+            a.filename, a.mime_type, size
+        ));
+    }
+
+    let message = format!(
+        "This turn produced {} attachment(s):\n{}",
+        attachments.len(),
+        lines.join("\n")
+    );
+
+    let reply_to: i64 = reply_to_id.parse().unwrap_or(0);
+    let mut body = serde_json::json!({ "message": message });
+    if reply_to > 0 {
+        body["replyTo"] = serde_json::json!(reply_to);
+    }
+
+    let body_str = body.to_string();
+    let Ok((random, signature)) = sign_request(secret, &body_str) else {
+        warn!("Failed to sign attachment notice");
+        return;
+    };
+
+    let url = format!(
+        "{}/ocs/v2.php/apps/spreed/api/v1/bot/{}/message",
+        server_url.trim_end_matches('/'),
+        conversation_token
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(REACTION_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    match client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .header("OCS-APIRequest", "true")
+        .header("X-Nextcloud-Talk-Bot-Random", &random)
+        .header("X-Nextcloud-Talk-Bot-Signature", &signature)
+        .body(body_str)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => {
+            debug!("Attachment notice posted");
+        }
+        Ok(r) => {
+            warn!(
+                status = %r.status(),
+                "Failed to post attachment notice"
+            );
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to post attachment notice");
+        }
+    }
+}
+
 // ── Reaction helpers ─────────────────────────────────────────────────────────
 
 /// Add a reaction to a message via the Nextcloud Talk Bot API.
 async fn add_reaction(
+    client: &reqwest::Client,
     server_url: &str,
     secret: &str,
     conversation_token: &str,
@@ -384,7 +530,7 @@ async fn add_reaction(
 ) -> Result<()> {
     let body = serde_json::json!({ "reaction": reaction });
     let body_str = body.to_string();
-    let (random, signature) = crate::signing::sign_request(secret, &body_str);
+    let (random, signature) = sign_request(secret, &body_str)?;
 
     let url = format!(
         "{}/ocs/v2.php/apps/spreed/api/v1/bot/{}/reaction/{}",
@@ -393,7 +539,6 @@ async fn add_reaction(
         message_id
     );
 
-    let client = reqwest::Client::new();
     let resp = client
         .post(&url)
         .header("Content-Type", "application/json")
@@ -414,6 +559,7 @@ async fn add_reaction(
 
 /// Remove a reaction from a message via the Nextcloud Talk Bot API.
 async fn remove_reaction(
+    client: &reqwest::Client,
     server_url: &str,
     secret: &str,
     conversation_token: &str,
@@ -422,7 +568,7 @@ async fn remove_reaction(
 ) -> Result<()> {
     let body = serde_json::json!({ "reaction": reaction });
     let body_str = body.to_string();
-    let (random, signature) = crate::signing::sign_request(secret, &body_str);
+    let (random, signature) = sign_request(secret, &body_str)?;
 
     let url = format!(
         "{}/ocs/v2.php/apps/spreed/api/v1/bot/{}/reaction/{}",
@@ -431,7 +577,6 @@ async fn remove_reaction(
         message_id
     );
 
-    let client = reqwest::Client::new();
     let resp = client
         .delete(&url)
         .header("Content-Type", "application/json")
@@ -452,6 +597,10 @@ async fn remove_reaction(
 
 // ── Graceful shutdown ────────────────────────────────────────────────────────
 
+/// Process-wide signal handler for standalone mode only.
+///
+/// In background mode, the caller passes a [`CancellationToken`] instead
+/// so that the REPL's Ctrl-C handling is not affected.
 async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
@@ -488,16 +637,22 @@ mod tests {
         rt.block_on(async {
             let conversations = Mutex::new(HashMap::new());
 
-            // First access creates a new UUID.
+            // First access creates a new entry.
             let id1 = {
                 let mut map = conversations.lock().await;
-                *map.entry("room1".to_string()).or_insert_with(Uuid::new_v4)
+                let entry = map
+                    .entry("room1".to_string())
+                    .or_insert_with(|| (Uuid::new_v4(), Arc::new(Semaphore::new(1))));
+                entry.0
             };
 
             // Second access returns the same UUID.
             let id2 = {
                 let mut map = conversations.lock().await;
-                *map.entry("room1".to_string()).or_insert_with(Uuid::new_v4)
+                let entry = map
+                    .entry("room1".to_string())
+                    .or_insert_with(|| (Uuid::new_v4(), Arc::new(Semaphore::new(1))));
+                entry.0
             };
 
             assert_eq!(id1, id2);
@@ -505,7 +660,10 @@ mod tests {
             // Different room gets a different UUID.
             let id3 = {
                 let mut map = conversations.lock().await;
-                *map.entry("room2".to_string()).or_insert_with(Uuid::new_v4)
+                let entry = map
+                    .entry("room2".to_string())
+                    .or_insert_with(|| (Uuid::new_v4(), Arc::new(Semaphore::new(1))));
+                entry.0
             };
 
             assert_ne!(id1, id3);
