@@ -193,6 +193,29 @@ async fn bootstrap() -> Result<(Arc<Orchestrator>, SignalConfig, PathBuf)> {
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());
 
+    // Connect to configured external MCP servers and register their tools.
+    if !config.mcp.servers.is_empty() {
+        let mcp_manager =
+            Arc::new(assistant_mcp_client::McpClientManager::start(&config.mcp.servers).await?);
+        let mcp_tools = mcp_manager.tool_handlers().await;
+        for handler in &mcp_tools {
+            executor.register_ambient_tool(handler.clone());
+        }
+        tracing::info!(
+            servers = mcp_manager.server_count().await,
+            tools = mcp_tools.len(),
+            "registered MCP client tools"
+        );
+
+        // Spawn background health-check loop for reconnection.
+        let exec_register = executor.clone();
+        let exec_unregister = executor.clone();
+        mcp_manager.spawn_health_loop(
+            Arc::new(move |h| exec_register.register_ambient_tool(h)),
+            Arc::new(move |prefix| exec_unregister.unregister_tools_by_prefix(prefix)),
+        );
+    }
+
     // Extract the [signal] section from config (or use defaults).
     let signal_config: SignalConfig = config.signal.clone().unwrap_or_default();
     let store_path = signal_config.resolved_store_path();

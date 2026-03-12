@@ -91,6 +91,18 @@ impl ToolExecutor {
         self.register_ambient_tool(Arc::new(AgentTerminateHandler::new(runner)));
     }
 
+    /// Remove all tools whose names start with `prefix`.
+    ///
+    /// Used by the MCP client manager to clear stale tools from a server before
+    /// re-registering refreshed ones (e.g. after a `tools/list_changed`
+    /// notification).
+    pub fn unregister_tools_by_prefix(&self, prefix: &str) {
+        self.tool_handlers
+            .write()
+            .unwrap()
+            .retain(|name, _| !name.starts_with(prefix));
+    }
+
     /// Returns all registered tool handlers.
     pub fn list_tools(&self) -> Vec<Arc<dyn ToolHandler>> {
         self.tool_handlers
@@ -337,6 +349,41 @@ mod tests {
             .await
             .unwrap();
         assert!(!out.success, "empty allowed_tools should reject all tools");
+    }
+
+    // -- unregister_tools_by_prefix ------------------------------------------
+
+    #[tokio::test]
+    async fn unregister_tools_by_prefix_removes_matching() {
+        let executor = make_executor_with_stubs().await;
+        executor.register_ambient_tool(Arc::new(StubHandler {
+            tool_name: "mcp__gh__issue",
+        }));
+        executor.register_ambient_tool(Arc::new(StubHandler {
+            tool_name: "mcp__gh__pr",
+        }));
+        executor.register_ambient_tool(Arc::new(StubHandler {
+            tool_name: "mcp__db__query",
+        }));
+
+        assert_eq!(executor.list_tools().len(), 6);
+        executor.unregister_tools_by_prefix("mcp__gh__");
+        let remaining: Vec<String> = executor
+            .list_tools()
+            .iter()
+            .map(|t| t.name().to_string())
+            .collect();
+        assert_eq!(remaining.len(), 4);
+        assert!(!remaining.contains(&"mcp__gh__issue".to_string()));
+        assert!(!remaining.contains(&"mcp__gh__pr".to_string()));
+        assert!(remaining.contains(&"mcp__db__query".to_string()));
+    }
+
+    #[tokio::test]
+    async fn unregister_tools_by_prefix_noop_when_no_match() {
+        let executor = make_executor_with_stubs().await;
+        executor.unregister_tools_by_prefix("mcp__nonexistent__");
+        assert_eq!(executor.list_tools().len(), 3);
     }
 
     // -- to_specs_filtered ---------------------------------------------------

@@ -19,9 +19,9 @@ pub use subagent::SubagentRunner;
 pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
     AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, ExecutionContext, Interface,
-    LlmConfig, LlmProviderKind, MattermostConfig, McpConfig, MemoryConfig, Message, MessageRole,
-    MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, NextcloudConfig, OpenAIAuthMode,
-    OpenAIOptions, OpenAIUserLocation, OpenAIWebSearchOptions, SignalConfig, SkillsConfig,
-    SlackConfig, SlackListenMode, StorageConfig, TranscriptionConfig, TranscriptionProviderKind,
-    DEFAULT_MAX_AGENT_DEPTH,
+    LlmConfig, LlmProviderKind, MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig,
+    McpTrustLevel, MemoryConfig, Message, MessageRole, MirrorConfig, MoonshotOptions,
+    MoonshotWebSearchOptions, NextcloudConfig, OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation,
+    OpenAIWebSearchOptions, SignalConfig, SkillsConfig, SlackConfig, SlackListenMode,
+    StorageConfig, TranscriptionConfig, TranscriptionProviderKind, DEFAULT_MAX_AGENT_DEPTH,
 };

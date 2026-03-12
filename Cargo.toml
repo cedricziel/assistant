@@ -18,6 +18,7 @@ members = [
     "crates/storage",
     "crates/runtime",
     "crates/tool-executor",
+    "crates/mcp-client",
     "crates/mcp-server",
     "crates/interface-cli",
     "crates/interface-signal",
