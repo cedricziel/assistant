@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.40](https://github.com/cedricziel/assistant/compare/v0.1.39...v0.1.40) (2026-03-13)
+
+
+### Features
+
+* integrate external MCP servers as tool sources ([#195](https://github.com/cedricziel/assistant/issues/195)) ([8eab50e](https://github.com/cedricziel/assistant/commit/8eab50e1acc339994646ce2592cd6dbd0e2eb2a4))
+* **interface-nextcloud:** add Nextcloud Talk webhook-based bot interface ([#196](https://github.com/cedricziel/assistant/issues/196)) ([ec98096](https://github.com/cedricziel/assistant/commit/ec9809672937e7b9eafe110f0ad59b21625b7e1d))
+
+
+### Bug Fixes
+
+* **cli:** spawn turn worker in standalone interface modes ([#204](https://github.com/cedricziel/assistant/issues/204)) ([d2104d3](https://github.com/cedricziel/assistant/commit/d2104d35f5a06dcf699ebb78d5ed3daea0f8904c))
+* **llm:** make retry config injectable and lower default from 20 to 3 ([#207](https://github.com/cedricziel/assistant/issues/207)) ([4dca418](https://github.com/cedricziel/assistant/commit/4dca418f3398577797d561a3a59a6a053a3b6cab))
+* **mcp-client:** address CodeRabbit review round 2 ([#205](https://github.com/cedricziel/assistant/issues/205)) ([a036bf0](https://github.com/cedricziel/assistant/commit/a036bf0a49e7f40750664ee4685b71201054fb28))
+* patch nextcloud version ([#208](https://github.com/cedricziel/assistant/issues/208)) ([daa8dd9](https://github.com/cedricziel/assistant/commit/daa8dd97368ccfef12f0fb0e8f076f8c4edbe6ae))
+* **slack:** only respond in threads where the bot was @-mentioned ([#206](https://github.com/cedricziel/assistant/issues/206)) ([7b174e9](https://github.com/cedricziel/assistant/commit/7b174e92f3da6ce9e011ed22885fcc8793aab52b))
+
 ## [0.1.39](https://github.com/cedricziel/assistant/compare/v0.1.38...v0.1.39) (2026-03-05)
 
 
