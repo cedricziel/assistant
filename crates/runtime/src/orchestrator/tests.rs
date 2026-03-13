@@ -57,6 +57,7 @@ async fn build_with_config(
             model: "test".to_string(),
             base_url: base_url.to_string(),
             timeout_secs: 10,
+            retry_config: assistant_llm::RetryConfig::disabled(),
         })
         .unwrap(),
     );
@@ -1020,6 +1021,7 @@ async fn build_with_executor(
             model: "test".to_string(),
             base_url: base_url.to_string(),
             timeout_secs: 10,
+            retry_config: assistant_llm::RetryConfig::disabled(),
         })
         .unwrap(),
     );

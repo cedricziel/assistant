@@ -92,6 +92,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
         model: MODEL.to_string(),
         base_url: base_url.to_string(),
         timeout_secs: 120,
+        retry_config: assistant_llm::RetryConfig::default(),
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
 
