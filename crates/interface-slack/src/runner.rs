@@ -158,6 +158,12 @@ struct SlackCallbackState {
     /// messages and combines them into a single orchestrator turn.  This
     /// avoids N sequential turns when N messages arrive during one turn.
     pending_messages: Arc<Mutex<HashMap<Uuid, Vec<PendingMessage>>>>,
+    /// Set of `(channel_id, thread_ts)` pairs for threads where the bot has
+    /// been @-mentioned at least once.  In [`SlackListenMode::Mention`] thread
+    /// replies are only processed when the thread is in this set, ensuring the
+    /// bot stays silent in conversations it was never invited to.
+    /// Persists across WebSocket reconnects.
+    active_threads: Arc<Mutex<HashSet<(String, String)>>>,
 }
 
 // ── History-message helpers ───────────────────────────────────────────────────
@@ -531,11 +537,14 @@ fn incoming_from_reaction_event(event: &SlackReactionAddedEvent) -> Option<Slack
 ///
 /// In [`SlackListenMode::Mention`]:
 /// - DMs (channel starts with `"D"`) are always accepted.
-/// - Thread replies (`thread_ts != msg_ts`) are always accepted.
-/// - Top-level channel messages must contain `<@bot_user_id>`.
+/// - Messages that @-mention the bot (`<@bot_user_id>`) are always accepted.
+/// - Thread replies are accepted **only** if the bot was previously mentioned
+///   in the same thread (`is_active_thread == true`).
+/// - Top-level channel messages without a mention are rejected.
 /// - Reactions are always rejected (no mention concept).
 ///
 /// In [`SlackListenMode::All`] everything passes.
+#[allow(clippy::too_many_arguments)]
 fn should_process(
     mode: &SlackListenMode,
     channel_id: &str,
@@ -544,6 +553,7 @@ fn should_process(
     text: &str,
     bot_user_id: &str,
     is_reaction: bool,
+    is_active_thread: bool,
 ) -> bool {
     match mode {
         SlackListenMode::All => true,
@@ -552,10 +562,10 @@ fn should_process(
                 return false;
             }
             let is_dm = channel_id.starts_with('D');
-            let is_thread_reply = thread_ts != msg_ts;
             let is_mentioned =
                 !bot_user_id.is_empty() && text.contains(&format!("<@{bot_user_id}>"));
-            is_dm || is_thread_reply || is_mentioned
+            let is_thread_reply = thread_ts != msg_ts;
+            is_dm || is_mentioned || (is_thread_reply && is_active_thread)
         }
     }
 }
@@ -582,6 +592,7 @@ async fn on_push_event(
         http_client,
         conv_locks,
         pending_messages,
+        active_threads,
     ) = {
         let guard = states.read().await;
         let s = guard
@@ -605,6 +616,7 @@ async fn on_push_event(
             s.http_client.clone(),
             s.conv_locks.clone(),
             s.pending_messages.clone(),
+            s.active_threads.clone(),
         )
     };
 
@@ -662,8 +674,20 @@ async fn on_push_event(
     }
 
     // Listen-mode filtering — see `should_process()` for the full rule set.
+    //
+    // In Mention mode we first check whether the thread is already "active"
+    // (the bot was @-mentioned in it before).  If the current message itself
+    // contains a mention we mark the thread active so future replies are
+    // processed too.
     {
         let is_reaction = matches!(incoming.kind, SlackIncomingKind::Reaction { .. });
+        let thread_key = (channel_id.clone(), thread_ts.0.clone());
+        let is_active = {
+            let set = active_threads.lock().await;
+            set.contains(&thread_key)
+        };
+        let is_mentioned = !bot_user_id.is_empty() && text.contains(&format!("<@{bot_user_id}>"));
+
         if !should_process(
             &config.mode,
             &channel_id,
@@ -672,6 +696,7 @@ async fn on_push_event(
             &text,
             &bot_user_id,
             is_reaction,
+            is_active,
         ) {
             debug!(
                 channel = %channel_id,
@@ -680,6 +705,13 @@ async fn on_push_event(
                 "Listen-mode filter: skipping event"
             );
             return Ok(());
+        }
+
+        // The message passed the filter — if it contains a mention, mark the
+        // thread as active so subsequent replies are processed automatically.
+        if is_mentioned {
+            let mut set = active_threads.lock().await;
+            set.insert(thread_key);
         }
     }
 
@@ -1250,6 +1282,10 @@ impl SlackInterface {
         // so a turn in progress is not interrupted by a reconnect event.
         let conv_locks: Arc<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        // Threads the bot has been @-mentioned in — persists across reconnects
+        // so the bot keeps responding in threads it was invited to.
+        let active_threads: Arc<Mutex<HashSet<(String, String)>>> =
+            Arc::new(Mutex::new(HashSet::new()));
 
         // ── Graceful shutdown ─────────────────────────────────────────────────
         // A watch channel delivers the shutdown signal across all select! points
@@ -1322,6 +1358,7 @@ impl SlackInterface {
                     .expect("Failed to build HTTP client for Slack file downloads"),
                 conv_locks: conv_locks.clone(),
                 pending_messages: Arc::new(Mutex::new(HashMap::new())),
+                active_threads: active_threads.clone(),
             };
 
             let listener_environment = Arc::new(
@@ -2252,6 +2289,7 @@ mod tests {
             "hello",
             "UBOT",
             false,
+            false,
         ));
         // Even reactions pass in All mode.
         assert!(should_process(
@@ -2262,6 +2300,7 @@ mod tests {
             "hello",
             "UBOT",
             true,
+            false,
         ));
     }
 
@@ -2275,6 +2314,7 @@ mod tests {
                 "1.0",
                 "hello everyone",
                 "UBOT",
+                false,
                 false,
             ),
             "top-level message without mention must be rejected"
@@ -2292,6 +2332,7 @@ mod tests {
                 "hey <@UBOT> what's up?",
                 "UBOT",
                 false,
+                false, // not active yet — mention alone is enough
             ),
             "message containing <@UBOT> must be accepted"
         );
@@ -2308,13 +2349,15 @@ mod tests {
                 "hello",
                 "UBOT",
                 false,
+                false,
             ),
             "DMs must always be accepted in mention mode"
         );
     }
 
     #[test]
-    fn mention_mode_accepts_thread_reply() {
+    fn mention_mode_accepts_thread_reply_in_active_thread() {
+        // Thread was previously activated by a mention — replies are accepted.
         assert!(
             should_process(
                 &SlackListenMode::Mention,
@@ -2324,8 +2367,46 @@ mod tests {
                 "follow-up without mention",
                 "UBOT",
                 false,
+                true, // thread is active
             ),
-            "thread replies must be accepted in mention mode"
+            "thread replies in active threads must be accepted"
+        );
+    }
+
+    #[test]
+    fn mention_mode_rejects_thread_reply_in_inactive_thread() {
+        // Bot was never mentioned in this thread — reply must be ignored.
+        assert!(
+            !should_process(
+                &SlackListenMode::Mention,
+                "C001",
+                "1.0", // thread_ts
+                "2.0", // msg_ts != thread_ts → reply
+                "follow-up without mention",
+                "UBOT",
+                false,
+                false, // thread is NOT active
+            ),
+            "thread replies in inactive threads must be rejected"
+        );
+    }
+
+    #[test]
+    fn mention_mode_accepts_thread_reply_with_mention_even_if_inactive() {
+        // Bot is mentioned directly in a thread reply — accepted even if the
+        // thread was not previously active.
+        assert!(
+            should_process(
+                &SlackListenMode::Mention,
+                "C001",
+                "1.0",
+                "2.0",
+                "hey <@UBOT> help me",
+                "UBOT",
+                false,
+                false, // thread not active yet, but message has mention
+            ),
+            "thread reply with mention must be accepted regardless of active state"
         );
     }
 
@@ -2340,8 +2421,26 @@ mod tests {
                 "Reaction :eyes:",
                 "UBOT",
                 true,
+                false,
             ),
             "reactions must be rejected in mention mode"
+        );
+    }
+
+    #[test]
+    fn mention_mode_rejects_reaction_even_in_active_thread() {
+        assert!(
+            !should_process(
+                &SlackListenMode::Mention,
+                "C001",
+                "1.0",
+                "2.0",
+                "Reaction :eyes:",
+                "UBOT",
+                true,
+                true, // active thread, but reactions are still rejected
+            ),
+            "reactions must be rejected even in active threads"
         );
     }
 
@@ -2356,6 +2455,7 @@ mod tests {
                 "1.0",
                 "hey <@UBOT> ping",
                 "", // empty bot_user_id
+                false,
                 false,
             ),
             "empty bot_user_id means mention detection is disabled"
