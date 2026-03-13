@@ -1950,3 +1950,59 @@ async fn subagent_max_iterations_returns_failed_status() {
         report.content
     );
 }
+
+// ── Worker integration tests ────────────────────────────────────────────────
+
+/// Test that submit_turn works correctly when the worker is running.
+/// This reproduces the bug where Slack/Mattermost-only modes didn't spawn
+/// the worker, causing submit_turn to timeout waiting for a result.
+#[tokio::test]
+async fn submit_turn_with_worker_returns_result() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "hello from worker").await;
+
+    let (orch, _) = build(&server.uri()).await;
+    let conv_id = Uuid::new_v4();
+
+    // Spawn the worker in the background (as the CLI would do).
+    let worker_orch = orch.clone();
+    let _worker = tokio::spawn(async move {
+        worker_orch.run_worker("test-worker").await;
+    });
+
+    // Give the worker a moment to start.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let result = orch
+        .submit_turn("test message", conv_id, Interface::Slack, None)
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "submit_turn should succeed when worker is running"
+    );
+    assert_eq!(result.unwrap().answer, "hello from worker");
+}
+
+/// Test that submit_turn times out when no worker is running.
+/// This verifies the bug condition that was fixed.
+#[tokio::test]
+async fn submit_turn_without_worker_times_out() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "this should not be received").await;
+
+    let (orch, _) = build(&server.uri()).await;
+    let conv_id = Uuid::new_v4();
+
+    // No worker spawned — simulates the bug condition.
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        orch.submit_turn("test message", conv_id, Interface::Slack, None),
+    )
+    .await;
+
+    assert!(
+        result.is_err() || result.unwrap().is_err(),
+        "submit_turn should fail/timeout when worker is not running"
+    );
+}

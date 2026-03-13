@@ -770,7 +770,7 @@ async fn main() -> Result<()> {
         let slack_cfg = bs.config.slack.clone().context(
             "Slack is not configured. Add a [slack] section to ~/.assistant/config.toml",
         )?;
-        let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator, bs.storage);
+        let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
         if let Some(ref tp) = transcription_provider {
             iface = iface.with_transcription(tp.clone(), transcription_language.clone());
         }
@@ -783,6 +783,14 @@ async fn main() -> Result<()> {
             info!("Registered ambient tool: {tool_name}");
         }
 
+        // Spawn the turn worker — required for submit_turn to process bus
+        // messages.  Without this the interface would timeout waiting for
+        // a turn result.
+        let worker_orch = bs.orchestrator.clone();
+        let _worker = tokio::spawn(async move {
+            worker_orch.run_worker("slack-worker").await;
+        });
+
         info!("Starting Slack-only mode");
         return iface.run().await;
     }
@@ -794,7 +802,16 @@ async fn main() -> Result<()> {
         let mm_cfg = bs.config.mattermost.clone().context(
             "Mattermost is not configured. Add a [mattermost] section to ~/.assistant/config.toml",
         )?;
-        let iface = MattermostInterface::new(mm_cfg, bs.orchestrator);
+        let iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
+
+        // Spawn the turn worker — required for submit_turn to process bus
+        // messages.  Without this the interface would timeout waiting for
+        // a turn result.
+        let worker_orch = bs.orchestrator.clone();
+        let _worker = tokio::spawn(async move {
+            worker_orch.run_worker("mattermost-worker").await;
+        });
+
         info!("Starting Mattermost-only mode");
         return iface.run().await;
     }
@@ -806,7 +823,16 @@ async fn main() -> Result<()> {
         let nc_cfg = bs.config.nextcloud.clone().context(
             "Nextcloud is not configured. Add a [nextcloud] section to ~/.assistant/config.toml",
         )?;
-        let iface = NextcloudInterface::new(nc_cfg, bs.orchestrator);
+        let iface = NextcloudInterface::new(nc_cfg, bs.orchestrator.clone());
+
+        // Spawn the turn worker — required for submit_turn to process bus
+        // messages.  Without this the interface would timeout waiting for
+        // a turn result.
+        let worker_orch = bs.orchestrator.clone();
+        let _worker = tokio::spawn(async move {
+            worker_orch.run_worker("nextcloud-worker").await;
+        });
+
         info!("Starting Nextcloud Talk-only mode");
         return iface.run().await;
     }
