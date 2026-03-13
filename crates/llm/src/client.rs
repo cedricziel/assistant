@@ -120,6 +120,9 @@ pub struct LlmClientConfig {
     pub model: String,
     pub base_url: String,
     pub timeout_secs: u64,
+    /// Retry configuration for transient HTTP errors.
+    /// Defaults to [`RetryConfig::default()`].
+    pub retry_config: crate::retry::RetryConfig,
 }
 
 impl Default for LlmClientConfig {
@@ -128,6 +131,7 @@ impl Default for LlmClientConfig {
             model: "qwen2.5:7b".to_string(),
             base_url: "http://localhost:11434".to_string(),
             timeout_secs: 120,
+            retry_config: crate::retry::RetryConfig::default(),
         }
     }
 }
@@ -138,6 +142,7 @@ impl From<&assistant_core::LlmConfig> for LlmClientConfig {
             model: cfg.model.clone(),
             base_url: cfg.base_url.clone(),
             timeout_secs: cfg.timeout_secs,
+            retry_config: crate::retry::RetryConfig::default(),
         }
     }
 }
@@ -157,10 +162,7 @@ pub struct LlmClient {
 impl LlmClient {
     /// Create a new client from the given configuration.
     pub fn new(config: LlmClientConfig) -> anyhow::Result<Self> {
-        let http = crate::http::build_http_client(
-            config.timeout_secs,
-            &crate::retry::RetryConfig::default(),
-        )?;
+        let http = crate::http::build_http_client(config.timeout_secs, &config.retry_config)?;
 
         Ok(Self { config, http })
     }
@@ -652,6 +654,7 @@ mod tests {
             model: "test".to_string(),
             base_url: base_url.to_string(),
             timeout_secs: 5,
+            retry_config: crate::retry::RetryConfig::disabled(),
         })
         .unwrap()
     }
