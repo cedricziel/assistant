@@ -671,6 +671,13 @@ pub struct McpServerEntry {
 }
 
 /// How to connect to an external MCP server.
+///
+/// Uses `#[serde(untagged)]` for compatibility with the standard MCP
+/// configuration format (Claude Desktop, VS Code, etc.).  Serde tries
+/// variants in order: if `command` is present the entry is treated as
+/// `Stdio`; otherwise `url` selects `Http`.  If a config entry contains
+/// *both* `command` and `url`, `Stdio` wins and `url` is silently
+/// ignored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum McpTransportConfig {

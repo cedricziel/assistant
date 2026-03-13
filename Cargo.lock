@@ -445,6 +445,7 @@ dependencies = [
  "assistant-core",
  "async-trait",
  "base64 0.22.1",
+ "futures",
  "http 1.4.0",
  "reqwest 0.13.2",
  "rmcp",
