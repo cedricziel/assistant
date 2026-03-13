@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use rmcp::model::{CallToolRequestParams, CallToolResult, Tool};
 use rmcp::service::{Peer, RoleClient, RunningService};
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// An active session with a single MCP server.
 ///
@@ -97,10 +97,14 @@ impl McpClient {
 
     /// Gracefully shut down the MCP session.
     pub async fn shutdown(&self) -> Result<()> {
-        warn!(server = %self.name, "shutting down MCP client");
+        debug!(server = %self.name, "shutting down MCP client");
         let mut service = self._service.lock().await;
         if let Some(mut svc) = service.take() {
+            // RunningService::close() waits for cleanup.  Ignore its result —
+            // it only fails if the transport is already gone, which is fine
+            // during shutdown.
             let _ = svc.close().await;
+            debug!(server = %self.name, "MCP client session closed");
         }
         Ok(())
     }

@@ -70,6 +70,17 @@ impl McpClientManager {
                 continue;
             }
 
+            // Validate server name: must be non-empty, lowercase alphanumeric + hyphens.
+            // Invalid names would create ambiguous tool namespaces and break
+            // prefix-based tool unregistration.
+            if !is_valid_server_name(&entry.name) {
+                error!(
+                    server = %entry.name,
+                    "invalid MCP server name: must be non-empty, lowercase alphanumeric + hyphens only; skipping"
+                );
+                continue;
+            }
+
             match Self::connect_one(entry).await {
                 Ok((client, tools)) => {
                     let client = Arc::new(client);
@@ -150,17 +161,17 @@ impl McpClientManager {
                 })?
             }
             McpTransportConfig::Http { url, headers } => {
+                // Only explicitly configured `headers` are sent over HTTP.
+                // `entry.env` is for stdio process environment only — promoting
+                // it to HTTP headers would leak sensitive values.
                 let resolved_headers = resolve_env_vars(headers);
-                let resolved_env_headers = resolve_env_vars(&entry.env);
-                let mut all_headers = resolved_env_headers;
-                all_headers.extend(resolved_headers);
 
                 // Build rmcp StreamableHttpClientTransportConfig.
                 let mut config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str());
 
                 // Convert string headers to http types.
                 let mut http_headers = HashMap::new();
-                for (k, v) in &all_headers {
+                for (k, v) in &resolved_headers {
                     if let (Ok(name), Ok(value)) = (
                         http::HeaderName::try_from(k.as_str()),
                         http::HeaderValue::try_from(v.as_str()),
@@ -231,16 +242,23 @@ impl McpClientManager {
     ///
     /// Called when we receive a `notifications/tools/list_changed` from the
     /// server. Returns the new tool handlers so the caller can re-register them.
+    ///
+    /// The confirmation requirement is derived from the server's configured
+    /// trust level — callers cannot override it to prevent accidental or
+    /// malicious downgrades for untrusted servers.
     pub async fn refresh_server_tools(
         &self,
         server_name: &str,
-        requires_confirmation: bool,
     ) -> Result<Vec<Arc<dyn ToolHandler>>> {
         let servers = self.servers.read().await;
-        let client = servers
+        let state = servers
             .get(server_name)
-            .and_then(|s| s.client.clone())
             .ok_or_else(|| anyhow::anyhow!("no active connection for server: {server_name}"))?;
+        let client = state
+            .client
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("no active connection for server: {server_name}"))?;
+        let requires_confirmation = state.entry.trust != McpTrustLevel::Trust;
         drop(servers);
 
         let tools = client.list_tools().await?;
@@ -275,11 +293,9 @@ impl McpClientManager {
 
     /// Run a single health-check cycle.
     ///
-    /// For each server:
-    /// - If connected, verify with `is_connected()`. If dead, remove stale
-    ///   tools and mark for reconnection.
-    /// - If disconnected, attempt reconnection with back-off. On success,
-    ///   re-register tools on the executor.
+    /// **Phase 1** (sequential): detect dead servers, remove stale tools.
+    /// **Phase 2** (parallel): reconnect all disconnected servers concurrently
+    /// so one slow server doesn't block recovery of others.
     ///
     /// `register_tool` and `unregister_prefix` are callbacks so the manager
     /// doesn't need to depend on `ToolExecutor` directly.
@@ -288,108 +304,120 @@ impl McpClientManager {
         register_tool: &Arc<dyn Fn(Arc<dyn ToolHandler>) + Send + Sync>,
         unregister_prefix: &Arc<dyn Fn(&str) + Send + Sync>,
     ) {
-        let server_names: Vec<String> = { self.servers.read().await.keys().cloned().collect() };
+        // -- Phase 1: detect dead connections (needs write lock) ---------------
+        let mut reconnect_work: Vec<(McpServerEntry, Duration)> = Vec::new();
 
-        for name in server_names {
+        {
             let mut servers = self.servers.write().await;
-            let Some(state) = servers.get_mut(&name) else {
-                continue;
-            };
+            let names: Vec<String> = servers.keys().cloned().collect();
 
-            // Check if a connected server has died.
-            if let Some(ref client) = state.client {
-                if !client.is_connected() {
-                    warn!(server = %name, "MCP server disconnected, removing tools");
-                    let prefix = bridge::namespaced_name(&name, "");
-                    unregister_prefix(&prefix);
-
-                    // Remove handlers from our internal list.
-                    let mut handlers = self.handlers.write().await;
-                    handlers.retain(|h| !h.name().starts_with(&prefix));
-                    drop(handlers);
-
-                    state.client = None;
-                    // Don't count this as a failure — the server was working.
-                    // Reset so we retry immediately.
-                    state.consecutive_failures = 0;
-                }
-            }
-
-            // Attempt reconnection for disconnected servers.
-            if state.client.is_none() {
-                if state.consecutive_failures >= MAX_RECONNECT_ATTEMPTS {
-                    // Back off: only retry every MAX_RECONNECT_ATTEMPTS cycles.
-                    // After hitting the cap, reset to allow another burst.
-                    debug!(
-                        server = %name,
-                        failures = state.consecutive_failures,
-                        "exceeded max reconnect attempts, will retry next cycle"
-                    );
-                    state.consecutive_failures = 0;
+            for name in names {
+                let Some(state) = servers.get_mut(&name) else {
                     continue;
-                }
+                };
 
-                let backoff = backoff_duration(state.consecutive_failures);
-                debug!(
-                    server = %name,
-                    attempt = state.consecutive_failures + 1,
-                    backoff_ms = backoff.as_millis(),
-                    "attempting MCP reconnection"
-                );
+                // Check if a connected server has died.
+                if let Some(ref client) = state.client {
+                    if !client.is_connected() {
+                        warn!(server = %name, "MCP server disconnected, removing tools");
+                        let prefix = bridge::namespaced_name(&name, "");
+                        unregister_prefix(&prefix);
 
-                // Drop the lock during the potentially slow connect.
-                let entry = state.entry.clone();
-                drop(servers);
-
-                // Small back-off before reconnecting.
-                tokio::time::sleep(backoff).await;
-
-                match Self::connect_one(&entry).await {
-                    Ok((client, tools)) => {
-                        let client = Arc::new(client);
-                        let requires_confirmation = entry.trust != McpTrustLevel::Trust;
-
-                        let mut new_tool_handlers = Vec::new();
-                        for tool in &tools {
-                            let handler = McpToolHandler::from_remote(
-                                &entry.name,
-                                tool,
-                                client.clone(),
-                                requires_confirmation,
-                            );
-                            let handler = Arc::new(handler);
-                            register_tool(Arc::clone(&handler) as Arc<dyn ToolHandler>);
-                            new_tool_handlers.push(handler);
-                        }
-
-                        // Update internal state.
                         let mut handlers = self.handlers.write().await;
-                        handlers.extend(new_tool_handlers);
+                        handlers.retain(|h| !h.name().starts_with(&prefix));
                         drop(handlers);
 
-                        let mut servers = self.servers.write().await;
-                        if let Some(state) = servers.get_mut(&entry.name) {
-                            state.client = Some(client);
-                            state.consecutive_failures = 0;
-                        }
+                        state.client = None;
+                        state.consecutive_failures = 0;
+                    }
+                }
 
-                        info!(
-                            server = %entry.name,
-                            tools = tools.len(),
-                            "MCP server reconnected"
+                // Collect disconnected servers for parallel reconnection.
+                if state.client.is_none() {
+                    if state.consecutive_failures >= MAX_RECONNECT_ATTEMPTS {
+                        debug!(
+                            server = %name,
+                            failures = state.consecutive_failures,
+                            "exceeded max reconnect attempts, will retry next cycle"
                         );
+                        state.consecutive_failures = 0;
+                        continue;
                     }
-                    Err(e) => {
-                        let mut servers = self.servers.write().await;
-                        if let Some(state) = servers.get_mut(&entry.name) {
-                            state.consecutive_failures += 1;
-                        }
-                        warn!(
-                            server = %entry.name,
-                            error = %e,
-                            "MCP reconnection failed"
+
+                    let backoff = backoff_duration(state.consecutive_failures);
+                    debug!(
+                        server = %name,
+                        attempt = state.consecutive_failures + 1,
+                        backoff_ms = backoff.as_millis(),
+                        "scheduling MCP reconnection"
+                    );
+                    reconnect_work.push((state.entry.clone(), backoff));
+                }
+            }
+        } // write lock released
+
+        if reconnect_work.is_empty() {
+            return;
+        }
+
+        // -- Phase 2: reconnect concurrently (no lock held) -------------------
+        type ReconnectResult = (McpServerEntry, Result<(McpClient, Vec<Tool>)>);
+        let results: Vec<ReconnectResult> =
+            futures::future::join_all(reconnect_work.into_iter().map(
+                |(entry, backoff)| async move {
+                    tokio::time::sleep(backoff).await;
+                    let result = Self::connect_one(&entry).await;
+                    (entry, result)
+                },
+            ))
+            .await;
+
+        // -- Phase 3: apply results (needs write lock) ------------------------
+        for (entry, result) in results {
+            match result {
+                Ok((client, tools)) => {
+                    let client = Arc::new(client);
+                    let requires_confirmation = entry.trust != McpTrustLevel::Trust;
+
+                    let mut new_tool_handlers = Vec::new();
+                    for tool in &tools {
+                        let handler = McpToolHandler::from_remote(
+                            &entry.name,
+                            tool,
+                            client.clone(),
+                            requires_confirmation,
                         );
+                        let handler = Arc::new(handler);
+                        register_tool(Arc::clone(&handler) as Arc<dyn ToolHandler>);
+                        new_tool_handlers.push(handler);
                     }
+
+                    let mut handlers = self.handlers.write().await;
+                    handlers.extend(new_tool_handlers);
+                    drop(handlers);
+
+                    let mut servers = self.servers.write().await;
+                    if let Some(state) = servers.get_mut(&entry.name) {
+                        state.client = Some(client);
+                        state.consecutive_failures = 0;
+                    }
+
+                    info!(
+                        server = %entry.name,
+                        tools = tools.len(),
+                        "MCP server reconnected"
+                    );
+                }
+                Err(e) => {
+                    let mut servers = self.servers.write().await;
+                    if let Some(state) = servers.get_mut(&entry.name) {
+                        state.consecutive_failures += 1;
+                    }
+                    warn!(
+                        server = %entry.name,
+                        error = %e,
+                        "MCP reconnection failed"
+                    );
                 }
             }
         }
@@ -437,6 +465,14 @@ fn backoff_duration(attempt: u32) -> Duration {
     Duration::from_secs(secs).min(MAX_BACKOFF)
 }
 
+/// Check that a server name is valid: non-empty, lowercase ASCII alphanumeric + hyphens.
+fn is_valid_server_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 /// Resolve `${VAR}` references in environment variable values.
 fn resolve_env_vars(env: &HashMap<String, String>) -> HashMap<String, String> {
     env.iter()
@@ -448,23 +484,34 @@ fn resolve_env_vars(env: &HashMap<String, String>) -> HashMap<String, String> {
 }
 
 /// Replace `${VAR}` in a value with the corresponding environment variable.
+///
+/// Uses a single-pass scan so that replacement text is never re-scanned.
+/// This prevents infinite loops when an env var's value contains `${…}`
+/// syntax (including self-referential values like `FOO=${FOO}`).
 fn resolve_env_value(value: &str) -> String {
-    let mut result = value.to_string();
-    // Simple regex-free approach: find ${...} patterns
-    while let Some(start) = result.find("${") {
-        if let Some(end) = result[start..].find('}') {
-            let var_name = &result[start + 2..start + end];
+    let mut result = String::with_capacity(value.len());
+    let mut remaining = value;
+
+    while let Some(start) = remaining.find("${") {
+        // Append everything before the `${`.
+        result.push_str(&remaining[..start]);
+        let after_dollar_brace = &remaining[start + 2..];
+
+        if let Some(end) = after_dollar_brace.find('}') {
+            let var_name = &after_dollar_brace[..end];
             let replacement = std::env::var(var_name).unwrap_or_default();
-            result = format!(
-                "{}{}{}",
-                &result[..start],
-                replacement,
-                &result[start + end + 1..]
-            );
+            result.push_str(&replacement);
+            // Advance past the closing `}` — never re-scan the replacement.
+            remaining = &after_dollar_brace[end + 1..];
         } else {
+            // Unterminated `${…` — keep the rest as-is and stop.
+            result.push_str(&remaining[start..]);
+            remaining = "";
             break;
         }
     }
+
+    result.push_str(remaining);
     result
 }
 
@@ -472,16 +519,26 @@ fn resolve_env_value(value: &str) -> String {
 mod tests {
     use super::*;
 
+    // -- resolve_env_value tests --
+
     #[test]
     fn resolve_env_value_no_vars() {
-        assert_eq!(resolve_env_value("hello"), "hello");
+        assert_eq!(
+            resolve_env_value("hello"),
+            "hello",
+            "plain text without variables should be unchanged"
+        );
     }
 
     #[test]
     fn resolve_env_value_with_var() {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("TEST_MCP_VAR", "world") };
-        assert_eq!(resolve_env_value("hello ${TEST_MCP_VAR}"), "hello world");
+        assert_eq!(
+            resolve_env_value("hello ${TEST_MCP_VAR}"),
+            "hello world",
+            "should substitute env var value"
+        );
         unsafe { std::env::remove_var("TEST_MCP_VAR") };
     }
 
@@ -489,7 +546,8 @@ mod tests {
     fn resolve_env_value_missing_var() {
         assert_eq!(
             resolve_env_value("token=${DEFINITELY_NOT_SET_12345}"),
-            "token="
+            "token=",
+            "missing env var should resolve to empty string"
         );
     }
 
@@ -498,24 +556,100 @@ mod tests {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("TEST_A", "foo") };
         unsafe { std::env::set_var("TEST_B", "bar") };
-        assert_eq!(resolve_env_value("${TEST_A}-${TEST_B}"), "foo-bar");
+        assert_eq!(
+            resolve_env_value("${TEST_A}-${TEST_B}"),
+            "foo-bar",
+            "multiple variables should all be resolved"
+        );
         unsafe { std::env::remove_var("TEST_A") };
         unsafe { std::env::remove_var("TEST_B") };
     }
 
     #[test]
+    fn resolve_env_value_self_referential_does_not_loop() {
+        // A self-referential env var must not cause an infinite loop.
+        // SAFETY: test-only, single-threaded test runner.
+        unsafe { std::env::set_var("TEST_SELF_REF", "${TEST_SELF_REF}") };
+        let result = resolve_env_value("${TEST_SELF_REF}");
+        // The single-pass scanner resolves TEST_SELF_REF to its literal
+        // value "${TEST_SELF_REF}" and does not re-scan that output.
+        assert_eq!(
+            result, "${TEST_SELF_REF}",
+            "self-referential env var should not cause infinite loop"
+        );
+        unsafe { std::env::remove_var("TEST_SELF_REF") };
+    }
+
+    #[test]
+    fn resolve_env_value_unterminated_kept_as_is() {
+        assert_eq!(
+            resolve_env_value("prefix ${UNCLOSED"),
+            "prefix ${UNCLOSED",
+            "unterminated ${{ pattern should be preserved verbatim"
+        );
+    }
+
+    // -- backoff_duration tests --
+
+    #[test]
     fn backoff_duration_exponential() {
-        assert_eq!(backoff_duration(0), Duration::from_secs(2));
-        assert_eq!(backoff_duration(1), Duration::from_secs(4));
-        assert_eq!(backoff_duration(2), Duration::from_secs(8));
-        assert_eq!(backoff_duration(3), Duration::from_secs(16));
-        assert_eq!(backoff_duration(4), Duration::from_secs(32));
+        assert_eq!(
+            backoff_duration(0),
+            Duration::from_secs(2),
+            "attempt 0 should use initial backoff"
+        );
+        assert_eq!(
+            backoff_duration(1),
+            Duration::from_secs(4),
+            "attempt 1 should double"
+        );
+        assert_eq!(
+            backoff_duration(2),
+            Duration::from_secs(8),
+            "attempt 2 should quadruple"
+        );
+        assert_eq!(backoff_duration(3), Duration::from_secs(16), "attempt 3");
+        assert_eq!(backoff_duration(4), Duration::from_secs(32), "attempt 4");
     }
 
     #[test]
     fn backoff_duration_capped() {
-        assert_eq!(backoff_duration(5), MAX_BACKOFF);
-        assert_eq!(backoff_duration(10), MAX_BACKOFF);
-        assert_eq!(backoff_duration(100), MAX_BACKOFF);
+        assert_eq!(
+            backoff_duration(5),
+            MAX_BACKOFF,
+            "should cap at MAX_BACKOFF"
+        );
+        assert_eq!(
+            backoff_duration(10),
+            MAX_BACKOFF,
+            "large attempt should still cap"
+        );
+        assert_eq!(
+            backoff_duration(100),
+            MAX_BACKOFF,
+            "very large attempt should still cap"
+        );
+    }
+
+    // -- is_valid_server_name tests --
+
+    #[test]
+    fn valid_server_names() {
+        assert!(is_valid_server_name("github"), "lowercase alpha is valid");
+        assert!(is_valid_server_name("my-server"), "hyphens are valid");
+        assert!(is_valid_server_name("server-2"), "digits are valid");
+        assert!(is_valid_server_name("a"), "single character is valid");
+    }
+
+    #[test]
+    fn invalid_server_names() {
+        assert!(!is_valid_server_name(""), "empty string is invalid");
+        assert!(!is_valid_server_name("MyServer"), "uppercase is invalid");
+        assert!(
+            !is_valid_server_name("my_server"),
+            "underscores are invalid"
+        );
+        assert!(!is_valid_server_name("my server"), "spaces are invalid");
+        assert!(!is_valid_server_name("server.name"), "dots are invalid");
     }
 }
