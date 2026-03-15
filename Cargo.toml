@@ -28,7 +28,6 @@ members = [
     "crates/transcription",
     "crates/integration-tests",
     "crates/web-ui",
-    "crates/a2a-proto",
     "crates/a2a-json-schema",
     "crates/opentelemetry-exporter-sqlite",
 ]
