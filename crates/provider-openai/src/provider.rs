@@ -9,7 +9,6 @@
 //! - **OAuth PKCE** — Codex subscription via ChatGPT sign-in.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::types::embeddings::CreateEmbeddingRequestArgs;
@@ -30,9 +29,9 @@ use tracing::{debug, warn};
 use assistant_core::types::OpenAIUserLocation;
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    is_transient_error_message, with_retry, Capabilities, ChatHistoryMessage, ChatRole,
-    ContentBlock, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, RetryConfig, ToolCallItem,
-    ToolSpec, ToolSupport,
+    build_reqwest_client, is_transient_error_message, with_retry, Capabilities, ChatHistoryMessage,
+    ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, RetryConfig,
+    ToolCallItem, ToolSpec, ToolSupport,
 };
 
 use crate::oauth::OAuthManager;
@@ -688,20 +687,6 @@ fn extract_response_meta(response: &Response) -> LlmResponseMeta {
         output_tokens: response.usage.as_ref().map(|u| u.output_tokens as u64),
         finish_reason: Some(status),
     }
-}
-
-// ── HTTP client ───────────────────────────────────────────────────────────────
-
-/// Build a `reqwest::Client` with the configured timeout.
-///
-/// `async-openai` does not support `reqwest-middleware`, so we cannot inject the
-/// tracing middleware.  We do however set the request timeout so that it matches
-/// the provider configuration rather than relying on async-openai's defaults.
-fn build_reqwest_client(timeout_secs: u64) -> anyhow::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .build()
-        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))
 }
 
 // ── URL normalisation ─────────────────────────────────────────────────────────
