@@ -722,20 +722,10 @@ fn build_chat_messages(
 
 /// Convert a [`ToolSpec`] to `async-openai` `ChatCompletionTool`.
 fn tool_spec_to_chat(tool: &ToolSpec) -> ChatCompletionTool {
-    let schema = &tool.params_schema;
-
-    let parameters = if schema.get("type").and_then(|t| t.as_str()) == Some("object") {
-        schema.clone()
-    } else if schema.as_object().is_some() {
-        json!({"type": "object", "properties": schema})
-    } else {
-        json!({"type": "object", "properties": {}, "required": []})
-    };
-
     let function = FunctionObjectArgs::default()
         .name(&tool.name)
         .description(&tool.description)
-        .parameters(parameters)
+        .parameters(tool.normalized_params_schema())
         .build()
         .expect("FunctionObject build should not fail");
 
