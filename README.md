@@ -44,14 +44,16 @@ assistant> /quit
 The single binary supports several subcommands:
 
 ```sh
-assistant          # Interactive REPL + all configured interfaces in background
-assistant mcp      # stdio MCP server (for Claude Code, Cursor, etc.)
-assistant slack    # Slack bot only (no REPL)
+assistant             # Interactive REPL + all configured interfaces in background
+assistant mcp         # stdio MCP server (for Claude Code, Cursor, etc.)
+assistant slack       # Slack bot only (no REPL)
 assistant mattermost  # Mattermost bot only (no REPL)
+assistant nextcloud   # Nextcloud Talk webhook bot
 ```
 
-If Slack and/or Mattermost credentials are present in `~/.assistant/config.toml`,
-those bots start automatically in the background when running the interactive REPL.
+If Slack, Mattermost, and/or Nextcloud credentials are present in
+`~/.assistant/config.toml`, those bots start automatically in the background
+when running the interactive REPL.
 
 ## Model recommendations (2026)
 
@@ -75,19 +77,60 @@ ollama pull qwen2.5:14b
 # then set model = "qwen2.5:14b" in ~/.assistant/config.toml
 ```
 
-## Built-in skills
+## Built-in tools
 
-| Skill           | Description                                                        | Tier    |
-| --------------- | ------------------------------------------------------------------ | ------- |
-| `memory-read`   | Read a persistent key/value entry                                  | builtin |
-| `memory-write`  | Write a persistent key/value entry                                 | builtin |
-| `memory-search` | Substring-search across memory entries                             | builtin |
-| `web-fetch`     | Fetch a URL and return page text                                   | builtin |
-| `bash`          | Run a bash command (mutating; ask for confirmation on risky turns) | builtin |
-| `list-skills`   | List all registered skills                                         | builtin |
-| `self-analyze`  | Analyse execution traces and propose SKILL.md improvements         | builtin |
-| `schedule-task` | Register a recurring cron-style prompt                             | builtin |
-| `slack-post`    | Post a message to a Slack channel (ambient; requires Slack config) | builtin |
+**File I/O**
+
+| Tool         | Description                                                           |
+| ------------ | --------------------------------------------------------------------- |
+| `file-read`  | Read the contents of any file from disk                               |
+| `file-write` | Write content to a file, creating it and parent directories if needed |
+| `file-edit`  | Replace the first occurrence of a string in a file                    |
+| `file-glob`  | Find files and directories matching a glob pattern                    |
+
+**Shell**
+
+| Tool      | Description                                                    |
+| --------- | -------------------------------------------------------------- |
+| `bash`    | Run a bash command and return its stdout/stderr                |
+| `process` | Manage long-running background processes (start/poll/log/kill) |
+
+**Web**
+
+| Tool         | Description                                      |
+| ------------ | ------------------------------------------------ |
+| `web-fetch`  | Fetch a URL and return page text (HTML stripped) |
+| `web-search` | Search the web via DuckDuckGo and return results |
+
+**Memory**
+
+| Tool            | Description                                                        |
+| --------------- | ------------------------------------------------------------------ |
+| `memory-get`    | Read the contents of a persistent memory file                      |
+| `memory-append` | Append text to a persistent memory file                            |
+| `memory-search` | Search indexed memory chunks using full-text and vector similarity |
+
+**Skills & meta**
+
+| Tool            | Description                                                |
+| --------------- | ---------------------------------------------------------- |
+| `list-skills`   | List all registered skills                                 |
+| `load-skill`    | Load the body text of a skill into context by name         |
+| `self-analyze`  | Analyse execution traces and propose SKILL.md improvements |
+| `schedule-task` | Schedule a prompt task (cron or one-shot)                  |
+| `list-tasks`    | List all scheduled tasks with status and next run time     |
+| `cancel-task`   | Cancel a scheduled task by ID or name                      |
+
+**Sub-agents**
+
+| Tool              | Description                                             |
+| ----------------- | ------------------------------------------------------- |
+| `agent-spawn`     | Spawn an isolated sub-agent to perform a delegated task |
+| `agent-status`    | Query the status of sub-agents                          |
+| `agent-terminate` | Cancel a running sub-agent by ID                        |
+
+Interfaces may register additional **ambient tools** at runtime (e.g. `slack-post`,
+`slack-send-dm` when Slack is configured).
 
 ## Skill discovery order
 
@@ -172,7 +215,7 @@ Copy `config.toml` to `~/.assistant/config.toml` and edit:
 
 ```toml
 [llm]
-provider = "ollama"            # "ollama" (default), "anthropic", or "openai"
+provider = "ollama"            # "ollama" (default), "anthropic", "openai", or "moonshot"
 model = "qwen2.5:7b"          # any Ollama model with tool-calling support
 base_url = "http://localhost:11434"
 max_iterations = 80
@@ -205,24 +248,32 @@ model    = "voyage-3-lite"     # optional, provider-specific default used
 ```
 assistant/
 ├── crates/
-│   ├── core/                  # Shared types, ToolHandler trait, MessageBus
-│   ├── llm/                   # LlmProvider trait, EmbeddingProvider, LlmClient
-│   ├── provider-ollama/       # Ollama backend (native tool-call + embeddings)
-│   ├── provider-anthropic/    # Anthropic backend (Claude models)
-│   ├── provider-openai/       # OpenAI backend (GPT models + embeddings)
-│   ├── storage/               # SQLite, SkillRegistry, trace store, memory store
-│   ├── runtime/               # ReAct orchestrator, scheduler
-│   ├── tool-executor/         # Builtin tool registry + skill installer
-│   ├── mcp-server/            # MCP stdio server library (used by `assistant mcp`)
-│   ├── interface-cli/         # Unified binary: REPL + background interfaces
-│   ├── interface-slack/       # Slack Socket Mode library + slack-post skill
-│   ├── interface-mattermost/  # Mattermost WebSocket library
-│   ├── interface-signal/      # Signal interface (feature-gated, separate binary)
-│   └── web-ui/                # Trace analysis web UI + A2A protocol server
-├── docker/                    # Dockerfiles (all build the unified assistant binary)
-├── migrations/                # SQLite migration files
-├── skills/                    # Built-in SKILL.md definitions
-└── config.toml                # Default configuration template
+│   ├── core/                           # Shared types, ToolHandler trait, MessageBus
+│   ├── llm/                            # LlmProvider trait, EmbeddingProvider, LlmClient
+│   ├── provider-ollama/                # Ollama backend (native tool-call + embeddings)
+│   ├── provider-anthropic/             # Anthropic backend (Claude models)
+│   ├── provider-openai/                # OpenAI backend (GPT models + embeddings)
+│   ├── provider-moonshot/              # Moonshot/Kimi backend (OpenAI-compatible)
+│   ├── skills/                         # Skill parsing, validation, embedded builtins
+│   ├── storage/                        # SQLite, SkillRegistry, trace store, memory store
+│   ├── runtime/                        # ReAct orchestrator, scheduler, sub-agents
+│   ├── tool-executor/                  # Builtin tool registry + skill installer
+│   ├── transcription/                  # Voice transcription providers (Whisper, Ollama, Deepgram)
+│   ├── mcp-server/                     # MCP stdio server library (used by `assistant mcp`)
+│   ├── mcp-client/                     # MCP client for connecting to external MCP servers
+│   ├── interface-cli/                  # Unified binary: REPL + background interfaces
+│   ├── interface-slack/                # Slack Socket Mode library + ambient tools
+│   ├── interface-mattermost/           # Mattermost WebSocket library
+│   ├── interface-nextcloud/            # Nextcloud Talk webhook bot
+│   ├── interface-signal/               # Signal interface (feature-gated, separate binary)
+│   ├── web-ui/                         # Trace analysis web UI + A2A protocol server
+│   ├── a2a-json-schema/                # A2A protocol JSON Schema types
+│   ├── opentelemetry-exporter-sqlite/  # SQLite exporter for OpenTelemetry spans/logs
+│   └── integration-tests/              # End-to-end smoke tests
+├── docker/                             # Dockerfiles (all build the unified assistant binary)
+├── migrations/                         # SQLite migration files
+├── skills/                             # Built-in SKILL.md definitions
+└── config.toml                         # Default configuration template
 ```
 
 ## Development
@@ -365,6 +416,20 @@ cargo build -p assistant-interface-signal --features signal
 ```
 
 See `crates/interface-signal/README.md` for setup instructions.
+
+## Further documentation
+
+| Topic                                         | Description                                           |
+| --------------------------------------------- | ----------------------------------------------------- |
+| [OpenTelemetry](docs/opentelemetry.md)        | Emitted spans, metrics, and supported env vars        |
+| [Slack interface](docs/slack.md)              | Setup, ambient tools, and event handling              |
+| [Nextcloud Talk interface](docs/nextcloud.md) | Webhook bot setup and message flow                    |
+| [OpenAI provider](docs/openai.md)             | API key and OAuth PKCE auth, Azure/vLLM compatibility |
+| [Moonshot provider](docs/moonshot.md)         | Kimi K2/K2.5 models, regional endpoints               |
+| [Web UI](docs/web-ui.md)                      | Trace analysis dashboard and A2A protocol server      |
+| [Authentication](docs/authentication.md)      | Web UI token auth, cookie flow, and A2A security      |
+| [Message bus](docs/messaging.md)              | Durable topic-based message bus architecture          |
+| [Voice transcription](docs/transcription.md)  | Whisper, Ollama, and Deepgram transcription providers |
 
 ## License
 
