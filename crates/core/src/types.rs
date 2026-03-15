@@ -111,7 +111,7 @@ pub struct AssistantConfig {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub mcp: McpConfig,
-    #[serde(default)]
+    #[serde(default, alias = "self_improvement")]
     pub mirror: MirrorConfig,
     #[serde(default)]
     pub memory: MemoryConfig,
@@ -621,29 +621,14 @@ fn default_skill_extra_dirs() -> Vec<String> {
     ]
 }
 
-/// MCP configuration — covers both the built-in MCP server and external MCP
-/// client connections.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP configuration — covers external MCP client connections.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpConfig {
-    /// Enable the built-in MCP server (JSON-RPC over stdio).
-    pub enabled: bool,
-    /// Listen address for the built-in MCP server.
-    pub listen: String,
     /// External MCP servers to connect to as a client.
     /// Each entry spawns a connection at startup and bridges the server's tools
     /// into the assistant's tool registry.
     #[serde(default)]
     pub servers: Vec<McpServerEntry>,
-}
-
-impl Default for McpConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen: "127.0.0.1:3000".to_string(),
-            servers: Vec::new(),
-        }
-    }
 }
 
 /// An external MCP server the assistant connects to as a client.
@@ -711,11 +696,10 @@ pub enum McpTrustLevel {
     Trust,
 }
 
-/// Self-improvement config
+/// Self-improvement / tracing config
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MirrorConfig {
     pub trace_enabled: bool,
-    pub analysis_window: usize,
     /// When `true`, LLM span events include full message content
     /// (`gen_ai.input.messages`, `gen_ai.output.messages`, etc.).
     /// Off by default because content may contain PII.
@@ -727,7 +711,6 @@ impl Default for MirrorConfig {
     fn default() -> Self {
         Self {
             trace_enabled: true,
-            analysis_window: 50,
             trace_content: false,
         }
     }
@@ -980,15 +963,11 @@ mod tests {
     fn mcp_config_default_has_empty_servers() {
         let cfg = McpConfig::default();
         assert!(cfg.servers.is_empty());
-        assert!(cfg.enabled);
     }
 
     #[test]
     fn mcp_config_stdio_server() {
         let toml_str = r#"
-            enabled = true
-            listen = "127.0.0.1:3000"
-
             [[servers]]
             name = "github"
             command = ["npx", "-y", "@modelcontextprotocol/server-github"]
@@ -1017,9 +996,6 @@ mod tests {
     #[test]
     fn mcp_config_http_server() {
         let toml_str = r#"
-            enabled = true
-            listen = "127.0.0.1:3000"
-
             [[servers]]
             name = "remote-db"
             url = "https://db.example.com/mcp/sse"
@@ -1045,9 +1021,6 @@ mod tests {
     #[test]
     fn mcp_config_multiple_servers() {
         let toml_str = r#"
-            enabled = true
-            listen = "127.0.0.1:3000"
-
             [[servers]]
             name = "fs"
             command = ["mcp-server-fs", "/tmp"]
@@ -1065,10 +1038,7 @@ mod tests {
 
     #[test]
     fn mcp_config_no_servers_section_defaults_empty() {
-        let toml_str = r#"
-            enabled = true
-            listen = "127.0.0.1:3000"
-        "#;
+        let toml_str = r#""#;
         let cfg: McpConfig = toml::from_str(toml_str).unwrap();
         assert!(cfg.servers.is_empty());
     }
