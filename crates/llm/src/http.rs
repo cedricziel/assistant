@@ -15,6 +15,17 @@ use reqwest_tracing::TracingMiddleware;
 
 use crate::retry::RetryConfig;
 
+/// Build a plain `reqwest::Client` with the given timeout.
+///
+/// Use this for libraries like `async-openai` that require a bare
+/// `reqwest::Client` rather than `ClientWithMiddleware`.
+pub fn build_reqwest_client(timeout_secs: u64) -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))
+}
+
 /// Build an instrumented HTTP client with the given timeout and retry config.
 ///
 /// The returned [`ClientWithMiddleware`] wraps a standard `reqwest::Client`

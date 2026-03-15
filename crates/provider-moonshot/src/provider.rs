@@ -6,8 +6,6 @@
 //! because it uses the non-standard `"type": "builtin_function"` tool spec
 //! and requires an echo-back loop.
 
-use std::time::Duration;
-
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::types::chat::{
     ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,
@@ -25,9 +23,9 @@ use tracing::{debug, warn};
 
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    is_transient_error_message, with_retry, Capabilities, ChatHistoryMessage, ChatRole,
-    ContentBlock, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, RetryConfig, ToolCallItem,
-    ToolSpec, ToolSupport,
+    build_reqwest_client, is_transient_error_message, with_retry, Capabilities, ChatHistoryMessage,
+    ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, RetryConfig,
+    ToolCallItem, ToolSpec, ToolSupport,
 };
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
@@ -585,14 +583,6 @@ impl LlmProvider for MoonshotProvider {
 }
 
 // ── HTTP client helper ────────────────────────────────────────────────────────
-
-/// Build a `reqwest::Client` with the configured timeout for `async-openai`.
-fn build_reqwest_client(timeout_secs: u64) -> anyhow::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .build()
-        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))
-}
 
 // ── Chat Completions message conversion ───────────────────────────────────────
 
