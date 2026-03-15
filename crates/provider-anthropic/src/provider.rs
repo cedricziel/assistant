@@ -247,15 +247,7 @@ impl AnthropicProvider {
 ///
 /// Anthropic uses `input_schema` (not `parameters` like OpenAI/Ollama).
 fn tool_spec_to_anthropic_json(tool: &ToolSpec) -> Value {
-    let schema = &tool.params_schema;
-
-    let input_schema = if schema.get("type").and_then(|t| t.as_str()) == Some("object") {
-        schema.clone()
-    } else if schema.as_object().is_some() {
-        json!({"type": "object", "properties": schema})
-    } else {
-        json!({"type": "object", "properties": {}, "required": []})
-    };
+    let input_schema = tool.normalized_params_schema();
 
     json!({
         "name": tool.name,

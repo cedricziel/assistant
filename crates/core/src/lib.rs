@@ -5,6 +5,7 @@ pub mod memory;
 pub mod subagent;
 pub mod tool;
 pub mod types;
+pub mod upload;
 
 pub use bus::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
 pub use bus_messages::{
@@ -25,3 +26,4 @@ pub use types::{
     OpenAIWebSearchOptions, SignalConfig, SkillsConfig, SlackConfig, SlackListenMode,
     StorageConfig, TranscriptionConfig, TranscriptionProviderKind, DEFAULT_MAX_AGENT_DEPTH,
 };
+pub use upload::resolve_upload_bytes;

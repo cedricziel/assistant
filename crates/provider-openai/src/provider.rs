@@ -566,20 +566,10 @@ fn find_preceding_call_id(items: &[InputItem]) -> String {
 
 /// Convert a [`ToolSpec`] to the Responses API `Tool::Function`.
 fn tool_spec_to_responses(tool: &ToolSpec) -> Tool {
-    let schema = &tool.params_schema;
-
-    let parameters = if schema.get("type").and_then(|t| t.as_str()) == Some("object") {
-        Some(schema.clone())
-    } else if schema.as_object().is_some() {
-        Some(serde_json::json!({"type": "object", "properties": schema}))
-    } else {
-        Some(serde_json::json!({"type": "object", "properties": {}, "required": []}))
-    };
-
     Tool::Function(FunctionTool {
         name: tool.name.clone(),
         description: Some(tool.description.clone()),
-        parameters,
+        parameters: Some(tool.normalized_params_schema()),
         strict: Some(false),
     })
 }

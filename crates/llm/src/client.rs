@@ -537,16 +537,7 @@ fn extract_ollama_meta(json: &Value) -> LlmResponseMeta {
 /// Convert a [`ToolSpec`] to the JSON structure expected by the Ollama
 /// `tools` array in the `/api/chat` request body.
 pub fn tool_spec_to_ollama_json(tool: &ToolSpec) -> Value {
-    let schema = &tool.params_schema;
-
-    // Normalise to a proper JSON Schema object.
-    let parameters = if schema.get("type").and_then(|t| t.as_str()) == Some("object") {
-        schema.clone()
-    } else if schema.as_object().is_some() {
-        json!({"type": "object", "properties": schema})
-    } else {
-        json!({"type": "object", "properties": {}, "required": []})
-    };
+    let parameters = tool.normalized_params_schema();
 
     json!({
         "type": "function",
