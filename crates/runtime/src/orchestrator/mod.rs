@@ -8,13 +8,11 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::{
     strip_html_comments, Attachment, ExecutionContext, Interface, MemoryLoader, Message,
-    MessageBus, MessageRole, ToolHandler,
+    MessageBus, ToolHandler,
 };
 use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    ToolSpec,
+    ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, ToolSpec,
 };
-use assistant_skills::SkillDef as SpecSkillDef;
 use assistant_storage::{conversations::ConversationStore, SkillRegistry, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
 use opentelemetry::{
@@ -26,6 +24,19 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, warn, Instrument};
 use uuid::Uuid;
+
+// ── Submodules ────────────────────────────────────────────────────────────────
+
+mod dispatch;
+mod prompt;
+mod turn_control;
+
+mod subagent;
+mod worker;
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -48,9 +59,10 @@ pub struct TurnResult {
     pub attachments: Vec<Attachment>,
 }
 
-/// Outcome of processing an `end_turn` tool call inside
-/// [`Orchestrator::handle_end_turn`].
-enum EndTurnOutcome {
+// ── Internal enums ────────────────────────────────────────────────────────────
+
+/// Outcome of processing an `end_turn` tool call.
+pub(crate) enum EndTurnOutcome {
     /// `end_turn` was called alongside real tool calls — deferred.
     Deferred,
     /// `end_turn` rejected because a reply tool is available but not yet used.
@@ -59,16 +71,15 @@ enum EndTurnOutcome {
     Accepted,
 }
 
-/// Outcome of processing a `FinalAnswer` from the LLM inside
-/// [`Orchestrator::handle_final_answer_with_extensions`].
-enum FinalAnswerOutcome {
+/// Outcome of processing a `FinalAnswer` from the LLM when extension tools
+/// are active.
+pub(crate) enum FinalAnswerOutcome {
     Done(TurnResult),
     Retry,
 }
 
-/// Outcome of dispatching a single global (executor) tool call inside
-/// [`Orchestrator::dispatch_global_tool`].
-enum DispatchOutcome {
+/// Outcome of dispatching a single global (executor) tool call.
+pub(crate) enum DispatchOutcome {
     /// The user denied execution via the confirmation gate.
     Denied,
     /// The tool was executed and its result finalized.
@@ -78,15 +89,12 @@ enum DispatchOutcome {
 /// Per-conversation extension tool registration consumed by the worker.
 ///
 /// Interfaces (Slack, Mattermost) register their per-turn tools and
-/// attachments before publishing a [`TurnRequest`](bus_messages::TurnRequest)
-/// to the bus.  The worker removes the registration when processing the
-/// request.
-struct ExtensionRegistration {
-    tools: Vec<Arc<dyn ToolHandler>>,
-    attachments: Vec<ContentBlock>,
+/// attachments before publishing a `TurnRequest` to the bus.  The worker
+/// removes the registration when processing the request.
+pub(crate) struct ExtensionRegistration {
+    pub(crate) tools: Vec<Arc<dyn ToolHandler>>,
+    pub(crate) attachments: Vec<ContentBlock>,
 }
-
-// ── Orchestrator ──────────────────────────────────────────────────────────────
 
 // ── Built-in extension tools ──────────────────────────────────────────────────
 
@@ -121,7 +129,7 @@ fn end_turn_spec() -> ToolSpec {
 /// Matches the `Debug` format that the codebase uses for serialisation
 /// (e.g. `"Cli"`, `"Slack"`).  Falls back to [`Interface::Cli`] for
 /// unknown values.
-fn parse_interface(s: &str) -> Interface {
+pub(crate) fn parse_interface(s: &str) -> Interface {
     match s.to_lowercase().as_str() {
         "cli" => Interface::Cli,
         "signal" => Interface::Signal,
@@ -134,6 +142,8 @@ fn parse_interface(s: &str) -> Interface {
         _ => Interface::Cli,
     }
 }
+
+// ── Orchestrator ──────────────────────────────────────────────────────────────
 
 /// Drives the tool-calling loop for a single conversation turn.
 ///
@@ -151,41 +161,32 @@ fn parse_interface(s: &str) -> Interface {
 pub struct Orchestrator {
     /// The LLM provider used for chat and embeddings.
     pub llm: Arc<dyn LlmProvider>,
-    storage: Arc<StorageLayer>,
-    executor: Arc<ToolExecutor>,
-    registry: Arc<SkillRegistry>,
+    pub(crate) storage: Arc<StorageLayer>,
+    pub(crate) executor: Arc<ToolExecutor>,
+    pub(crate) registry: Arc<SkillRegistry>,
     /// Durable message bus for decoupled inter-component communication.
-    bus: Arc<dyn MessageBus>,
-    max_iterations: usize,
-    confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
+    pub(crate) bus: Arc<dyn MessageBus>,
+    pub(crate) max_iterations: usize,
+    pub(crate) confirmation_callback: Option<Arc<dyn ConfirmationCallback>>,
     /// Memory loader used to rebuild the system prompt at the start of every
     /// turn so that writes made by memory tools are reflected immediately.
-    memory_loader: MemoryLoader,
+    pub(crate) memory_loader: MemoryLoader,
     /// When true, record full message content on LLM spans (PII-sensitive).
-    trace_content: bool,
+    pub(crate) trace_content: bool,
     /// Per-conversation token sinks for streaming turns dispatched through
     /// the bus.  Consumed (removed) by the worker when processing.
-    token_sinks: tokio::sync::RwLock<HashMap<Uuid, mpsc::Sender<String>>>,
+    pub(crate) token_sinks: tokio::sync::RwLock<HashMap<Uuid, mpsc::Sender<String>>>,
     /// Per-conversation extension tool registrations for interface-specific
     /// turns dispatched through the bus.  Consumed by the worker.
-    extension_registrations: tokio::sync::RwLock<HashMap<Uuid, ExtensionRegistration>>,
+    pub(crate) extension_registrations: tokio::sync::RwLock<HashMap<Uuid, ExtensionRegistration>>,
     /// Cancellation tokens for running subagents, keyed by agent ID.
-    /// Inserting a token when a subagent starts and removing it when it finishes
-    /// allows external callers to cancel an in-progress subagent.
-    agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
+    pub(crate) agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
     /// OTel metric instruments for GenAI and operational metrics.
-    metrics: crate::MetricsRecorder,
+    pub(crate) metrics: crate::MetricsRecorder,
 }
 
 impl Orchestrator {
     /// Create a new orchestrator.
-    ///
-    /// # Parameters
-    /// * `llm` — the LLM client (Ollama wrapper)
-    /// * `storage` — the SQLite storage layer
-    /// * `executor` — tool executor (dispatches to all registered ToolHandlers)
-    /// * `config` — assistant configuration (controls iteration limit and trace
-    ///   logging)
     pub fn new(
         llm: Arc<dyn LlmProvider>,
         storage: Arc<StorageLayer>,
@@ -238,11 +239,7 @@ impl Orchestrator {
     ///
     /// Reads BOOT.md from the configured path.  If the file exists and contains
     /// non-comment, non-empty content, its text is submitted as a single silent
-    /// turn through the message bus.  The result is logged but not displayed to
-    /// the user — BOOT.md is infrastructure, not conversation.
-    ///
-    /// Requires [`run_worker`](Self::run_worker) to be running in a background
-    /// task.
+    /// turn through the message bus.
     ///
     /// Call this once per session, before the first interactive turn.  Returns
     /// `Ok(true)` if a boot turn was executed, `Ok(false)` if skipped.
@@ -261,8 +258,6 @@ impl Orchestrator {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to read BOOT.md: {e}"))?;
 
-        // Strip HTML comments and whitespace — an empty/comment-only file is
-        // treated as "no boot instructions".
         let stripped = strip_html_comments(&raw);
         if stripped.is_empty() {
             debug!("BOOT.md is empty or comment-only, skipping startup hook");
@@ -288,24 +283,12 @@ impl Orchestrator {
         }
     }
 
-    // ── Main entry point ──────────────────────────────────────────────────────
+    // ── Turn entry points ─────────────────────────────────────────────────────
 
     /// Process one turn of the conversation with per-turn extension tools.
     ///
     /// Extension tools are injected by the calling interface (e.g. Slack,
-    /// Mattermost) and are checked before the global tool executor.  They
-    /// Unlike [`run_turn`] / [`run_turn_streaming`], this method does **not**
-    /// return the final answer; replies are expected to happen as side-effects
-    /// of the extension tool calls (e.g. `reply`).  If the LLM emits a
-    /// `FinalAnswer` without calling a reply tool, it is persisted to the DB
-    /// but not forwarded anywhere.
-    ///
-    /// # Parameters
-    /// * `user_message` — the raw user input
-    /// * `conversation_id` — the UUID of the conversation
-    /// * `interface` — the originating interface
-    /// * `extensions` — per-turn `Arc<dyn ToolHandler>` pairs; names must be
-    ///   unique and must not collide with global tool names
+    /// Mattermost) and are checked before the global tool executor.
     pub async fn run_turn_with_tools(
         &self,
         user_message: &str,
@@ -333,6 +316,39 @@ impl Orchestrator {
         .await
     }
 
+    /// Process one turn of the conversation.
+    pub async fn run_turn(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        trace_cx: Option<&OtelContext>,
+    ) -> Result<TurnResult> {
+        self.run_turn_core(user_message, conversation_id, interface, None, trace_cx)
+            .await
+    }
+
+    /// Like [`run_turn`] but streams final-answer tokens through `token_sink`.
+    pub async fn run_turn_streaming(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        token_sink: mpsc::Sender<String>,
+        trace_cx: Option<&OtelContext>,
+    ) -> Result<TurnResult> {
+        self.run_turn_core(
+            user_message,
+            conversation_id,
+            interface,
+            Some(token_sink),
+            trace_cx,
+        )
+        .await
+    }
+
+    // ── Turn implementations ──────────────────────────────────────────────────
+
     async fn run_turn_with_tools_impl(
         &self,
         user_message: &str,
@@ -347,7 +363,7 @@ impl Orchestrator {
 
         let (_conv_cx, turn_cx) = setup_turn_trace(trace_cx, conversation_id, &interface);
 
-        // Build extension lookup: name → handler.
+        // Build extension lookup: name -> handler.
         let ext_map: HashMap<String, Arc<dyn ToolHandler>> = extensions
             .iter()
             .map(|h| (h.name().to_string(), h.clone()))
@@ -375,13 +391,7 @@ impl Orchestrator {
             .prepare_history(user_message, conversation_id, attachments)
             .await?;
 
-        // 4. Load global tool specs and merge with extensions for LLM tool listing.
-        //    Extension specs come first so the LLM sees them prominently.
-        //
-        //    When a `reply` extension tool is present, suppress any global tools
-        //    whose name contains "post" — those tools (e.g. `slack-post`) post to
-        //    arbitrary channels without thread context and reliably confuse the LLM
-        //    into replying to the channel root instead of the active thread.
+        // 4. Load global tool specs and merge with extensions.
         let has_reply_ext = ext_specs.iter().any(|s| s.name.contains("reply"));
         let provider_caps = self.llm.capabilities();
         let global_specs = Self::filter_tool_specs(self.executor.to_specs(), &provider_caps);
@@ -430,10 +440,6 @@ impl Orchestrator {
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {
-                    // The user message was already persisted by prepare_history.
-                    // Save a synthetic assistant message so the conversation
-                    // keeps proper alternation and subsequent turns are not
-                    // poisoned by an orphaned user message.
                     crate::history::persist_error_recovery(&conv_store, conversation_id).await;
                     self.metrics
                         .record_error("llm_error", "run_turn_with_tools");
@@ -449,7 +455,6 @@ impl Orchestrator {
             );
 
             match response {
-                // ── Final answer ──────────────────────────────────────────────
                 LlmResponse::FinalAnswer(text, _meta) => {
                     let outcome = Self::handle_final_answer_with_extensions(
                         replied,
@@ -471,7 +476,6 @@ impl Orchestrator {
                     }
                 }
 
-                // ── Tool calls ────────────────────────────────────────────────
                 LlmResponse::ToolCalls(tool_call_items, _meta) => {
                     info!(
                         count = tool_call_items.len(),
@@ -576,15 +580,6 @@ impl Orchestrator {
                             }
                         }
 
-                        // Mark the turn as acknowledged if any posting, reply,
-                        // or reaction tool was called — regardless of whether it
-                        // is an extension tool or a global skill (e.g.
-                        // `slack-post`).  Without this, calling a global posting
-                        // skill leaves `replied=false` and the auto-post fallback
-                        // fires on the next FinalAnswer, producing a second
-                        // message in a different context (e.g. channel root vs.
-                        // thread).  Reactions (e.g. `react`) count as valid
-                        // acknowledgements per the system prompt.
                         if name.contains("reply") || name.contains("post") || name.contains("react")
                         {
                             replied = true;
@@ -599,11 +594,8 @@ impl Orchestrator {
                     }
                 }
 
-                // ── Intermediate thinking step ────────────────────────────────
                 LlmResponse::Thinking(text, _meta) => {
                     debug!(iteration, "LLM emitted thinking step");
-                    // Persist to DB so thinking is preserved, but the
-                    // interface (Slack) will never display it directly.
                     let thinking_msg = {
                         let mut m = assistant_core::Message::assistant(
                             conversation_id,
@@ -632,54 +624,7 @@ impl Orchestrator {
         );
     }
 
-    /// Process one turn of the conversation.
-    ///
-    /// # Parameters
-    /// * `user_message` — the raw user input
-    /// * `conversation_id` — the UUID of the conversation; a new row is created
-    ///   in SQLite automatically if one does not exist yet
-    /// * `interface` — the interface that originated this request (affects
-    ///   safety checks and whether confirmation prompts are allowed)
-    pub async fn run_turn(
-        &self,
-        user_message: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        trace_cx: Option<&OtelContext>,
-    ) -> Result<TurnResult> {
-        self.run_turn_core(user_message, conversation_id, interface, None, trace_cx)
-            .await
-    }
-
-    /// Like [`run_turn`] but streams final-answer tokens through `token_sink`
-    /// as they are generated.
-    ///
-    /// Tool-call and observation steps are silent — only the tokens that make
-    /// up the final answer are forwarded.  The complete answer is also
-    /// returned in [`TurnResult`] so callers can persist or process it.
-    pub async fn run_turn_streaming(
-        &self,
-        user_message: &str,
-        conversation_id: Uuid,
-        interface: Interface,
-        token_sink: mpsc::Sender<String>,
-        trace_cx: Option<&OtelContext>,
-    ) -> Result<TurnResult> {
-        self.run_turn_core(
-            user_message,
-            conversation_id,
-            interface,
-            Some(token_sink),
-            trace_cx,
-        )
-        .await
-    }
-
     /// Shared implementation for [`run_turn`] and [`run_turn_streaming`].
-    ///
-    /// When `token_sink` is `Some`, final-answer tokens are streamed via
-    /// [`LlmProvider::chat_streaming`]; otherwise the non-streaming
-    /// [`LlmProvider::chat`] is used.
     async fn run_turn_core(
         &self,
         user_message: &str,
@@ -773,13 +718,9 @@ impl Orchestrator {
             );
 
             match response {
-                // ── Final answer ──────────────────────────────────────────────
                 LlmResponse::FinalAnswer(text, _meta) => {
                     info!(iteration, "LLM returned final answer");
 
-                    // Don't persist empty final answers — they pollute the
-                    // conversation history and can confuse the model on
-                    // subsequent turns.
                     if !text.trim().is_empty() {
                         let assistant_msg = {
                             let mut m = Message::assistant(conversation_id, &text);
@@ -798,7 +739,6 @@ impl Orchestrator {
                     });
                 }
 
-                // ── Tool calls ────────────────────────────────────────────────
                 LlmResponse::ToolCalls(tool_call_items, _meta) => {
                     info!(
                         count = tool_call_items.len(),
@@ -852,11 +792,8 @@ impl Orchestrator {
                     }
                 }
 
-                // ── Intermediate thinking step ────────────────────────────────
                 LlmResponse::Thinking(text, _meta) => {
                     debug!(iteration, "LLM emitted thinking step");
-                    // Persist to DB so thinking is preserved, but the
-                    // interface will never display it directly.
                     let thinking_msg = {
                         let mut m =
                             Message::assistant(conversation_id, format!("<think>{text}</think>"));
@@ -888,43 +825,7 @@ impl Orchestrator {
         );
     }
 
-    async fn compose_system_prompt(&self) -> String {
-        let mut prompt = self.memory_loader.load_system_prompt();
-        if let Some(skills_xml) = self.available_skills_xml().await {
-            prompt.push_str("\n\n");
-            prompt.push_str(&skills_xml);
-        }
-        prompt
-    }
-
-    async fn available_skills_xml(&self) -> Option<String> {
-        let skills = self.registry.list().await;
-        if skills.is_empty() {
-            return None;
-        }
-
-        let mut buf = String::new();
-        buf.push_str("<available_skills>\n");
-        for skill in &skills {
-            buf.push_str("  <skill>\n");
-            buf.push_str(&format!("    <name>{}</name>\n", escape_xml(&skill.name)));
-            buf.push_str(&format!(
-                "    <description>{}</description>\n",
-                escape_xml(&skill.description)
-            ));
-            if let Some(location) = skill_location_string(skill) {
-                buf.push_str(&format!(
-                    "    <location>{}</location>\n",
-                    escape_xml(&location)
-                ));
-            }
-            buf.push_str("  </skill>\n");
-        }
-        buf.push_str("</available_skills>");
-        Some(buf)
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── History setup ─────────────────────────────────────────────────────────
 
     pub(crate) async fn prepare_history(
         &self,
@@ -952,13 +853,8 @@ impl Orchestrator {
         conv_store.save_message(&user_msg).await?;
 
         let mut history = crate::history::messages_to_chat_history(prior);
-
-        // Repair structural issues (orphaned messages, missing tool results).
         crate::history::sanitize_history(&mut history);
 
-        // When attachments are present, emit a MultimodalUser message so
-        // vision-capable providers receive the inline images.  Otherwise
-        // fall back to the lightweight Text variant.
         if attachments.is_empty() {
             history.push(ChatHistoryMessage::Text {
                 role: ChatRole::User,
@@ -972,493 +868,7 @@ impl Orchestrator {
 
         Ok((conv_store, history, base_turn))
     }
-
-    fn filter_tool_specs(specs: Vec<ToolSpec>, caps: &Capabilities) -> Vec<ToolSpec> {
-        specs
-            .into_iter()
-            .filter(|spec| !Self::tool_suppressed_by_caps(spec, caps))
-            .collect()
-    }
-
-    fn tool_suppressed_by_caps(spec: &ToolSpec, caps: &Capabilities) -> bool {
-        if caps.hosted_tools.contains(&HostedTool::WebSearch) && spec.name == "web-search" {
-            return true;
-        }
-        if caps.hosted_tools.contains(&HostedTool::WebFetch) && spec.name == "web-fetch" {
-            return true;
-        }
-        false
-    }
-
-    fn make_tool_call_message(
-        conversation_id: Uuid,
-        turn: i64,
-        items: &[assistant_llm::ToolCallItem],
-    ) -> Message {
-        let mut m = Message::assistant(conversation_id, "");
-        m.turn = turn;
-        m.tool_calls_json = serde_json::to_string(items).ok();
-        m
-    }
-
-    fn make_tool_result_message(
-        conversation_id: Uuid,
-        turn: i64,
-        tool_name: &str,
-        observation: &str,
-    ) -> Message {
-        let mut m = Message::new(conversation_id, MessageRole::Tool, observation);
-        m.turn = turn;
-        m.skill_name = Some(tool_name.to_string());
-        m
-    }
-
-    /// Handle a `FinalAnswer` from the LLM when extension tools are active.
-    ///
-    /// Three paths:
-    /// - **Already replied**: persist any non-empty wrap-up text -> `Done`.
-    /// - **Empty answer, no reply yet**: warn -> `Retry`.
-    /// - **Non-empty answer**: persist and optionally auto-post via a reply
-    ///   extension tool -> `Done`.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_final_answer_with_extensions(
-        replied: bool,
-        text: &str,
-        iteration: usize,
-        base_turn: i64,
-        conversation_id: Uuid,
-        interface: &Interface,
-        ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
-        conv_store: &ConversationStore,
-    ) -> Result<FinalAnswerOutcome> {
-        let turn_index = base_turn + iteration as i64 + 1;
-
-        if replied {
-            if !text.trim().is_empty() {
-                let mut m = Message::assistant(conversation_id, text);
-                m.turn = turn_index;
-                if let Err(e) = conv_store.save_message(&m).await {
-                    warn!("Failed to persist post-reply assistant message: {e}");
-                }
-            }
-            return Ok(FinalAnswerOutcome::Done(TurnResult {
-                answer: String::new(),
-                attachments: Vec::new(),
-            }));
-        }
-
-        if text.trim().is_empty() {
-            warn!(
-                iteration,
-                "LLM returned empty final answer without a prior reply; retrying"
-            );
-            return Ok(FinalAnswerOutcome::Retry);
-        }
-
-        let mut m = Message::assistant(conversation_id, text);
-        m.turn = turn_index;
-        conv_store.save_message(&m).await?;
-
-        // Collect candidates and sort deterministically so the chosen tool
-        // doesn't depend on HashMap iteration order.
-        // Priority: prefer "reply" over "post", prefer non-"blocks" variants,
-        // alphabetical tiebreaker.
-        let reply_entry = {
-            let mut candidates: Vec<_> = ext_map
-                .iter()
-                .filter(|(name, _)| name.contains("reply") || name.contains("post"))
-                .collect();
-            candidates.sort_by(|(a, _), (b, _)| {
-                let rank = |n: &str| -> u8 {
-                    if n.contains("reply") && !n.contains("blocks") {
-                        0
-                    } else if n.contains("reply") {
-                        1
-                    } else {
-                        2
-                    }
-                };
-                rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
-            });
-            candidates.into_iter().next()
-        };
-
-        if let Some((reply_name, reply_handler)) = reply_entry {
-            info!(
-                iteration,
-                tool = %reply_name,
-                "LLM returned final answer; auto-posting via extension reply tool"
-            );
-            let schema = reply_handler.params_schema();
-            let text_param = schema
-                .get("required")
-                .and_then(|r| r.as_array())
-                .and_then(|r| if r.len() == 1 { r[0].as_str() } else { None })
-                .filter(|name| matches!(*name, "text" | "content" | "message"));
-
-            if let Some(param_name) = text_param {
-                let mut params_map = HashMap::new();
-                params_map.insert(
-                    param_name.to_string(),
-                    serde_json::Value::String(text.to_string()),
-                );
-                let ctx = ExecutionContext {
-                    conversation_id,
-                    turn: iteration as i64,
-                    interface: interface.clone(),
-                    interactive: false,
-                    allowed_tools: None,
-                    depth: 0,
-                };
-                if let Err(e) = reply_handler.run(params_map, &ctx).await {
-                    warn!(tool = %reply_name, %e, "Auto-post via reply tool failed");
-                }
-            } else {
-                warn!(
-                    tool = %reply_name,
-                    "Auto-post skipped: reply tool requires multiple or non-text params"
-                );
-            }
-        } else {
-            info!(
-                iteration,
-                "LLM returned final answer (no auto-post): no reply tool available"
-            );
-        }
-
-        Ok(FinalAnswerOutcome::Done(TurnResult {
-            answer: String::new(),
-            attachments: Vec::new(),
-        }))
-    }
-
-    /// Evaluate an `end_turn` tool call and return the appropriate outcome.
-    ///
-    /// Three possible paths:
-    /// - **Deferred**: `end_turn` was called alongside real tool calls.
-    /// - **Rejected**: a reply/react extension tool exists but was never called.
-    /// - **Accepted**: the turn ends normally.
-    ///
-    /// In every case the helper records the OTel span, appends the tool result
-    /// to `history`, and persists it to the database.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_end_turn(
-        has_real_calls: bool,
-        replied: bool,
-        ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
-        params: &serde_json::Value,
-        iteration: usize,
-        conversation_id: Uuid,
-        turn_index: i64,
-        otel_span: &mut opentelemetry::global::BoxedSpan,
-        history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
-    ) -> EndTurnOutcome {
-        if has_real_calls {
-            info!(
-                iteration,
-                "end_turn deferred (called alongside other tools)"
-            );
-            let msg = "end_turn deferred: processing other tool calls first";
-            otel_span.set_attribute(KeyValue::new("tool_status", "deferred"));
-            otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
-            crate::history::append_tool_result(history, "end_turn", msg);
-            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
-            if let Err(e) = conv_store.save_message(&tr).await {
-                warn!("Failed to persist deferred end_turn tool-result: {e}");
-            }
-            otel_span.end();
-            return EndTurnOutcome::Deferred;
-        }
-
-        let reason = params
-            .get("reason")
-            .and_then(|v| v.as_str())
-            .unwrap_or("done");
-
-        let has_reply_tool = ext_map
-            .keys()
-            .any(|n| n.contains("reply") || n.contains("post") || n.contains("react"));
-        if !replied && has_reply_tool {
-            warn!(
-                iteration,
-                reason, "end_turn rejected: reply tool available but no reply sent"
-            );
-            let msg = "end_turn rejected: you MUST call the `reply` tool \
-                       before ending the turn. The user has not seen any \
-                       response yet.";
-            otel_span.set_attribute(KeyValue::new("tool_status", "rejected"));
-            otel_span.set_attribute(KeyValue::new("tool_observation", msg.to_string()));
-            crate::history::append_tool_result(history, "end_turn", msg);
-            let tr = Self::make_tool_result_message(conversation_id, turn_index, "end_turn", msg);
-            if let Err(e) = conv_store.save_message(&tr).await {
-                warn!("Failed to persist rejected end_turn tool-result: {e}");
-            }
-            otel_span.end();
-            return EndTurnOutcome::Rejected;
-        }
-
-        info!(iteration, reason, "end_turn called; stopping turn");
-        let result_text = format!("end_turn: {reason}");
-        otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-        otel_span.set_attribute(KeyValue::new("tool_observation", result_text.clone()));
-        crate::history::append_tool_result(history, "end_turn", &result_text);
-        let tr =
-            Self::make_tool_result_message(conversation_id, turn_index, "end_turn", &result_text);
-        if let Err(e) = conv_store.save_message(&tr).await {
-            warn!("Failed to persist end_turn tool-result: {e}");
-        }
-        otel_span.end();
-        EndTurnOutcome::Accepted
-    }
-
-    /// Build the system prompt for a turn that has extension tools.
-    ///
-    /// When no extension tool specs are provided, the base prompt is returned
-    /// unchanged.  Otherwise we append instructions that tell the LLM how to
-    /// use reply / react / block-reply tools and when to call `end_turn`.
-    fn build_extension_system_prompt(base_system_prompt: &str, ext_specs: &[ToolSpec]) -> String {
-        if ext_specs.is_empty() {
-            return base_system_prompt.to_string();
-        }
-
-        let plain_reply: Vec<&str> = ext_specs
-            .iter()
-            .filter(|s| {
-                (s.name.contains("reply") || s.name.contains("post")) && !s.name.contains("block")
-            })
-            .map(|s| s.name.as_str())
-            .collect();
-        let block_reply: Vec<&str> = ext_specs
-            .iter()
-            .filter(|s| s.name.contains("block"))
-            .map(|s| s.name.as_str())
-            .collect();
-        let react_tools: Vec<&str> = ext_specs
-            .iter()
-            .filter(|s| s.name.contains("react"))
-            .map(|s| s.name.as_str())
-            .collect();
-
-        let has_reply = !plain_reply.is_empty() || !block_reply.is_empty();
-        let has_react = !react_tools.is_empty();
-
-        let ack_instruction = if has_reply && has_react {
-            let plain_names = plain_reply.join("`, `");
-            let block_names = block_reply.join("`, `");
-            let react_names = react_tools.join("`, `");
-            let block_clause = if !block_names.is_empty() {
-                format!(" or `{block_names}` for rich Block Kit layouts")
-            } else {
-                String::new()
-            };
-            format!(
-                "Before calling `end_turn` you MUST send exactly one reply to the user.\n\
-                 - Use `{plain_names}` for plain-text or mrkdwn responses{block_clause}.\n\
-                 - Use `{react_names}` only for a brief emoji-only acknowledgement \
-                   (e.g. `thumbsup`, `white_check_mark`) when no text is needed.\n\
-                 Call at most ONE reply tool per turn — never call two reply tools \
-                 or call the same tool twice.\n"
-            )
-        } else if has_reply {
-            let plain_names = plain_reply.join("`, `");
-            let block_names = block_reply.join("`, `");
-            let block_clause = if !block_names.is_empty() {
-                format!(" or `{block_names}` for rich Block Kit layouts")
-            } else {
-                String::new()
-            };
-            format!(
-                "Before calling `end_turn` you MUST reply to the user exactly once \
-                 using `{plain_names}`{block_clause}. \
-                 Never call a reply tool more than once per turn.\n"
-            )
-        } else if has_react {
-            let react_names = react_tools.join("`, `");
-            format!(
-                "Before calling `end_turn` you MUST acknowledge the user \
-                 using `{react_names}` (exactly once).\n"
-            )
-        } else {
-            String::new()
-        };
-
-        format!(
-            "{base_system_prompt}\n\n---\n\n\
-             You are operating inside a messaging interface. \
-             {ack_instruction}\
-             When you have finished all work, call `end_turn` to signal completion."
-        )
-    }
-
-    /// Process a tool execution result: record metrics, set OTel span
-    /// attributes, collect attachments, end the span, append to history,
-    /// and persist the tool-result message to the database.
-    ///
-    /// Returns the observation string that was fed back to the LLM.
-    ///
-    /// This is the common post-execution step shared by all turn variants
-    /// (extension-tools, core, and subagent).
-    #[allow(clippy::too_many_arguments)]
-    async fn finalize_tool_result(
-        &self,
-        tool_name: &str,
-        exec_result: Result<assistant_core::ToolOutput>,
-        elapsed: std::time::Duration,
-        otel_span: &mut opentelemetry::global::BoxedSpan,
-        history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
-        conversation_id: Uuid,
-        turn_index: i64,
-        turn_attachments: &mut Vec<Attachment>,
-    ) -> String {
-        let duration_ms = elapsed.as_millis() as i64;
-        self.metrics.record_tool_invocation(tool_name);
-        self.metrics
-            .record_tool_duration(tool_name, duration_ms as f64 / 1000.0);
-
-        let observation = match exec_result {
-            Ok(output) => {
-                debug!(tool = %tool_name, duration_ms, "Tool execution completed");
-                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
-                otel_span.set_attribute(KeyValue::new("tool_observation", output.content.clone()));
-                if !output.attachments.is_empty() {
-                    turn_attachments.extend(output.attachments);
-                }
-                output.content.clone()
-            }
-            Err(err) => {
-                warn!(tool = %tool_name, %err, "Tool execution failed");
-                self.metrics.record_error("tool_error", tool_name);
-                let msg = err.to_string();
-                otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
-                otel_span.set_attribute(KeyValue::new("tool_status", "error"));
-                otel_span.set_attribute(KeyValue::new("tool_error", msg.clone()));
-                format!("Error executing '{tool_name}': {msg}")
-            }
-        };
-
-        otel_span.end();
-
-        crate::history::append_tool_result(history, tool_name, &observation);
-        let tr_msg =
-            Self::make_tool_result_message(conversation_id, turn_index, tool_name, &observation);
-        if let Err(e) = conv_store.save_message(&tr_msg).await {
-            warn!("Failed to persist tool-result message: {e}");
-        }
-
-        observation
-    }
-
-    /// Dispatch a single tool call through the global executor, applying the
-    /// confirmation gate when required.
-    ///
-    /// This is the common dispatch step shared by `run_turn_with_tools_impl`
-    /// and `run_turn_core`.  It checks whether the tool requires user
-    /// confirmation, records the denial in OTel/history/DB when refused,
-    /// and otherwise executes and finalizes the result.
-    ///
-    /// The caller-provided `instrument_span` is used for `.instrument()` calls
-    /// on both the confirmation-denied persist and the tool execution itself.
-    #[allow(clippy::too_many_arguments)]
-    async fn dispatch_global_tool(
-        &self,
-        name: &str,
-        params: &serde_json::Value,
-        ctx: &ExecutionContext,
-        otel_span: &mut opentelemetry::global::BoxedSpan,
-        history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
-        conversation_id: Uuid,
-        turn_index: i64,
-        turn_attachments: &mut Vec<Attachment>,
-        tool_handlers: &[Arc<dyn ToolHandler>],
-        instrument_span: &tracing::Span,
-    ) -> DispatchOutcome {
-        // Confirmation gate.
-        let requires_confirm = tool_handlers
-            .iter()
-            .find(|h| h.name() == name)
-            .map(|h| h.requires_confirmation())
-            .unwrap_or(false);
-
-        if requires_confirm && ctx.interactive {
-            if let Some(cb) = &self.confirmation_callback {
-                if !cb.confirm(name, params) {
-                    let observation = format!("User denied execution of '{name}'.");
-                    info!(%observation);
-                    otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
-                    otel_span.set_attribute(KeyValue::new("tool_error", observation.clone()));
-                    crate::history::append_tool_result(history, name, &observation);
-                    let tr_msg = Self::make_tool_result_message(
-                        conversation_id,
-                        turn_index,
-                        name,
-                        &observation,
-                    );
-                    if let Err(e) = conv_store
-                        .save_message(&tr_msg)
-                        .instrument(instrument_span.clone())
-                        .await
-                    {
-                        warn!("Failed to persist tool-result message: {e}");
-                    }
-                    otel_span.end();
-                    return DispatchOutcome::Denied;
-                }
-            }
-        }
-
-        let params_map = value_to_params_map(params);
-
-        let start = std::time::Instant::now();
-        let exec_result = self
-            .executor
-            .execute(name, params_map, ctx)
-            .instrument(instrument_span.clone())
-            .await;
-        let elapsed = start.elapsed();
-
-        self.finalize_tool_result(
-            name,
-            exec_result,
-            elapsed,
-            otel_span,
-            history,
-            conv_store,
-            conversation_id,
-            turn_index,
-            turn_attachments,
-        )
-        .await;
-
-        DispatchOutcome::Executed
-    }
-
-    /// Record tool calls in the chat history and persist them to the database.
-    ///
-    /// This is the common pre-execution step shared by all three turn variants
-    /// (extension-tools, core, and subagent).  It clones the items into the
-    /// running history and saves a tool-call message to the conversation store.
-    async fn persist_tool_calls(
-        history: &mut Vec<ChatHistoryMessage>,
-        conv_store: &ConversationStore,
-        conversation_id: Uuid,
-        turn_index: i64,
-        tool_call_items: &[assistant_llm::ToolCallItem],
-    ) {
-        history.push(ChatHistoryMessage::AssistantToolCalls(
-            tool_call_items.to_vec(),
-        ));
-        let tc_msg = Self::make_tool_call_message(conversation_id, turn_index, tool_call_items);
-        if let Err(e) = conv_store.save_message(&tc_msg).await {
-            warn!("Failed to persist tool-call message: {e}");
-        }
-    }
 }
-
-mod subagent;
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
 
@@ -1494,38 +904,10 @@ fn setup_turn_trace(
     (conv_cx, turn_cx)
 }
 
-/// Build the tool result content from a tool output.
-///
-fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {
-    let path = skill.dir.join("SKILL.md");
-    if path.exists() {
-        Some(path.display().to_string())
-    } else {
-        None
-    }
-}
-
-fn escape_xml(input: &str) -> String {
-    let mut escaped = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&apos;"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
-}
-
 /// Convert a [`serde_json::Value`] to a flat `HashMap<String, Value>`.
 ///
 /// If the value is an `Object`, its entries are cloned into the map.
-/// Any other variant (or `Null`) yields an empty map.  This is the
-/// canonical way to prepare tool-call parameters for
-/// [`ToolHandler::run`](assistant_core::ToolHandler::run).
+/// Any other variant (or `Null`) yields an empty map.
 pub(crate) fn value_to_params_map(value: &serde_json::Value) -> HashMap<String, serde_json::Value> {
     if let serde_json::Value::Object(map) = value {
         map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
@@ -1533,9 +915,3 @@ pub(crate) fn value_to_params_map(value: &serde_json::Value) -> HashMap<String, 
         HashMap::new()
     }
 }
-
-mod worker;
-
-#[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
