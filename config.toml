@@ -157,10 +157,6 @@ timeout_secs = 120
 # extra_dirs = ["~/.claude/skills", "./.claude/skills"]
 
 [mcp]
-# Enable the built-in MCP server (JSON-RPC over stdio)
-enabled = true
-# Listen address for MCP server
-listen = "127.0.0.1:3000"
 
 # ── External MCP servers (client connections) ─────────────────────────────────
 # Connect to external MCP servers and bridge their tools into the assistant.
@@ -189,8 +185,6 @@ listen = "127.0.0.1:3000"
 [self_improvement]
 # Enable passive execution trace collection
 trace_enabled = true
-# How many recent traces to include in self-analysis (per skill)
-analysis_window = 50
 # Record full message content on LLM spans (system prompt, input messages,
 # output messages, tool definitions).  Off by default — content may contain PII.
 # trace_content = false
