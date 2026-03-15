@@ -93,12 +93,6 @@ impl AgentStore {
         Self::new(base.join("agents"))
     }
 
-    /// Returns the agents directory path.
-    #[allow(dead_code)]
-    pub fn dir(&self) -> &Path {
-        &self.agents_dir
-    }
-
     // -- CRUD operations --
 
     /// Registers a new agent card. Returns the assigned ID (filename slug).
@@ -258,12 +252,6 @@ impl AgentStore {
         }
 
         true
-    }
-
-    /// Returns the number of registered agents.
-    #[allow(dead_code)]
-    pub async fn count(&self) -> usize {
-        self.list().await.map(|v| v.len()).unwrap_or(0)
     }
 
     // -- Internal helpers --
