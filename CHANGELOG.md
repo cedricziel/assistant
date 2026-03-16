@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.41](https://github.com/cedricziel/assistant/compare/v0.1.40...v0.1.41) (2026-03-16)
+
+
+### Miscellaneous Chores
+
+* release 0.1.41 ([e0853e1](https://github.com/cedricziel/assistant/commit/e0853e114970732ffe918b7c1ff67fc0ec16622b))
+
 ## [0.1.40](https://github.com/cedricziel/assistant/compare/v0.1.39...v0.1.40) (2026-03-13)
 
 
