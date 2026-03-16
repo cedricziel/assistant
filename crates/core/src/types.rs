@@ -108,6 +108,8 @@ pub struct AssistantConfig {
     #[serde(default)]
     pub storage: StorageConfig,
     #[serde(default)]
+    pub bus: BusConfig,
+    #[serde(default)]
     pub skills: SkillsConfig,
     #[serde(default)]
     pub mcp: McpConfig,
@@ -595,6 +597,39 @@ impl Default for MoonshotWebSearchOptions {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StorageConfig {
     pub db_path: Option<String>,
+}
+
+/// Message bus backend kind.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BusKind {
+    /// SQLite-backed bus (default) — uses the same pool as storage.
+    #[default]
+    Sqlite,
+    /// NATS JetStream-backed bus — eliminates SQLite write-lock contention.
+    Nats,
+}
+
+/// Message bus configuration.
+///
+/// Controls which bus backend is used. Add a `[bus]` section to
+/// `config.toml`:
+///
+/// ```toml
+/// [bus]
+/// kind = "nats"
+/// nats_url = "nats://localhost:4222"
+/// ```
+///
+/// The `nats_url` field falls back to the `NATS_URL` environment variable.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BusConfig {
+    /// Which bus backend to use: `"sqlite"` (default) or `"nats"`.
+    #[serde(default)]
+    pub kind: BusKind,
+    /// NATS server URL (e.g. `nats://localhost:4222`).
+    /// Falls back to the `NATS_URL` environment variable when not set.
+    pub nats_url: Option<String>,
 }
 
 /// Skills configuration
