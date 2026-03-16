@@ -143,6 +143,14 @@ timeout_secs = 120
 # Path to SQLite database (~/.assistant/assistant.db by default)
 # db_path = "~/.assistant/assistant.db"
 
+# [bus]
+# Message bus backend.  Options: "sqlite" (default), "nats".
+# NATS JetStream eliminates SQLite write-lock contention when the
+# orchestrator, OTel exporters, and bus all share a single SQLite pool.
+# Requires the `nats` feature to be compiled in.
+# kind = "nats"
+# nats_url = "nats://localhost:4222"   # or set NATS_URL env var
+
 [skills]
 # Directories to scan for skills (highest priority first):
 # 1. entries from extra_dirs (defaults target Claude Code/NanoClaw folders)
