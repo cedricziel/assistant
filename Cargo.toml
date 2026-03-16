@@ -30,6 +30,7 @@ members = [
     "crates/web-ui",
     "crates/a2a-json-schema",
     "crates/opentelemetry-exporter-sqlite",
+    "crates/bus-nats",
 ]
 default-members = [
     "crates/interface-cli",
@@ -119,8 +120,11 @@ hex = "0.4"
 url = "2"
 # OS-level CSPRNG
 getrandom = "0.4"
+# NATS message bus
+async-nats = "0.46"
 # Integration testing
 testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 wiremock = "0.6"
 # LRU cache (bounded conversation map in Mattermost/Slack runners)
 lru = "0.16"

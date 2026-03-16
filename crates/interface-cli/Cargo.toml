@@ -10,6 +10,7 @@ slack = ["dep:assistant-interface-slack"]
 mattermost = ["dep:assistant-interface-mattermost"]
 nextcloud = ["dep:assistant-interface-nextcloud"]
 mcp = ["dep:assistant-mcp-server"]
+nats = ["dep:assistant-bus-nats"]
 default = ["slack", "mattermost", "nextcloud", "mcp"]
 
 [[bin]]
@@ -36,6 +37,7 @@ assistant-interface-slack = { path = "../interface-slack", optional = true }
 assistant-interface-mattermost = { path = "../interface-mattermost", optional = true }
 assistant-interface-nextcloud = { path = "../interface-nextcloud", optional = true }
 assistant-mcp-server = { path = "../mcp-server", optional = true }
+assistant-bus-nats = { path = "../bus-nats", optional = true }
 assistant-mcp-client = { path = "../mcp-client" }
 assistant-transcription = { path = "../transcription" }
 # CancellationToken for background Nextcloud shutdown
