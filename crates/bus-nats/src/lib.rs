@@ -278,9 +278,20 @@ impl MessageBus for NatsMessageBus {
             .await
             .map_err(|e| anyhow::anyhow!("NATS fetch failed: {e}"))?;
 
+        let mut result: Option<(BusMessage, async_nats::jetstream::Message)> = None;
+
         while let Some(msg_result) = batch.next().await {
             let msg: async_nats::jetstream::Message =
                 msg_result.map_err(|e| anyhow::anyhow!("NATS message receive error: {e}"))?;
+
+            // If we already found our match, nak remaining messages so they
+            // are redelivered promptly instead of waiting for ack_wait.
+            if result.is_some() {
+                if let Err(e) = msg.ack_with(AckKind::Nak(Some(NAK_DELAY))).await {
+                    warn!(error = %e, "NATS nak (drain) failed");
+                }
+                continue;
+            }
 
             let headers = msg.headers.as_ref();
             if !matches_filter(headers, filter) {
@@ -300,9 +311,12 @@ impl MessageBus for NatsMessageBus {
                 "claimed bus message via NATS"
             );
 
-            // Stash the raw NATS message so ack/nack/fail can operate on it.
-            self.inflight.write().await.insert(bus_msg.id, msg);
+            result = Some((bus_msg, msg));
+        }
 
+        // Stash the raw NATS message so ack/nack/fail can operate on it.
+        if let Some((bus_msg, nats_msg)) = result {
+            self.inflight.write().await.insert(bus_msg.id, nats_msg);
             return Ok(Some(bus_msg));
         }
 
@@ -696,6 +710,22 @@ mod tests {
         assert_eq!(msg.batch_id, Some(batch_b));
     }
 
+    /// Helper: claim with retries, allowing JetStream a moment to deliver.
+    async fn claim_with_retry(
+        bus: &NatsMessageBus,
+        topic: &str,
+        worker: &str,
+        retries: usize,
+    ) -> Option<BusMessage> {
+        for _ in 0..retries {
+            if let Some(msg) = bus.claim(topic, worker).await.unwrap() {
+                return Some(msg);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        None
+    }
+
     #[tokio::test]
     #[ignore = "requires Docker"]
     async fn test_ack_nack_fail() {
@@ -714,20 +744,25 @@ mod tests {
             .unwrap();
 
         // Claim and ack the first
-        let m1 = bus.claim("q", "w1").await.unwrap().unwrap();
+        let m1 = claim_with_retry(&bus, "q", "w1", 10)
+            .await
+            .expect("should claim first message");
         bus.ack(m1.id).await.unwrap();
 
         // Claim and fail the second
-        let m2 = bus.claim("q", "w1").await.unwrap().unwrap();
+        let m2 = claim_with_retry(&bus, "q", "w1", 10)
+            .await
+            .expect("should claim second message");
         bus.fail(m2.id).await.unwrap();
 
         // Claim and nack the third (returns to stream)
-        let m3 = bus.claim("q", "w1").await.unwrap().unwrap();
+        let m3 = claim_with_retry(&bus, "q", "w1", 10)
+            .await
+            .expect("should claim third message");
         bus.nack(m3.id).await.unwrap();
 
         // After a short delay the nack'd message should be reclaimable
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        let reclaimed = bus.claim("q", "w1").await.unwrap();
+        let reclaimed = claim_with_retry(&bus, "q", "w1", 20).await;
         assert!(reclaimed.is_some(), "nacked message should be reclaimable");
     }
 

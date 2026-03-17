@@ -176,7 +176,26 @@ async fn bootstrap() -> Result<(Arc<Orchestrator>, SignalConfig, PathBuf)> {
     ));
 
     // Build message bus and orchestrator with auto-deny confirmation.
-    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+    let bus: Arc<dyn MessageBus> = {
+        #[cfg(feature = "nats")]
+        {
+            use assistant_core::BusKind;
+            if config.bus.kind == BusKind::Nats {
+                tracing::info!("Using NATS message bus");
+                Arc::new(
+                    assistant_bus_nats::NatsMessageBus::connect(&config.bus)
+                        .await
+                        .context("failed to connect to NATS")?,
+                )
+            } else {
+                Arc::new(storage.message_bus())
+            }
+        }
+        #[cfg(not(feature = "nats"))]
+        {
+            Arc::new(storage.message_bus())
+        }
+    };
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(AutoDenyConfirmation);
     let orchestrator = Arc::new(
         Orchestrator::new(

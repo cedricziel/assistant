@@ -5,7 +5,11 @@ edition.workspace = true
 license.workspace = true
 description = "Web-based trace analysis UI and A2A protocol server for the assistant"
 
+[features]
+nats = ["dep:assistant-bus-nats"]
+
 [dependencies]
+assistant-bus-nats = { path = "../bus-nats", optional = true }
 anyhow = { workspace = true }
 askama = { workspace = true }
 assistant-a2a-json-schema = { path = "../a2a-json-schema" }
