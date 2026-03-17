@@ -387,6 +387,7 @@ name = "assistant-interface-signal"
 version = "0.1.41"
 dependencies = [
  "anyhow",
+ "assistant-bus-nats",
  "assistant-core",
  "assistant-mcp-client",
  "assistant-provider-ollama",
@@ -668,6 +669,7 @@ dependencies = [
  "anyhow",
  "askama",
  "assistant-a2a-json-schema",
+ "assistant-bus-nats",
  "assistant-core",
  "assistant-llm",
  "assistant-mcp-client",
