@@ -69,6 +69,10 @@ const FETCH_BATCH: usize = 10;
 const NAK_DELAY: Duration = Duration::from_millis(200);
 /// Stream max age — auto-purge messages older than this.
 const STREAM_MAX_AGE: Duration = Duration::from_secs(86_400); // 24 h
+/// How long a fetch() call waits for the server to fill the batch before
+/// returning whatever it has. Prevents indefinite blocking when there are
+/// fewer messages than `FETCH_BATCH`.
+const FETCH_EXPIRES: Duration = Duration::from_secs(5);
 
 // -- NatsMessageBus ---------------------------------------------------------
 
@@ -274,6 +278,7 @@ impl MessageBus for NatsMessageBus {
         let mut batch = consumer
             .fetch()
             .max_messages(FETCH_BATCH)
+            .expires(FETCH_EXPIRES)
             .messages()
             .await
             .map_err(|e| anyhow::anyhow!("NATS fetch failed: {e}"))?;
