@@ -288,15 +288,16 @@ impl MessageBus for NatsMessageBus {
         Ok(())
     }
 
+    /// **NATS behavioural note:** Only returns in-flight (claimed) messages
+    /// from this process's memory.  Unlike the SQLite bus, this does *not*
+    /// query all persisted messages.  Use the NATS dashboard / CLI for full
+    /// stream observability.
     async fn list(
         &self,
         topic: &str,
         status: Option<MessageStatus>,
         _limit: u32,
     ) -> Result<Vec<BusMessage>> {
-        // JetStream does not track per-message status the way the SQLite bus
-        // does.  We return in-flight (claimed) messages as a best-effort
-        // approximation; use the NATS dashboard for full observability.
         match status {
             Some(MessageStatus::Claimed) | None => {
                 let inflight = self.inflight.read().await;
@@ -305,21 +306,35 @@ impl MessageBus for NatsMessageBus {
                     .filter_map(|msg| parse_nats_message(msg, "list").ok())
                     .filter(|m| m.topic == topic)
                     .collect();
+                debug!(
+                    topic = %topic,
+                    count = result.len(),
+                    "NATS list: returning in-flight messages only (no persisted query)"
+                );
                 Ok(result)
             }
-            _ => Ok(vec![]),
+            _ => {
+                debug!(
+                    topic = %topic,
+                    status = ?status,
+                    "NATS list: status filter not supported, returning empty"
+                );
+                Ok(vec![])
+            }
         }
     }
 
+    /// **NATS behavioural note:** No-op — JetStream automatically redelivers
+    /// messages whose `ack_wait` expires, replacing manual stale reaping.
     async fn reap_stale(&self, _timeout: Duration) -> Result<u64> {
-        // JetStream automatically redelivers messages whose ack_wait expires.
-        // No manual reaping needed.
+        debug!("NATS reap_stale: no-op (JetStream ack_wait handles redelivery)");
         Ok(0)
     }
 
+    /// **NATS behavioural note:** No-op — the JetStream stream's `MaxAge`
+    /// setting handles time-based purging automatically.
     async fn purge(&self, _older_than: DateTime<Utc>) -> Result<u64> {
-        // JetStream MaxAge handles time-based purging automatically.
-        // A manual purge would delete ALL messages, which is too aggressive.
+        debug!("NATS purge: no-op (JetStream MaxAge handles expiration)");
         Ok(0)
     }
 }
