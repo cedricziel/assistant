@@ -39,7 +39,9 @@ use tokio::sync::RwLock;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use assistant_core::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
+use assistant_core::{
+    BusConfig, BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest,
+};
 
 // -- Header keys ------------------------------------------------------------
 
@@ -84,8 +86,25 @@ pub struct NatsMessageBus {
 
 impl NatsMessageBus {
     /// Connect to NATS and ensure the JetStream stream exists.
-    pub async fn new(url: &str) -> Result<Self> {
-        let client = async_nats::connect(url)
+    ///
+    /// Credentials are resolved from `BusConfig` fields with env var
+    /// fallbacks, in priority order:
+    ///
+    /// 1. `credentials_file` / `NATS_CREDENTIALS_FILE` — `.creds` JWT+NKey
+    /// 2. `token` / `NATS_TOKEN` — token auth
+    /// 3. `username`+`password` / `NATS_USER`+`NATS_PASSWORD` — basic auth
+    /// 4. No auth (unauthenticated connection)
+    pub async fn connect(config: &BusConfig) -> Result<Self> {
+        let url = config
+            .nats_url
+            .clone()
+            .or_else(|| std::env::var("NATS_URL").ok())
+            .unwrap_or_else(|| "nats://localhost:4222".to_string());
+
+        let opts = Self::build_connect_options(config).await?;
+
+        let client = opts
+            .connect(&url)
             .await
             .map_err(|e| anyhow::anyhow!("failed to connect to NATS at {url}: {e}"))?;
 
@@ -102,13 +121,63 @@ impl NatsMessageBus {
             .await
             .map_err(|e| anyhow::anyhow!("failed to create/get JetStream stream: {e}"))?;
 
-        debug!(stream = STREAM_NAME, "NATS message bus ready");
+        debug!(stream = STREAM_NAME, url = %url, "NATS message bus ready");
 
         Ok(Self {
             js,
             stream,
             inflight: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// Simple constructor for tests and cases where only a URL is needed.
+    pub async fn new(url: &str) -> Result<Self> {
+        let config = BusConfig {
+            nats_url: Some(url.to_string()),
+            ..Default::default()
+        };
+        Self::connect(&config).await
+    }
+
+    /// Build [`async_nats::ConnectOptions`] from the config, resolving env
+    /// var fallbacks for each credential field.
+    async fn build_connect_options(config: &BusConfig) -> Result<async_nats::ConnectOptions> {
+        // Resolve each credential field with env var fallback.
+        let creds_file = config
+            .credentials_file
+            .clone()
+            .or_else(|| std::env::var("NATS_CREDENTIALS_FILE").ok());
+        let token = config
+            .token
+            .clone()
+            .or_else(|| std::env::var("NATS_TOKEN").ok());
+        let username = config
+            .username
+            .clone()
+            .or_else(|| std::env::var("NATS_USER").ok());
+        let password = config
+            .password
+            .clone()
+            .or_else(|| std::env::var("NATS_PASSWORD").ok());
+
+        // Priority: credentials file > token > user/password > none.
+        let opts = if let Some(path) = creds_file {
+            debug!(path = %path, "NATS auth: credentials file");
+            async_nats::ConnectOptions::with_credentials_file(&path)
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to load NATS credentials file {path}: {e}"))?
+        } else if let Some(tok) = token {
+            debug!("NATS auth: token");
+            async_nats::ConnectOptions::with_token(tok)
+        } else if let Some(user) = username {
+            let pass = password.unwrap_or_default();
+            debug!(user = %user, "NATS auth: username/password");
+            async_nats::ConnectOptions::with_user_and_password(user, pass)
+        } else {
+            async_nats::ConnectOptions::new()
+        };
+
+        Ok(opts.name("assistant-bus"))
     }
 
     /// Build or retrieve a durable pull consumer for `(worker_id, topic)`.

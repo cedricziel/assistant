@@ -150,6 +150,12 @@ timeout_secs = 120
 # Requires the `nats` feature to be compiled in.
 # kind = "nats"
 # nats_url = "nats://localhost:4222"   # or set NATS_URL env var
+#
+# Authentication (pick one, all fields fall back to env vars):
+# username = "myuser"                  # or NATS_USER
+# password = "s3cret"                  # or NATS_PASSWORD
+# token = "t0k3n!"                    # or NATS_TOKEN
+# credentials_file = "/path/to/nats.creds"  # or NATS_CREDENTIALS_FILE
 
 [skills]
 # Directories to scan for skills (highest priority first):

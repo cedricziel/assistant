@@ -588,15 +588,9 @@ async fn bootstrap(
         {
             use assistant_core::BusKind;
             if config.bus.kind == BusKind::Nats {
-                let nats_url = config
-                    .bus
-                    .nats_url
-                    .clone()
-                    .or_else(|| std::env::var("NATS_URL").ok())
-                    .unwrap_or_else(|| "nats://localhost:4222".to_string());
-                info!(url = %nats_url, "Using NATS message bus");
+                info!("Using NATS message bus");
                 Arc::new(
-                    assistant_bus_nats::NatsMessageBus::new(&nats_url)
+                    assistant_bus_nats::NatsMessageBus::connect(&config.bus)
                         .await
                         .context("failed to connect to NATS")?,
                 )
