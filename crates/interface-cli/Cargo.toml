@@ -11,7 +11,7 @@ mattermost = ["dep:assistant-interface-mattermost"]
 nextcloud = ["dep:assistant-interface-nextcloud"]
 mcp = ["dep:assistant-mcp-server"]
 nats = ["dep:assistant-bus-nats"]
-default = ["slack", "mattermost", "nextcloud", "mcp"]
+default = ["slack", "mattermost", "nextcloud", "mcp", "nats"]
 
 [[bin]]
 name = "assistant"

@@ -9,6 +9,7 @@ description = "Signal messenger interface for the assistant (feature-gated)"
 # Build with:
 #   cargo build -p assistant-interface-signal --features signal
 [features]
+default = ["nats"]
 signal = ["dep:presage", "dep:presage-store-sqlite"]
 nats = ["dep:assistant-bus-nats"]
 

@@ -6,6 +6,7 @@ license.workspace = true
 description = "Web-based trace analysis UI and A2A protocol server for the assistant"
 
 [features]
+default = ["nats"]
 nats = ["dep:assistant-bus-nats"]
 
 [dependencies]
