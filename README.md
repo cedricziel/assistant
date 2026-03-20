@@ -243,6 +243,20 @@ model    = "voyage-3-lite"     # optional, provider-specific default used
 # api_key = "pa-..."          # or set VOYAGE_API_KEY env var
 ```
 
+To use NATS JetStream instead of SQLite for the message bus (eliminates
+write-lock contention at high concurrency), set `[bus] kind = "nats"` and
+configure:
+
+```toml
+[bus]
+kind = "nats"
+nats_url = "nats://localhost:4222"   # or set NATS_URL env var
+# username = "myuser"               # or NATS_USER
+# password = "s3cret"               # or NATS_PASSWORD
+# token = "t0k3n!"                  # or NATS_TOKEN
+# credentials_file = "/path/to.creds"  # or NATS_CREDENTIALS_FILE
+```
+
 ## Workspace layout
 
 ```
@@ -256,6 +270,7 @@ assistant/
 │   ├── provider-moonshot/              # Moonshot/Kimi backend (OpenAI-compatible)
 │   ├── skills/                         # Skill parsing, validation, embedded builtins
 │   ├── storage/                        # SQLite, SkillRegistry, trace store, memory store
+│   ├── bus-nats/                       # NATS JetStream MessageBus (optional, feature-gated)
 │   ├── runtime/                        # ReAct orchestrator, scheduler, sub-agents
 │   ├── tool-executor/                  # Builtin tool registry + skill installer
 │   ├── transcription/                  # Voice transcription providers (Whisper, Ollama, Deepgram)
