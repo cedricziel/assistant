@@ -13,9 +13,10 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{LlmProviderKind, MessageBus};
+use assistant_core::{BusKind, LlmProviderKind, MessageBus};
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_moonshot::MoonshotProvider;
@@ -28,12 +29,15 @@ use assistant_storage::registry::SkillRegistry;
 use assistant_storage::{default_db_path, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
 use axum::{
+    http::StatusCode,
     response::Redirect,
     routing::{get, post},
     Extension, Router,
 };
 use clap::Parser;
+use serde_json::json;
 use sqlx::SqlitePool;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn, Level};
 use tracing_subscriber::EnvFilter;
@@ -95,6 +99,9 @@ pub(crate) struct AppState {
     pub(crate) pool: SqlitePool,
     pub(crate) trace_limit: i64,
     pub(crate) log_limit: i64,
+    pub(crate) bus_kind: BusKind,
+    pub(crate) nats_url: Option<String>,
+    pub(crate) nats_token: Option<String>,
 }
 
 #[tokio::main]
@@ -131,11 +138,6 @@ async fn main() -> Result<()> {
     };
 
     let storage = Arc::new(StorageLayer::new(&db_path).await?);
-    let state = AppState {
-        pool: storage.pool.clone(),
-        trace_limit: args.trace_limit,
-        log_limit: args.log_limit,
-    };
 
     // -- Load assistant config from ~/.assistant/config.toml --------------------
     let mut config = match assistant_core::default_config_path() {
@@ -165,6 +167,23 @@ async fn main() -> Result<()> {
     if let Some(base_url) = args.llm_base_url {
         config.llm.base_url = base_url;
     }
+
+    let state = AppState {
+        pool: storage.pool.clone(),
+        trace_limit: args.trace_limit,
+        log_limit: args.log_limit,
+        bus_kind: config.bus.kind.clone(),
+        nats_url: config
+            .bus
+            .nats_url
+            .clone()
+            .or_else(|| std::env::var("NATS_URL").ok()),
+        nats_token: config
+            .bus
+            .token
+            .clone()
+            .or_else(|| std::env::var("NATS_TOKEN").ok()),
+    };
 
     // -- Build the full orchestrator chain -----------------------------------
     //
@@ -360,6 +379,8 @@ async fn main() -> Result<()> {
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
+        .route("/health", get(health))
+        .route("/ready", get(ready))
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
         // A2A agent card is public per spec — callers need it to discover auth.
@@ -406,6 +427,111 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router.into_make_service()).await?;
     Ok(())
+}
+
+async fn health() -> StatusCode {
+    StatusCode::OK
+}
+
+async fn ready(Extension(state): Extension<AppState>) -> StatusCode {
+    if sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&state.pool)
+        .await
+        .is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
+
+    if state.bus_kind == BusKind::Nats {
+        let Some(url) = state.nats_url.as_deref() else {
+            return StatusCode::SERVICE_UNAVAILABLE;
+        };
+
+        if !nats_reachable(url, state.nats_token.as_deref()).await {
+            return StatusCode::SERVICE_UNAVAILABLE;
+        }
+    }
+
+    StatusCode::OK
+}
+
+async fn nats_reachable(url: &str, token: Option<&str>) -> bool {
+    let endpoint = url.strip_prefix("nats://").unwrap_or(url);
+    let (url_auth, endpoint) = match endpoint.rsplit_once('@') {
+        Some((auth, host)) => (Some(auth), host),
+        None => (None, endpoint),
+    };
+
+    let (host, port) = match endpoint.rsplit_once(':') {
+        Some((h, p)) => match p.parse::<u16>() {
+            Ok(parsed) => (h, parsed),
+            Err(_) => (endpoint, 4222),
+        },
+        None => (endpoint, 4222),
+    };
+
+    let mut stream = match tokio::time::timeout(
+        Duration::from_secs(1),
+        tokio::net::TcpStream::connect((host, port)),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => stream,
+        _ => return false,
+    };
+
+    let mut initial = vec![0_u8; 1024];
+    if tokio::time::timeout(Duration::from_secs(1), stream.read(&mut initial))
+        .await
+        .is_err()
+    {
+        return false;
+    }
+
+    let mut connect = json!({
+        "lang": "rust",
+        "version": "web-ui-readyz",
+        "protocol": 1,
+        "verbose": false,
+        "pedantic": false,
+        "tls_required": false,
+    });
+
+    if let Some(token) = token.filter(|t| !t.is_empty()) {
+        connect["auth_token"] = json!(token);
+    } else if let Some(auth) = url_auth {
+        if let Some((user, pass)) = auth.split_once(':') {
+            connect["user"] = json!(user);
+            connect["pass"] = json!(pass);
+        } else if !auth.is_empty() {
+            connect["auth_token"] = json!(auth);
+        }
+    }
+
+    let line = format!("CONNECT {}\r\nPING\r\n", connect);
+    if tokio::time::timeout(Duration::from_secs(1), stream.write_all(line.as_bytes()))
+        .await
+        .is_err()
+    {
+        return false;
+    }
+
+    for _ in 0..3 {
+        let mut buf = vec![0_u8; 1024];
+        let n = match tokio::time::timeout(Duration::from_secs(1), stream.read(&mut buf)).await {
+            Ok(Ok(n)) if n > 0 => n,
+            _ => return false,
+        };
+        let msg = String::from_utf8_lossy(&buf[..n]);
+        if msg.contains("PONG") {
+            return true;
+        }
+        if msg.contains("-ERR") {
+            return false;
+        }
+    }
+
+    false
 }
 
 // -- Auto-hardening ---------------------------------------------------------
