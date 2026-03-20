@@ -127,7 +127,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -138,7 +138,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -236,11 +236,11 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
 name = "assistant"
-version = "0.1.41"
+version = "0.1.42"
 
 [[package]]
 name = "assistant-a2a-json-schema"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "chrono",
  "serde",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-bus-nats"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-cli"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-bus-nats",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-core"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-integration-tests"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -339,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-mattermost"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-nextcloud"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-signal"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-bus-nats",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-slack"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -437,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-llm"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-client"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-server"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-anthropic"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-moonshot"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -524,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-ollama"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-openai"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -562,7 +562,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-runtime"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-skills"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "gray_matter",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-storage"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -624,7 +624,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-tool-executor"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-transcription"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-web-ui"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "askama",
@@ -1891,7 +1891,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2050,7 +2050,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3698,7 +3698,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3961,7 +3961,7 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-exporter-sqlite"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "chrono",
  "opentelemetry",
@@ -5291,7 +5291,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5372,7 +5372,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6390,7 +6390,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6868,9 +6868,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.23"
+version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
+checksum = "2f30143827ddab0d256fd843b7a66d164e9f271cfa0dde49142c5ca0ca291f1e"
 dependencies = [
  "matchers",
  "nu-ansi-term",
@@ -7441,7 +7441,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

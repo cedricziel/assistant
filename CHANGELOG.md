@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.42](https://github.com/cedricziel/assistant/compare/v0.1.41...v0.1.42) (2026-03-20)
+
+
+### Features
+
+* add NATS JetStream message bus backend ([#223](https://github.com/cedricziel/assistant/issues/223)) ([9cd2c31](https://github.com/cedricziel/assistant/commit/9cd2c317e720c6d30a5e948233e392bed4e7b61c))
+
 ## [0.1.41](https://github.com/cedricziel/assistant/compare/v0.1.40...v0.1.41) (2026-03-16)
 
 
