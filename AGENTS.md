@@ -32,34 +32,41 @@ Install hooks after cloning: `make install-hooks`.
 
 Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 
-| Crate (package name)             | Path                          | Purpose                                              |
-|----------------------------------|-------------------------------|------------------------------------------------------|
-| `assistant-core`                 | `crates/core`                 | Shared types, ToolHandler trait, MessageBus trait     |
-| `assistant-llm`                  | `crates/llm`                  | LlmProvider trait, EmbeddingProvider, LlmClient      |
-| `assistant-provider-ollama`      | `crates/provider-ollama`      | Ollama LlmProvider implementation                    |
-| `assistant-provider-anthropic`   | `crates/provider-anthropic`   | Anthropic LlmProvider implementation                 |
-| `assistant-provider-openai`      | `crates/provider-openai`      | OpenAI LlmProvider implementation                    |
-| `assistant-skills`               | `crates/skills`               | Skill parsing, validation, embedded builtins         |
-| `assistant-storage`              | `crates/storage`              | SQLite (sqlx), SkillRegistry, TraceStore, MessageBus |
-| `assistant-runtime`              | `crates/runtime`              | Orchestrator (main ReAct loop), SafetyGate, Scheduler|
-| `assistant-tool-executor`        | `crates/tool-executor`        | ToolHandler registry, builtin tools, dispatch        |
-| `assistant-mcp-server`           | `crates/mcp-server`           | stdio JSON-RPC 2.0 MCP server                       |
-| `assistant-cli`                  | `crates/interface-cli`        | Unified binary: REPL + subcommands                   |
-| `assistant-interface-slack`      | `crates/interface-slack`      | Slack bot library                                    |
-| `assistant-interface-mattermost` | `crates/interface-mattermost` | Mattermost bot library                               |
-| `assistant-interface-signal`     | `crates/interface-signal`     | Signal interface stub (feature-gated)                |
-| `assistant-web-ui`               | `crates/web-ui`               | Trace analysis web UI + A2A protocol server          |
-| `assistant-a2a-proto`            | `crates/a2a-proto`            | A2A protocol protobuf definitions                    |
-| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`      | A2A protocol JSON Schema types                       |
-| `assistant-integration-tests`    | `crates/integration-tests`    | End-to-end smoke tests                               |
+| Crate (package name)             | Path                                   | Purpose                                                    |
+| -------------------------------- | -------------------------------------- | ---------------------------------------------------------- |
+| `assistant-core`                 | `crates/core`                          | Shared types, ToolHandler trait, MessageBus trait          |
+| `assistant-llm`                  | `crates/llm`                           | LlmProvider trait, EmbeddingProvider, LlmClient            |
+| `assistant-provider-ollama`      | `crates/provider-ollama`               | Ollama LlmProvider implementation                          |
+| `assistant-provider-anthropic`   | `crates/provider-anthropic`            | Anthropic LlmProvider implementation                       |
+| `assistant-provider-openai`      | `crates/provider-openai`               | OpenAI LlmProvider implementation                          |
+| `assistant-provider-moonshot`    | `crates/provider-moonshot`             | Moonshot/Kimi LlmProvider (OpenAI-compatible)              |
+| `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins               |
+| `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus |
+| `assistant-bus-nats`             | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)        |
+| `assistant-runtime`              | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler      |
+| `assistant-tool-executor`        | `crates/tool-executor`                 | ToolHandler registry, builtin tools, dispatch              |
+| `assistant-mcp-server`           | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                              |
+| `assistant-mcp-client`           | `crates/mcp-client`                    | MCP client for external MCP server connections             |
+| `assistant-cli`                  | `crates/interface-cli`                 | Unified binary: REPL + subcommands                         |
+| `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot library                                          |
+| `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot library                                     |
+| `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot                                 |
+| `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface stub (feature-gated)                      |
+| `assistant-web-ui`               | `crates/web-ui`                        | Trace analysis web UI + A2A protocol server                |
+| `assistant-transcription`        | `crates/transcription`                 | Voice transcription providers (Whisper, Ollama, etc)       |
+| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`               | A2A protocol JSON Schema types                             |
+| `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite` | SQLite exporter for OpenTelemetry spans/logs               |
+| `assistant-integration-tests`    | `crates/integration-tests`             | End-to-end smoke tests                                     |
 
 Dependency order (no cycles):
+
 ```
 interface-cli -> runtime -> llm -> core
-                    |         '-> provider-ollama, provider-anthropic, provider-openai
+                    |         '-> provider-ollama, provider-anthropic, provider-openai, provider-moonshot
                     |-> storage -> core
+                    |-> bus-nats -> core  (optional, feature = "nats")
                     |-> tool-executor -> core, storage, llm
-                    '-> mcp-server, interface-slack, interface-mattermost (optional features)
+                    '-> mcp-server, interface-slack, interface-mattermost, interface-nextcloud (optional features)
 ```
 
 ## Code Style
@@ -71,12 +78,14 @@ Default `cargo fmt` (no `rustfmt.toml`). Default clippy with `-D warnings` (all 
 ### Imports
 
 Standard Rust ordering enforced by `cargo fmt`:
+
 1. `std` imports
 2. External crate imports
 3. Workspace crate imports (`assistant_*`)
 4. `crate::` / `self::` imports
 
 Separate groups with blank lines:
+
 ```rust
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -107,16 +116,16 @@ use crate::helpers::build_context;
 ### Naming Conventions
 
 | Element          | Convention         | Example                                      |
-|------------------|--------------------|----------------------------------------------|
-| Crate names      | `assistant-*`      | `assistant-core`, `assistant-tool-executor`   |
-| Module files     | `snake_case`       | `skill_registry.rs`, `tool_executor.rs`       |
-| Structs          | `PascalCase`       | `ToolExecutor`, `FileReadHandler`             |
-| Traits           | `PascalCase`       | `ToolHandler`, `LlmProvider`                  |
-| Handler structs  | `<Feature>Handler` | `FileReadHandler`, `BashHandler`              |
-| Tool names (str) | `kebab-case`       | `"file-read"`, `"web-fetch"`, `"memory-get"`  |
-| Skill names      | `kebab-case`       | Must match directory name exactly              |
-| Constants        | `SCREAMING_SNAKE`  | `DEFAULT_LIMIT`, `BOOTSTRAP_MAX_CHARS`        |
-| Enum variants    | `PascalCase`       | `MessageRole::User`, `Interface::Cli`         |
+| ---------------- | ------------------ | -------------------------------------------- |
+| Crate names      | `assistant-*`      | `assistant-core`, `assistant-tool-executor`  |
+| Module files     | `snake_case`       | `skill_registry.rs`, `tool_executor.rs`      |
+| Structs          | `PascalCase`       | `ToolExecutor`, `FileReadHandler`            |
+| Traits           | `PascalCase`       | `ToolHandler`, `LlmProvider`                 |
+| Handler structs  | `<Feature>Handler` | `FileReadHandler`, `BashHandler`             |
+| Tool names (str) | `kebab-case`       | `"file-read"`, `"web-fetch"`, `"memory-get"` |
+| Skill names      | `kebab-case`       | Must match directory name exactly            |
+| Constants        | `SCREAMING_SNAKE`  | `DEFAULT_LIMIT`, `BOOTSTRAP_MAX_CHARS`       |
+| Enum variants    | `PascalCase`       | `MessageRole::User`, `Interface::Cli`        |
 
 ### Type Patterns
 

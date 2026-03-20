@@ -579,7 +579,36 @@ async fn bootstrap(
     ));
 
     // Build message bus.
-    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+    // When the `nats` feature is enabled and `[bus] kind = "nats"` is
+    // configured, use NATS JetStream to avoid SQLite write-lock contention
+    // between the bus and the rest of the storage layer.  Otherwise fall
+    // back to the SQLite-backed bus.
+    let bus: Arc<dyn MessageBus> = {
+        #[cfg(feature = "nats")]
+        {
+            use assistant_core::BusKind;
+            if config.bus.kind == BusKind::Nats {
+                info!("Using NATS message bus");
+                Arc::new(
+                    assistant_bus_nats::NatsMessageBus::connect(&config.bus)
+                        .await
+                        .context("failed to connect to NATS")?,
+                )
+            } else {
+                Arc::new(storage.message_bus())
+            }
+        }
+        #[cfg(not(feature = "nats"))]
+        {
+            use assistant_core::BusKind;
+            if config.bus.kind == BusKind::Nats {
+                anyhow::bail!(
+                    "[bus] kind = \"nats\" configured but this binary was built without the `nats` feature"
+                );
+            }
+            Arc::new(storage.message_bus())
+        }
+    };
 
     // Build orchestrator.
     let orchestrator = Arc::new(

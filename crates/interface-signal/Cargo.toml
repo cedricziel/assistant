@@ -9,7 +9,9 @@ description = "Signal messenger interface for the assistant (feature-gated)"
 # Build with:
 #   cargo build -p assistant-interface-signal --features signal
 [features]
+default = ["nats"]
 signal = ["dep:presage", "dep:presage-store-sqlite"]
+nats = ["dep:assistant-bus-nats"]
 
 [dependencies]
 assistant-core = { path = "../core" }
@@ -32,6 +34,7 @@ dirs = { workspace = true }
 toml = { workspace = true }
 futures = { workspace = true }
 qr2term = { workspace = true }
+assistant-bus-nats = { path = "../bus-nats", optional = true }
 presage = { git = "https://github.com/whisperfish/presage", branch = "main", optional = true }
 presage-store-sqlite = { git = "https://github.com/whisperfish/presage", branch = "main", optional = true }
 

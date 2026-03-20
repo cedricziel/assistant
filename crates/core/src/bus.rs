@@ -272,6 +272,11 @@ impl ClaimFilter {
 /// not acknowledged within a reasonable timeout should be reclaimed via
 /// [`reap_stale`](MessageBus::reap_stale).
 ///
+/// Some method semantics are backend-specific. In particular,
+/// [`list`](MessageBus::list), [`reap_stale`](MessageBus::reap_stale), and
+/// [`purge`](MessageBus::purge) may have implementation-defined behavior
+/// depending on broker capabilities (e.g. SQLite vs JetStream).
+///
 /// # Routing model
 ///
 /// Topics represent *message types* (e.g. `turn.request`, `tool.execute`).
@@ -316,7 +321,9 @@ pub trait MessageBus: Send + Sync {
 
     /// Query messages on a topic, optionally filtered by status.
     ///
-    /// Results are ordered oldest-first (`created_at ASC`).
+    /// For backends that expose persisted message history, results should be
+    /// ordered oldest-first (`created_at ASC`). Backends may return a
+    /// best-effort subset when full historical queries are not supported.
     async fn list(
         &self,
         topic: &str,
@@ -325,10 +332,16 @@ pub trait MessageBus: Send + Sync {
     ) -> Result<Vec<BusMessage>>;
 
     /// Reclaim messages that were claimed longer than `timeout` ago but
-    /// never acknowledged.  Returns the number of messages reset to pending.
+    /// never acknowledged. Returns the number of messages reset to pending.
+    ///
+    /// Backends with broker-managed visibility/lease timeouts may implement
+    /// this as a no-op.
     async fn reap_stale(&self, timeout: Duration) -> Result<u64>;
 
     /// Delete completed (`Done`) messages older than `older_than`.
     /// Returns the number of messages purged.
+    ///
+    /// Backends with broker-managed retention windows may implement this as a
+    /// no-op.
     async fn purge(&self, older_than: DateTime<Utc>) -> Result<u64>;
 }

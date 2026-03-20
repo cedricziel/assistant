@@ -10,6 +10,12 @@ license: "MIT"
 depends:
   - ffmpeg
 
+# Optional: only needed when [bus] kind = "nats" is configured.
+# nats-server is the NATS JetStream server that the assistant connects to
+# as a client via the async-nats library compiled into the binary.
+suggests:
+  - nats-server
+
 scripts:
   postinstall: packaging/scripts/postinstall.sh
   preremove: packaging/scripts/preremove.sh

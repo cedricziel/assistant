@@ -66,7 +66,7 @@ AssistantConfig        (load from ~/.assistant/config.toml)
   -> SkillRegistry     (load embedded + dir-scanned skills)
   -> LlmProvider       (Ollama / Anthropic / OpenAI)
   -> ToolExecutor      (storage, llm, registry, config)
-  -> MessageBus        (storage.message_bus())
+  -> MessageBus        (if config.bus.kind == "nats": NatsMessageBus::connect(&config.bus), else storage.message_bus())
   -> Orchestrator      (llm, storage, executor, registry, bus, config)
   -> executor.set_subagent_runner(orchestrator)   // break init cycle
 ```

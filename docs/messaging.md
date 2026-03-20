@@ -6,9 +6,15 @@ multi-agent, multi-user, multi-interface communication.
 ## Architecture
 
 The bus is defined as a backend-agnostic trait (`MessageBus`) in
-`assistant-core` with an SQLite implementation (`SqliteMessageBus`) in
-`assistant-storage`. The trait can be swapped for NATS, Redis Streams,
-or any other broker without changing consumers.
+`assistant-core` with two implementations:
+
+- **`SqliteMessageBus`** in `assistant-storage` (default) — uses the shared
+  SQLite pool. Fine for tens of concurrent conversations.
+- **`NatsMessageBus`** in `assistant-bus-nats` (optional, `nats` feature) —
+  NATS JetStream backend that eliminates SQLite write-lock contention.
+
+The trait can also be extended for Redis Streams or any other broker
+without changing consumers.
 
 ```text
                          +-----------+
@@ -19,8 +25,8 @@ or any other broker without changing consumers.
                   |                         |
           +-------+--------+      +--------+-------+
           |SqliteMessageBus|      | NatsMessageBus |
-          |(assistant-      |      | (future)       |
-          | storage)        |      |                |
+          |(assistant-      |      |(assistant-     |
+          | storage)        |      | bus-nats)      |
           +----------------+      +----------------+
 ```
 
@@ -44,17 +50,17 @@ agents or users exist. Consumers filter what they care about at claim time.
 
 ## Topics
 
-| Topic             | Producer       | Consumer          | Purpose                             |
-|-------------------|----------------|-------------------|-------------------------------------|
-| `turn.request`    | Interface      | Orchestrator      | User sent a message                 |
-| `turn.status`     | Orchestrator   | Interface         | Status update (thinking, tools ...) |
-| `turn.result`     | Orchestrator   | Interface         | Final answer ready                  |
-| `tool.execute`    | Orchestrator   | Tool executor     | Run a tool                          |
-| `tool.result`     | Tool executor  | Orchestrator      | Tool output                         |
-| `agent.spawn`     | Agent          | Agent supervisor  | Create a sub-agent                  |
-| `agent.report`    | Sub-agent      | Parent agent      | Sub-agent finished                  |
-| `agent.terminate` | Supervisor     | Agent             | Shut down an agent                  |
-| `schedule.trigger`| Scheduler      | Orchestrator      | Cron task fired                     |
+| Topic              | Producer      | Consumer         | Purpose                             |
+| ------------------ | ------------- | ---------------- | ----------------------------------- |
+| `turn.request`     | Interface     | Orchestrator     | User sent a message                 |
+| `turn.status`      | Orchestrator  | Interface        | Status update (thinking, tools ...) |
+| `turn.result`      | Orchestrator  | Interface        | Final answer ready                  |
+| `tool.execute`     | Orchestrator  | Tool executor    | Run a tool                          |
+| `tool.result`      | Tool executor | Orchestrator     | Tool output                         |
+| `agent.spawn`      | Agent         | Agent supervisor | Create a sub-agent                  |
+| `agent.report`     | Sub-agent     | Parent agent     | Sub-agent finished                  |
+| `agent.terminate`  | Supervisor    | Agent            | Shut down an agent                  |
+| `schedule.trigger` | Scheduler     | Orchestrator     | Cron task fired                     |
 
 ## Typed Envelopes
 
@@ -62,15 +68,15 @@ Each topic has a corresponding Rust struct in `assistant_core::bus_messages`
 that defines the payload shape at compile time. Topic names are constants in
 `assistant_core::topic`.
 
-| Topic               | Constant                | Envelope struct    |
-|----------------------|-------------------------|--------------------|
-| `turn.request`       | `topic::TURN_REQUEST`   | `TurnRequest`      |
-| `turn.result`        | `topic::TURN_RESULT`    | `TurnResult`       |
-| `turn.status`        | `topic::TURN_STATUS`    | `TurnStatus`       |
-| `tool.execute`       | `topic::TOOL_EXECUTE`   | `ToolExecute`      |
-| `tool.result`        | `topic::TOOL_RESULT`    | `ToolResult`       |
-| `agent.spawn`        | `topic::AGENT_SPAWN`    | `AgentSpawn`       |
-| `agent.report`       | `topic::AGENT_REPORT`   | `AgentReport`      |
+| Topic          | Constant              | Envelope struct |
+| -------------- | --------------------- | --------------- |
+| `turn.request` | `topic::TURN_REQUEST` | `TurnRequest`   |
+| `turn.result`  | `topic::TURN_RESULT`  | `TurnResult`    |
+| `turn.status`  | `topic::TURN_STATUS`  | `TurnStatus`    |
+| `tool.execute` | `topic::TOOL_EXECUTE` | `ToolExecute`   |
+| `tool.result`  | `topic::TOOL_RESULT`  | `ToolResult`    |
+| `agent.spawn`  | `topic::AGENT_SPAWN`  | `AgentSpawn`    |
+| `agent.report` | `topic::AGENT_REPORT` | `AgentReport`   |
 
 ### Publishing with typed envelopes
 
@@ -108,22 +114,26 @@ if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
 ### Available envelopes
 
 **`TurnRequest`** -- user or agent initiates a turn:
+
 - `prompt: String` -- the user's message
 - `conversation_id: Uuid`
 - `extension_tools: Vec<String>` -- interface-provided tools (default empty)
 
 **`TurnResult`** -- agent's final answer:
+
 - `conversation_id: Uuid`
 - `content: String`
 - `turn: i64`
 - `attachments: Vec<Attachment>` -- file attachments from tool outputs (default empty)
 
 **`TurnStatus`** -- progress update during a turn:
+
 - `conversation_id: Uuid`
 - `phase: TurnPhase` -- `Thinking`, `CallingTools`, or `Responding`
 - `detail: Option<String>` -- e.g. which tool is running
 
 **`ToolExecute`** -- run a single tool:
+
 - `tool_name: String` -- kebab-case tool name
 - `call_id: String` -- LLM's tool call ID for correlation
 - `params: HashMap<String, Value>`
@@ -131,6 +141,7 @@ if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
 - `turn: i64`
 
 **`ToolResult`** -- output from a tool execution:
+
 - `tool_name: String`
 - `call_id: String` -- matches `ToolExecute::call_id`
 - `content: String`
@@ -138,6 +149,7 @@ if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
 - `data: Option<Value>`
 
 **`AgentSpawn`** -- create a sub-agent:
+
 - `agent_id: String`
 - `task: String`
 - `system_prompt: Option<String>`
@@ -145,6 +157,7 @@ if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
 - `allowed_tools: Vec<String>` -- empty = all tools
 
 **`AgentReport`** -- sub-agent reports back:
+
 - `status: AgentReportStatus` -- `Completed`, `Failed`, or `Cancelled`
 - `content: String`
 - `data: Option<Value>`
@@ -155,26 +168,26 @@ Every message carries three categories of metadata alongside the payload:
 
 ### Identity -- who is involved
 
-| Field      | Type            | Purpose                                  |
-|------------|-----------------|------------------------------------------|
-| `user_id`  | `Option<String>`| User who initiated the chain of work     |
-| `agent_id` | `Option<String>`| Agent that produced or should consume it |
+| Field      | Type             | Purpose                                  |
+| ---------- | ---------------- | ---------------------------------------- |
+| `user_id`  | `Option<String>` | User who initiated the chain of work     |
+| `agent_id` | `Option<String>` | Agent that produced or should consume it |
 
 ### Routing -- where it goes
 
-| Field             | Type            | Purpose                                      |
-|-------------------|-----------------|----------------------------------------------|
-| `conversation_id` | `Option<Uuid>`  | Conversation thread                          |
-| `interface`       | `Option<String>`| Originating interface (cli, slack, ...)       |
-| `reply_to`        | `Option<String>`| Topic for the consumer to send responses to  |
+| Field             | Type             | Purpose                                     |
+| ----------------- | ---------------- | ------------------------------------------- |
+| `conversation_id` | `Option<Uuid>`   | Conversation thread                         |
+| `interface`       | `Option<String>` | Originating interface (cli, slack, ...)     |
+| `reply_to`        | `Option<String>` | Topic for the consumer to send responses to |
 
 ### Correlation -- how messages relate
 
-| Field            | Type           | Purpose                                         |
-|------------------|----------------|-------------------------------------------------|
-| `correlation_id` | `Option<Uuid>` | Traces the entire request chain end-to-end      |
-| `causation_id`   | `Option<Uuid>` | Links to the specific message that caused this  |
-| `batch_id`       | `Option<Uuid>` | Groups parallel fan-out (e.g. N tool calls)     |
+| Field            | Type           | Purpose                                        |
+| ---------------- | -------------- | ---------------------------------------------- |
+| `correlation_id` | `Option<Uuid>` | Traces the entire request chain end-to-end     |
+| `causation_id`   | `Option<Uuid>` | Links to the specific message that caused this |
+| `batch_id`       | `Option<Uuid>` | Groups parallel fan-out (e.g. N tool calls)    |
 
 ## Publishing
 
@@ -380,28 +393,46 @@ CREATE TABLE bus_messages (
 
 ### Performance characteristics
 
-| Operation        | Complexity | Notes                                     |
-|------------------|------------|-------------------------------------------|
-| `publish`        | O(1)       | Single INSERT                             |
-| `claim`          | O(1)       | Indexed subquery + UPDATE                 |
-| `claim_filtered` | O(1)       | Partial index on (topic, agent, status)   |
-| `ack/nack/fail`  | O(1)       | UPDATE by primary key                     |
-| `reap_stale`     | O(stale)   | Partial index on (status, claimed_at)     |
-| `purge`          | O(purged)  | Scan on status + created_at               |
+| Operation        | Complexity | Notes                                   |
+| ---------------- | ---------- | --------------------------------------- |
+| `publish`        | O(1)       | Single INSERT                           |
+| `claim`          | O(1)       | Indexed subquery + UPDATE               |
+| `claim_filtered` | O(1)       | Partial index on (topic, agent, status) |
+| `ack/nack/fail`  | O(1)       | UPDATE by primary key                   |
+| `reap_stale`     | O(stale)   | Partial index on (status, claimed_at)   |
+| `purge`          | O(purged)  | Scan on status + created_at             |
 
 SQLite serialises writes. This is fine for tens of concurrent conversations.
-For hundreds+, swap to NATS or Postgres.
+For hundreds+, enable the NATS backend via `[bus] kind = "nats"` (see below).
+
+## NATS Backend Configuration
+
+The NATS backend is implemented in `assistant-bus-nats` and wired into the
+interface binaries. It is enabled by default in the primary binaries; set
+`[bus] kind = "nats"` to activate it at runtime:
+
+```toml
+[bus]
+kind = "nats"
+nats_url = "nats://localhost:4222"   # or NATS_URL env var
+
+# Optional auth (priority: creds file > token > username/password)
+# credentials_file = "/path/to/nats.creds"  # or NATS_CREDENTIALS_FILE
+# token = "t0k3n!"                          # or NATS_TOKEN
+# username = "myuser"                      # or NATS_USER
+# password = "s3cret"                      # or NATS_PASSWORD
+```
 
 ## What Stays Off the Bus
 
 Not everything benefits from indirection:
 
-| Component         | Stays on          | Reason                                    |
-|-------------------|-------------------|-------------------------------------------|
-| Token streaming   | `tokio::sync::mpsc` | Ephemeral, high-throughput, backpressure |
-| Storage reads     | `Arc<StorageLayer>` | Stateless queries, no routing needed     |
-| Skill registry    | `Arc<SkillRegistry>`| In-memory cache, read-only hot path      |
-| Shutdown signals  | `tokio::sync::watch` | Process-local, single value             |
+| Component        | Stays on             | Reason                                   |
+| ---------------- | -------------------- | ---------------------------------------- |
+| Token streaming  | `tokio::sync::mpsc`  | Ephemeral, high-throughput, backpressure |
+| Storage reads    | `Arc<StorageLayer>`  | Stateless queries, no routing needed     |
+| Skill registry   | `Arc<SkillRegistry>` | In-memory cache, read-only hot path      |
+| Shutdown signals | `tokio::sync::watch` | Process-local, single value              |
 
 ## Testing
 
@@ -420,4 +451,6 @@ Run the bus tests:
 
 ```sh
 cargo test -p assistant-storage message_bus
+cargo test -p assistant-bus-nats
+cargo test -p assistant-bus-nats -- --ignored --nocapture   # requires Docker
 ```
