@@ -600,6 +600,12 @@ async fn bootstrap(
         }
         #[cfg(not(feature = "nats"))]
         {
+            use assistant_core::BusKind;
+            if config.bus.kind == BusKind::Nats {
+                anyhow::bail!(
+                    "[bus] kind = \"nats\" configured but this binary was built without the `nats` feature"
+                );
+            }
             Arc::new(storage.message_bus())
         }
     };

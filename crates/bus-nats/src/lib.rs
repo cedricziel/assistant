@@ -74,6 +74,14 @@ const STREAM_MAX_AGE: Duration = Duration::from_secs(86_400); // 24 h
 /// fewer messages than `FETCH_BATCH`.
 const FETCH_EXPIRES: Duration = Duration::from_secs(5);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResolvedNatsAuth {
+    CredentialsFile(String),
+    Token(String),
+    UserPassword { username: String, password: String },
+    None,
+}
+
 // -- NatsMessageBus ---------------------------------------------------------
 
 /// NATS JetStream implementation of [`MessageBus`].
@@ -99,11 +107,7 @@ impl NatsMessageBus {
     /// 3. `username`+`password` / `NATS_USER`+`NATS_PASSWORD` — basic auth
     /// 4. No auth (unauthenticated connection)
     pub async fn connect(config: &BusConfig) -> Result<Self> {
-        let url = config
-            .nats_url
-            .clone()
-            .or_else(|| std::env::var("NATS_URL").ok())
-            .unwrap_or_else(|| "nats://localhost:4222".to_string());
+        let url = resolve_nats_url_with(config, |key| std::env::var(key).ok());
 
         let opts = Self::build_connect_options(config).await?;
 
@@ -146,39 +150,26 @@ impl NatsMessageBus {
     /// Build [`async_nats::ConnectOptions`] from the config, resolving env
     /// var fallbacks for each credential field.
     async fn build_connect_options(config: &BusConfig) -> Result<async_nats::ConnectOptions> {
-        // Resolve each credential field with env var fallback.
-        let creds_file = config
-            .credentials_file
-            .clone()
-            .or_else(|| std::env::var("NATS_CREDENTIALS_FILE").ok());
-        let token = config
-            .token
-            .clone()
-            .or_else(|| std::env::var("NATS_TOKEN").ok());
-        let username = config
-            .username
-            .clone()
-            .or_else(|| std::env::var("NATS_USER").ok());
-        let password = config
-            .password
-            .clone()
-            .or_else(|| std::env::var("NATS_PASSWORD").ok());
+        let auth = resolve_nats_auth_with(config, |key| std::env::var(key).ok());
 
-        // Priority: credentials file > token > user/password > none.
-        let opts = if let Some(path) = creds_file {
-            debug!(path = %path, "NATS auth: credentials file");
-            async_nats::ConnectOptions::with_credentials_file(&path)
-                .await
-                .map_err(|e| anyhow::anyhow!("failed to load NATS credentials file {path}: {e}"))?
-        } else if let Some(tok) = token {
-            debug!("NATS auth: token");
-            async_nats::ConnectOptions::with_token(tok)
-        } else if let Some(user) = username {
-            let pass = password.unwrap_or_default();
-            debug!(user = %user, "NATS auth: username/password");
-            async_nats::ConnectOptions::with_user_and_password(user, pass)
-        } else {
-            async_nats::ConnectOptions::new()
+        let opts = match auth {
+            ResolvedNatsAuth::CredentialsFile(path) => {
+                debug!(path = %path, "NATS auth: credentials file");
+                async_nats::ConnectOptions::with_credentials_file(&path)
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!("failed to load NATS credentials file {path}: {e}")
+                    })?
+            }
+            ResolvedNatsAuth::Token(tok) => {
+                debug!("NATS auth: token");
+                async_nats::ConnectOptions::with_token(tok)
+            }
+            ResolvedNatsAuth::UserPassword { username, password } => {
+                debug!(user = %username, "NATS auth: username/password");
+                async_nats::ConnectOptions::with_user_and_password(username, password)
+            }
+            ResolvedNatsAuth::None => async_nats::ConnectOptions::new(),
         };
 
         Ok(opts.name("assistant-bus"))
@@ -204,6 +195,47 @@ impl NatsMessageBus {
 
         Ok(consumer)
     }
+}
+
+fn resolve_nats_url_with<F>(config: &BusConfig, get_env: F) -> String
+where
+    F: Fn(&str) -> Option<String>,
+{
+    config
+        .nats_url
+        .clone()
+        .or_else(|| get_env("NATS_URL"))
+        .unwrap_or_else(|| "nats://localhost:4222".to_string())
+}
+
+fn resolve_nats_auth_with<F>(config: &BusConfig, get_env: F) -> ResolvedNatsAuth
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let creds_file = config
+        .credentials_file
+        .clone()
+        .or_else(|| get_env("NATS_CREDENTIALS_FILE"));
+    if let Some(path) = creds_file {
+        return ResolvedNatsAuth::CredentialsFile(path);
+    }
+
+    let token = config.token.clone().or_else(|| get_env("NATS_TOKEN"));
+    if let Some(tok) = token {
+        return ResolvedNatsAuth::Token(tok);
+    }
+
+    let username = config.username.clone().or_else(|| get_env("NATS_USER"));
+    if let Some(username) = username {
+        let password = config
+            .password
+            .clone()
+            .or_else(|| get_env("NATS_PASSWORD"))
+            .unwrap_or_default();
+        return ResolvedNatsAuth::UserPassword { username, password };
+    }
+
+    ResolvedNatsAuth::None
 }
 
 // -- MessageBus impl --------------------------------------------------------
@@ -590,6 +622,95 @@ mod tests {
     fn test_matches_filter_no_headers_non_empty_filter() {
         let filter = ClaimFilter::new().with_agent_id("x");
         assert!(!matches_filter(None, &filter));
+    }
+
+    #[test]
+    fn test_auth_resolution_prefers_credentials_file() {
+        let config = BusConfig {
+            token: Some("token-config".to_string()),
+            username: Some("user-config".to_string()),
+            password: Some("pass-config".to_string()),
+            credentials_file: Some("/config.creds".to_string()),
+            ..Default::default()
+        };
+
+        let auth = resolve_nats_auth_with(&config, |_| None);
+        assert_eq!(
+            auth,
+            ResolvedNatsAuth::CredentialsFile("/config.creds".to_string())
+        );
+    }
+
+    #[test]
+    fn test_auth_resolution_prefers_token_over_user_password() {
+        let config = BusConfig {
+            token: Some("token-config".to_string()),
+            username: Some("user-config".to_string()),
+            password: Some("pass-config".to_string()),
+            ..Default::default()
+        };
+
+        let auth = resolve_nats_auth_with(&config, |_| None);
+        assert_eq!(auth, ResolvedNatsAuth::Token("token-config".to_string()));
+    }
+
+    #[test]
+    fn test_auth_resolution_uses_env_fallbacks() {
+        let config = BusConfig::default();
+        let auth = resolve_nats_auth_with(&config, |key| match key {
+            "NATS_USER" => Some("env-user".to_string()),
+            "NATS_PASSWORD" => Some("env-pass".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(
+            auth,
+            ResolvedNatsAuth::UserPassword {
+                username: "env-user".to_string(),
+                password: "env-pass".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_auth_resolution_env_precedence_credentials_over_token() {
+        let config = BusConfig::default();
+        let auth = resolve_nats_auth_with(&config, |key| match key {
+            "NATS_CREDENTIALS_FILE" => Some("/env.creds".to_string()),
+            "NATS_TOKEN" => Some("env-token".to_string()),
+            "NATS_USER" => Some("env-user".to_string()),
+            "NATS_PASSWORD" => Some("env-pass".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(
+            auth,
+            ResolvedNatsAuth::CredentialsFile("/env.creds".to_string())
+        );
+    }
+
+    #[test]
+    fn test_url_resolution_prefers_config_then_env_then_default() {
+        let config_url = BusConfig {
+            nats_url: Some("nats://config:4222".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_nats_url_with(&config_url, |_| Some("nats://env:4222".to_string())),
+            "nats://config:4222"
+        );
+
+        let env_only = BusConfig::default();
+        assert_eq!(
+            resolve_nats_url_with(&env_only, |_| Some("nats://env:4222".to_string())),
+            "nats://env:4222"
+        );
+
+        let none = BusConfig::default();
+        assert_eq!(
+            resolve_nats_url_with(&none, |_| None),
+            "nats://localhost:4222"
+        );
     }
 
     // -- Integration tests (require Docker) ---------------------------------
