@@ -74,6 +74,45 @@ impl LogStore {
         rows.into_iter().map(Self::row_to_log).collect()
     }
 
+    /// Return recent logs scoped to a specific assistant agent.
+    pub async fn list_recent_for_agent(
+        &self,
+        limit: i64,
+        min_severity: Option<i32>,
+        target_filter: Option<&str>,
+        search: Option<&str>,
+        trace_id: Option<&str>,
+        agent_id: &str,
+    ) -> Result<Vec<RecordedLog>> {
+        let rows = sqlx::query(
+            "SELECT l.id, l.timestamp, l.observed_timestamp, l.severity_number, l.severity_text, \
+                    l.body, l.trace_id, l.span_id, l.target, l.attributes \
+             FROM logs l \
+             WHERE (?1 IS NULL OR l.severity_number >= ?1) \
+               AND (?2 IS NULL OR l.target = ?2) \
+               AND (?3 IS NULL OR l.body LIKE '%' || ?3 || '%') \
+               AND (?4 IS NULL OR l.trace_id = ?4) \
+               AND EXISTS ( \
+                   SELECT 1 \
+                   FROM distributed_traces dt \
+                   INNER JOIN conversations c ON c.id = dt.conversation_id \
+                   WHERE dt.trace_id = l.trace_id AND c.agent_id = ?5 \
+               ) \
+             ORDER BY l.timestamp DESC \
+             LIMIT ?6",
+        )
+        .bind(min_severity)
+        .bind(target_filter)
+        .bind(search)
+        .bind(trace_id)
+        .bind(agent_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(Self::row_to_log).collect()
+    }
+
     /// Return all log records for a specific trace, ordered by time.
     pub async fn list_by_trace(&self, trace_id: &str) -> Result<Vec<RecordedLog>> {
         let rows = sqlx::query(
@@ -105,6 +144,28 @@ impl LogStore {
         row.map(Self::row_to_log).transpose()
     }
 
+    /// Fetch one log record constrained to a specific assistant agent.
+    pub async fn get_log_for_agent(&self, id: &str, agent_id: &str) -> Result<Option<RecordedLog>> {
+        let row = sqlx::query(
+            "SELECT l.id, l.timestamp, l.observed_timestamp, l.severity_number, l.severity_text, \
+                    l.body, l.trace_id, l.span_id, l.target, l.attributes \
+             FROM logs l \
+             WHERE l.id = ?1 \
+               AND EXISTS ( \
+                   SELECT 1 \
+                   FROM distributed_traces dt \
+                   INNER JOIN conversations c ON c.id = dt.conversation_id \
+                   WHERE dt.trace_id = l.trace_id AND c.agent_id = ?2 \
+               )",
+        )
+        .bind(id)
+        .bind(agent_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(Self::row_to_log).transpose()
+    }
+
     /// List distinct targets that have recorded logs.
     pub async fn list_targets(&self) -> Result<Vec<String>> {
         let rows = sqlx::query(
@@ -113,6 +174,30 @@ impl LogStore {
              WHERE target IS NOT NULL \
              ORDER BY target",
         )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.try_get::<Option<String>, _>("target").ok().flatten())
+            .collect())
+    }
+
+    /// List distinct targets with logs belonging to one assistant agent.
+    pub async fn list_targets_for_agent(&self, agent_id: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT DISTINCT l.target \
+             FROM logs l \
+             WHERE l.target IS NOT NULL \
+               AND EXISTS ( \
+                   SELECT 1 \
+                   FROM distributed_traces dt \
+                   INNER JOIN conversations c ON c.id = dt.conversation_id \
+                   WHERE dt.trace_id = l.trace_id AND c.agent_id = ?1 \
+               ) \
+             ORDER BY l.target",
+        )
+        .bind(agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -135,6 +220,40 @@ impl LogStore {
                 SUM(CASE WHEN severity_number >= 21 THEN 1 ELSE 0 END) AS fatal_count \
              FROM logs",
         )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(LogStats {
+            total: row.try_get("total").unwrap_or(0),
+            trace_count: row.try_get("trace_count").unwrap_or(0),
+            debug_count: row.try_get("debug_count").unwrap_or(0),
+            info_count: row.try_get("info_count").unwrap_or(0),
+            warn_count: row.try_get("warn_count").unwrap_or(0),
+            error_count: row.try_get("error_count").unwrap_or(0),
+            fatal_count: row.try_get("fatal_count").unwrap_or(0),
+        })
+    }
+
+    /// Compute aggregate log statistics for one assistant agent.
+    pub async fn stats_for_agent(&self, agent_id: &str) -> Result<LogStats> {
+        let row = sqlx::query(
+            "SELECT \
+                COUNT(*) AS total, \
+                SUM(CASE WHEN l.severity_number BETWEEN 1 AND 4 THEN 1 ELSE 0 END) AS trace_count, \
+                SUM(CASE WHEN l.severity_number BETWEEN 5 AND 8 THEN 1 ELSE 0 END) AS debug_count, \
+                SUM(CASE WHEN l.severity_number BETWEEN 9 AND 12 THEN 1 ELSE 0 END) AS info_count, \
+                SUM(CASE WHEN l.severity_number BETWEEN 13 AND 16 THEN 1 ELSE 0 END) AS warn_count, \
+                SUM(CASE WHEN l.severity_number BETWEEN 17 AND 20 THEN 1 ELSE 0 END) AS error_count, \
+                SUM(CASE WHEN l.severity_number >= 21 THEN 1 ELSE 0 END) AS fatal_count \
+             FROM logs l \
+             WHERE EXISTS ( \
+                 SELECT 1 \
+                 FROM distributed_traces dt \
+                 INNER JOIN conversations c ON c.id = dt.conversation_id \
+                 WHERE dt.trace_id = l.trace_id AND c.agent_id = ?1 \
+             )",
+        )
+        .bind(agent_id)
         .fetch_one(&self.pool)
         .await?;
 

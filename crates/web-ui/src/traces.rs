@@ -149,7 +149,7 @@ async fn show_dashboard(
     let min_duration_ms = query.min_duration_ms;
 
     let all_traces = store
-        .list_recent_traces(state.trace_limit, None)
+        .list_recent_traces_for_agent(state.trace_limit, None, &state.agent_id)
         .await
         .map_err(internal_error)?;
     let total_count = all_traces.len();
@@ -226,7 +226,10 @@ async fn show_trace_detail(
     Path(trace_id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
     let store = TraceStore::new(state.pool.clone());
-    let spans = store.get_trace(&trace_id).await.map_err(internal_error)?;
+    let spans = store
+        .get_trace_for_agent(&trace_id, &state.agent_id)
+        .await
+        .map_err(internal_error)?;
     if spans.is_empty() {
         return Err((
             StatusCode::NOT_FOUND,

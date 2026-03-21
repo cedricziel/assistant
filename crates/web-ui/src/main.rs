@@ -104,6 +104,7 @@ struct Args {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) pool: SqlitePool,
+    pub(crate) agent_id: String,
     pub(crate) trace_limit: i64,
     pub(crate) log_limit: i64,
     pub(crate) bus_kind: BusKind,
@@ -202,6 +203,7 @@ async fn main() -> Result<()> {
 
     let state = AppState {
         pool: storage.pool.clone(),
+        agent_id: selected_agent.clone(),
         trace_limit: args.trace_limit,
         log_limit: args.log_limit,
         bus_kind: config.bus.kind.clone(),

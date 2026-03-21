@@ -143,18 +143,25 @@ async fn show_logs(
         .filter(|s| !s.is_empty());
 
     let logs = store
-        .list_recent(
+        .list_recent_for_agent(
             state.log_limit,
             min_severity,
             target_filter,
             search,
             trace_id,
+            &state.agent_id,
         )
         .await
         .map_err(internal_error)?;
 
-    let stats = store.stats().await.map_err(internal_error)?;
-    let targets = store.list_targets().await.map_err(internal_error)?;
+    let stats = store
+        .stats_for_agent(&state.agent_id)
+        .await
+        .map_err(internal_error)?;
+    let targets = store
+        .list_targets_for_agent(&state.agent_id)
+        .await
+        .map_err(internal_error)?;
 
     let severity_options = build_severity_options(&stats, severity_label);
     let target_facets =
@@ -184,7 +191,7 @@ async fn show_log_detail(
 ) -> Result<Response, (StatusCode, String)> {
     let store = LogStore::new(state.pool.clone());
     let log = store
-        .get_log(&log_id)
+        .get_log_for_agent(&log_id, &state.agent_id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Log {} not found", log_id)))?;
