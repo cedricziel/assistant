@@ -1,0 +1,81 @@
+{% extends "base.html" %} {% block title %}Contexts{% endblock %} {% block
+breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Contexts</span>
+{% endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Contexts</h2>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Assistant Contexts</h2>
+          <p>Choose which context is default on startup.</p>
+        </div>
+        <span class="pill">{{ rows.len() }}</span>
+      </div>
+
+      {% if show_updated %}
+      <p class="empty" style="margin-bottom: 1rem; color: var(--ok)">
+        Default context updated. Restart the web UI to switch the live session.
+      </p>
+      {% endif %}
+
+      <p class="empty" style="margin-bottom: 1rem">
+        Running now: <strong>{{ current_agent }}</strong> · Startup default:
+        <strong>{{ default_agent }}</strong>
+      </p>
+
+      <table class="trace-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td><span class="trace-id">{{ row.id }}</span></td>
+            <td><span class="primary">{{ row.name }}</span></td>
+            <td>
+              {% if row.is_current %}
+              <span class="hdr-badge ok">running</span>
+              {% endif %} {% if row.is_default %}
+              <span class="hdr-badge">default</span>
+              {% endif %} {% if !row.is_current && !row.is_default %}
+              <span class="badge muted">available</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.is_default %}
+              <span class="badge muted">Default</span>
+              {% else %}
+              <form
+                method="POST"
+                action="/contexts/{{ row.id }}/use"
+                style="margin: 0"
+              >
+                <button type="submit" class="action-btn">Set Default</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+{% endblock %}

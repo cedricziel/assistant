@@ -3,6 +3,7 @@ mod analytics;
 pub mod auth;
 mod chat;
 pub mod common;
+mod contexts;
 mod logs;
 mod pwa;
 pub(crate) mod static_assets;
@@ -449,6 +450,7 @@ async fn main() -> Result<()> {
         .merge(traces::traces_router())
         .merge(logs::logs_router())
         .merge(analytics::analytics_router())
+        .merge(contexts::contexts_router())
         .with_state(state)
         // A2A protocol routes (auth-protected endpoints only).
         .merge(a2a::protected_router().with_state(a2a_state))
