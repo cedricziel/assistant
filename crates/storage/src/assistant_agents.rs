@@ -68,6 +68,58 @@ impl AssistantAgentStore {
             .ok_or_else(|| anyhow::anyhow!("agent '{}' missing after ensure_exists", id))
     }
 
+    pub async fn list(&self) -> Result<Vec<AssistantAgentRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, name, is_default, created_at, updated_at
+             FROM assistant_agents
+             ORDER BY is_default DESC, id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(row_to_record).collect()
+    }
+
+    pub async fn set_default(&self, id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM assistant_agents WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if exists == 0 {
+            anyhow::bail!("agent '{}' does not exist", id);
+        }
+
+        sqlx::query("UPDATE assistant_agents SET is_default = 0, updated_at = CURRENT_TIMESTAMP")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "UPDATE assistant_agents
+             SET is_default = 1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn default_id(&self) -> Result<String> {
+        let id = sqlx::query_scalar::<_, String>(
+            "SELECT id
+             FROM assistant_agents
+             WHERE is_default = 1
+             LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or_else(|| "default".to_string());
+        Ok(id)
+    }
+
     pub async fn get(&self, id: &str) -> Result<Option<AssistantAgentRecord>> {
         let row = sqlx::query(
             "SELECT id, name, is_default, created_at, updated_at

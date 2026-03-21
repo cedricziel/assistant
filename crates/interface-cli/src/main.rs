@@ -76,6 +76,30 @@ enum Command {
     /// The bot receives messages via webhooks from the Nextcloud Talk server.
     #[cfg(feature = "nextcloud")]
     Nextcloud,
+    /// Manage assistant agent contexts.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentCommand {
+    /// List all configured agents.
+    List,
+    /// Create an agent context.
+    Create {
+        /// Agent ID (letters, numbers, '-', '_').
+        id: String,
+        /// Mark the created/existing agent as default.
+        #[arg(long)]
+        default: bool,
+    },
+    /// Set an existing agent as default.
+    Use {
+        /// Agent ID to mark as default.
+        id: String,
+    },
 }
 
 // ── CLI confirmation callback ─────────────────────────────────────────────────
@@ -321,6 +345,7 @@ fn print_help() {
          /skills [name]                 List all skills, or show detail for one\n\
          /review                       Review pending skill refinement proposals\n\
          /install <path|owner/repo>    Install a skill from disk or GitHub\n\
+         Agent management: run `assistant agent --help` in another shell\n\
          /model <name>                 Switch model (takes effect on next startup)\n\
          /help                         Show this help message\n\
          /quit | /exit                 Exit the assistant\n\
@@ -390,6 +415,71 @@ fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Re
     println!("\nDefaults restored. Assistant is ready for a fresh start.");
 
     Ok(())
+}
+
+async fn cmd_agent(db_path: &Path, command: &AgentCommand) -> Result<()> {
+    let storage = StorageLayer::new(db_path).await?;
+    let store = storage.assistant_agent_store();
+    store.ensure_default().await?;
+
+    match command {
+        AgentCommand::List => {
+            let items = store.list().await?;
+            if items.is_empty() {
+                println!("No agents configured.");
+                return Ok(());
+            }
+            println!("Configured agents:\n");
+            for item in items {
+                let marker = if item.is_default { "*" } else { " " };
+                println!("{marker} {:20} {}", item.id, item.name);
+            }
+            println!("\n* default");
+        }
+        AgentCommand::Create { id, default } => {
+            if !validate_agent_id(id) {
+                anyhow::bail!(
+                    "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
+                    id
+                );
+            }
+            store.ensure_exists(id).await?;
+            if *default {
+                store.set_default(id).await?;
+            }
+
+            let root = home_agent_root(id)?;
+            let workspace = default_workspace_dir(id);
+            tokio::fs::create_dir_all(&root).await?;
+            tokio::fs::create_dir_all(&workspace).await?;
+            println!("Agent '{}' is ready.", id);
+            if *default {
+                println!("Default agent set to '{}'.", id);
+            }
+        }
+        AgentCommand::Use { id } => {
+            if !validate_agent_id(id) {
+                anyhow::bail!(
+                    "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
+                    id
+                );
+            }
+            store.ensure_exists(id).await?;
+            store.set_default(id).await?;
+            let root = home_agent_root(id)?;
+            let workspace = default_workspace_dir(id);
+            tokio::fs::create_dir_all(&root).await?;
+            tokio::fs::create_dir_all(&workspace).await?;
+            println!("Default agent set to '{}'.", id);
+        }
+    }
+
+    Ok(())
+}
+
+fn home_agent_root(agent_id: &str) -> Result<PathBuf> {
+    let home = dirs::home_dir().context("Cannot determine home directory")?;
+    Ok(home.join(".assistant").join("agents").join(agent_id))
 }
 
 // ── Embedding provider factory ────────────────────────────────────────────────
@@ -710,6 +800,10 @@ async fn main() -> Result<()> {
     // 3. Handle Reset early — does not need heavy resources.
     if let Some(Command::Reset { yes }) = &cli.command {
         return cmd_reset(&db_path, &config, *yes);
+    }
+
+    if let Some(Command::Agent { command }) = &cli.command {
+        return cmd_agent(&db_path, command).await;
     }
 
     // 4. Prepare confirmation behavior before bootstrapping the stack.
