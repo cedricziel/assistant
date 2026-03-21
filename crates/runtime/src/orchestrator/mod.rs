@@ -183,6 +183,8 @@ pub struct Orchestrator {
     pub(crate) agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
     /// OTel metric instruments for GenAI and operational metrics.
     pub(crate) metrics: crate::MetricsRecorder,
+    /// Active assistant agent ID for memory/workspace conversation scoping.
+    pub(crate) agent_id: String,
 }
 
 impl Orchestrator {
@@ -211,6 +213,7 @@ impl Orchestrator {
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             metrics: crate::MetricsRecorder::new(),
+            agent_id: config.agent.id.clone(),
         }
     }
 
@@ -833,7 +836,7 @@ impl Orchestrator {
         conversation_id: Uuid,
         attachments: Vec<ContentBlock>,
     ) -> Result<(ConversationStore, Vec<ChatHistoryMessage>, i64)> {
-        let conv_store = self.storage.conversation_store();
+        let conv_store = self.storage.conversation_store_for_agent(&self.agent_id);
         conv_store
             .create_conversation_with_id(conversation_id, None)
             .await?;

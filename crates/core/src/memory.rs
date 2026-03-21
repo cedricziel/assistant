@@ -10,11 +10,13 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 
 use anyhow::Result;
 use chrono::Local;
 use tracing::{debug, warn};
 
+use crate::context::runtime_agent_root;
 use crate::types::{AssistantConfig, MemoryConfig};
 
 /// Maximum characters per individual memory file included in the system prompt.
@@ -37,6 +39,8 @@ const DEFAULT_BOOT: &str = include_str!("../templates/BOOT.md");
 /// Placeholder used in the default IDENTITY.md for unfilled fields and
 /// referenced in the system-prompt footer so both stay in sync.
 const IDENTITY_PLACEHOLDER: &str = "(not set)";
+
+static LEGACY_MEMORY_MIGRATION_ONCE: Once = Once::new();
 
 /// Loads and manages the assistant's persistent markdown memory files.
 pub struct MemoryLoader {
@@ -383,6 +387,10 @@ Read the file first with `memory-get` if unsure what text is there.\n\
     pub fn memory_path(&self) -> &Path {
         &self.memory_path
     }
+    /// Return the path to the daily notes directory.
+    pub fn notes_dir_path(&self) -> &Path {
+        &self.notes_dir
+    }
     /// Return the path to HEARTBEAT.md (used by the scheduler).
     pub fn heartbeat_path(&self) -> &Path {
         &self.heartbeat_path
@@ -453,11 +461,208 @@ Read the file first with `memory-get` if unsure what text is there.\n\
 
 // -- Helpers -----------------------------------------------------------------
 
-/// Return the default `~/.assistant/` base directory.
+/// Return the default `~/.assistant/agents/default/` base directory.
 pub fn base_dir() -> PathBuf {
+    if let Some(configured) = runtime_agent_root() {
+        if configured
+            .to_string_lossy()
+            .ends_with(".assistant/agents/default")
+        {
+            LEGACY_MEMORY_MIGRATION_ONCE.call_once(migrate_legacy_memory_layout);
+        }
+        return configured;
+    }
+    LEGACY_MEMORY_MIGRATION_ONCE.call_once(migrate_legacy_memory_layout);
     dirs::home_dir()
-        .map(|h| h.join(".assistant"))
-        .unwrap_or_else(|| PathBuf::from(".assistant"))
+        .map(|h| h.join(".assistant").join("agents").join("default"))
+        .unwrap_or_else(|| PathBuf::from(".assistant/agents/default"))
+}
+
+fn migrate_legacy_memory_layout() {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+
+    let legacy_root = home.join(".assistant");
+    let new_root = legacy_root.join("agents").join("default");
+
+    if let Err(e) = fs::create_dir_all(&new_root) {
+        warn!(
+            path = %new_root.display(),
+            error = %e,
+            "Failed to create default agent memory directory"
+        );
+        return;
+    }
+
+    for name in [
+        "AGENTS.md",
+        "SOUL.md",
+        "IDENTITY.md",
+        "USER.md",
+        "TOOLS.md",
+        "MEMORY.md",
+        "BOOTSTRAP.md",
+        "HEARTBEAT.md",
+        "BOOT.md",
+    ] {
+        let from = legacy_root.join(name);
+        let to = new_root.join(name);
+        move_path_if_needed(&from, &to);
+    }
+
+    let legacy_notes = legacy_root.join("memory");
+    let new_notes = new_root.join("memory");
+    move_dir_if_needed(&legacy_notes, &new_notes);
+}
+
+fn move_path_if_needed(from: &Path, to: &Path) {
+    if !from.exists() {
+        return;
+    }
+    if to.exists() {
+        warn!(
+            from = %from.display(),
+            to = %to.display(),
+            "Skipping legacy memory file move because destination already exists"
+        );
+        return;
+    }
+    if let Some(parent) = to.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            warn!(path = %parent.display(), error = %e, "Failed to create destination directory");
+            return;
+        }
+    }
+
+    match fs::rename(from, to) {
+        Ok(_) => {
+            debug!(from = %from.display(), to = %to.display(), "Moved legacy memory file");
+        }
+        Err(_) => {
+            if let Err(e) = fs::copy(from, to) {
+                warn!(
+                    from = %from.display(),
+                    to = %to.display(),
+                    error = %e,
+                    "Failed to copy legacy memory file"
+                );
+                let _ = fs::remove_file(to);
+                return;
+            }
+            if let Err(e) = fs::remove_file(from) {
+                warn!(
+                    path = %from.display(),
+                    error = %e,
+                    "Copied legacy memory file but failed to remove source"
+                );
+                return;
+            }
+            debug!(from = %from.display(), to = %to.display(), "Copied and removed legacy memory file");
+        }
+    }
+}
+
+fn move_dir_if_needed(from: &Path, to: &Path) {
+    if !from.exists() || !from.is_dir() {
+        return;
+    }
+
+    if !to.exists() {
+        if let Some(parent) = to.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                warn!(
+                    path = %parent.display(),
+                    error = %e,
+                    "Failed to create destination parent directory"
+                );
+                return;
+            }
+        }
+        match fs::rename(from, to) {
+            Ok(_) => {
+                debug!(from = %from.display(), to = %to.display(), "Moved legacy notes directory");
+                return;
+            }
+            Err(_) => {
+                if let Err(e) = copy_dir_recursive(from, to) {
+                    warn!(
+                        from = %from.display(),
+                        to = %to.display(),
+                        error = %e,
+                        "Failed to copy legacy notes directory"
+                    );
+                    return;
+                }
+                if let Err(e) = fs::remove_dir_all(from) {
+                    warn!(
+                        path = %from.display(),
+                        error = %e,
+                        "Copied legacy notes directory but failed to remove source"
+                    );
+                } else {
+                    debug!(
+                        from = %from.display(),
+                        to = %to.display(),
+                        "Copied and removed legacy notes directory"
+                    );
+                }
+                return;
+            }
+        }
+    }
+
+    match fs::read_dir(from) {
+        Ok(entries) => {
+            if let Err(e) = fs::create_dir_all(to) {
+                warn!(
+                    path = %to.display(),
+                    error = %e,
+                    "Failed to create destination notes directory"
+                );
+                return;
+            }
+            for entry in entries.flatten() {
+                let src = entry.path();
+                let dst = to.join(entry.file_name());
+                if src.is_dir() {
+                    move_dir_if_needed(&src, &dst);
+                } else {
+                    move_path_if_needed(&src, &dst);
+                }
+            }
+            if from
+                .read_dir()
+                .map(|mut it| it.next().is_none())
+                .unwrap_or(false)
+            {
+                let _ = fs::remove_dir(from);
+            }
+        }
+        Err(e) => {
+            warn!(
+                path = %from.display(),
+                error = %e,
+                "Failed to read legacy notes directory"
+            );
+        }
+    }
+}
+
+fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            copy_dir_recursive(&src, &dst)?;
+        } else {
+            fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
 }
 
 /// Resolve a memory file path from an optional config override, falling back
@@ -555,6 +760,7 @@ pub fn strip_html_comments(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn strip_comments_empty_input() {
@@ -612,5 +818,35 @@ mod tests {
     fn strip_comments_multiple_comments() {
         let input = "a <!-- x --> b <!-- y --> c";
         assert_eq!(strip_html_comments(input), "a  b  c");
+    }
+
+    #[test]
+    fn move_path_if_needed_moves_file_when_destination_missing() {
+        let dir = tempdir().expect("tempdir");
+        let from = dir.path().join("legacy.txt");
+        let to = dir.path().join("new").join("migrated.txt");
+        fs::write(&from, "hello").expect("write source");
+
+        move_path_if_needed(&from, &to);
+
+        assert!(!from.exists(), "source should be moved away");
+        let moved = fs::read_to_string(&to).expect("read moved file");
+        assert_eq!(moved, "hello");
+    }
+
+    #[test]
+    fn move_dir_if_needed_merges_files_into_existing_destination() {
+        let dir = tempdir().expect("tempdir");
+        let from = dir.path().join("legacy_memory");
+        let to = dir.path().join("agent_memory");
+        fs::create_dir_all(&from).expect("create source dir");
+        fs::create_dir_all(&to).expect("create destination dir");
+        fs::write(from.join("2026-01-01.md"), "legacy note").expect("write source note");
+
+        move_dir_if_needed(&from, &to);
+
+        let moved = fs::read_to_string(to.join("2026-01-01.md")).expect("read moved note");
+        assert_eq!(moved, "legacy note");
+        assert!(!from.exists(), "empty source directory should be removed");
     }
 }

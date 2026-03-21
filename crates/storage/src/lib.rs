@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod assistant_agents;
 pub mod conversations;
 pub mod logs;
 pub mod memory_chunks;
@@ -11,6 +12,7 @@ pub mod traces;
 pub mod webhooks;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
+pub use assistant_agents::{AssistantAgentRecord, AssistantAgentStore};
 pub use conversations::{ConversationRecord, ConversationStore};
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
@@ -71,6 +73,16 @@ impl StorageLayer {
     /// Convenience: build a `ConversationStore` backed by this pool.
     pub fn conversation_store(&self) -> ConversationStore {
         ConversationStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `ConversationStore` scoped to an assistant agent.
+    pub fn conversation_store_for_agent(&self, agent_id: &str) -> ConversationStore {
+        ConversationStore::for_agent(self.pool.clone(), agent_id)
+    }
+
+    /// Convenience: build an `AssistantAgentStore` backed by this pool.
+    pub fn assistant_agent_store(&self) -> AssistantAgentStore {
+        AssistantAgentStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `RefinementsStore` backed by this pool.
@@ -206,6 +218,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "016_webhooks",
             include_str!("../../../migrations/016_webhooks.sql"),
+        ),
+        (
+            "017_assistant_agents",
+            include_str!("../../../migrations/017_assistant_agents.sql"),
         ),
     ];
 

@@ -16,7 +16,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{BusKind, LlmProviderKind, MessageBus};
+use assistant_core::{
+    apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
+    validate_agent_id, BusKind, LlmProviderKind, MessageBus,
+};
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_moonshot::MoonshotProvider;
@@ -92,6 +95,10 @@ struct Args {
     /// Base URL for the LLM provider (mainly for Ollama).
     #[arg(long, env = "OLLAMA_BASE_URL")]
     llm_base_url: Option<String>,
+
+    /// Assistant agent context ID (e.g. "default", "work", "personal").
+    #[arg(long, env = "ASSISTANT_AGENT")]
+    agent: Option<String>,
 }
 
 #[derive(Clone)]
@@ -167,6 +174,31 @@ async fn main() -> Result<()> {
     if let Some(base_url) = args.llm_base_url {
         config.llm.base_url = base_url;
     }
+
+    let selected_agent = args
+        .agent
+        .clone()
+        .unwrap_or_else(|| config.agent.id.clone());
+    if !validate_agent_id(&selected_agent) {
+        anyhow::bail!(
+            "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
+            selected_agent
+        );
+    }
+    apply_agent_context(&mut config, &selected_agent);
+    if let Some(home) = dirs::home_dir() {
+        let agent_root = home.join(".assistant").join("agents").join(&selected_agent);
+        set_runtime_agent_root(agent_root);
+    }
+    let workspace_dir = default_workspace_dir(&selected_agent);
+    set_runtime_workspace_dir(workspace_dir.clone());
+    tokio::fs::create_dir_all(&workspace_dir)
+        .await
+        .with_context(|| format!("Failed to create workspace at {}", workspace_dir.display()))?;
+
+    let assistant_agents = storage.assistant_agent_store();
+    assistant_agents.ensure_default().await?;
+    assistant_agents.ensure_exists(&selected_agent).await?;
 
     let state = AppState {
         pool: storage.pool.clone(),
@@ -375,7 +407,8 @@ async fn main() -> Result<()> {
         pool: storage.pool.clone(),
     };
 
-    let chat_state = chat::ChatState::new(storage.pool.clone(), orchestrator);
+    let chat_state =
+        chat::ChatState::new(storage.pool.clone(), orchestrator, selected_agent.clone());
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()

@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{runtime_workspace_dir, ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -155,7 +155,8 @@ impl ProcessHandler {
         let workdir = params
             .get("workdir")
             .and_then(|v| v.as_str())
-            .map(String::from);
+            .map(String::from)
+            .or_else(|| runtime_workspace_dir().map(|path| path.to_string_lossy().to_string()));
 
         let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-c").arg(&command);

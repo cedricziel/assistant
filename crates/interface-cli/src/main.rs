@@ -12,8 +12,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use assistant_core::{
-    AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, Interface, LlmProviderKind,
-    MemoryLoader, MessageBus,
+    apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
+    validate_agent_id, AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, Interface,
+    LlmProviderKind, MemoryLoader, MessageBus,
 };
 use assistant_llm::{
     EmbeddingProvider, LlmEmbedder, LlmProvider, VoyageConfig, VoyageEmbedder,
@@ -36,6 +37,10 @@ use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 #[derive(Parser)]
 #[command(name = "assistant", about = "Local AI assistant")]
 struct Cli {
+    /// Assistant agent context ID (e.g. "default", "work", "personal").
+    #[arg(long, env = "ASSISTANT_AGENT")]
+    agent: Option<String>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -342,10 +347,7 @@ fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Re
     for p in &memory_files {
         println!("  Memory   : {}", p.display());
     }
-    // notes_dir is not exposed via a public getter; reconstruct from home.
-    let notes_dir = dirs::home_dir()
-        .map(|h| h.join(".assistant").join("memory"))
-        .unwrap_or_else(|| PathBuf::from(".assistant/memory"));
+    let notes_dir = loader.notes_dir_path().to_path_buf();
     println!("  Notes dir: {}", notes_dir.display());
     println!();
 
@@ -680,7 +682,24 @@ async fn main() -> Result<()> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
     let assistant_dir = home.join(".assistant");
     let config_path = assistant_dir.join("config.toml");
-    let (config, config_logs) = load_config_messages(&config_path);
+    let (mut config, config_logs) = load_config_messages(&config_path);
+
+    let selected_agent = cli.agent.clone().unwrap_or_else(|| config.agent.id.clone());
+    if !validate_agent_id(&selected_agent) {
+        anyhow::bail!(
+            "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
+            selected_agent
+        );
+    }
+    apply_agent_context(&mut config, &selected_agent);
+    let agent_root = assistant_dir.join("agents").join(&selected_agent);
+    let workspace_dir = default_workspace_dir(&selected_agent);
+    set_runtime_agent_root(agent_root);
+    set_runtime_workspace_dir(workspace_dir.clone());
+    tokio::fs::create_dir_all(&workspace_dir)
+        .await
+        .with_context(|| format!("Failed to create workspace at {}", workspace_dir.display()))?;
+
     let db_path: PathBuf = config
         .storage
         .db_path
@@ -731,6 +750,9 @@ async fn main() -> Result<()> {
             .await
             .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
     );
+    let assistant_agents = storage.assistant_agent_store();
+    assistant_agents.ensure_default().await?;
+    assistant_agents.ensure_exists(&selected_agent).await?;
 
     let _otel_guard = init_tracing(storage.pool.clone(), config.mirror.trace_enabled)?;
     for msg in config_logs {
@@ -943,8 +965,8 @@ async fn main() -> Result<()> {
     }
 
     println!(
-        "Assistant ready. Model: {}  (type /help for commands)\n",
-        bs.config.llm.model
+        "Assistant ready. Agent: {}  Model: {}  (type /help for commands)\n",
+        selected_agent, bs.config.llm.model
     );
 
     // 13. Build the reedline editor and prompt.

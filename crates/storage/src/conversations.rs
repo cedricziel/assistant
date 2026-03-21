@@ -10,6 +10,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct ConversationRecord {
     pub id: Uuid,
+    pub agent_id: String,
     pub title: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -18,11 +19,22 @@ pub struct ConversationRecord {
 /// SQLite-backed store for conversations and messages.
 pub struct ConversationStore {
     pool: SqlitePool,
+    agent_id: String,
 }
 
 impl ConversationStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            agent_id: "default".to_string(),
+        }
+    }
+
+    pub fn for_agent(pool: SqlitePool, agent_id: impl Into<String>) -> Self {
+        Self {
+            pool,
+            agent_id: agent_id.into(),
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -40,12 +52,13 @@ impl ConversationStore {
         let id_str = id.to_string();
 
         sqlx::query(
-            "INSERT INTO conversations (id, title, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?3) \
+            "INSERT INTO conversations (id, title, agent_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?4) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id_str)
         .bind(title)
+        .bind(&self.agent_id)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -63,17 +76,19 @@ impl ConversationStore {
         let id_str = id.to_string();
 
         sqlx::query(
-            "INSERT INTO conversations (id, title, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?3)",
+            "INSERT INTO conversations (id, title, agent_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?4)",
         )
         .bind(&id_str)
         .bind(title)
+        .bind(&self.agent_id)
         .bind(now)
         .execute(&self.pool)
         .await?;
 
         Ok(ConversationRecord {
             id,
+            agent_id: self.agent_id.clone(),
             title: title.map(|s| s.to_string()),
             created_at: now,
             updated_at: now,
@@ -85,11 +100,12 @@ impl ConversationStore {
         let id_str = id.to_string();
 
         let row = sqlx::query(
-            "SELECT id, title, created_at, updated_at \
+            "SELECT id, title, agent_id, created_at, updated_at \
              FROM conversations \
-             WHERE id = ?1",
+             WHERE id = ?1 AND agent_id = ?2",
         )
         .bind(&id_str)
+        .bind(&self.agent_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -97,6 +113,7 @@ impl ConversationStore {
             let raw_id: String = r.get("id");
             Ok(ConversationRecord {
                 id: Uuid::parse_str(&raw_id)?,
+                agent_id: r.get("agent_id"),
                 title: r.get("title"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),
@@ -108,10 +125,12 @@ impl ConversationStore {
     /// List all conversations, most-recently updated first.
     pub async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
         let rows = sqlx::query(
-            "SELECT id, title, created_at, updated_at \
+            "SELECT id, title, agent_id, created_at, updated_at \
              FROM conversations \
+             WHERE agent_id = ?1 \
              ORDER BY updated_at DESC",
         )
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -120,6 +139,7 @@ impl ConversationStore {
                 let raw_id: String = r.get("id");
                 Ok(ConversationRecord {
                     id: Uuid::parse_str(&raw_id)?,
+                    agent_id: r.get("agent_id"),
                     title: r.get("title"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
@@ -133,14 +153,18 @@ impl ConversationStore {
     /// Returns an error if the conversation does not exist.
     pub async fn update_title(&self, id: Uuid, title: &str) -> Result<()> {
         let id_str = id.to_string();
-        let result =
-            sqlx::query("UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3")
-                .bind(title)
-                .bind(Utc::now())
-                .bind(&id_str)
-                .execute(&self.pool)
-                .await
-                .with_context(|| format!("failed to update title for conversation {id}"))?;
+        let result = sqlx::query(
+            "UPDATE conversations
+                 SET title = ?1, updated_at = ?2
+                 WHERE id = ?3 AND agent_id = ?4",
+        )
+        .bind(title)
+        .bind(Utc::now())
+        .bind(&id_str)
+        .bind(&self.agent_id)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to update title for conversation {id}"))?;
         if result.rows_affected() == 0 {
             anyhow::bail!("conversation {id} not found");
         }
@@ -150,8 +174,9 @@ impl ConversationStore {
     /// Delete a conversation and all its messages (cascade).
     pub async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
-        sqlx::query("DELETE FROM conversations WHERE id = ?1")
+        sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
             .bind(&id_str)
+            .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -186,9 +211,10 @@ impl ConversationStore {
 
         // Update the conversation's updated_at timestamp
         let now = Utc::now();
-        sqlx::query("UPDATE conversations SET updated_at = ?1 WHERE id = ?2")
+        sqlx::query("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND agent_id = ?3")
             .bind(now)
             .bind(&conversation_id)
+            .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
 
@@ -200,12 +226,14 @@ impl ConversationStore {
         let conv_id_str = conversation_id.to_string();
 
         let rows = sqlx::query(
-            "SELECT id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at \
-             FROM messages \
-             WHERE conversation_id = ?1 \
-             ORDER BY turn ASC, created_at ASC",
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at \
+             FROM messages m \
+             INNER JOIN conversations c ON c.id = m.conversation_id \
+             WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
+             ORDER BY m.turn ASC, m.created_at ASC",
         )
         .bind(&conv_id_str)
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -234,13 +262,15 @@ impl ConversationStore {
 
         // Fetch the newest rows first, then reverse to restore chronological order.
         let rows = sqlx::query(
-            "SELECT id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at \
-             FROM messages \
-             WHERE conversation_id = ?1 \
-             ORDER BY turn DESC, created_at DESC \
-             LIMIT ?2",
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at \
+             FROM messages m \
+             INNER JOIN conversations c ON c.id = m.conversation_id \
+             WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
+             ORDER BY m.turn DESC, m.created_at DESC \
+             LIMIT ?3",
         )
         .bind(&conv_id_str)
+        .bind(&self.agent_id)
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
