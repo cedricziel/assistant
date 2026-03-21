@@ -127,7 +127,7 @@ pub(crate) fn finish_llm_span(
     meta: &LlmResponseMeta,
     response: &LlmResponse,
     trace_content: bool,
-    metrics: Option<(&crate::MetricsRecorder, &str, std::time::Duration)>,
+    metrics: Option<(&crate::MetricsRecorder, &str, &str, std::time::Duration)>,
 ) {
     if let Some(model) = &meta.model {
         span.set_attribute(KeyValue::new("gen_ai.response.model", model.clone()));
@@ -174,13 +174,14 @@ pub(crate) fn finish_llm_span(
     }
 
     // -- Record OTel metrics alongside the span ---------------------------------
-    if let Some((recorder, provider_name, duration)) = metrics {
+    if let Some((recorder, agent_id, provider_name, duration)) = metrics {
         let model = meta.model.as_deref().unwrap_or("unknown");
         let input = meta.input_tokens.unwrap_or(0);
         let output = meta.output_tokens.unwrap_or(0);
 
-        recorder.record_token_usage(model, provider_name, "chat", input, output);
+        recorder.record_token_usage(agent_id, model, provider_name, "chat", input, output);
         recorder.record_operation_duration(
+            agent_id,
             model,
             provider_name,
             "chat",

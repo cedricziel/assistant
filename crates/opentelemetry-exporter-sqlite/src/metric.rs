@@ -176,8 +176,8 @@ impl SqliteMetricExporter {
             "INSERT INTO metric_points \
                 (resource_id, scope_id, metric_name, metric_kind, unit, description, \
                  value, attributes, start_time, recorded_at, \
-                 model, provider, operation, skill, interface) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                 model, provider, operation, skill, interface, agent_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         )
         .bind(resource_id)
         .bind(scope_id)
@@ -194,6 +194,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
+        .bind(&da.agent_id)
         .execute(&mut *conn)
         .await?;
 
@@ -224,8 +225,8 @@ impl SqliteMetricExporter {
             "INSERT INTO metric_points \
                 (resource_id, scope_id, metric_name, metric_kind, unit, description, \
                  value, attributes, start_time, recorded_at, \
-                 model, provider, operation, skill, interface) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                 model, provider, operation, skill, interface, agent_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         )
         .bind(resource_id)
         .bind(scope_id)
@@ -242,6 +243,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
+        .bind(&da.agent_id)
         .execute(&mut *conn)
         .await?;
 
@@ -267,8 +269,8 @@ impl SqliteMetricExporter {
             "INSERT INTO metric_points \
                 (resource_id, scope_id, metric_name, metric_kind, unit, description, \
                  value, attributes, recorded_at, \
-                 model, provider, operation, skill, interface) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                 model, provider, operation, skill, interface, agent_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         )
         .bind(resource_id)
         .bind(scope_id)
@@ -284,6 +286,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
+        .bind(&da.agent_id)
         .execute(&mut *conn)
         .await?;
 
@@ -309,8 +312,8 @@ impl SqliteMetricExporter {
             "INSERT INTO metric_points \
                 (resource_id, scope_id, metric_name, metric_kind, unit, description, \
                  value, attributes, recorded_at, \
-                 model, provider, operation, skill, interface) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                 model, provider, operation, skill, interface, agent_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         )
         .bind(resource_id)
         .bind(scope_id)
@@ -326,6 +329,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
+        .bind(&da.agent_id)
         .execute(&mut *conn)
         .await?;
 
@@ -360,8 +364,8 @@ impl SqliteMetricExporter {
                 (resource_id, scope_id, metric_name, metric_kind, unit, description, \
                  count, sum, min, max, bounds, bucket_counts, \
                  attributes, start_time, recorded_at, \
-                 model, provider, operation, skill, interface) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
+                 model, provider, operation, skill, interface, agent_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
         )
         .bind(resource_id)
         .bind(scope_id)
@@ -383,6 +387,7 @@ impl SqliteMetricExporter {
         .bind(&da.operation)
         .bind(&da.skill)
         .bind(&da.interface)
+        .bind(&da.agent_id)
         .execute(&mut *conn)
         .await?;
 
@@ -595,6 +600,7 @@ struct DenormalizedAttrs {
     operation: Option<String>,
     skill: Option<String>,
     interface: Option<String>,
+    agent_id: String,
 }
 
 /// Extract well-known attribute values into denormalized columns.
@@ -605,6 +611,7 @@ fn extract_denormalized(attrs: &[KeyValue]) -> DenormalizedAttrs {
         operation: None,
         skill: None,
         interface: None,
+        agent_id: "default".to_string(),
     };
 
     for kv in attrs {
@@ -614,6 +621,11 @@ fn extract_denormalized(attrs: &[KeyValue]) -> DenormalizedAttrs {
             "gen_ai.operation.name" => da.operation = value_as_string(&kv.value),
             "skill" => da.skill = value_as_string(&kv.value),
             "interface" => da.interface = value_as_string(&kv.value),
+            "agent.id" => {
+                if let Some(v) = value_as_string(&kv.value) {
+                    da.agent_id = v;
+                }
+            }
             _ => {}
         }
     }

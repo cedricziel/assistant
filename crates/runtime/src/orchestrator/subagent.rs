@@ -21,6 +21,7 @@ use tracing::{debug, info, info_span, warn, Instrument};
 use uuid::Uuid;
 
 use super::{value_to_params_map, Orchestrator};
+use crate::webhook_dispatch;
 
 #[async_trait]
 impl SubagentRunner for Orchestrator {
@@ -77,7 +78,9 @@ impl SubagentRunner for Orchestrator {
             conversation_id = %conversation_id,
             "Spawning subagent"
         );
-        self.metrics.agent_spawn_count.add(1, &[]);
+        self.metrics
+            .agent_spawn_count
+            .add(1, &[KeyValue::new("agent.id", self.agent_id.clone())]);
 
         // Register a cancellation token for this agent.
         let cancel_token = CancellationToken::new();
@@ -192,7 +195,8 @@ impl SubagentRunner for Orchestrator {
                         crate::history::persist_error_recovery(&conv_store, conversation_id)
                             .instrument(iteration_span.clone())
                             .await;
-                        self.metrics.record_error("llm_error", "run_subagent");
+                        self.metrics
+                            .record_error(&self.agent_id, "llm_error", "run_subagent");
                         let msg = format!("LLM error: {e}");
                         let _ = agent_store
                             .complete(
@@ -217,7 +221,12 @@ impl SubagentRunner for Orchestrator {
                     response.meta(),
                     &response,
                     self.trace_content,
-                    Some((&self.metrics, self.llm.provider_name(), llm_elapsed)),
+                    Some((
+                        &self.metrics,
+                        &self.agent_id,
+                        self.llm.provider_name(),
+                        llm_elapsed,
+                    )),
                 );
 
                 match response {
@@ -383,7 +392,8 @@ impl SubagentRunner for Orchestrator {
 
             // Reached iteration limit.
             crate::history::persist_error_recovery(&conv_store, conversation_id).await;
-            self.metrics.record_error("max_iterations", "run_subagent");
+            self.metrics
+                .record_error(&self.agent_id, "max_iterations", "run_subagent");
             let msg = format!(
                 "Subagent '{}' reached max iterations ({}) without a final answer",
                 spawn.agent_id, self.max_iterations
@@ -414,6 +424,24 @@ impl SubagentRunner for Orchestrator {
             .write()
             .await
             .remove(&spawn.agent_id);
+
+        let event_payload = serde_json::json!({
+            "agent_id": spawn.agent_id,
+            "conversation_id": conversation_id,
+            "status": format!("{:?}", report.status),
+            "content": report.content.clone(),
+            "data": report.data.clone(),
+        });
+        if let Err(e) = webhook_dispatch::dispatch_event(
+            self.storage.as_ref(),
+            &self.agent_id,
+            assistant_core::topic::AGENT_REPORT,
+            event_payload,
+        )
+        .await
+        {
+            warn!(error = %e, "Failed to dispatch agent.report webhooks");
+        }
 
         Ok(report)
     }

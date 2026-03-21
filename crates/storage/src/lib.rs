@@ -120,6 +120,11 @@ impl StorageLayer {
         MetricsStore::new(self.pool.clone())
     }
 
+    /// Convenience: build a [`MetricsStore`] scoped to an assistant agent.
+    pub fn metrics_store_for_agent(&self, agent_id: &str) -> MetricsStore {
+        MetricsStore::for_agent(self.pool.clone(), agent_id)
+    }
+
     /// Convenience: build a [`WebhookStore`] backed by this pool.
     pub fn webhook_store(&self) -> WebhookStore {
         WebhookStore::new(self.pool.clone())
@@ -236,6 +241,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "018_agent_scope_tasks_webhooks",
             include_str!("../../../migrations/018_agent_scope_tasks_webhooks.sql"),
+        ),
+        (
+            "019_metrics_agent_scope",
+            include_str!("../../../migrations/019_metrics_agent_scope.sql"),
         ),
     ];
 
