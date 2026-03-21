@@ -6,6 +6,7 @@ pub mod orchestrator;
 pub(crate) mod otel_spans;
 pub mod scheduler;
 pub mod telemetry;
+pub mod webhook_dispatch;
 
 pub use bootstrap::spawn_memory_indexer;
 pub use metrics::MetricsRecorder;

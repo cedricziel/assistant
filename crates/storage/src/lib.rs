@@ -95,6 +95,11 @@ impl StorageLayer {
         ScheduledTaskStore::new(self.pool.clone())
     }
 
+    /// Convenience: build a `ScheduledTaskStore` scoped to an assistant agent.
+    pub fn scheduled_task_store_for_agent(&self, agent_id: &str) -> ScheduledTaskStore {
+        ScheduledTaskStore::for_agent(self.pool.clone(), agent_id)
+    }
+
     /// Convenience: build a `MemoryChunkStore` backed by this pool.
     pub fn memory_chunks_store(&self) -> MemoryChunkStore {
         MemoryChunkStore::new(self.pool.clone())
@@ -118,6 +123,11 @@ impl StorageLayer {
     /// Convenience: build a [`WebhookStore`] backed by this pool.
     pub fn webhook_store(&self) -> WebhookStore {
         WebhookStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`WebhookStore`] scoped to an assistant agent.
+    pub fn webhook_store_for_agent(&self, agent_id: &str) -> WebhookStore {
+        WebhookStore::for_agent(self.pool.clone(), agent_id)
     }
 }
 
@@ -222,6 +232,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "017_assistant_agents",
             include_str!("../../../migrations/017_assistant_agents.sql"),
+        ),
+        (
+            "018_agent_scope_tasks_webhooks",
+            include_str!("../../../migrations/018_agent_scope_tasks_webhooks.sql"),
         ),
     ];
 

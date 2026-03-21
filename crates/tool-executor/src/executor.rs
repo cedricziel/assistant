@@ -272,6 +272,7 @@ mod tests {
     fn ctx_unrestricted() -> ExecutionContext {
         ExecutionContext {
             conversation_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
             turn: 0,
             interface: Interface::Cli,
             interactive: false,
@@ -283,6 +284,7 @@ mod tests {
     fn ctx_restricted(allowed: Vec<&str>) -> ExecutionContext {
         ExecutionContext {
             conversation_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
             turn: 0,
             interface: Interface::Cli,
             interactive: false,

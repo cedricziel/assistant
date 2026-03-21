@@ -176,8 +176,8 @@ async fn main() -> Result<()> {
         config.llm.base_url = base_url;
     }
 
-    let selected_agent = args
-        .agent
+    let cli_agent_override = args.agent.clone();
+    let mut selected_agent = cli_agent_override
         .clone()
         .unwrap_or_else(|| config.agent.id.clone());
     if !validate_agent_id(&selected_agent) {
@@ -199,6 +199,22 @@ async fn main() -> Result<()> {
 
     let assistant_agents = storage.assistant_agent_store();
     assistant_agents.ensure_default().await?;
+    if cli_agent_override.is_none() {
+        let default_id = assistant_agents.default_id().await?;
+        selected_agent = default_id;
+        apply_agent_context(&mut config, &selected_agent);
+        if let Some(home) = dirs::home_dir() {
+            let agent_root = home.join(".assistant").join("agents").join(&selected_agent);
+            set_runtime_agent_root(agent_root);
+        }
+        let workspace_dir = default_workspace_dir(&selected_agent);
+        set_runtime_workspace_dir(workspace_dir.clone());
+        tokio::fs::create_dir_all(&workspace_dir)
+            .await
+            .with_context(|| {
+                format!("Failed to create workspace at {}", workspace_dir.display())
+            })?;
+    }
     assistant_agents.ensure_exists(&selected_agent).await?;
 
     let state = AppState {
@@ -407,6 +423,7 @@ async fn main() -> Result<()> {
 
     let webhook_pages_state = webhooks::pages::WebhookPagesState {
         pool: storage.pool.clone(),
+        agent_id: selected_agent.clone(),
     };
 
     let chat_state =

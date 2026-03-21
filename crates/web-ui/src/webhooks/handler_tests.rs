@@ -20,6 +20,7 @@ mod tests {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let state = WebhookPagesState {
             pool: storage.pool.clone(),
+            agent_id: "default".to_string(),
         };
         let app = webhook_pages_router().with_state(state.clone());
         (app, state)
@@ -57,7 +58,7 @@ mod tests {
         let (app, state) = test_app().await;
 
         // Seed a webhook directly via the store.
-        let store = WebhookStore::new(state.pool.clone());
+        let store = WebhookStore::for_agent(state.pool.clone(), &state.agent_id);
         store
             .create("wh-1", "Test Hook", "https://example.com/wh", "secret", &[])
             .await
@@ -153,7 +154,7 @@ mod tests {
             .await
             .unwrap();
 
-        let store = WebhookStore::new(state.pool);
+        let store = WebhookStore::for_agent(state.pool, &state.agent_id);
         let all = store.list().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(
@@ -177,7 +178,7 @@ mod tests {
             .await
             .unwrap();
 
-        let store = WebhookStore::new(state.pool);
+        let store = WebhookStore::for_agent(state.pool, &state.agent_id);
         let all = store.list().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].name, "Persisted");
@@ -191,7 +192,7 @@ mod tests {
     #[tokio::test]
     async fn show_webhook_renders_detail() {
         let (app, state) = test_app().await;
-        let store = WebhookStore::new(state.pool.clone());
+        let store = WebhookStore::for_agent(state.pool.clone(), &state.agent_id);
         store
             .create(
                 "wh-detail",
@@ -249,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn delete_webhook_removes_and_redirects() {
         let (app, state) = test_app().await;
-        let store = WebhookStore::new(state.pool.clone());
+        let store = WebhookStore::for_agent(state.pool.clone(), &state.agent_id);
         store
             .create("wh-del", "Delete Me", "https://del.test", "s", &[])
             .await
@@ -279,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn toggle_webhook_flips_active() {
         let (_app, state) = test_app().await;
-        let store = WebhookStore::new(state.pool.clone());
+        let store = WebhookStore::for_agent(state.pool.clone(), &state.agent_id);
         store
             .create("wh-tog", "Toggle", "https://tog.test", "s", &[])
             .await
@@ -289,6 +290,7 @@ mod tests {
         // Need to rebuild the router for the second request since oneshot consumes it.
         let app1 = webhook_pages_router().with_state(WebhookPagesState {
             pool: state.pool.clone(),
+            agent_id: state.agent_id.clone(),
         });
         let resp = app1
             .oneshot(
@@ -310,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn rotate_secret_changes_secret_and_clears_verified() {
         let (app, state) = test_app().await;
-        let store = WebhookStore::new(state.pool.clone());
+        let store = WebhookStore::for_agent(state.pool.clone(), &state.agent_id);
         store
             .create("wh-rot", "Rotate", "https://rot.test", "original", &[])
             .await
@@ -340,7 +342,7 @@ mod tests {
     #[tokio::test]
     async fn update_webhook_changes_fields() {
         let (app, state) = test_app().await;
-        let store = WebhookStore::new(state.pool.clone());
+        let store = WebhookStore::for_agent(state.pool.clone(), &state.agent_id);
         store
             .create(
                 "wh-upd",
@@ -383,7 +385,7 @@ mod tests {
     #[tokio::test]
     async fn edit_form_prepopulates_fields() {
         let (app, state) = test_app().await;
-        let store = WebhookStore::new(state.pool.clone());
+        let store = WebhookStore::for_agent(state.pool.clone(), &state.agent_id);
         store
             .create(
                 "wh-edit",

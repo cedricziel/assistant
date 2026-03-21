@@ -774,7 +774,10 @@ async fn main() -> Result<()> {
     let config_path = assistant_dir.join("config.toml");
     let (mut config, config_logs) = load_config_messages(&config_path);
 
-    let selected_agent = cli.agent.clone().unwrap_or_else(|| config.agent.id.clone());
+    let cli_agent_override = cli.agent.clone();
+    let mut selected_agent = cli_agent_override
+        .clone()
+        .unwrap_or_else(|| config.agent.id.clone());
     if !validate_agent_id(&selected_agent) {
         anyhow::bail!(
             "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
@@ -846,6 +849,22 @@ async fn main() -> Result<()> {
     );
     let assistant_agents = storage.assistant_agent_store();
     assistant_agents.ensure_default().await?;
+    if cli_agent_override.is_none() {
+        let default_id = assistant_agents.default_id().await?;
+        if default_id != selected_agent {
+            selected_agent = default_id;
+            apply_agent_context(&mut config, &selected_agent);
+            let agent_root = assistant_dir.join("agents").join(&selected_agent);
+            let workspace_dir = default_workspace_dir(&selected_agent);
+            set_runtime_agent_root(agent_root);
+            set_runtime_workspace_dir(workspace_dir.clone());
+            tokio::fs::create_dir_all(&workspace_dir)
+                .await
+                .with_context(|| {
+                    format!("Failed to create workspace at {}", workspace_dir.display())
+                })?;
+        }
+    }
     assistant_agents.ensure_exists(&selected_agent).await?;
 
     let _otel_guard = init_tracing(storage.pool.clone(), config.mirror.trace_enabled)?;

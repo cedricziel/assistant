@@ -267,6 +267,7 @@ mod tests {
     fn test_ctx() -> ExecutionContext {
         ExecutionContext {
             conversation_id: uuid::Uuid::nil(),
+            agent_id: "default".to_string(),
             turn: 0,
             interface: assistant_core::Interface::Cli,
             interactive: false,

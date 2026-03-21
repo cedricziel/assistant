@@ -318,6 +318,7 @@ impl SubagentRunner for Orchestrator {
 
                             let ctx = ExecutionContext {
                                 conversation_id,
+                                agent_id: self.agent_id.clone(),
                                 turn: iteration as i64,
                                 interface: Interface::Scheduler,
                                 interactive: false,

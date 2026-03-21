@@ -72,6 +72,8 @@ pub const DEFAULT_MAX_AGENT_DEPTH: u32 = 5;
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
     pub conversation_id: Uuid,
+    /// Active assistant agent context ID.
+    pub agent_id: String,
     pub turn: i64,
     /// The interface this turn originated from (cli, signal, mcp)
     pub interface: Interface,

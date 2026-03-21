@@ -8,6 +8,7 @@ use sqlx::{Row, SqlitePool};
 #[derive(Debug, Clone)]
 pub struct WebhookRecord {
     pub id: String,
+    pub agent_id: String,
     pub name: String,
     pub url: String,
     pub secret: String,
@@ -21,11 +22,22 @@ pub struct WebhookRecord {
 /// SQLite-backed store for outgoing webhooks.
 pub struct WebhookStore {
     pool: SqlitePool,
+    agent_id: String,
 }
 
 impl WebhookStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            agent_id: "default".to_string(),
+        }
+    }
+
+    pub fn for_agent(pool: SqlitePool, agent_id: impl Into<String>) -> Self {
+        Self {
+            pool,
+            agent_id: agent_id.into(),
+        }
     }
 
     /// Insert a new webhook.
@@ -40,10 +52,11 @@ impl WebhookStore {
         let now = Utc::now();
         let events_json = serde_json::to_string(event_types)?;
         sqlx::query(
-            "INSERT INTO webhooks (id, name, url, secret, event_types, active, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)",
+            "INSERT INTO webhooks (id, agent_id, name, url, secret, event_types, active, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)",
         )
         .bind(id)
+        .bind(&self.agent_id)
         .bind(name)
         .bind(url)
         .bind(secret)
@@ -58,10 +71,11 @@ impl WebhookStore {
     /// Fetch a single webhook by ID.
     pub async fn get(&self, id: &str) -> Result<Option<WebhookRecord>> {
         let row = sqlx::query(
-            "SELECT id, name, url, secret, event_types, active, verified_at, created_at, updated_at \
-             FROM webhooks WHERE id = ?1",
+            "SELECT id, agent_id, name, url, secret, event_types, active, verified_at, created_at, updated_at \
+             FROM webhooks WHERE id = ?1 AND agent_id = ?2",
         )
         .bind(id)
+        .bind(&self.agent_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -74,9 +88,10 @@ impl WebhookStore {
     /// List all webhooks ordered by creation time (newest first).
     pub async fn list(&self) -> Result<Vec<WebhookRecord>> {
         let rows = sqlx::query(
-            "SELECT id, name, url, secret, event_types, active, verified_at, created_at, updated_at \
-             FROM webhooks ORDER BY created_at DESC",
+            "SELECT id, agent_id, name, url, secret, event_types, active, verified_at, created_at, updated_at \
+             FROM webhooks WHERE agent_id = ?1 ORDER BY created_at DESC",
         )
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -96,7 +111,7 @@ impl WebhookStore {
         let events_json = serde_json::to_string(event_types)?;
         let result = sqlx::query(
             "UPDATE webhooks SET name = ?1, url = ?2, event_types = ?3, active = ?4, updated_at = ?5 \
-             WHERE id = ?6",
+             WHERE id = ?6 AND agent_id = ?7",
         )
         .bind(name)
         .bind(url)
@@ -104,6 +119,7 @@ impl WebhookStore {
         .bind(active)
         .bind(now)
         .bind(id)
+        .bind(&self.agent_id)
         .execute(&self.pool)
         .await?;
 
@@ -112,8 +128,9 @@ impl WebhookStore {
 
     /// Delete a webhook by ID.
     pub async fn delete(&self, id: &str) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM webhooks WHERE id = ?1")
+        let result = sqlx::query("DELETE FROM webhooks WHERE id = ?1 AND agent_id = ?2")
             .bind(id)
+            .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
 
@@ -123,12 +140,16 @@ impl WebhookStore {
     /// Record a successful verification timestamp.
     pub async fn mark_verified(&self, id: &str) -> Result<bool> {
         let now = Utc::now();
-        let result =
-            sqlx::query("UPDATE webhooks SET verified_at = ?1, updated_at = ?1 WHERE id = ?2")
-                .bind(now)
-                .bind(id)
-                .execute(&self.pool)
-                .await?;
+        let result = sqlx::query(
+            "UPDATE webhooks
+                 SET verified_at = ?1, updated_at = ?1
+                 WHERE id = ?2 AND agent_id = ?3",
+        )
+        .bind(now)
+        .bind(id)
+        .bind(&self.agent_id)
+        .execute(&self.pool)
+        .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -136,12 +157,16 @@ impl WebhookStore {
     /// Toggle the active flag on a webhook.
     pub async fn toggle_active(&self, id: &str) -> Result<bool> {
         let now = Utc::now();
-        let result =
-            sqlx::query("UPDATE webhooks SET active = 1 - active, updated_at = ?1 WHERE id = ?2")
-                .bind(now)
-                .bind(id)
-                .execute(&self.pool)
-                .await?;
+        let result = sqlx::query(
+            "UPDATE webhooks
+                 SET active = 1 - active, updated_at = ?1
+                 WHERE id = ?2 AND agent_id = ?3",
+        )
+        .bind(now)
+        .bind(id)
+        .bind(&self.agent_id)
+        .execute(&self.pool)
+        .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -151,15 +176,43 @@ impl WebhookStore {
     pub async fn rotate_secret(&self, id: &str, new_secret: &str) -> Result<bool> {
         let now = Utc::now();
         let result = sqlx::query(
-            "UPDATE webhooks SET secret = ?1, verified_at = NULL, updated_at = ?2 WHERE id = ?3",
+            "UPDATE webhooks
+             SET secret = ?1, verified_at = NULL, updated_at = ?2
+             WHERE id = ?3 AND agent_id = ?4",
         )
         .bind(new_secret)
         .bind(now)
         .bind(id)
+        .bind(&self.agent_id)
         .execute(&self.pool)
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    /// List active webhooks subscribed to a specific event topic.
+    pub async fn list_active_for_event(&self, event_topic: &str) -> Result<Vec<WebhookRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, agent_id, name, url, secret, event_types, active, verified_at, created_at, updated_at \
+             FROM webhooks \
+             WHERE agent_id = ?1 AND active = 1",
+        )
+        .bind(&self.agent_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            let record = parse_row(row)?;
+            if record
+                .event_types
+                .iter()
+                .any(|ev| ev.eq_ignore_ascii_case(event_topic))
+            {
+                items.push(record);
+            }
+        }
+        Ok(items)
     }
 }
 
@@ -171,6 +224,7 @@ fn parse_row(row: sqlx::sqlite::SqliteRow) -> Result<WebhookRecord> {
 
     Ok(WebhookRecord {
         id: row.try_get("id")?,
+        agent_id: row.try_get("agent_id")?,
         name: row.try_get("name")?,
         url: row.try_get("url")?,
         secret: row.try_get("secret")?,

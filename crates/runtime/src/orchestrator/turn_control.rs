@@ -32,6 +32,7 @@ impl Orchestrator {
         iteration: usize,
         base_turn: i64,
         conversation_id: Uuid,
+        agent_id: &str,
         interface: &Interface,
         ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
         conv_store: &ConversationStore,
@@ -109,6 +110,7 @@ impl Orchestrator {
                 );
                 let ctx = ExecutionContext {
                     conversation_id,
+                    agent_id: agent_id.to_string(),
                     turn: iteration as i64,
                     interface: interface.clone(),
                     interactive: false,

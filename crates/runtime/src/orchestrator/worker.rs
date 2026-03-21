@@ -15,6 +15,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{parse_interface, ExtensionRegistration, Orchestrator, TurnResult};
+use crate::webhook_dispatch;
 
 impl Orchestrator {
     // ── Bus-based turn processing ────────────────────────────────────────────
@@ -82,10 +83,10 @@ impl Orchestrator {
     /// steal turns from another.
     pub async fn run_worker_filtered(&self, worker_id: &str, interface: Option<&str>) {
         info!(worker_id, ?interface, "Turn worker started");
-        let filter = match interface {
-            Some(iface) => ClaimFilter::new().with_interface(iface),
-            None => ClaimFilter::default(),
-        };
+        let mut filter = ClaimFilter::new().with_agent_id(self.agent_id.clone());
+        if let Some(iface) = interface {
+            filter = filter.with_interface(iface);
+        }
         loop {
             match self
                 .bus
@@ -114,6 +115,7 @@ impl Orchestrator {
                         .unwrap_or(Interface::Cli);
 
                     let conv_id = turn_req.conversation_id;
+                    let interface_name = format!("{:?}", interface);
 
                     debug!(
                         conversation_id = %conv_id,
@@ -174,6 +176,7 @@ impl Orchestrator {
                                 topic::TURN_RESULT,
                                 serde_json::to_value(&bus_result).unwrap_or_default(),
                             )
+                            .with_agent_id(self.agent_id.clone())
                             .with_conversation_id(conv_id);
                             if let Some(bid) = msg.batch_id {
                                 pub_req = pub_req.with_batch_id(bid);
@@ -186,6 +189,27 @@ impl Orchestrator {
                                             error = %e,
                                             msg_id = %msg.id,
                                             "Failed to ack bus message"
+                                        );
+                                    }
+                                    let event_payload = serde_json::json!({
+                                        "conversation_id": conv_id,
+                                        "content": bus_result.content,
+                                        "turn": bus_result.turn,
+                                        "attachments": bus_result.attachments,
+                                        "interface": interface_name,
+                                    });
+                                    if let Err(e) = webhook_dispatch::dispatch_event(
+                                        self.storage.as_ref(),
+                                        &self.agent_id,
+                                        topic::TURN_RESULT,
+                                        event_payload,
+                                    )
+                                    .await
+                                    {
+                                        warn!(
+                                            conversation_id = %conv_id,
+                                            error = %e,
+                                            "Failed to dispatch turn.result webhooks"
                                         );
                                     }
                                     info!(
@@ -221,11 +245,34 @@ impl Orchestrator {
                                 topic::TURN_RESULT,
                                 serde_json::to_value(&err_result).unwrap_or_default(),
                             )
+                            .with_agent_id(self.agent_id.clone())
                             .with_conversation_id(conv_id);
                             if let Some(bid) = msg.batch_id {
                                 pub_req = pub_req.with_batch_id(bid);
                             }
                             let _ = self.bus.publish(pub_req).await;
+
+                            let err_payload = serde_json::json!({
+                                "conversation_id": conv_id,
+                                "content": err_result.content,
+                                "turn": err_result.turn,
+                                "attachments": err_result.attachments,
+                                "interface": interface_name,
+                            });
+                            if let Err(dispatch_err) = webhook_dispatch::dispatch_event(
+                                self.storage.as_ref(),
+                                &self.agent_id,
+                                topic::TURN_RESULT,
+                                err_payload,
+                            )
+                            .await
+                            {
+                                warn!(
+                                    conversation_id = %conv_id,
+                                    error = %dispatch_err,
+                                    "Failed to dispatch failed turn.result webhooks"
+                                );
+                            }
 
                             let _ = self.bus.fail(msg.id).await;
                         }
@@ -274,6 +321,7 @@ impl Orchestrator {
         self.bus
             .publish(
                 PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
+                    .with_agent_id(self.agent_id.clone())
                     .with_conversation_id(conversation_id)
                     .with_interface(format!("{:?}", interface))
                     .with_reply_to(topic::TURN_RESULT)
@@ -294,6 +342,7 @@ impl Orchestrator {
             }
 
             let filter = ClaimFilter::new()
+                .with_agent_id(self.agent_id.clone())
                 .with_conversation_id(conversation_id)
                 .with_batch_id(request_id);
             if let Some(msg) = self

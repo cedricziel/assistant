@@ -421,6 +421,7 @@ impl Orchestrator {
 
             let ctx = ExecutionContext {
                 conversation_id,
+                agent_id: self.agent_id.clone(),
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: false,
@@ -465,6 +466,7 @@ impl Orchestrator {
                         iteration,
                         base_turn,
                         conversation_id,
+                        &self.agent_id,
                         &interface,
                         &ext_map,
                         &conv_store,
@@ -668,6 +670,7 @@ impl Orchestrator {
 
             let ctx = ExecutionContext {
                 conversation_id,
+                agent_id: self.agent_id.clone(),
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: matches!(interface, Interface::Cli),

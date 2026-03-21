@@ -482,6 +482,7 @@ mod tests {
     fn ctx() -> ExecutionContext {
         ExecutionContext {
             conversation_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
             turn: 0,
             interface: Interface::Cli,
             interactive: false,
