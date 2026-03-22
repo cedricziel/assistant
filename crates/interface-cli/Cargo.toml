@@ -1,6 +1,6 @@
 [package]
 name = "assistant-cli"
-version = "0.1.43"
+version = "0.1.44"
 license.workspace = true
 edition.workspace = true
 description = "Interactive CLI REPL for the local AI assistant"
