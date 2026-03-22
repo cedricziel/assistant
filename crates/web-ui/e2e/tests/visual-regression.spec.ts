@@ -121,6 +121,14 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("workflow create form", async ({ page }) => {
+    await navigateAndSettle(page, "/workflows/new");
+    await expect(page).toHaveScreenshot("workflow-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+  });
+
   test("chat page", async ({ page }) => {
     await navigateAndSettle(page, "/chat");
     await expect(page).toHaveScreenshot("chat.png", {
