@@ -616,6 +616,7 @@ dependencies = [
  "assistant-skills",
  "async-trait",
  "chrono",
+ "cron",
  "dirs",
  "serde",
  "serde_json",
@@ -684,6 +685,9 @@ dependencies = [
  "assistant-skills",
  "assistant-storage",
  "assistant-tool-executor",
+ "assistant-workflow",
+ "assistant-workflow-http",
+ "async-trait",
  "axum",
  "chrono",
  "clap",
@@ -708,6 +712,36 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "assistant-workflow"
+version = "0.1.42"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "assistant-storage",
+ "async-trait",
+ "chrono",
+ "cron",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "assistant-workflow-http"
+version = "0.1.42"
+dependencies = [
+ "anyhow",
+ "assistant-workflow",
+ "async-trait",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ mod pwa;
 pub(crate) mod static_assets;
 mod traces;
 mod webhooks;
+mod workflows;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -19,7 +20,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use assistant_core::{
     apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
-    validate_agent_id, BusKind, LlmProviderKind, MessageBus,
+    validate_agent_id, BusKind, Interface, LlmProviderKind, MessageBus,
 };
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
@@ -32,6 +33,11 @@ use assistant_skills::SkillSource;
 use assistant_storage::registry::SkillRegistry;
 use assistant_storage::{default_db_path, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
+use assistant_workflow::{
+    spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
+    AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
+};
+use assistant_workflow_http::HttpRequestActionExecutor;
 use axum::{
     http::StatusCode,
     response::Redirect,
@@ -46,6 +52,7 @@ use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn, Level};
 use tracing_subscriber::EnvFilter;
+use uuid::Uuid;
 
 use auth::AuthConfig;
 
@@ -112,6 +119,21 @@ pub(crate) struct AppState {
     pub(crate) bus_kind: BusKind,
     pub(crate) nats_url: Option<String>,
     pub(crate) nats_token: Option<String>,
+}
+
+struct OrchestratorTurnClient {
+    orchestrator: Arc<Orchestrator>,
+}
+
+#[async_trait::async_trait]
+impl AssistantTurnClient for OrchestratorTurnClient {
+    async fn submit_turn(&self, prompt: &str, conversation_id: Uuid) -> Result<String> {
+        let result = self
+            .orchestrator
+            .submit_turn(prompt, conversation_id, Interface::Scheduler, None)
+            .await?;
+        Ok(result.answer)
+    }
 }
 
 #[tokio::main]
@@ -353,7 +375,7 @@ async fn main() -> Result<()> {
             storage.clone(),
             executor.clone(),
             registry,
-            bus,
+            bus.clone(),
             &config,
         )
         .with_confirmation_callback(Arc::new(AutoDenyConfirmation {
@@ -397,6 +419,21 @@ async fn main() -> Result<()> {
             .await;
     });
 
+    // 6. Spawn workflow run processor (loop guardrails + action executors).
+    let turn_client = Arc::new(OrchestratorTurnClient {
+        orchestrator: orchestrator.clone(),
+    });
+    let action_executors: Vec<Arc<dyn WorkflowActionExecutor>> = vec![
+        Arc::new(AssistantTurnActionExecutor::new(turn_client)),
+        Arc::new(HttpRequestActionExecutor::default()),
+    ];
+    let _workflow_runner =
+        spawn_workflow_runner(storage.clone(), Duration::from_secs(2), action_executors);
+    let _workflow_schedule_adapter =
+        spawn_schedule_trigger_adapter(storage.clone(), Duration::from_secs(2));
+    let _workflow_event_adapter =
+        spawn_event_trigger_adapter(storage.clone(), bus.clone(), Duration::from_secs(2));
+
     // -- Agent store (filesystem-backed) --
     let agent_store = AgentStore::default_dir()?;
 
@@ -428,6 +465,11 @@ async fn main() -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
+    let workflow_pages_state = workflows::pages::WorkflowPagesState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
+    };
+
     let chat_state =
         chat::ChatState::new(storage.pool.clone(), orchestrator, selected_agent.clone());
 
@@ -437,6 +479,8 @@ async fn main() -> Result<()> {
         .route("/ready", get(ready))
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
+        // Public workflow webhook trigger ingress.
+        .merge(workflows::workflow_public_router().with_state(workflow_pages_state.clone()))
         // A2A agent card is public per spec — callers need it to discover auth.
         .merge(a2a::public_router().with_state(a2a_state.clone()))
         // PWA assets must be public so the browser can fetch them before auth.
@@ -459,8 +503,13 @@ async fn main() -> Result<()> {
         .merge(a2a::agent_pages_router().with_state(agent_pages_state))
         // Webhook management UI pages.
         .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
+        // Workflow graph management pages + JSON API.
+        .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
         // Chat interface.
         .merge(chat::chat_router().with_state(chat_state))
+        .route_layer(axum::middleware::from_fn(
+            auth::require_same_origin_mutation,
+        ))
         .route_layer(axum::middleware::from_fn(auth::require_auth));
 
     let router = public_routes

@@ -49,6 +49,11 @@ pub trait StaticUrls {
     fn agent_form_js_url(&self) -> &'static str {
         crate::static_assets::agent_form_js_url()
     }
+
+    /// Fingerprinted URL for the workflow graph editor JS.
+    fn workflow_editor_js_url(&self) -> &'static str {
+        crate::static_assets::workflow_editor_js_url()
+    }
 }
 
 /// HTML-escape a string to prevent XSS.
