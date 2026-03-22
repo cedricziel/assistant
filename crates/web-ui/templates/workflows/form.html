@@ -3,15 +3,30 @@ breadcrumb %}
 <a class="breadcrumb-page" href="/workflows">Workflows</a>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">{{ heading }}</span>
-{% endblock %} {% block extra_css %} .wf-form { display: grid; gap: 1rem; }
-.wf-form label { display: grid; gap: 0.4rem; font-size: 0.9rem; color: #9eb2d8;
-} .wf-form input[type="text"], .wf-form textarea { width: 100%; background:
-#071224; border: 1px solid #173153; color: #e5e9f0; border-radius: 8px; padding:
-0.65rem 0.75rem; } .wf-form textarea { min-height: 280px; font-family:
-ui-monospace, monospace; } .wf-row { display:grid; grid-template-columns: 1fr
-1fr; gap: 0.75rem; } .err { color: #ff8a8a; font-size: 0.84rem; min-height:
-1.2rem; } @media (max-width: 800px) { .wf-row { grid-template-columns: 1fr; } }
-{% endblock %} {% block content %}
+{% endblock %} {% block extra_css %} .wf-layout { display: grid;
+grid-template-columns: minmax(360px, 480px) minmax(500px, 1fr); gap: 1rem;
+align-items: start; } .wf-pane { background: #071224; border: 1px solid #173153;
+border-radius: 12px; padding: 1rem; } .wf-pane h3 { margin-bottom: 0.3rem; }
+.wf-pane p { color: #8ba2c6; font-size: 0.9rem; margin-bottom: 0.8rem; }
+.wf-form { display: grid; gap: 0.9rem; } .wf-form label { display: grid; gap:
+0.38rem; font-size: 0.9rem; color: #9eb2d8; } .wf-form input[type="text"],
+.wf-form textarea { width: 100%; background: #040d1b; border: 1px solid #173153;
+color: #e5e9f0; border-radius: 8px; padding: 0.65rem 0.75rem; } .wf-form
+textarea { min-height: 330px; font-family: ui-monospace, monospace; } .wf-active
+{ display: flex; align-items: center; gap: 0.45rem; color: #e5e9f0; }
+.wf-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.25rem;
+} .err { color: #ff8a8a; font-size: 0.84rem; min-height: 1.2rem; }
+.wf-preview-header { display: flex; justify-content: space-between; gap: 0.6rem;
+align-items: baseline; } .wf-preview-header .muted { font-size: 0.82rem; color:
+#8aa5d8; } .wf-preview { width: 100%; min-height: 360px; background: #040d1b;
+border: 1px dashed #225081; border-radius: 10px; } .wf-node-table { width: 100%;
+border-collapse: collapse; margin-top: 0.8rem; } .wf-node-table th,
+.wf-node-table td { text-align: left; padding: 0.45rem 0.4rem; border-bottom:
+1px solid #112744; font-size: 0.82rem; } .wf-node-table th { color: #8aa5d8;
+text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.74rem; }
+.wf-hint { margin-top: 0.75rem; color: #8aa5d8; font-size: 0.82rem; } @media
+(max-width: 1100px) { .wf-layout { grid-template-columns: 1fr; } } {% endblock
+%} {% block content %}
 <div class="layout">
   <main class="main" style="width: 100%">
     <div class="panel">
@@ -19,62 +34,108 @@ ui-monospace, monospace; } .wf-row { display:grid; grid-template-columns: 1fr
         <div>
           <h2>{{ heading }}</h2>
           <p>
-            Define graph nodes/edges and loop guardrails in JSON, then use the
-            visual editor to refine.
+            Build your workflow definition on the left. The graph preview on the
+            right updates in real time so desktop space is actually useful.
           </p>
         </div>
       </div>
 
-      <form class="wf-form" method="POST" action="{{ action }}">
-        <label>
-          Name
-          <input type="text" name="name" value="{{ name }}" required />
-        </label>
+      <div class="wf-layout">
+        <section class="wf-pane">
+          <h3>Definition</h3>
+          <p>Name, describe, and edit graph JSON for this workflow.</p>
 
-        <label>
-          Description
-          <input
-            type="text"
-            name="description"
-            value="{{ description }}"
-            placeholder="What this automation does"
-          />
-        </label>
+          <form class="wf-form" method="POST" action="{{ action }}">
+            <label for="workflowName">
+              Name
+              <input
+                id="workflowName"
+                type="text"
+                name="name"
+                value="{{ name }}"
+                required
+              />
+            </label>
 
-        <label>
-          <span>Graph JSON</span>
-          <textarea id="graphJson" name="graph_json" required>
+            <label for="workflowDescription">
+              Description
+              <input
+                id="workflowDescription"
+                type="text"
+                name="description"
+                value="{{ description }}"
+                placeholder="What this automation does"
+              />
+            </label>
+
+            <label for="graphJson">
+              Graph JSON
+              <textarea
+                id="graphJson"
+                name="graph_json"
+                required
+                aria-describedby="graphError"
+              >
 {{ graph_json }}</textarea
-          >
-          <div id="graphError" class="err"></div>
-        </label>
+              >
+              <div id="graphError" class="err" role="alert"></div>
+            </label>
 
-        <label
-          style="
-            display: flex;
-            align-items: center;
-            gap: 0.45rem;
-            color: #e5e9f0;
-          "
-        >
-          <input
-            type="checkbox"
-            name="active"
-            {%
-            if
-            active_checked
-            %}checked{%
-            endif
-            %}
-          />
-          Active
-        </label>
+            <label class="wf-active" for="workflowActive">
+              <input
+                id="workflowActive"
+                type="checkbox"
+                name="active"
+                {%
+                if
+                active_checked
+                %}checked{%
+                endif
+                %}
+              />
+              Active
+            </label>
 
-        <div style="display: flex; gap: 0.6rem; flex-wrap: wrap">
-          <button type="submit" class="action-btn">{{ submit_label }}</button>
-          <a href="/workflows" class="ghost-btn">Cancel</a>
-        </div>
-      </form>
+            <div class="wf-actions">
+              <button type="submit" class="action-btn">
+                {{ submit_label }}
+              </button>
+              <a href="/workflows" class="ghost-btn">Cancel</a>
+            </div>
+          </form>
+        </section>
+
+        <section class="wf-pane">
+          <div class="wf-preview-header">
+            <h3>Live Graph Preview</h3>
+            <span class="muted">Updates while you type</span>
+          </div>
+          <p>Use this to catch broken edges or wrong node IDs before saving.</p>
+
+          <svg
+            id="workflowGraphPreview"
+            class="wf-preview"
+            viewBox="0 0 980 420"
+            aria-label="Workflow graph preview"
+          ></svg>
+
+          <table class="wf-node-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Kind</th>
+                <th>Config</th>
+              </tr>
+            </thead>
+            <tbody id="workflowNodeRows"></tbody>
+          </table>
+
+          <p class="wf-hint">
+            Tip: for richer visual editing use the dedicated graph editor after
+            creating this workflow.
+          </p>
+        </section>
+      </div>
     </div>
   </main>
 </div>
