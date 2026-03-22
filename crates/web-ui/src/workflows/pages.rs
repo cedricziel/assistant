@@ -6,13 +6,14 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Redirect, Response};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::SqlitePool;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use assistant_storage::{
     WorkflowExecutionLimits, WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRecord,
-    WorkflowStore,
+    WorkflowRunRecord, WorkflowStore, WorkflowTriggerKind,
 };
 
 use crate::common::{internal_error, render_template, StaticUrls};
@@ -81,6 +82,10 @@ struct WorkflowDetailTemplate {
     created_at: String,
     updated_at: String,
     graph_json: String,
+    webhook_url: String,
+    webhook_token: String,
+    webhook_updated_at: String,
+    recent_runs: Vec<WorkflowRunView>,
 }
 
 impl StaticUrls for WorkflowDetailTemplate {}
@@ -95,6 +100,13 @@ struct WorkflowEditorTemplate {
 }
 
 impl StaticUrls for WorkflowEditorTemplate {}
+
+struct WorkflowRunView {
+    id: String,
+    trigger_type: String,
+    status: String,
+    started_at: String,
+}
 
 #[derive(Deserialize)]
 pub struct WorkflowFormData {
@@ -185,6 +197,18 @@ pub async fn show_workflow(
     let graph_json =
         serde_json::to_string_pretty(&workflow.graph).unwrap_or_else(|_| "{}".to_string());
     let short_id = id[..8.min(id.len())].to_string();
+    let endpoint = store
+        .ensure_webhook_endpoint(workflow_id)
+        .await
+        .map_err(internal_error)?;
+    let webhook_url = format!("/workflow-hooks/{}/{}", id, endpoint.token);
+    let recent_runs = store
+        .list_runs(workflow_id, 10)
+        .await
+        .map_err(internal_error)?
+        .into_iter()
+        .map(to_run_view)
+        .collect();
 
     Ok(render_template(WorkflowDetailTemplate {
         active_page: "workflows",
@@ -207,6 +231,10 @@ pub async fn show_workflow(
         created_at: format_ts(workflow.created_at),
         updated_at: format_ts(workflow.updated_at),
         graph_json,
+        webhook_url,
+        webhook_token: endpoint.token,
+        webhook_updated_at: format_ts(endpoint.updated_at),
+        recent_runs,
     }))
 }
 
@@ -311,6 +339,36 @@ pub async fn toggle_workflow(
     }
 }
 
+/// `POST /workflows/:id/webhook/rotate` -- Rotate inbound webhook token.
+pub async fn rotate_workflow_webhook(
+    State(state): State<WorkflowPagesState>,
+    Path(id): Path<String>,
+) -> Response {
+    let workflow_id = match parse_uuid(&id) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+
+    let store = WorkflowStore::new(state.pool);
+    match store.get(workflow_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return (StatusCode::NOT_FOUND, "Workflow not found").into_response(),
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+
+    let rotate_result = match store.get_webhook_endpoint(workflow_id).await {
+        Ok(Some(_)) => store.rotate_webhook_token(workflow_id).await,
+        Ok(None) => store.ensure_webhook_endpoint(workflow_id).await.map(Some),
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    };
+
+    match rotate_result {
+        Ok(Some(_)) => Redirect::to(&format!("/workflows/{id}")).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Webhook endpoint not found").into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
 /// `GET /workflows/:id/editor` -- Graph editor page.
 pub async fn editor_page(
     State(state): State<WorkflowPagesState>,
@@ -373,10 +431,30 @@ pub struct WorkflowApiUpsert {
 #[derive(Serialize)]
 pub struct WorkflowApiRunPreview {
     workflow_id: String,
+    run_id: String,
     status: String,
     message: String,
     started_at: String,
     execution_limits: WorkflowExecutionLimits,
+}
+
+#[derive(Serialize)]
+pub struct WorkflowApiRunItem {
+    id: String,
+    workflow_id: String,
+    trigger_type: String,
+    status: String,
+    started_at: String,
+    finished_at: Option<String>,
+    error_message: Option<String>,
+    trigger_payload: Value,
+}
+
+#[derive(Serialize)]
+pub struct WorkflowWebhookTriggerAccepted {
+    workflow_id: String,
+    run_id: String,
+    status: String,
 }
 
 /// `GET /api/workflows` -- List workflows.
@@ -486,15 +564,85 @@ pub async fn api_test_run_workflow(
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, "Workflow not found".to_string()))?;
 
+    let run_id = store
+        .create_run(
+            workflow.id,
+            WorkflowTriggerKind::Manual,
+            &serde_json::json!({}),
+        )
+        .await
+        .map_err(internal_error)?;
+
     let now = Utc::now();
     let preview = WorkflowApiRunPreview {
         workflow_id: workflow.id.to_string(),
+        run_id: run_id.to_string(),
         status: "accepted".to_string(),
-        message: "Workflow test-run accepted (execution worker integration is next)".to_string(),
+        message: "Workflow run accepted and queued for execution worker".to_string(),
         started_at: now.to_rfc3339(),
         execution_limits: workflow.graph.execution,
     };
     Ok(Json(preview))
+}
+
+/// `GET /api/workflows/:id/runs` -- List recent workflow runs.
+pub async fn api_list_workflow_runs(
+    State(state): State<WorkflowPagesState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<WorkflowApiRunItem>>, (StatusCode, String)> {
+    let workflow_id = parse_uuid(&id)?;
+    let store = WorkflowStore::new(state.pool.clone());
+    let exists = store
+        .get(workflow_id)
+        .await
+        .map_err(internal_error)?
+        .is_some();
+    if !exists {
+        return Err((StatusCode::NOT_FOUND, "Workflow not found".to_string()));
+    }
+
+    let runs = store
+        .list_runs(workflow_id, 50)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(runs.into_iter().map(to_api_run_item).collect()))
+}
+
+/// `POST /workflow-hooks/:id/:token` -- Public incoming webhook trigger.
+pub async fn public_webhook_trigger(
+    State(state): State<WorkflowPagesState>,
+    Path((id, token)): Path<(String, String)>,
+    Json(payload): Json<Value>,
+) -> Result<(StatusCode, Json<WorkflowWebhookTriggerAccepted>), (StatusCode, String)> {
+    let workflow_id = parse_uuid(&id)?;
+    let store = WorkflowStore::new(state.pool);
+    let workflow = store
+        .resolve_by_webhook(workflow_id, &token)
+        .await
+        .map_err(internal_error)?;
+
+    let Some(workflow) = workflow else {
+        warn!(workflow_id = %id, "Rejected workflow webhook trigger due to invalid token/workflow");
+        return Err((
+            StatusCode::NOT_FOUND,
+            "Workflow webhook not found".to_string(),
+        ));
+    };
+
+    let run_id = store
+        .create_run(workflow.id, WorkflowTriggerKind::Webhook, &payload)
+        .await
+        .map_err(internal_error)?;
+    info!(workflow_id = %workflow.id, run_id = %run_id, "Accepted workflow webhook trigger");
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(WorkflowWebhookTriggerAccepted {
+            workflow_id: workflow.id.to_string(),
+            run_id: run_id.to_string(),
+            status: "accepted".to_string(),
+        }),
+    ))
 }
 
 async fn set_active_api(
@@ -576,6 +724,28 @@ fn to_api_detail(workflow: WorkflowRecord) -> WorkflowApiDetail {
         graph: workflow.graph,
         created_at: format_ts(workflow.created_at),
         updated_at: format_ts(workflow.updated_at),
+    }
+}
+
+fn to_api_run_item(run: WorkflowRunRecord) -> WorkflowApiRunItem {
+    WorkflowApiRunItem {
+        id: run.id.to_string(),
+        workflow_id: run.workflow_id.to_string(),
+        trigger_type: run.trigger_type,
+        status: run.status,
+        started_at: format_ts(run.started_at),
+        finished_at: run.finished_at.map(format_ts),
+        error_message: run.error_message,
+        trigger_payload: run.trigger_payload,
+    }
+}
+
+fn to_run_view(run: WorkflowRunRecord) -> WorkflowRunView {
+    WorkflowRunView {
+        id: run.id.to_string()[..8].to_string(),
+        trigger_type: run.trigger_type,
+        status: run.status,
+        started_at: format_ts(run.started_at),
     }
 }
 

@@ -28,7 +28,8 @@ pub use traces::{RecordedSpan, TraceStats, TraceStore, TraceSummary};
 pub use webhooks::{WebhookRecord, WebhookStore};
 pub use workflows::{
     WorkflowEdge, WorkflowEdgeCondition, WorkflowExecutionLimits, WorkflowGraph, WorkflowNode,
-    WorkflowNodeKind, WorkflowRecord, WorkflowStore,
+    WorkflowNodeKind, WorkflowRecord, WorkflowRunRecord, WorkflowRunStepRecord, WorkflowStore,
+    WorkflowTriggerKind, WorkflowWebhookEndpoint,
 };
 
 use anyhow::Result;
@@ -259,6 +260,14 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "020_workflows",
             include_str!("../../../migrations/020_workflows.sql"),
+        ),
+        (
+            "021_workflow_webhook_endpoints",
+            include_str!("../../../migrations/021_workflow_webhook_endpoints.sql"),
+        ),
+        (
+            "022_workflow_run_steps",
+            include_str!("../../../migrations/022_workflow_run_steps.sql"),
         ),
     ];
 

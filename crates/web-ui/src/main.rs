@@ -28,7 +28,7 @@ use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_provider_openai::OpenAIProvider;
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
-use assistant_runtime::Orchestrator;
+use assistant_runtime::{spawn_workflow_runner, Orchestrator};
 use assistant_skills::SkillSource;
 use assistant_storage::registry::SkillRegistry;
 use assistant_storage::{default_db_path, StorageLayer};
@@ -398,6 +398,9 @@ async fn main() -> Result<()> {
             .await;
     });
 
+    // 6. Spawn workflow run processor (loop guardrails + run telemetry).
+    let _workflow_runner = spawn_workflow_runner(storage.clone(), Duration::from_secs(2));
+
     // -- Agent store (filesystem-backed) --
     let agent_store = AgentStore::default_dir()?;
 
@@ -443,6 +446,8 @@ async fn main() -> Result<()> {
         .route("/ready", get(ready))
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
+        // Public workflow webhook trigger ingress.
+        .merge(workflows::workflow_public_router().with_state(workflow_pages_state.clone()))
         // A2A agent card is public per spec — callers need it to discover auth.
         .merge(a2a::public_router().with_state(a2a_state.clone()))
         // PWA assets must be public so the browser can fetch them before auth.

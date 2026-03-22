@@ -90,6 +90,62 @@ pub struct WorkflowRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Persisted inbound webhook endpoint for a workflow trigger.
+#[derive(Debug, Clone)]
+pub struct WorkflowWebhookEndpoint {
+    pub workflow_id: Uuid,
+    pub token: String,
+    pub active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Trigger kinds used when recording workflow runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowTriggerKind {
+    Manual,
+    Webhook,
+    Schedule,
+    Event,
+}
+
+impl WorkflowTriggerKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Webhook => "webhook",
+            Self::Schedule => "schedule",
+            Self::Event => "event",
+        }
+    }
+}
+
+/// Persisted run record for workflow execution telemetry.
+#[derive(Debug, Clone)]
+pub struct WorkflowRunRecord {
+    pub id: Uuid,
+    pub workflow_id: Uuid,
+    pub agent_id: String,
+    pub trigger_type: String,
+    pub trigger_payload: Value,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub error_message: Option<String>,
+}
+
+/// Step-level event within a run execution.
+#[derive(Debug, Clone)]
+pub struct WorkflowRunStepRecord {
+    pub id: Uuid,
+    pub run_id: Uuid,
+    pub step_index: i64,
+    pub node_id: String,
+    pub node_kind: String,
+    pub note: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+}
+
 /// SQLite-backed store for workflows.
 pub struct WorkflowStore {
     pool: SqlitePool,
@@ -143,6 +199,249 @@ impl WorkflowStore {
         .await?;
 
         Ok(id)
+    }
+
+    /// Returns webhook endpoint metadata for a workflow, creating one if missing.
+    pub async fn ensure_webhook_endpoint(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<WorkflowWebhookEndpoint> {
+        if let Some(existing) = self.get_webhook_endpoint(workflow_id).await? {
+            return Ok(existing);
+        }
+
+        let now = Utc::now();
+        let token = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO workflow_webhook_endpoints
+             (workflow_id, token, active, created_at, updated_at)
+             VALUES (?1, ?2, 1, ?3, ?3)",
+        )
+        .bind(workflow_id.to_string())
+        .bind(&token)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        self.get_webhook_endpoint(workflow_id)
+            .await?
+            .context("workflow webhook endpoint missing after insert")
+    }
+
+    /// Returns inbound webhook endpoint metadata for a workflow.
+    pub async fn get_webhook_endpoint(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<WorkflowWebhookEndpoint>> {
+        let row = sqlx::query(
+            "SELECT workflow_id, token, active, created_at, updated_at
+             FROM workflow_webhook_endpoints
+             WHERE workflow_id = ?1",
+        )
+        .bind(workflow_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(parse_webhook_row).transpose()
+    }
+
+    /// Rotates the webhook token for a workflow endpoint.
+    pub async fn rotate_webhook_token(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Option<WorkflowWebhookEndpoint>> {
+        let now = Utc::now();
+        let token = Uuid::new_v4().to_string();
+        let result = sqlx::query(
+            "UPDATE workflow_webhook_endpoints
+             SET token = ?1, updated_at = ?2
+             WHERE workflow_id = ?3",
+        )
+        .bind(&token)
+        .bind(now)
+        .bind(workflow_id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+
+        self.get_webhook_endpoint(workflow_id).await
+    }
+
+    /// Resolves a workflow by webhook credentials.
+    pub async fn resolve_by_webhook(
+        &self,
+        workflow_id: Uuid,
+        token: &str,
+    ) -> Result<Option<WorkflowRecord>> {
+        let allowed: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)
+             FROM workflow_webhook_endpoints we
+             JOIN workflows w ON w.id = we.workflow_id
+             WHERE we.workflow_id = ?1
+               AND we.token = ?2
+               AND we.active = 1
+               AND w.active = 1
+               AND w.agent_id = ?3",
+        )
+        .bind(workflow_id.to_string())
+        .bind(token)
+        .bind(&self.agent_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if allowed == 0 {
+            return Ok(None);
+        }
+
+        self.get(workflow_id).await
+    }
+
+    /// Records a workflow run triggered by manual, webhook, schedule, or events.
+    pub async fn create_run(
+        &self,
+        workflow_id: Uuid,
+        trigger: WorkflowTriggerKind,
+        trigger_payload: &Value,
+    ) -> Result<Uuid> {
+        let workflow = self.get(workflow_id).await?.context("workflow not found")?;
+        let run_id = Uuid::new_v4();
+        let payload_json = serde_json::to_string(trigger_payload)?;
+
+        sqlx::query(
+            "INSERT INTO workflow_runs
+             (id, workflow_id, agent_id, trigger_type, trigger_payload_json, status, started_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'running', ?6)",
+        )
+        .bind(run_id.to_string())
+        .bind(workflow_id.to_string())
+        .bind(&workflow.agent_id)
+        .bind(trigger.as_str())
+        .bind(payload_json)
+        .bind(Utc::now())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(run_id)
+    }
+
+    /// Lists recent runs for a workflow.
+    pub async fn list_runs(&self, workflow_id: Uuid, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, workflow_id, agent_id, trigger_type, trigger_payload_json, status, started_at, finished_at, error_message
+             FROM workflow_runs
+             WHERE workflow_id = ?1 AND agent_id = ?2
+             ORDER BY started_at DESC
+             LIMIT ?3",
+        )
+        .bind(workflow_id.to_string())
+        .bind(&self.agent_id)
+        .bind(limit.max(1))
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(parse_run_row).collect()
+    }
+
+    /// Lists globally runnable workflow runs.
+    pub async fn list_runnable_runs(&self, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, workflow_id, agent_id, trigger_type, trigger_payload_json, status, started_at, finished_at, error_message
+             FROM workflow_runs
+             WHERE status = 'running' AND finished_at IS NULL
+             ORDER BY started_at ASC
+             LIMIT ?1",
+        )
+        .bind(limit.max(1))
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(parse_run_row).collect()
+    }
+
+    /// Load the workflow definition associated with a run.
+    pub async fn workflow_for_run(&self, run_id: Uuid) -> Result<Option<WorkflowRecord>> {
+        let row = sqlx::query(
+            "SELECT w.id, w.agent_id, w.name, w.description, w.graph_json, w.active, w.created_at, w.updated_at
+             FROM workflow_runs wr
+             JOIN workflows w ON w.id = wr.workflow_id
+             WHERE wr.id = ?1",
+        )
+        .bind(run_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(parse_row).transpose()
+    }
+
+    /// Append one execution step record for a workflow run.
+    pub async fn append_run_step(
+        &self,
+        run_id: Uuid,
+        step_index: i64,
+        node_id: &str,
+        node_kind: &str,
+        note: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO workflow_run_steps
+             (id, run_id, step_index, node_id, node_kind, note, occurred_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(run_id.to_string())
+        .bind(step_index)
+        .bind(node_id)
+        .bind(node_kind)
+        .bind(note)
+        .bind(Utc::now())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Mark a run finished with final status and optional error message.
+    pub async fn finish_run(
+        &self,
+        run_id: Uuid,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE workflow_runs
+             SET status = ?1, finished_at = ?2, error_message = ?3
+             WHERE id = ?4 AND finished_at IS NULL",
+        )
+        .bind(status)
+        .bind(Utc::now())
+        .bind(error_message)
+        .bind(run_id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// List recorded step events for a run.
+    pub async fn list_run_steps(
+        &self,
+        run_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<WorkflowRunStepRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, run_id, step_index, node_id, node_kind, note, occurred_at
+             FROM workflow_run_steps
+             WHERE run_id = ?1
+             ORDER BY step_index ASC
+             LIMIT ?2",
+        )
+        .bind(run_id.to_string())
+        .bind(limit.max(1))
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(parse_step_row).collect()
     }
 
     /// List workflows for this agent.
@@ -323,6 +622,52 @@ fn parse_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkflowRecord> {
     })
 }
 
+fn parse_webhook_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkflowWebhookEndpoint> {
+    let workflow_id_raw: String = row.try_get("workflow_id")?;
+    let active_int: i64 = row.try_get("active")?;
+    Ok(WorkflowWebhookEndpoint {
+        workflow_id: Uuid::parse_str(&workflow_id_raw)?,
+        token: row.try_get("token")?,
+        active: active_int != 0,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+fn parse_run_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkflowRunRecord> {
+    let id_raw: String = row.try_get("id")?;
+    let workflow_id_raw: String = row.try_get("workflow_id")?;
+    let payload_json: String = row.try_get("trigger_payload_json")?;
+    let trigger_payload = serde_json::from_str(&payload_json)
+        .with_context(|| format!("failed to parse trigger_payload_json for run {id_raw}"))?;
+
+    Ok(WorkflowRunRecord {
+        id: Uuid::parse_str(&id_raw)?,
+        workflow_id: Uuid::parse_str(&workflow_id_raw)?,
+        agent_id: row.try_get("agent_id")?,
+        trigger_type: row.try_get("trigger_type")?,
+        trigger_payload,
+        status: row.try_get("status")?,
+        started_at: row.try_get("started_at")?,
+        finished_at: row.try_get("finished_at")?,
+        error_message: row.try_get("error_message")?,
+    })
+}
+
+fn parse_step_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkflowRunStepRecord> {
+    let id_raw: String = row.try_get("id")?;
+    let run_id_raw: String = row.try_get("run_id")?;
+    Ok(WorkflowRunStepRecord {
+        id: Uuid::parse_str(&id_raw)?,
+        run_id: Uuid::parse_str(&run_id_raw)?,
+        step_index: row.try_get("step_index")?,
+        node_id: row.try_get("node_id")?,
+        node_kind: row.try_get("node_kind")?,
+        note: row.try_get("note")?,
+        occurred_at: row.try_get("occurred_at")?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +775,61 @@ mod tests {
         let toggled = store.set_active(id, true).await.unwrap();
         assert!(toggled);
         assert!(store.get(id).await.unwrap().unwrap().active);
+    }
+
+    #[tokio::test]
+    async fn webhook_endpoint_and_runs_roundtrip() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = WorkflowStore::new(storage.pool.clone());
+        let graph = graph_with_loop();
+        let workflow_id = store.create("wf", "desc", &graph, true).await.unwrap();
+
+        let endpoint = store.ensure_webhook_endpoint(workflow_id).await.unwrap();
+        assert_eq!(endpoint.workflow_id, workflow_id);
+        assert!(!endpoint.token.is_empty());
+
+        let resolved = store
+            .resolve_by_webhook(workflow_id, &endpoint.token)
+            .await
+            .unwrap();
+        assert!(resolved.is_some());
+
+        let run_id = store
+            .create_run(
+                workflow_id,
+                WorkflowTriggerKind::Webhook,
+                &serde_json::json!({"hello": "world"}),
+            )
+            .await
+            .unwrap();
+
+        let runnable = store.list_runnable_runs(10).await.unwrap();
+        assert!(runnable.iter().any(|r| r.id == run_id));
+
+        store
+            .append_run_step(run_id, 1, "trigger_1", "trigger", Some("start"))
+            .await
+            .unwrap();
+        let steps = store.list_run_steps(run_id, 10).await.unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].node_id, "trigger_1");
+
+        let wf_for_run = store.workflow_for_run(run_id).await.unwrap();
+        assert!(wf_for_run.is_some());
+
+        let runs = store.list_runs(workflow_id, 20).await.unwrap();
+        assert!(!runs.is_empty());
+        assert_eq!(runs[0].id, run_id);
+        assert_eq!(runs[0].trigger_type, "webhook");
+
+        let finished = store.finish_run(run_id, "completed", None).await.unwrap();
+        assert!(finished);
+
+        let rotated = store
+            .rotate_webhook_token(workflow_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(endpoint.token, rotated.token);
     }
 }

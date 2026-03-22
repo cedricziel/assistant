@@ -7,6 +7,7 @@ pub(crate) mod otel_spans;
 pub mod scheduler;
 pub mod telemetry;
 pub mod webhook_dispatch;
+pub mod workflows;
 
 pub use bootstrap::spawn_memory_indexer;
 pub use metrics::MetricsRecorder;
@@ -14,3 +15,4 @@ pub use orchestrator::{Orchestrator, TurnResult};
 pub use otel_spans::start_conversation_context;
 pub use scheduler::spawn_scheduler;
 pub use telemetry::{init_tracing, OtelGuard};
+pub use workflows::spawn_workflow_runner;

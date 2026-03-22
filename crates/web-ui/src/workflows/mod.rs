@@ -7,7 +7,7 @@ use axum::Router;
 
 use pages::WorkflowPagesState;
 
-/// Router for workflow UI pages and JSON API.
+/// Router for auth-protected workflow UI pages and JSON API.
 pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
     Router::new()
         .route(
@@ -22,6 +22,10 @@ pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
         )
         .route("/workflows/{id}/delete", post(pages::delete_workflow))
         .route("/workflows/{id}/toggle", post(pages::toggle_workflow))
+        .route(
+            "/workflows/{id}/webhook/rotate",
+            post(pages::rotate_workflow_webhook),
+        )
         .route("/workflows/{id}/editor", get(pages::editor_page))
         .route(
             "/api/workflows",
@@ -43,4 +47,16 @@ pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
             "/api/workflows/{id}/test-run",
             post(pages::api_test_run_workflow),
         )
+        .route(
+            "/api/workflows/{id}/runs",
+            get(pages::api_list_workflow_runs),
+        )
+}
+
+/// Router for public inbound workflow webhook trigger endpoints.
+pub fn workflow_public_router() -> Router<WorkflowPagesState> {
+    Router::new().route(
+        "/workflow-hooks/{id}/{token}",
+        post(pages::public_webhook_trigger),
+    )
 }
