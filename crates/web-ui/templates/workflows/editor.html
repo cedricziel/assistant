@@ -18,19 +18,26 @@ min-height:1.2rem; font-size:0.85rem; margin-top:0.35rem; } svg { width:100%;
 min-height:320px; background:#04101f; border-radius:8px; border:1px dashed
 #225081; } table { width:100%; border-collapse: collapse; font-size:0.82rem; }
 th, td { padding:0.35rem 0.4rem; border-bottom:1px solid #112744;
-text-align:left; } @media (max-width: 960px) { .editor-grid {
-grid-template-columns: 1fr; } .controls .row { grid-template-columns:1fr; } } {%
-endblock %} {% block content %}
+text-align:left; } .visually-hidden { position:absolute; left:-9999px; } @media
+(max-width: 960px) { .editor-grid { grid-template-columns: 1fr; } .controls .row
+{ grid-template-columns:1fr; } } {% endblock %} {% block content %}
 <div class="layout">
   <main class="main" style="width: 100%">
+    <div id="workflowEditorMeta" data-workflow-id="{{ id }}"></div>
     <div class="panel">
       <div class="panel-head">
         <div>
           <h2>Graph Editor</h2>
-          <p>
-            Edit nodes and edges for <strong>{{ name }}</strong>. Save from the
-            workflow edit page after copying JSON.
-          </p>
+          <p>Edit nodes and edges for <strong>{{ name }}</strong>.</p>
+        </div>
+        <div style="display: flex; gap: 0.45rem; align-items: center">
+          <span
+            id="editorStatus"
+            style="font-size: 0.82rem; color: #8aa5d8"
+          ></span>
+          <button type="button" id="saveGraphBtn" class="action-btn">
+            Save Graph
+          </button>
         </div>
       </div>
 
@@ -46,13 +53,23 @@ endblock %} {% block content %}
           <div class="controls" style="margin-top: 0.8rem">
             <h3 style="margin-top: 0.3rem">Add Node</h3>
             <div class="row">
+              <label for="nodeIdInput" class="visually-hidden">Node ID</label>
               <input id="nodeIdInput" placeholder="node id" />
+              <label for="nodeKindInput" class="visually-hidden"
+                >Node Kind</label
+              >
               <select id="nodeKindInput">
                 <option value="trigger">trigger</option>
                 <option value="action" selected>action</option>
                 <option value="condition">condition</option>
               </select>
+              <label for="nodeTypeInput" class="visually-hidden"
+                >Node Type</label
+              >
               <input id="nodeTypeInput" placeholder="config.type" />
+              <label for="addNodeBtn" class="visually-hidden"
+                >Add Node Button</label
+              >
               <button type="button" id="addNodeBtn">Add Node</button>
             </div>
           </div>
@@ -60,9 +77,19 @@ endblock %} {% block content %}
           <div class="controls">
             <h3>Add Edge</h3>
             <div class="row">
+              <label for="edgeFromInput" class="visually-hidden"
+                >Edge From</label
+              >
               <input id="edgeFromInput" placeholder="from node id" />
+              <label for="edgeToInput" class="visually-hidden">Edge To</label>
               <input id="edgeToInput" placeholder="to node id" />
+              <label for="edgeOnInput" class="visually-hidden"
+                >Edge On Label</label
+              >
               <input id="edgeOnInput" placeholder="on label (optional)" />
+              <label for="addEdgeBtn" class="visually-hidden"
+                >Add Edge Button</label
+              >
               <button type="button" id="addEdgeBtn">Add Edge</button>
             </div>
           </div>
@@ -70,7 +97,12 @@ endblock %} {% block content %}
 
         <section class="pane">
           <h3>Graph JSON</h3>
-          <textarea id="graphJson">{{ graph_json }}</textarea>
+          <label for="graphJson" class="visually-hidden"
+            >Workflow Graph JSON</label
+          >
+          <textarea id="graphJson" aria-describedby="graphError">
+{{ graph_json }}</textarea
+          >
           <div id="graphError" class="err"></div>
 
           <h3 style="margin-top: 0.8rem">Nodes</h3>
@@ -92,10 +124,18 @@ endblock %} {% block content %}
               flex-wrap: wrap;
             "
           >
-            <a href="/workflows/{{ id }}/edit" class="action-btn"
+            <a
+              href="/workflows/{{ id }}/edit"
+              class="action-btn"
+              data-editor-nav="true"
               >Back to Edit Form</a
             >
-            <a href="/workflows/{{ id }}" class="ghost-btn">Back to Detail</a>
+            <a
+              href="/workflows/{{ id }}"
+              class="ghost-btn"
+              data-editor-nav="true"
+              >Back to Detail</a
+            >
           </div>
         </section>
       </div>

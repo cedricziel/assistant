@@ -41,14 +41,19 @@ function renderNodeTable(graph, tbody) {
   tbody.innerHTML = "";
   graph.nodes.forEach(function (node) {
     const tr = document.createElement("tr");
-    tr.innerHTML =
-      "<td>" +
-      node.id +
-      "</td><td>" +
-      node.kind +
-      "</td><td><code>" +
-      JSON.stringify(node.config || {}) +
-      "</code></td>";
+
+    const idTd = document.createElement("td");
+    idTd.textContent = node.id;
+
+    const kindTd = document.createElement("td");
+    kindTd.textContent = node.kind;
+
+    const configTd = document.createElement("td");
+    const code = document.createElement("code");
+    code.textContent = JSON.stringify(node.config || {});
+    configTd.appendChild(code);
+
+    tr.append(idTd, kindTd, configTd);
     tbody.appendChild(tr);
   });
 }
@@ -149,6 +154,87 @@ function bindWorkflowEditor() {
   const errorBox = document.getElementById("graphError");
   const nodeTableBody = document.getElementById("workflowNodeRows");
   const svg = document.getElementById("workflowGraphPreview");
+  const saveBtn = document.getElementById("saveGraphBtn");
+  const statusBox = document.getElementById("editorStatus");
+  const editorMeta = document.getElementById("workflowEditorMeta");
+  const workflowId = editorMeta
+    ? editorMeta.getAttribute("data-workflow-id")
+    : null;
+  const storageKey = workflowId ? "workflow-editor-draft:" + workflowId : null;
+  let isDirty = false;
+
+  function setStatus(message, isError) {
+    if (!statusBox) return;
+    statusBox.textContent = message;
+    statusBox.style.color = isError ? "#ff8a8a" : "#8aa5d8";
+  }
+
+  function markDirty() {
+    isDirty = true;
+    setStatus("Unsaved changes", false);
+  }
+
+  function persistDraft() {
+    if (!storageKey) return;
+    localStorage.setItem(storageKey, textarea.value);
+  }
+
+  function clearDraft() {
+    if (!storageKey) return;
+    localStorage.removeItem(storageKey);
+  }
+
+  function saveDraftToServer() {
+    if (!workflowId) {
+      return Promise.resolve(false);
+    }
+    const graph = refreshFromTextArea();
+    if (!graph) {
+      setStatus("Cannot save invalid graph JSON", true);
+      return Promise.resolve(false);
+    }
+
+    return fetch("/api/workflows/" + workflowId)
+      .then(function (res) {
+        if (!res.ok) {
+          throw new Error("Failed to load workflow");
+        }
+        return res.json();
+      })
+      .then(function (workflow) {
+        return fetch("/api/workflows/" + workflowId, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: workflow.name,
+            description: workflow.description,
+            active: workflow.active,
+            graph: graph,
+          }),
+        });
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          throw new Error("Save failed");
+        }
+        isDirty = false;
+        clearDraft();
+        setStatus("Saved", false);
+        return true;
+      })
+      .catch(function (err) {
+        setStatus(String(err), true);
+        return false;
+      });
+  }
+
+  if (storageKey) {
+    const draft = localStorage.getItem(storageKey);
+    if (draft && draft.trim()) {
+      textarea.value = draft;
+      markDirty();
+    }
+  }
 
   function refreshFromTextArea() {
     try {
@@ -194,6 +280,8 @@ function bindWorkflowEditor() {
         config: { type: typeInput.value.trim() || "custom" },
       });
       writeGraph(textarea, graph, errorBox);
+      markDirty();
+      persistDraft();
       refreshFromTextArea();
       idInput.value = "";
     });
@@ -214,18 +302,64 @@ function bindWorkflowEditor() {
       const to = toInput.value.trim();
       if (!from || !to) return;
 
+      const knownNodeIds = new Set(
+        graph.nodes.map(function (node) {
+          return node.id;
+        }),
+      );
+      if (!knownNodeIds.has(from) || !knownNodeIds.has(to)) {
+        if (errorBox) {
+          errorBox.textContent =
+            "Both edge endpoints must reference existing nodes";
+        }
+        return;
+      }
+
       graph.edges.push({
         from: from,
         to: to,
         on: onInput.value.trim() || null,
       });
       writeGraph(textarea, graph, errorBox);
+      markDirty();
+      persistDraft();
       refreshFromTextArea();
     });
   }
 
+  if (saveBtn) {
+    saveBtn.addEventListener("click", function () {
+      saveDraftToServer();
+    });
+  }
+
+  const navLinks = document.querySelectorAll("a[data-editor-nav='true']");
+  navLinks.forEach(function (link) {
+    link.addEventListener("click", function (event) {
+      if (!isDirty) return;
+      event.preventDefault();
+      if (!confirm("You have unsaved changes. Save before leaving?")) {
+        window.location.href = link.getAttribute("href");
+        return;
+      }
+      saveDraftToServer().then(function (saved) {
+        if (saved) {
+          window.location.href = link.getAttribute("href");
+        }
+      });
+    });
+  });
+
   textarea.addEventListener("input", function () {
+    markDirty();
+    persistDraft();
     refreshFromTextArea();
+  });
+
+  window.addEventListener("beforeunload", function (event) {
+    if (!isDirty) return;
+    event.preventDefault();
+    event.returnValue = "";
   });
 
   refreshFromTextArea();

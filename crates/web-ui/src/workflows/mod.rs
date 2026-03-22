@@ -37,7 +37,9 @@ pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
         )
         .route(
             "/api/workflows/{id}",
-            get(pages::api_get_workflow).put(pages::api_update_workflow),
+            get(pages::api_get_workflow)
+                .put(pages::api_update_workflow)
+                .delete(pages::api_delete_workflow),
         )
         .route(
             "/api/workflows/{id}/activate",

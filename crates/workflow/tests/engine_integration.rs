@@ -22,13 +22,15 @@ impl WorkflowActionExecutor for MockAssistantTurnExecutor {
     }
 
     async fn execute(&self, input: WorkflowActionInput) -> Result<WorkflowActionResult> {
-        Ok(WorkflowActionResult::success("mock assistant execution").with_output(
-            serde_json::json!({
-                "run_id": input.run_id,
-                "node_id": input.node_id,
-                "ok": true,
-            }),
-        ))
+        Ok(
+            WorkflowActionResult::success("mock assistant execution").with_output(
+                serde_json::json!({
+                    "run_id": input.run_id,
+                    "node_id": input.node_id,
+                    "ok": true,
+                }),
+            ),
+        )
     }
 }
 
@@ -62,20 +64,28 @@ fn graph_with_trigger(trigger_config: serde_json::Value) -> WorkflowGraph {
 
 #[tokio::test]
 async fn runner_executes_action_and_persists_step_output() {
-    let storage = Arc::new(StorageLayer::new_in_memory().await.expect("in-memory storage"));
+    let storage = Arc::new(
+        StorageLayer::new_in_memory()
+            .await
+            .expect("in-memory storage"),
+    );
     let store = storage.workflow_store();
     let workflow_id = store
         .create(
             "runner-manual",
             "manual runner test",
-            &graph_with_trigger(serde_json::json!({"type": "manual"}),),
+            &graph_with_trigger(serde_json::json!({"type": "manual"})),
             true,
         )
         .await
         .expect("create workflow");
 
     let run_id = store
-        .create_run(workflow_id, WorkflowTriggerKind::Manual, &serde_json::json!({}))
+        .create_run(
+            workflow_id,
+            WorkflowTriggerKind::Manual,
+            &serde_json::json!({}),
+        )
         .await
         .expect("create run");
 
@@ -105,7 +115,11 @@ async fn runner_executes_action_and_persists_step_output() {
 
 #[tokio::test]
 async fn schedule_adapter_creates_schedule_run() {
-    let storage = Arc::new(StorageLayer::new_in_memory().await.expect("in-memory storage"));
+    let storage = Arc::new(
+        StorageLayer::new_in_memory()
+            .await
+            .expect("in-memory storage"),
+    );
     let store = storage.workflow_store();
     let workflow_id = store
         .create(
@@ -131,13 +145,19 @@ async fn schedule_adapter_creates_schedule_run() {
 
 #[tokio::test]
 async fn event_adapter_creates_run_from_done_bus_message() {
-    let storage = Arc::new(StorageLayer::new_in_memory().await.expect("in-memory storage"));
+    let storage = Arc::new(
+        StorageLayer::new_in_memory()
+            .await
+            .expect("in-memory storage"),
+    );
     let store = storage.workflow_store();
     let workflow_id = store
         .create(
             "event-trigger",
             "event adapter test",
-            &graph_with_trigger(serde_json::json!({"type": "event", "event": bus_messages::topic::TURN_RESULT})),
+            &graph_with_trigger(
+                serde_json::json!({"type": "event", "event": bus_messages::topic::TURN_RESULT}),
+            ),
             true,
         )
         .await

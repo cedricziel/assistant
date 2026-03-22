@@ -8,6 +8,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::SqlitePool;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -22,6 +24,7 @@ use crate::common::{internal_error, render_template, StaticUrls};
 #[derive(Clone)]
 pub struct WorkflowPagesState {
     pub pool: SqlitePool,
+    pub agent_id: Arc<RwLock<String>>,
 }
 
 struct WorkflowListRow {
@@ -151,7 +154,7 @@ pub struct WorkflowFormData {
 pub async fn list_workflows(
     State(state): State<WorkflowPagesState>,
 ) -> Result<Response, (StatusCode, String)> {
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let workflows = store.list().await.map_err(internal_error)?;
     let count = workflows.len();
     let rows = workflows
@@ -186,7 +189,7 @@ pub async fn create_workflow(
     State(state): State<WorkflowPagesState>,
     Form(form): Form<WorkflowFormData>,
 ) -> Response {
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let graph = match parse_graph_json(&form.graph_json) {
         Ok(graph) => graph,
         Err(err) => return (StatusCode::BAD_REQUEST, err).into_response(),
@@ -215,7 +218,7 @@ pub async fn show_workflow(
     Path(id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let workflow = store
         .get(workflow_id)
         .await
@@ -273,7 +276,7 @@ pub async fn edit_workflow_form(
     Path(id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let workflow = store
         .get(workflow_id)
         .await
@@ -311,7 +314,7 @@ pub async fn update_workflow(
         Err(err) => return (StatusCode::BAD_REQUEST, err).into_response(),
     };
 
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     match store
         .update(
             workflow_id,
@@ -338,7 +341,7 @@ pub async fn delete_workflow(
         Err(err) => return err.into_response(),
     };
 
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     match store.delete(workflow_id).await {
         Ok(true) => Redirect::to("/workflows").into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, "Workflow not found").into_response(),
@@ -356,14 +359,10 @@ pub async fn toggle_workflow(
         Err(err) => return err.into_response(),
     };
 
-    let store = WorkflowStore::new(state.pool.clone());
-    let Some(workflow) = store.get(workflow_id).await.unwrap_or(None) else {
-        return (StatusCode::NOT_FOUND, "Workflow not found").into_response();
-    };
-
-    match store.set_active(workflow_id, !workflow.active).await {
-        Ok(true) => Redirect::to(&format!("/workflows/{id}")).into_response(),
-        Ok(false) => (StatusCode::NOT_FOUND, "Workflow not found").into_response(),
+    let store = workflow_store(&state).await;
+    match store.toggle_active(workflow_id).await {
+        Ok(Some(_)) => Redirect::to(&format!("/workflows/{id}")).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Workflow not found").into_response(),
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }
 }
@@ -378,7 +377,7 @@ pub async fn rotate_workflow_webhook(
         Err(err) => return err.into_response(),
     };
 
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     match store.get(workflow_id).await {
         Ok(Some(_)) => {}
         Ok(None) => return (StatusCode::NOT_FOUND, "Workflow not found").into_response(),
@@ -404,7 +403,7 @@ pub async fn editor_page(
     Path(id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let workflow = store
         .get(workflow_id)
         .await
@@ -427,7 +426,7 @@ pub async fn show_workflow_run(
 ) -> Result<Response, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
     let run_uuid = parse_uuid(&run_id)?;
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
 
     let workflow = store
         .get(workflow_id)
@@ -551,7 +550,7 @@ pub struct WorkflowWebhookTriggerAccepted {
 pub async fn api_list_workflows(
     State(state): State<WorkflowPagesState>,
 ) -> Result<Json<Vec<WorkflowApiItem>>, (StatusCode, String)> {
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let rows = store.list().await.map_err(internal_error)?;
     Ok(Json(rows.iter().map(to_api_item).collect()))
 }
@@ -561,7 +560,7 @@ pub async fn api_create_workflow(
     State(state): State<WorkflowPagesState>,
     Json(req): Json<WorkflowApiUpsert>,
 ) -> Result<(StatusCode, Json<WorkflowApiDetail>), (StatusCode, String)> {
-    let store = WorkflowStore::new(state.pool.clone());
+    let store = workflow_store(&state).await;
     let id = store
         .create(
             req.name.trim(),
@@ -585,7 +584,7 @@ pub async fn api_get_workflow(
     Path(id): Path<String>,
 ) -> Result<Json<WorkflowApiDetail>, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let workflow = store
         .get(workflow_id)
         .await
@@ -601,7 +600,7 @@ pub async fn api_update_workflow(
     Json(req): Json<WorkflowApiUpsert>,
 ) -> Result<Json<WorkflowApiDetail>, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool.clone());
+    let store = workflow_store(&state).await;
 
     let updated = store
         .update(
@@ -623,6 +622,20 @@ pub async fn api_update_workflow(
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, "Workflow not found".to_string()))?;
     Ok(Json(to_api_detail(workflow)))
+}
+
+/// `DELETE /api/workflows/:id` -- Delete workflow.
+pub async fn api_delete_workflow(
+    State(state): State<WorkflowPagesState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let workflow_id = parse_uuid(&id)?;
+    let store = workflow_store(&state).await;
+    let deleted = store.delete(workflow_id).await.map_err(internal_error)?;
+    if !deleted {
+        return Err((StatusCode::NOT_FOUND, "Workflow not found".to_string()));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /api/workflows/:id/activate` -- Activate workflow.
@@ -647,7 +660,7 @@ pub async fn api_test_run_workflow(
     Path(id): Path<String>,
 ) -> Result<Json<WorkflowApiRunPreview>, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let workflow = store
         .get(workflow_id)
         .await
@@ -681,7 +694,7 @@ pub async fn api_list_workflow_runs(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<WorkflowApiRunItem>>, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool.clone());
+    let store = workflow_store(&state).await;
     let exists = store
         .get(workflow_id)
         .await
@@ -705,7 +718,7 @@ pub async fn api_get_workflow_run(
 ) -> Result<Json<WorkflowApiRunDetail>, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
     let run_uuid = parse_uuid(&run_id)?;
-    let store = WorkflowStore::new(state.pool.clone());
+    let store = workflow_store(&state).await;
 
     let run = store
         .get_run(workflow_id, run_uuid)
@@ -730,7 +743,7 @@ pub async fn public_webhook_trigger(
     Json(payload): Json<Value>,
 ) -> Result<(StatusCode, Json<WorkflowWebhookTriggerAccepted>), (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool);
+    let store = workflow_store(&state).await;
     let workflow = store
         .resolve_by_webhook(workflow_id, &token)
         .await
@@ -766,7 +779,7 @@ async fn set_active_api(
     active: bool,
 ) -> Result<Json<WorkflowApiDetail>, (StatusCode, String)> {
     let workflow_id = parse_uuid(&id)?;
-    let store = WorkflowStore::new(state.pool.clone());
+    let store = workflow_store(&state).await;
     let changed = store
         .set_active(workflow_id, active)
         .await
@@ -786,13 +799,18 @@ async fn set_active_api(
 fn parse_graph_json(raw: &str) -> Result<WorkflowGraph, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return serde_json::from_str(&default_graph_json()).map_err(|err| err.to_string());
+        return Err("graph_json cannot be empty".to_string());
     }
     serde_json::from_str(trimmed).map_err(|err| format!("Invalid graph_json: {err}"))
 }
 
 fn parse_uuid(input: &str) -> Result<Uuid, (StatusCode, String)> {
     Uuid::parse_str(input).map_err(|_| (StatusCode::BAD_REQUEST, "Invalid workflow id".to_string()))
+}
+
+async fn workflow_store(state: &WorkflowPagesState) -> WorkflowStore {
+    let agent_id = state.agent_id.read().await.clone();
+    WorkflowStore::for_agent(state.pool.clone(), agent_id)
 }
 
 fn to_row(workflow: &WorkflowRecord) -> WorkflowListRow {

@@ -553,6 +553,35 @@ impl WorkflowStore {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Atomically toggle active status and return the new state.
+    pub async fn toggle_active(&self, id: Uuid) -> Result<Option<bool>> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            "UPDATE workflows
+             SET active = CASE WHEN active = 0 THEN 1 ELSE 0 END,
+                 updated_at = ?1
+             WHERE id = ?2 AND agent_id = ?3",
+        )
+        .bind(now)
+        .bind(id.to_string())
+        .bind(&self.agent_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+
+        let active_int: i64 =
+            sqlx::query_scalar("SELECT active FROM workflows WHERE id = ?1 AND agent_id = ?2")
+                .bind(id.to_string())
+                .bind(&self.agent_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+        Ok(Some(active_int != 0))
+    }
+
     /// Delete a workflow.
     pub async fn delete(&self, id: Uuid) -> Result<bool> {
         let result = sqlx::query("DELETE FROM workflows WHERE id = ?1 AND agent_id = ?2")
