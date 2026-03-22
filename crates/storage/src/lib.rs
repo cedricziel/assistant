@@ -295,3 +295,139 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
     info!("Database migrations applied successfully");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use anyhow::Result;
+    use sqlx::{Row, SqlitePool};
+    use uuid::Uuid;
+
+    use super::StorageLayer;
+
+    #[tokio::test]
+    async fn upgrade_from_pre_agent_scope_db_succeeds() -> Result<()> {
+        let db_path = temp_db_path();
+        seed_database_through_016(&db_path).await?;
+
+        let storage = StorageLayer::new(&db_path).await?;
+        let pool = &storage.pool;
+
+        assert!(column_exists(pool, "conversations", "agent_id").await?);
+        assert!(column_exists(pool, "scheduled_tasks", "agent_id").await?);
+        assert!(column_exists(pool, "webhooks", "agent_id").await?);
+        assert!(column_exists(pool, "metric_points", "agent_id").await?);
+
+        let applied: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM _migrations WHERE name IN ('017_assistant_agents', '018_agent_scope_tasks_webhooks', '019_metrics_agent_scope')",
+        )
+        .fetch_one(pool)
+        .await?;
+        assert_eq!(applied, 3, "new agent-scope migrations should be applied");
+
+        let _ = tokio::fs::remove_file(&db_path).await;
+        Ok(())
+    }
+
+    async fn seed_database_through_016(db_path: &PathBuf) -> Result<()> {
+        let url = format!("sqlite://{}?mode=rwc", db_path.display());
+        let pool = SqlitePool::connect(&url).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS _migrations (
+                name        TEXT PRIMARY KEY,
+                applied_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
+        let seed_migrations: &[(&str, &str)] = &[
+            (
+                "001_conversations",
+                include_str!("../../../migrations/001_conversations.sql"),
+            ),
+            (
+                "002_skills",
+                include_str!("../../../migrations/002_skills.sql"),
+            ),
+            (
+                "003_execution_traces",
+                include_str!("../../../migrations/003_execution_traces.sql"),
+            ),
+            (
+                "004_memory",
+                include_str!("../../../migrations/004_memory.sql"),
+            ),
+            (
+                "005_tool_calls",
+                include_str!("../../../migrations/005_tool_calls.sql"),
+            ),
+            (
+                "006_drop_memory_entries",
+                include_str!("../../../migrations/006_drop_memory_entries.sql"),
+            ),
+            (
+                "007_memory_chunks",
+                include_str!("../../../migrations/007_memory_chunks.sql"),
+            ),
+            (
+                "008_skills_drop_tier_check",
+                include_str!("../../../migrations/008_skills_drop_tier_check.sql"),
+            ),
+            (
+                "009_distributed_traces",
+                include_str!("../../../migrations/009_distributed_traces.sql"),
+            ),
+            (
+                "010_trace_token_usage",
+                include_str!("../../../migrations/010_trace_token_usage.sql"),
+            ),
+            ("011_logs", include_str!("../../../migrations/011_logs.sql")),
+            (
+                "012_scheduled_tasks_once",
+                include_str!("../../../migrations/012_scheduled_tasks_once.sql"),
+            ),
+            (
+                "013_bus_messages",
+                include_str!("../../../migrations/013_bus_messages.sql"),
+            ),
+            (
+                "014_agents",
+                include_str!("../../../migrations/014_agents.sql"),
+            ),
+            (
+                "015_metrics",
+                include_str!("../../../migrations/015_metrics.sql"),
+            ),
+            (
+                "016_webhooks",
+                include_str!("../../../migrations/016_webhooks.sql"),
+            ),
+        ];
+
+        for (name, sql) in seed_migrations {
+            sqlx::raw_sql(sql).execute(&pool).await?;
+            sqlx::query("INSERT INTO _migrations(name) VALUES (?)")
+                .bind(name)
+                .execute(&pool)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> Result<bool> {
+        let query = format!("PRAGMA table_info({table})");
+        let rows = sqlx::query(&query).fetch_all(pool).await?;
+        Ok(rows.iter().any(|row| {
+            row.try_get::<String, _>("name")
+                .is_ok_and(|name| name == column)
+        }))
+    }
+
+    fn temp_db_path() -> PathBuf {
+        std::env::temp_dir().join(format!("assistant-storage-migration-{}.db", Uuid::new_v4()))
+    }
+}

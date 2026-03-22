@@ -23,8 +23,7 @@ WHERE NOT EXISTS (
 );
 
 ALTER TABLE conversations
-    ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'default'
-    REFERENCES assistant_agents(id) ON DELETE RESTRICT;
+    ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'default';
 
 CREATE INDEX IF NOT EXISTS idx_conversations_agent_updated
     ON conversations(agent_id, updated_at DESC);
