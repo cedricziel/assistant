@@ -399,7 +399,11 @@ async fn main() -> Result<()> {
     });
 
     // 6. Spawn workflow run processor (loop guardrails + run telemetry).
-    let _workflow_runner = spawn_workflow_runner(storage.clone(), Duration::from_secs(2));
+    let _workflow_runner = spawn_workflow_runner(
+        storage.clone(),
+        Some(orchestrator.clone()),
+        Duration::from_secs(2),
+    );
 
     // -- Agent store (filesystem-backed) --
     let agent_store = AgentStore::default_dir()?;

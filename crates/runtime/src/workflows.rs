@@ -1,36 +1,44 @@
 //! Background workflow run processor.
 //!
 //! This worker consumes `workflow_runs` records in `running` state and executes
-//! graph traversal with loop guardrails. Action side effects are intentionally
-//! deferred to the next phase; this module focuses on deterministic traversal,
-//! run status transitions, and step telemetry.
+//! graph traversal with loop guardrails. It currently supports `assistant_turn`
+//! action nodes through the orchestrator while keeping run/step telemetry and
+//! deterministic transition routing.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use assistant_storage::{StorageLayer, WorkflowGraph, WorkflowNode, WorkflowStore};
+use assistant_core::Interface;
+use assistant_storage::{
+    StorageLayer, WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRunRecord, WorkflowStore,
+};
 use tracing::{error, info, warn};
-use uuid::Uuid;
+
+use crate::Orchestrator;
 
 /// Spawn the workflow runner loop.
 pub fn spawn_workflow_runner(
     storage: Arc<StorageLayer>,
+    orchestrator: Option<Arc<Orchestrator>>,
     poll_interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!(?poll_interval, "Workflow runner started");
         loop {
             tokio::time::sleep(poll_interval).await;
-            if let Err(err) = process_pending_runs(&storage).await {
+            if let Err(err) = process_pending_runs(&storage, orchestrator.as_deref()).await {
                 error!(error = %err, "Workflow runner iteration failed");
             }
         }
     })
 }
 
-async fn process_pending_runs(storage: &StorageLayer) -> Result<()> {
+async fn process_pending_runs(
+    storage: &StorageLayer,
+    orchestrator: Option<&Orchestrator>,
+) -> Result<()> {
     let store = storage.workflow_store();
     let runs = store.list_runnable_runs(25).await?;
     if runs.is_empty() {
@@ -49,7 +57,7 @@ async fn process_pending_runs(storage: &StorageLayer) -> Result<()> {
             }
         };
 
-        let outcome = traverse_graph(run.id, &workflow.graph, &store).await?;
+        let outcome = traverse_graph(&run, &workflow.graph, &store, orchestrator).await?;
         let (status, error_message) = match outcome {
             RunOutcome::Completed => ("completed", None),
             RunOutcome::MaxStepsExceeded { max_steps } => (
@@ -86,9 +94,10 @@ enum RunOutcome {
 }
 
 async fn traverse_graph(
-    run_id: Uuid,
+    run: &WorkflowRunRecord,
     graph: &WorkflowGraph,
     store: &WorkflowStore,
+    orchestrator: Option<&Orchestrator>,
 ) -> Result<RunOutcome> {
     let mut nodes_by_id: HashMap<&str, &WorkflowNode> = HashMap::new();
     for node in &graph.nodes {
@@ -98,7 +107,7 @@ async fn traverse_graph(
     let mut queue: VecDeque<&str> = graph
         .nodes
         .iter()
-        .filter(|node| node.kind == assistant_storage::WorkflowNodeKind::Trigger)
+        .filter(|node| node.kind == WorkflowNodeKind::Trigger)
         .map(|node| node.id.as_str())
         .collect();
 
@@ -128,24 +137,164 @@ async fn traverse_graph(
 
         store
             .append_run_step(
-                run_id,
+                run.id,
                 step_index,
                 node.id.as_str(),
-                match node.kind {
-                    assistant_storage::WorkflowNodeKind::Trigger => "trigger",
-                    assistant_storage::WorkflowNodeKind::Action => "action",
-                    assistant_storage::WorkflowNodeKind::Condition => "condition",
-                },
-                Some("graph traversal"),
+                node_kind_label(node.kind.clone()),
+                Some("node started"),
             )
             .await?;
 
+        let outcome_label = execute_node(run, node, store, step_index, orchestrator).await?;
+
         for edge in graph.edges.iter().filter(|edge| edge.from == node.id) {
-            queue.push_back(edge.to.as_str());
+            if edge_matches_label(edge.on.as_deref(), &outcome_label) {
+                queue.push_back(edge.to.as_str());
+            }
         }
     }
 
     Ok(RunOutcome::Completed)
+}
+
+fn node_kind_label(kind: WorkflowNodeKind) -> &'static str {
+    match kind {
+        WorkflowNodeKind::Trigger => "trigger",
+        WorkflowNodeKind::Action => "action",
+        WorkflowNodeKind::Condition => "condition",
+    }
+}
+
+fn edge_matches_label(edge_label: Option<&str>, outcome_label: &str) -> bool {
+    match edge_label {
+        Some(label) => label.eq_ignore_ascii_case(outcome_label),
+        None => true,
+    }
+}
+
+async fn execute_node(
+    run: &WorkflowRunRecord,
+    node: &WorkflowNode,
+    store: &WorkflowStore,
+    step_index: i64,
+    orchestrator: Option<&Orchestrator>,
+) -> Result<String> {
+    match node.kind {
+        WorkflowNodeKind::Trigger => Ok("trigger".to_string()),
+        WorkflowNodeKind::Condition => {
+            let label = evaluate_condition(node, &run.trigger_payload);
+            store
+                .append_run_step(
+                    run.id,
+                    step_index,
+                    node.id.as_str(),
+                    "condition",
+                    Some(&format!("condition -> {label}")),
+                )
+                .await?;
+            Ok(label)
+        }
+        WorkflowNodeKind::Action => {
+            let action_type = node
+                .config
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            match action_type {
+                "assistant_turn" => {
+                    let Some(orch) = orchestrator else {
+                        store
+                            .append_run_step(
+                                run.id,
+                                step_index,
+                                node.id.as_str(),
+                                "action",
+                                Some("assistant_turn skipped: orchestrator unavailable"),
+                            )
+                            .await?;
+                        return Ok("failure".to_string());
+                    };
+
+                    let prompt = node
+                        .config
+                        .get("prompt")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Continue workflow action");
+                    match orch
+                        .submit_turn(prompt, run.id, Interface::Scheduler, None)
+                        .await
+                    {
+                        Ok(result) => {
+                            store
+                                .append_run_step(
+                                    run.id,
+                                    step_index,
+                                    node.id.as_str(),
+                                    "action",
+                                    Some(&format!(
+                                        "assistant_turn success: {} chars",
+                                        result.answer.chars().count()
+                                    )),
+                                )
+                                .await?;
+                            Ok("success".to_string())
+                        }
+                        Err(err) => {
+                            store
+                                .append_run_step(
+                                    run.id,
+                                    step_index,
+                                    node.id.as_str(),
+                                    "action",
+                                    Some(&format!("assistant_turn failure: {err}")),
+                                )
+                                .await?;
+                            Ok("failure".to_string())
+                        }
+                    }
+                }
+                _ => {
+                    store
+                        .append_run_step(
+                            run.id,
+                            step_index,
+                            node.id.as_str(),
+                            "action",
+                            Some(&format!("unsupported action type '{action_type}'")),
+                        )
+                        .await?;
+                    Ok("failure".to_string())
+                }
+            }
+        }
+    }
+}
+
+fn evaluate_condition(node: &WorkflowNode, trigger_payload: &serde_json::Value) -> String {
+    let condition_type = node
+        .config
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("always_true");
+    match condition_type {
+        "always_false" => "false".to_string(),
+        "has_trigger_payload_key" => {
+            let key = node
+                .config
+                .get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if key.is_empty() {
+                return "false".to_string();
+            }
+            if trigger_payload.get(key).is_some() {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
+        _ => "true".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -210,7 +359,7 @@ mod tests {
             .await
             .expect("create run");
 
-        process_pending_runs(&storage)
+        process_pending_runs(&storage, None)
             .await
             .expect("runner process");
 
