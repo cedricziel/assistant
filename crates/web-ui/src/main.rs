@@ -42,6 +42,7 @@ use clap::Parser;
 use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn, Level};
 use tracing_subscriber::EnvFilter;
@@ -105,7 +106,7 @@ struct Args {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) pool: SqlitePool,
-    pub(crate) agent_id: String,
+    pub(crate) agent_id: Arc<RwLock<String>>,
     pub(crate) trace_limit: i64,
     pub(crate) log_limit: i64,
     pub(crate) bus_kind: BusKind,
@@ -220,7 +221,7 @@ async fn main() -> Result<()> {
 
     let state = AppState {
         pool: storage.pool.clone(),
-        agent_id: selected_agent.clone(),
+        agent_id: Arc::new(RwLock::new(selected_agent.clone())),
         trace_limit: args.trace_limit,
         log_limit: args.log_limit,
         bus_kind: config.bus.kind.clone(),
@@ -424,7 +425,7 @@ async fn main() -> Result<()> {
 
     let webhook_pages_state = webhooks::pages::WebhookPagesState {
         pool: storage.pool.clone(),
-        agent_id: selected_agent.clone(),
+        agent_id: state.agent_id.clone(),
     };
 
     let chat_state =

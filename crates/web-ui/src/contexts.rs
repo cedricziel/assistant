@@ -46,6 +46,7 @@ async fn show_contexts(
     State(state): State<AppState>,
     Query(query): Query<ContextQuery>,
 ) -> Result<Response, (StatusCode, String)> {
+    let current_agent = state.agent_id.read().await.clone();
     let store = AssistantAgentStore::new(state.pool.clone());
     store.ensure_default().await.map_err(internal_error)?;
     let rows_raw = store.list().await.map_err(internal_error)?;
@@ -54,7 +55,7 @@ async fn show_contexts(
     let rows = rows_raw
         .into_iter()
         .map(|row| AgentRowView {
-            is_current: row.id == state.agent_id,
+            is_current: row.id == current_agent,
             is_default: row.is_default,
             id: row.id,
             name: row.name,
@@ -64,7 +65,7 @@ async fn show_contexts(
     let tmpl = ContextsPageTemplate {
         active_page: "contexts",
         rows,
-        current_agent: state.agent_id,
+        current_agent,
         default_agent,
         show_updated: query.updated.unwrap_or(0) != 0,
     };
@@ -84,10 +85,6 @@ async fn use_context(State(state): State<AppState>, Path(id): Path<String>) -> R
     if let Err(e) = store.ensure_exists(&id).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
-    if let Err(e) = store.set_default(&id).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-    }
-
     if let Some(home) = dirs::home_dir() {
         let agent_root = home.join(".assistant").join("agents").join(&id);
         if let Err(e) = tokio::fs::create_dir_all(&agent_root).await {
@@ -98,6 +95,8 @@ async fn use_context(State(state): State<AppState>, Path(id): Path<String>) -> R
     if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
+
+    *state.agent_id.write().await = id;
 
     Redirect::to("/contexts?updated=1").into_response()
 }

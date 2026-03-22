@@ -115,6 +115,7 @@ async fn show_logs(
     State(state): State<AppState>,
     Query(query): Query<LogQuery>,
 ) -> Result<Response, (StatusCode, String)> {
+    let agent_id = state.agent_id.read().await.clone();
     let store = LogStore::new(state.pool.clone());
 
     let severity_label = query
@@ -149,17 +150,17 @@ async fn show_logs(
             target_filter,
             search,
             trace_id,
-            &state.agent_id,
+            &agent_id,
         )
         .await
         .map_err(internal_error)?;
 
     let stats = store
-        .stats_for_agent(&state.agent_id)
+        .stats_for_agent(&agent_id)
         .await
         .map_err(internal_error)?;
     let targets = store
-        .list_targets_for_agent(&state.agent_id)
+        .list_targets_for_agent(&agent_id)
         .await
         .map_err(internal_error)?;
 
@@ -189,9 +190,10 @@ async fn show_log_detail(
     State(state): State<AppState>,
     Path(log_id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
+    let agent_id = state.agent_id.read().await.clone();
     let store = LogStore::new(state.pool.clone());
     let log = store
-        .get_log_for_agent(&log_id, &state.agent_id)
+        .get_log_for_agent(&log_id, &agent_id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Log {} not found", log_id)))?;

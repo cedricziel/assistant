@@ -19,20 +19,20 @@ breadcrumb %}
       <div class="panel-head">
         <div>
           <h2>Assistant Contexts</h2>
-          <p>Choose which context is default on startup.</p>
+          <p>Switch the active context for this web session.</p>
         </div>
         <span class="pill">{{ rows.len() }}</span>
       </div>
 
       {% if show_updated %}
       <p class="empty" style="margin-bottom: 1rem; color: var(--ok)">
-        Default context updated. Restart the web UI to switch the live session.
+        Context switched for this live web session.
       </p>
       {% endif %}
 
       <p class="empty" style="margin-bottom: 1rem">
         Running now: <strong>{{ current_agent }}</strong> · Startup default:
-        <strong>{{ default_agent }}</strong>
+        <strong>{{ default_agent }}</strong> (unchanged)
       </p>
 
       <table class="trace-table">
@@ -59,15 +59,15 @@ breadcrumb %}
               {% endif %}
             </td>
             <td>
-              {% if row.is_default %}
-              <span class="badge muted">Default</span>
+              {% if row.is_current %}
+              <span class="badge muted">Active</span>
               {% else %}
               <form
                 method="POST"
                 action="/contexts/{{ row.id }}/use"
                 style="margin: 0"
               >
-                <button type="submit" class="action-btn">Set Default</button>
+                <button type="submit" class="action-btn">Switch</button>
               </form>
               {% endif %}
             </td>

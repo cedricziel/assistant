@@ -123,6 +123,7 @@ async fn show_dashboard(
     State(state): State<AppState>,
     Query(query): Query<TraceQuery>,
 ) -> Result<Response, (StatusCode, String)> {
+    let agent_id = state.agent_id.read().await.clone();
     let store = TraceStore::new(state.pool.clone());
 
     let skill_filter = query
@@ -149,7 +150,7 @@ async fn show_dashboard(
     let min_duration_ms = query.min_duration_ms;
 
     let all_traces = store
-        .list_recent_traces_for_agent(state.trace_limit, None, &state.agent_id)
+        .list_recent_traces_for_agent(state.trace_limit, None, &agent_id)
         .await
         .map_err(internal_error)?;
     let total_count = all_traces.len();
@@ -225,9 +226,10 @@ async fn show_trace_detail(
     State(state): State<AppState>,
     Path(trace_id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
+    let agent_id = state.agent_id.read().await.clone();
     let store = TraceStore::new(state.pool.clone());
     let spans = store
-        .get_trace_for_agent(&trace_id, &state.agent_id)
+        .get_trace_for_agent(&trace_id, &agent_id)
         .await
         .map_err(internal_error)?;
     if spans.is_empty() {
