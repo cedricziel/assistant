@@ -63,6 +63,8 @@ impl ConversationStore {
         .execute(&self.pool)
         .await?;
 
+        self.ensure_conversation_agent(id).await?;
+
         // Fetch whatever row is there (new or existing).
         self.get_conversation(id)
             .await?
@@ -192,6 +194,8 @@ impl ConversationStore {
         let conversation_id = msg.conversation_id.to_string();
         let role = msg.role.to_string();
 
+        self.ensure_conversation_agent(msg.conversation_id).await?;
+
         sqlx::query(
             "INSERT INTO messages \
                 (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at) \
@@ -219,6 +223,26 @@ impl ConversationStore {
             .await?;
 
         Ok(())
+    }
+
+    async fn ensure_conversation_agent(&self, id: Uuid) -> Result<()> {
+        let id_str = id.to_string();
+        let owner =
+            sqlx::query_scalar::<_, String>("SELECT agent_id FROM conversations WHERE id = ?1")
+                .bind(&id_str)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        match owner {
+            Some(found) if found == self.agent_id => Ok(()),
+            Some(found) => anyhow::bail!(
+                "conversation {} belongs to agent '{}' (requested '{}')",
+                id,
+                found,
+                self.agent_id
+            ),
+            None => anyhow::bail!("conversation {} not found", id),
+        }
     }
 
     /// Load all messages for a conversation, ordered by turn then created_at.
@@ -406,5 +430,34 @@ mod tests {
 
         let found = store.get_conversation(conv.id).await.unwrap();
         assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_conversation_cannot_cross_agent_boundary() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let default_store = storage.conversation_store_for_agent("default");
+        let work_store = storage.conversation_store_for_agent("work");
+
+        let conv = default_store
+            .create_conversation(Some("Default only"))
+            .await
+            .unwrap();
+
+        let err = work_store
+            .create_conversation_with_id(conv.id, Some("Wrong owner"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("belongs to agent"),
+            "expected ownership error, got: {err}"
+        );
+
+        let mut msg = Message::user(conv.id, "cross-agent write");
+        msg.turn = 1;
+        let err = work_store.save_message(&msg).await.unwrap_err();
+        assert!(
+            err.to_string().contains("belongs to agent"),
+            "expected ownership error, got: {err}"
+        );
     }
 }
