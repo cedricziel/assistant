@@ -46,9 +46,6 @@ jobs:
       - name: cargo check
         run: cargo check --workspace --all-features
 
-      - name: cargo check assistant-cli binary
-        run: cargo check -p assistant-cli --all-features --bin assistant
-
   test:
     name: Test
     if: github.event.action != 'closed'

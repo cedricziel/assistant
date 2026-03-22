@@ -85,6 +85,10 @@ jobs:
       - name: Vendor JS dependencies
         run: make vendor
 
+      - name: Preflight check assistant-cli bin
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo check -p assistant-cli --all-features --bin assistant
+
       - name: Build assistant-cli (unified binary)
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
