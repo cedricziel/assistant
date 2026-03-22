@@ -1481,6 +1481,7 @@ async fn run_worker_processes_turn_request() {
                 topic::TURN_REQUEST,
                 serde_json::to_value(&turn_req).unwrap(),
             )
+            .with_agent_id("default")
             .with_conversation_id(conv_id)
             .with_interface("Cli"),
         )
