@@ -1,14 +1,19 @@
 //! Workflow run engine and extensible action execution.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use assistant_core::{bus_messages, MessageBus, MessageStatus};
 use assistant_storage::{
     StorageLayer, WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRunRecord, WorkflowStore,
+    WorkflowTriggerKind,
 };
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use cron::Schedule;
 use serde_json::Value;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -28,6 +33,7 @@ pub struct WorkflowActionInput {
 pub struct WorkflowActionResult {
     pub outcome_label: String,
     pub note: Option<String>,
+    pub output: Option<Value>,
 }
 
 impl WorkflowActionResult {
@@ -36,6 +42,7 @@ impl WorkflowActionResult {
         Self {
             outcome_label: "success".to_string(),
             note: Some(note.into()),
+            output: None,
         }
     }
 
@@ -44,7 +51,14 @@ impl WorkflowActionResult {
         Self {
             outcome_label: "failure".to_string(),
             note: Some(note.into()),
+            output: None,
         }
+    }
+
+    /// Attach structured step output.
+    pub fn with_output(mut self, output: Value) -> Self {
+        self.output = Some(output);
+        self
     }
 }
 
@@ -115,6 +129,51 @@ pub fn spawn_workflow_runner(
     })
 }
 
+/// Spawn schedule trigger adapter that creates runs for due schedule nodes.
+pub fn spawn_schedule_trigger_adapter(
+    storage: Arc<StorageLayer>,
+    poll_interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        info!(?poll_interval, "Workflow schedule adapter started");
+        loop {
+            tokio::time::sleep(poll_interval).await;
+            if let Err(err) = process_schedule_triggers(&storage).await {
+                error!(error = %err, "Workflow schedule adapter iteration failed");
+            }
+        }
+    })
+}
+
+/// Spawn event trigger adapter from completed bus events.
+pub fn spawn_event_trigger_adapter(
+    storage: Arc<StorageLayer>,
+    bus: Arc<dyn MessageBus>,
+    poll_interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        info!(?poll_interval, "Workflow event adapter started");
+        let mut seen: HashSet<Uuid> = HashSet::new();
+        let mut seen_order: VecDeque<Uuid> = VecDeque::new();
+        let started_at = Utc::now();
+
+        loop {
+            tokio::time::sleep(poll_interval).await;
+            if let Err(err) = process_event_triggers(
+                &storage,
+                bus.as_ref(),
+                started_at,
+                &mut seen,
+                &mut seen_order,
+            )
+            .await
+            {
+                error!(error = %err, "Workflow event adapter iteration failed");
+            }
+        }
+    })
+}
+
 async fn process_pending_runs(
     storage: &StorageLayer,
     action_executors: &[Arc<dyn WorkflowActionExecutor>],
@@ -166,6 +225,161 @@ async fn process_pending_runs(
     Ok(())
 }
 
+async fn process_schedule_triggers(storage: &StorageLayer) -> Result<()> {
+    let store = storage.workflow_store();
+    let workflows = store.list().await?;
+    let now = Utc::now();
+
+    for workflow in workflows.into_iter().filter(|w| w.active) {
+        for node in workflow
+            .graph
+            .nodes
+            .iter()
+            .filter(|n| n.kind == WorkflowNodeKind::Trigger)
+        {
+            let trigger_type = node
+                .config
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("manual");
+            if trigger_type != "schedule" {
+                continue;
+            }
+
+            let cron_expr = node
+                .config
+                .get("cron")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if cron_expr.is_empty() {
+                warn!(workflow_id = %workflow.id, node_id = %node.id, "schedule trigger missing cron");
+                continue;
+            }
+
+            if !schedule_trigger_due(&store, workflow.id, node.id.as_str(), cron_expr, now).await? {
+                continue;
+            }
+
+            let payload = serde_json::json!({
+                "trigger_node_id": node.id,
+                "cron": cron_expr,
+                "scheduled_at": now.to_rfc3339(),
+            });
+            let run_id = store
+                .create_run(workflow.id, WorkflowTriggerKind::Schedule, &payload)
+                .await?;
+            info!(workflow_id = %workflow.id, node_id = %node.id, run_id = %run_id, "Scheduled trigger queued workflow run");
+        }
+    }
+
+    Ok(())
+}
+
+async fn schedule_trigger_due(
+    store: &WorkflowStore,
+    workflow_id: Uuid,
+    trigger_node_id: &str,
+    cron_expr: &str,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    let runs = store.list_runs(workflow_id, 200).await?;
+    let latest_for_node = runs.into_iter().find(|run| {
+        run.trigger_type == "schedule"
+            && run
+                .trigger_payload
+                .get("trigger_node_id")
+                .and_then(|v| v.as_str())
+                == Some(trigger_node_id)
+    });
+
+    let Some(schedule) = parse_schedule(cron_expr) else {
+        warn!(workflow_id = %workflow_id, trigger_node_id, cron_expr, "Invalid schedule cron expression");
+        return Ok(false);
+    };
+
+    if let Some(last_run) = latest_for_node {
+        let next = schedule.after(&last_run.started_at).next();
+        return Ok(next.map(|t| t <= now).unwrap_or(false));
+    }
+
+    Ok(true)
+}
+
+async fn process_event_triggers(
+    storage: &StorageLayer,
+    bus: &dyn MessageBus,
+    started_at: DateTime<Utc>,
+    seen: &mut HashSet<Uuid>,
+    seen_order: &mut VecDeque<Uuid>,
+) -> Result<()> {
+    let store = storage.workflow_store();
+    let workflows = store.list().await?;
+
+    for topic in [
+        bus_messages::topic::TURN_RESULT,
+        bus_messages::topic::TOOL_RESULT,
+        bus_messages::topic::AGENT_REPORT,
+    ] {
+        let messages = bus.list(topic, Some(MessageStatus::Done), 50).await?;
+        for msg in messages {
+            if msg.created_at < started_at || seen.contains(&msg.id) {
+                continue;
+            }
+
+            seen.insert(msg.id);
+            seen_order.push_back(msg.id);
+            while seen_order.len() > 4096 {
+                if let Some(old) = seen_order.pop_front() {
+                    seen.remove(&old);
+                }
+            }
+
+            for workflow in workflows.iter().filter(|w| w.active) {
+                for node in workflow
+                    .graph
+                    .nodes
+                    .iter()
+                    .filter(|n| n.kind == WorkflowNodeKind::Trigger)
+                {
+                    let trigger_type = node
+                        .config
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("manual");
+                    if trigger_type != "event" {
+                        continue;
+                    }
+
+                    let expected_topic = node
+                        .config
+                        .get("event")
+                        .or_else(|| node.config.get("topic"))
+                        .and_then(|v| v.as_str());
+                    if let Some(expected_topic) = expected_topic {
+                        if expected_topic != msg.topic {
+                            continue;
+                        }
+                    }
+
+                    let payload = serde_json::json!({
+                        "trigger_node_id": node.id,
+                        "event_topic": msg.topic,
+                        "message_id": msg.id,
+                        "conversation_id": msg.conversation_id,
+                        "payload": msg.payload,
+                    });
+                    let run_id = store
+                        .create_run(workflow.id, WorkflowTriggerKind::Event, &payload)
+                        .await?;
+                    info!(workflow_id = %workflow.id, node_id = %node.id, run_id = %run_id, event_topic = %topic, "Event trigger queued workflow run");
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 enum RunOutcome {
     Completed,
@@ -188,6 +402,7 @@ async fn traverse_graph(
         .nodes
         .iter()
         .filter(|node| node.kind == WorkflowNodeKind::Trigger)
+        .filter(|node| run_starts_from_trigger(run, node))
         .map(|node| node.id.as_str())
         .collect();
 
@@ -222,6 +437,7 @@ async fn traverse_graph(
                 node.id.as_str(),
                 node_kind_label(node.kind.clone()),
                 Some("node started"),
+                None,
             )
             .await?;
 
@@ -261,6 +477,29 @@ fn find_action_executor<'a>(
         .find(|executor| executor.action_type() == action_type)
 }
 
+fn run_starts_from_trigger(run: &WorkflowRunRecord, trigger_node: &WorkflowNode) -> bool {
+    if let Some(target_node) = run
+        .trigger_payload
+        .get("trigger_node_id")
+        .and_then(|v| v.as_str())
+    {
+        return target_node == trigger_node.id;
+    }
+
+    let trigger_type = trigger_node
+        .config
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("manual");
+    match run.trigger_type.as_str() {
+        "manual" => trigger_type == "manual",
+        "webhook" => trigger_type == "webhook",
+        "schedule" => trigger_type == "schedule",
+        "event" => trigger_type == "event",
+        _ => true,
+    }
+}
+
 async fn execute_node(
     run: &WorkflowRunRecord,
     node: &WorkflowNode,
@@ -279,6 +518,7 @@ async fn execute_node(
                     node.id.as_str(),
                     "condition",
                     Some(&format!("condition -> {label}")),
+                    None,
                 )
                 .await?;
             Ok(label)
@@ -292,7 +532,14 @@ async fn execute_node(
             let Some(executor) = find_action_executor(action_type, action_executors) else {
                 let note = format!("unsupported action type '{action_type}'");
                 store
-                    .append_run_step(run.id, step_index, node.id.as_str(), "action", Some(&note))
+                    .append_run_step(
+                        run.id,
+                        step_index,
+                        node.id.as_str(),
+                        "action",
+                        Some(&note),
+                        None,
+                    )
                     .await?;
                 return Ok("failure".to_string());
             };
@@ -314,6 +561,7 @@ async fn execute_node(
                             node.id.as_str(),
                             "action",
                             result.note.as_deref(),
+                            result.output.as_ref(),
                         )
                         .await?;
                     Ok(result.outcome_label)
@@ -327,6 +575,7 @@ async fn execute_node(
                             node.id.as_str(),
                             "action",
                             Some(&note),
+                            None,
                         )
                         .await?;
                     Ok("failure".to_string())
@@ -363,6 +612,12 @@ fn evaluate_condition(node: &WorkflowNode, trigger_payload: &Value) -> String {
     }
 }
 
+fn parse_schedule(expr: &str) -> Option<Schedule> {
+    Schedule::from_str(expr)
+        .or_else(|_| Schedule::from_str(&format!("0 {expr}")))
+        .ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,7 +637,7 @@ mod tests {
                 WorkflowNode {
                     id: "a1".to_string(),
                     kind: WorkflowNodeKind::Action,
-                    config: serde_json::json!({"type": "assistant_turn"}),
+                    config: serde_json::json!({"type": "assistant_turn", "prompt": "Loop"}),
                 },
             ],
             edges: vec![

@@ -34,7 +34,8 @@ use assistant_storage::registry::SkillRegistry;
 use assistant_storage::{default_db_path, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
 use assistant_workflow::{
-    spawn_workflow_runner, AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
+    spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
+    AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
 };
 use assistant_workflow_http::HttpRequestActionExecutor;
 use axum::{
@@ -374,7 +375,7 @@ async fn main() -> Result<()> {
             storage.clone(),
             executor.clone(),
             registry,
-            bus,
+            bus.clone(),
             &config,
         )
         .with_confirmation_callback(Arc::new(AutoDenyConfirmation {
@@ -428,6 +429,10 @@ async fn main() -> Result<()> {
     ];
     let _workflow_runner =
         spawn_workflow_runner(storage.clone(), Duration::from_secs(2), action_executors);
+    let _workflow_schedule_adapter =
+        spawn_schedule_trigger_adapter(storage.clone(), Duration::from_secs(2));
+    let _workflow_event_adapter =
+        spawn_event_trigger_adapter(storage.clone(), bus.clone(), Duration::from_secs(2));
 
     // -- Agent store (filesystem-backed) --
     let agent_store = AgentStore::default_dir()?;

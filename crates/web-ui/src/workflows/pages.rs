@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use assistant_storage::{
     WorkflowExecutionLimits, WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRecord,
-    WorkflowRunRecord, WorkflowStore, WorkflowTriggerKind,
+    WorkflowRunRecord, WorkflowRunStepRecord, WorkflowStore, WorkflowTriggerKind,
 };
 
 use crate::common::{internal_error, render_template, StaticUrls};
@@ -103,9 +103,38 @@ impl StaticUrls for WorkflowEditorTemplate {}
 
 struct WorkflowRunView {
     id: String,
+    run_id: String,
     trigger_type: String,
     status: String,
     started_at: String,
+}
+
+#[derive(Template)]
+#[template(path = "workflows/run_detail.html")]
+struct WorkflowRunDetailTemplate {
+    active_page: &'static str,
+    workflow_id: String,
+    workflow_name: String,
+    run_id: String,
+    trigger_type: String,
+    status: String,
+    started_at: String,
+    finished_at: String,
+    error_message: String,
+    has_error: bool,
+    trigger_payload_json: String,
+    steps: Vec<WorkflowRunStepView>,
+}
+
+impl StaticUrls for WorkflowRunDetailTemplate {}
+
+struct WorkflowRunStepView {
+    step_index: i64,
+    node_id: String,
+    node_kind: String,
+    note_text: String,
+    output_json: String,
+    occurred_at: String,
 }
 
 #[derive(Deserialize)]
@@ -391,6 +420,50 @@ pub async fn editor_page(
     }))
 }
 
+/// `GET /workflows/:id/runs/:run_id` -- Workflow run detail page.
+pub async fn show_workflow_run(
+    State(state): State<WorkflowPagesState>,
+    Path((id, run_id)): Path<(String, String)>,
+) -> Result<Response, (StatusCode, String)> {
+    let workflow_id = parse_uuid(&id)?;
+    let run_uuid = parse_uuid(&run_id)?;
+    let store = WorkflowStore::new(state.pool);
+
+    let workflow = store
+        .get(workflow_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or((StatusCode::NOT_FOUND, "Workflow not found".to_string()))?;
+    let run = store
+        .get_run(workflow_id, run_uuid)
+        .await
+        .map_err(internal_error)?
+        .ok_or((StatusCode::NOT_FOUND, "Workflow run not found".to_string()))?;
+    let steps = store
+        .list_run_steps(run_uuid, 500)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(render_template(WorkflowRunDetailTemplate {
+        active_page: "workflows",
+        workflow_id: workflow.id.to_string(),
+        workflow_name: workflow.name,
+        run_id,
+        trigger_type: run.trigger_type,
+        status: run.status,
+        started_at: format_ts(run.started_at),
+        finished_at: run
+            .finished_at
+            .map(format_ts)
+            .unwrap_or_else(|| "-".to_string()),
+        has_error: run.error_message.is_some(),
+        error_message: run.error_message.unwrap_or_default(),
+        trigger_payload_json: serde_json::to_string_pretty(&run.trigger_payload)
+            .unwrap_or_else(|_| "{}".to_string()),
+        steps: steps.into_iter().map(to_run_step_view).collect(),
+    }))
+}
+
 #[derive(Serialize)]
 pub struct WorkflowApiItem {
     id: String,
@@ -448,6 +521,23 @@ pub struct WorkflowApiRunItem {
     finished_at: Option<String>,
     error_message: Option<String>,
     trigger_payload: Value,
+}
+
+#[derive(Serialize)]
+pub struct WorkflowApiRunStepItem {
+    id: String,
+    step_index: i64,
+    node_id: String,
+    node_kind: String,
+    note: Option<String>,
+    output: Option<Value>,
+    occurred_at: String,
+}
+
+#[derive(Serialize)]
+pub struct WorkflowApiRunDetail {
+    run: WorkflowApiRunItem,
+    steps: Vec<WorkflowApiRunStepItem>,
 }
 
 #[derive(Serialize)]
@@ -608,6 +698,31 @@ pub async fn api_list_workflow_runs(
     Ok(Json(runs.into_iter().map(to_api_run_item).collect()))
 }
 
+/// `GET /api/workflows/:id/runs/:run_id` -- Workflow run detail with steps.
+pub async fn api_get_workflow_run(
+    State(state): State<WorkflowPagesState>,
+    Path((id, run_id)): Path<(String, String)>,
+) -> Result<Json<WorkflowApiRunDetail>, (StatusCode, String)> {
+    let workflow_id = parse_uuid(&id)?;
+    let run_uuid = parse_uuid(&run_id)?;
+    let store = WorkflowStore::new(state.pool.clone());
+
+    let run = store
+        .get_run(workflow_id, run_uuid)
+        .await
+        .map_err(internal_error)?
+        .ok_or((StatusCode::NOT_FOUND, "Workflow run not found".to_string()))?;
+    let steps = store
+        .list_run_steps(run_uuid, 500)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(Json(WorkflowApiRunDetail {
+        run: to_api_run_item(run),
+        steps: steps.into_iter().map(to_api_run_step_item).collect(),
+    }))
+}
+
 /// `POST /workflow-hooks/:id/:token` -- Public incoming webhook trigger.
 pub async fn public_webhook_trigger(
     State(state): State<WorkflowPagesState>,
@@ -740,12 +855,39 @@ fn to_api_run_item(run: WorkflowRunRecord) -> WorkflowApiRunItem {
     }
 }
 
+fn to_api_run_step_item(step: WorkflowRunStepRecord) -> WorkflowApiRunStepItem {
+    WorkflowApiRunStepItem {
+        id: step.id.to_string(),
+        step_index: step.step_index,
+        node_id: step.node_id,
+        node_kind: step.node_kind,
+        note: step.note,
+        output: step.output,
+        occurred_at: format_ts(step.occurred_at),
+    }
+}
+
 fn to_run_view(run: WorkflowRunRecord) -> WorkflowRunView {
     WorkflowRunView {
         id: run.id.to_string()[..8].to_string(),
+        run_id: run.id.to_string(),
         trigger_type: run.trigger_type,
         status: run.status,
         started_at: format_ts(run.started_at),
+    }
+}
+
+fn to_run_step_view(step: WorkflowRunStepRecord) -> WorkflowRunStepView {
+    WorkflowRunStepView {
+        step_index: step.step_index,
+        node_id: step.node_id,
+        node_kind: step.node_kind,
+        note_text: step.note.unwrap_or_else(|| "-".to_string()),
+        output_json: step
+            .output
+            .and_then(|v| serde_json::to_string_pretty(&v).ok())
+            .unwrap_or_else(|| "{}".to_string()),
+        occurred_at: format_ts(step.occurred_at),
     }
 }
 

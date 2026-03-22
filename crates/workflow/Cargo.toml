@@ -6,9 +6,12 @@ edition.workspace = true
 description = "Workflow run engine and action executor abstractions"
 
 [dependencies]
+assistant-core = { path = "../core" }
 assistant-storage = { path = "../storage" }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+chrono = { workspace = true }
+cron = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

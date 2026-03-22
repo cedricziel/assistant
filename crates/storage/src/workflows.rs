@@ -4,9 +4,11 @@ use std::collections::HashSet;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
+use cron::Schedule;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// Workflow node kind.
@@ -143,6 +145,7 @@ pub struct WorkflowRunStepRecord {
     pub node_id: String,
     pub node_kind: String,
     pub note: Option<String>,
+    pub output: Option<Value>,
     pub occurred_at: DateTime<Utc>,
 }
 
@@ -345,6 +348,26 @@ impl WorkflowStore {
         rows.into_iter().map(parse_run_row).collect()
     }
 
+    /// Fetch one workflow run by workflow and run id.
+    pub async fn get_run(
+        &self,
+        workflow_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<Option<WorkflowRunRecord>> {
+        let row = sqlx::query(
+            "SELECT id, workflow_id, agent_id, trigger_type, trigger_payload_json, status, started_at, finished_at, error_message
+             FROM workflow_runs
+             WHERE workflow_id = ?1 AND id = ?2 AND agent_id = ?3",
+        )
+        .bind(workflow_id.to_string())
+        .bind(run_id.to_string())
+        .bind(&self.agent_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(parse_run_row).transpose()
+    }
+
     /// Lists globally runnable workflow runs.
     pub async fn list_runnable_runs(&self, limit: i64) -> Result<Vec<WorkflowRunRecord>> {
         let rows = sqlx::query(
@@ -384,11 +407,13 @@ impl WorkflowStore {
         node_id: &str,
         node_kind: &str,
         note: Option<&str>,
+        output: Option<&Value>,
     ) -> Result<()> {
+        let output_json = output.map(serde_json::to_string).transpose()?;
         sqlx::query(
             "INSERT INTO workflow_run_steps
-             (id, run_id, step_index, node_id, node_kind, note, occurred_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (id, run_id, step_index, node_id, node_kind, note, output_json, occurred_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(run_id.to_string())
@@ -396,6 +421,7 @@ impl WorkflowStore {
         .bind(node_id)
         .bind(node_kind)
         .bind(note)
+        .bind(output_json)
         .bind(Utc::now())
         .execute(&self.pool)
         .await?;
@@ -430,7 +456,7 @@ impl WorkflowStore {
         limit: i64,
     ) -> Result<Vec<WorkflowRunStepRecord>> {
         let rows = sqlx::query(
-            "SELECT id, run_id, step_index, node_id, node_kind, note, occurred_at
+            "SELECT id, run_id, step_index, node_id, node_kind, note, output_json, occurred_at
              FROM workflow_run_steps
              WHERE run_id = ?1
              ORDER BY step_index ASC
@@ -582,6 +608,8 @@ pub fn validate_workflow_graph(graph: &WorkflowGraph) -> Result<()> {
             WorkflowNodeKind::Action => action_count += 1,
             WorkflowNodeKind::Condition => {}
         }
+
+        validate_node_contract(node)?;
     }
 
     if trigger_count == 0 {
@@ -597,6 +625,26 @@ pub fn validate_workflow_graph(graph: &WorkflowGraph) -> Result<()> {
         }
         if !node_ids.contains(&edge.to) {
             bail!("edge target '{}' does not exist", edge.to);
+        }
+
+        if let Some(label) = edge.on.as_deref() {
+            let source = graph
+                .nodes
+                .iter()
+                .find(|n| n.id == edge.from)
+                .context("edge source vanished during validation")?;
+            let allowed = allowed_edge_outcomes(source)?;
+            if !allowed
+                .iter()
+                .any(|allowed_label| allowed_label.eq_ignore_ascii_case(label))
+            {
+                bail!(
+                    "edge label '{}' is invalid for source node '{}' (allowed: {})",
+                    label,
+                    source.id,
+                    allowed.join(", ")
+                );
+            }
         }
     }
 
@@ -657,6 +705,13 @@ fn parse_run_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkflowRunRecord> {
 fn parse_step_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkflowRunStepRecord> {
     let id_raw: String = row.try_get("id")?;
     let run_id_raw: String = row.try_get("run_id")?;
+    let output_json: Option<String> = row.try_get("output_json")?;
+    let output = match output_json {
+        Some(raw) => Some(serde_json::from_str(&raw).with_context(|| {
+            format!("failed to parse output_json for workflow run step {id_raw}")
+        })?),
+        None => None,
+    };
     Ok(WorkflowRunStepRecord {
         id: Uuid::parse_str(&id_raw)?,
         run_id: Uuid::parse_str(&run_id_raw)?,
@@ -664,8 +719,134 @@ fn parse_step_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkflowRunStepRecord>
         node_id: row.try_get("node_id")?,
         node_kind: row.try_get("node_kind")?,
         note: row.try_get("note")?,
+        output,
         occurred_at: row.try_get("occurred_at")?,
     })
+}
+
+fn validate_node_contract(node: &WorkflowNode) -> Result<()> {
+    let node_type = node
+        .config
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    match node.kind {
+        WorkflowNodeKind::Trigger => match node_type {
+            "manual" | "webhook" => Ok(()),
+            "schedule" => {
+                let cron_expr = node
+                    .config
+                    .get("cron")
+                    .and_then(|v| v.as_str())
+                    .context("schedule trigger requires config.cron")?;
+                parse_schedule(cron_expr)
+                    .with_context(|| format!("invalid schedule cron expression '{}'", cron_expr))
+                    .map(|_| ())
+            }
+            "event" => {
+                let event_topic = node
+                    .config
+                    .get("event")
+                    .or_else(|| node.config.get("topic"))
+                    .and_then(|v| v.as_str())
+                    .context("event trigger requires config.event (or config.topic)")?;
+                if event_topic.trim().is_empty() {
+                    bail!("event trigger requires non-empty config.event");
+                }
+                Ok(())
+            }
+            _ => bail!(
+                "trigger node '{}' has unsupported type '{}'",
+                node.id,
+                node_type
+            ),
+        },
+        WorkflowNodeKind::Action => match node_type {
+            "assistant_turn" => {
+                if node
+                    .config
+                    .get("prompt")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .is_none()
+                {
+                    bail!(
+                        "assistant_turn action '{}' requires non-empty config.prompt",
+                        node.id
+                    );
+                }
+                Ok(())
+            }
+            "http_request" => {
+                let url = node
+                    .config
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .context("http_request action requires config.url")?;
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    bail!("http_request action '{}' has invalid config.url", node.id);
+                }
+                if let Some(method) = node.config.get("method").and_then(|v| v.as_str()) {
+                    let upper = method.to_ascii_uppercase();
+                    if !["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+                        .contains(&upper.as_str())
+                    {
+                        bail!("http_request action '{}' has invalid HTTP method", node.id);
+                    }
+                }
+                Ok(())
+            }
+            _ => bail!(
+                "action node '{}' has unsupported type '{}'",
+                node.id,
+                node_type
+            ),
+        },
+        WorkflowNodeKind::Condition => match node_type {
+            "always_true" | "always_false" => Ok(()),
+            "has_trigger_payload_key" => {
+                let key = node
+                    .config
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .context("has_trigger_payload_key condition requires config.key")?;
+                if key.trim().is_empty() {
+                    bail!("has_trigger_payload_key condition requires non-empty config.key");
+                }
+                Ok(())
+            }
+            _ => bail!(
+                "condition node '{}' has unsupported type '{}'",
+                node.id,
+                node_type
+            ),
+        },
+    }
+}
+
+fn allowed_edge_outcomes(node: &WorkflowNode) -> Result<Vec<String>> {
+    let node_type = node
+        .config
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let outcomes = match node.kind {
+        WorkflowNodeKind::Trigger => vec!["trigger"],
+        WorkflowNodeKind::Action => match node_type {
+            "assistant_turn" | "http_request" => vec!["success", "failure"],
+            _ => bail!("unsupported action type for edge validation: {node_type}"),
+        },
+        WorkflowNodeKind::Condition => vec!["true", "false"],
+    };
+    Ok(outcomes.into_iter().map(|s| s.to_string()).collect())
+}
+
+fn parse_schedule(expr: &str) -> Option<Schedule> {
+    Schedule::from_str(expr)
+        .or_else(|_| Schedule::from_str(&format!("0 {expr}")))
+        .ok()
 }
 
 #[cfg(test)]
@@ -690,7 +871,7 @@ mod tests {
                 WorkflowNode {
                     id: "condition_1".to_string(),
                     kind: WorkflowNodeKind::Condition,
-                    config: serde_json::json!({"type": "until_done"}),
+                    config: serde_json::json!({"type": "always_true"}),
                 },
             ],
             edges: vec![
@@ -732,6 +913,22 @@ mod tests {
         graph.nodes.retain(|n| n.kind != WorkflowNodeKind::Trigger);
         let err = validate_workflow_graph(&graph).unwrap_err().to_string();
         assert!(err.contains("trigger"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_invalid_edge_label_for_condition() {
+        let mut graph = graph_with_loop();
+        graph.edges[2].on = Some("success".to_string());
+        let err = validate_workflow_graph(&graph).unwrap_err().to_string();
+        assert!(err.contains("invalid"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_http_action_without_url() {
+        let mut graph = graph_with_loop();
+        graph.nodes[1].config = serde_json::json!({"type": "http_request"});
+        let err = validate_workflow_graph(&graph).unwrap_err().to_string();
+        assert!(err.contains("config.url"), "unexpected error: {err}");
     }
 
     #[tokio::test]
@@ -807,7 +1004,7 @@ mod tests {
         assert!(runnable.iter().any(|r| r.id == run_id));
 
         store
-            .append_run_step(run_id, 1, "trigger_1", "trigger", Some("start"))
+            .append_run_step(run_id, 1, "trigger_1", "trigger", Some("start"), None)
             .await
             .unwrap();
         let steps = store.list_run_steps(run_id, 10).await.unwrap();

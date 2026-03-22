@@ -126,7 +126,11 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
         <tbody>
           {% for run in recent_runs %}
           <tr>
-            <td class="trace-id">{{ run.id }}&hellip;</td>
+            <td class="trace-id">
+              <a href="/workflows/{{ id }}/runs/{{ run.run_id }}"
+                >{{ run.id }}&hellip;</a
+              >
+            </td>
             <td>{{ run.trigger_type }}</td>
             <td>{{ run.status }}</td>
             <td>{{ run.started_at }}</td>

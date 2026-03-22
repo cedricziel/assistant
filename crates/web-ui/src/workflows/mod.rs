@@ -17,6 +17,10 @@ pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
         .route("/workflows/new", get(pages::new_workflow_form))
         .route("/workflows/{id}", get(pages::show_workflow))
         .route(
+            "/workflows/{id}/runs/{run_id}",
+            get(pages::show_workflow_run),
+        )
+        .route(
             "/workflows/{id}/edit",
             get(pages::edit_workflow_form).post(pages::update_workflow),
         )
@@ -50,6 +54,10 @@ pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
         .route(
             "/api/workflows/{id}/runs",
             get(pages::api_list_workflow_runs),
+        )
+        .route(
+            "/api/workflows/{id}/runs/{run_id}",
+            get(pages::api_get_workflow_run),
         )
 }
 
