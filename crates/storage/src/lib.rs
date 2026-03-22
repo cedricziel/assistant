@@ -10,6 +10,7 @@ pub mod registry;
 pub mod scheduled_tasks;
 pub mod traces;
 pub mod webhooks;
+pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
 pub use assistant_agents::{AssistantAgentRecord, AssistantAgentStore};
@@ -25,6 +26,10 @@ pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
 pub use traces::{RecordedSpan, TraceStats, TraceStore, TraceSummary};
 pub use webhooks::{WebhookRecord, WebhookStore};
+pub use workflows::{
+    WorkflowEdge, WorkflowEdgeCondition, WorkflowExecutionLimits, WorkflowGraph, WorkflowNode,
+    WorkflowNodeKind, WorkflowRecord, WorkflowStore,
+};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -128,6 +133,11 @@ impl StorageLayer {
     /// Convenience: build a [`WebhookStore`] backed by this pool.
     pub fn webhook_store(&self) -> WebhookStore {
         WebhookStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`WorkflowStore`] backed by this pool.
+    pub fn workflow_store(&self) -> WorkflowStore {
+        WorkflowStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`WebhookStore`] scoped to an assistant agent.
@@ -245,6 +255,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "019_metrics_agent_scope",
             include_str!("../../../migrations/019_metrics_agent_scope.sql"),
+        ),
+        (
+            "020_workflows",
+            include_str!("../../../migrations/020_workflows.sql"),
         ),
     ];
 

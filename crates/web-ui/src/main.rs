@@ -9,6 +9,7 @@ mod pwa;
 pub(crate) mod static_assets;
 mod traces;
 mod webhooks;
+mod workflows;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -428,6 +429,11 @@ async fn main() -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
+    let workflow_pages_state = workflows::pages::WorkflowPagesState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
+    };
+
     let chat_state =
         chat::ChatState::new(storage.pool.clone(), orchestrator, selected_agent.clone());
 
@@ -459,6 +465,8 @@ async fn main() -> Result<()> {
         .merge(a2a::agent_pages_router().with_state(agent_pages_state))
         // Webhook management UI pages.
         .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
+        // Workflow graph management pages + JSON API.
+        .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
         // Chat interface.
         .merge(chat::chat_router().with_state(chat_state))
         .route_layer(axum::middleware::from_fn(auth::require_auth));

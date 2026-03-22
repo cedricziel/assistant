@@ -1,0 +1,83 @@
+{% extends "base.html" %} {% block title %}{{ heading }}{% endblock %} {% block
+breadcrumb %}
+<a class="breadcrumb-page" href="/workflows">Workflows</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">{{ heading }}</span>
+{% endblock %} {% block extra_css %} .wf-form { display: grid; gap: 1rem; }
+.wf-form label { display: grid; gap: 0.4rem; font-size: 0.9rem; color: #9eb2d8;
+} .wf-form input[type="text"], .wf-form textarea { width: 100%; background:
+#071224; border: 1px solid #173153; color: #e5e9f0; border-radius: 8px; padding:
+0.65rem 0.75rem; } .wf-form textarea { min-height: 280px; font-family:
+ui-monospace, monospace; } .wf-row { display:grid; grid-template-columns: 1fr
+1fr; gap: 0.75rem; } .err { color: #ff8a8a; font-size: 0.84rem; min-height:
+1.2rem; } @media (max-width: 800px) { .wf-row { grid-template-columns: 1fr; } }
+{% endblock %} {% block content %}
+<div class="layout">
+  <main class="main" style="width: 100%">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>{{ heading }}</h2>
+          <p>
+            Define graph nodes/edges and loop guardrails in JSON, then use the
+            visual editor to refine.
+          </p>
+        </div>
+      </div>
+
+      <form class="wf-form" method="POST" action="{{ action }}">
+        <label>
+          Name
+          <input type="text" name="name" value="{{ name }}" required />
+        </label>
+
+        <label>
+          Description
+          <input
+            type="text"
+            name="description"
+            value="{{ description }}"
+            placeholder="What this automation does"
+          />
+        </label>
+
+        <label>
+          <span>Graph JSON</span>
+          <textarea id="graphJson" name="graph_json" required>
+{{ graph_json }}</textarea
+          >
+          <div id="graphError" class="err"></div>
+        </label>
+
+        <label
+          style="
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            color: #e5e9f0;
+          "
+        >
+          <input
+            type="checkbox"
+            name="active"
+            {%
+            if
+            active_checked
+            %}checked{%
+            endif
+            %}
+          />
+          Active
+        </label>
+
+        <div style="display: flex; gap: 0.6rem; flex-wrap: wrap">
+          <button type="submit" class="action-btn">{{ submit_label }}</button>
+          <a href="/workflows" class="ghost-btn">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="{{ self.workflow_editor_js_url() }}"></script>
+{% endblock %}

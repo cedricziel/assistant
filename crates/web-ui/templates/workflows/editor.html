@@ -1,0 +1,107 @@
+{% extends "base.html" %} {% block title %}Graph Editor{% endblock %} {% block
+breadcrumb %}
+<a class="breadcrumb-page" href="/workflows">Workflows</a>
+<span class="breadcrumb-sep">/</span>
+<a class="breadcrumb-page" href="/workflows/{{ id }}">{{ name }}</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Editor</span>
+{% endblock %} {% block extra_css %} .editor-grid { display:grid;
+grid-template-columns: 1.3fr 1fr; gap:1rem; } .pane { background:#071224;
+border:1px solid #173153; border-radius:10px; padding:0.75rem; } .pane h3 {
+margin-bottom:0.55rem; } .controls { display:grid; gap:0.5rem;
+margin-bottom:0.8rem; } .controls .row { display:grid; grid-template-columns:1fr
+1fr 1fr auto; gap:0.45rem; } .controls input, .controls select, .controls
+button, textarea { background:#040d1b; border:1px solid #173153; color:#e5e9f0;
+border-radius:7px; padding:0.45rem 0.55rem; } textarea { width:100%;
+min-height:280px; font-family: ui-monospace, monospace; } .err { color:#ff8a8a;
+min-height:1.2rem; font-size:0.85rem; margin-top:0.35rem; } svg { width:100%;
+min-height:320px; background:#04101f; border-radius:8px; border:1px dashed
+#225081; } table { width:100%; border-collapse: collapse; font-size:0.82rem; }
+th, td { padding:0.35rem 0.4rem; border-bottom:1px solid #112744;
+text-align:left; } @media (max-width: 960px) { .editor-grid {
+grid-template-columns: 1fr; } .controls .row { grid-template-columns:1fr; } } {%
+endblock %} {% block content %}
+<div class="layout">
+  <main class="main" style="width: 100%">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Graph Editor</h2>
+          <p>
+            Edit nodes and edges for <strong>{{ name }}</strong>. Save from the
+            workflow edit page after copying JSON.
+          </p>
+        </div>
+      </div>
+
+      <div class="editor-grid">
+        <section class="pane">
+          <h3>Visual Preview</h3>
+          <svg
+            id="workflowGraphPreview"
+            viewBox="0 0 980 420"
+            aria-label="Workflow graph preview"
+          ></svg>
+
+          <div class="controls" style="margin-top: 0.8rem">
+            <h3 style="margin-top: 0.3rem">Add Node</h3>
+            <div class="row">
+              <input id="nodeIdInput" placeholder="node id" />
+              <select id="nodeKindInput">
+                <option value="trigger">trigger</option>
+                <option value="action" selected>action</option>
+                <option value="condition">condition</option>
+              </select>
+              <input id="nodeTypeInput" placeholder="config.type" />
+              <button type="button" id="addNodeBtn">Add Node</button>
+            </div>
+          </div>
+
+          <div class="controls">
+            <h3>Add Edge</h3>
+            <div class="row">
+              <input id="edgeFromInput" placeholder="from node id" />
+              <input id="edgeToInput" placeholder="to node id" />
+              <input id="edgeOnInput" placeholder="on label (optional)" />
+              <button type="button" id="addEdgeBtn">Add Edge</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane">
+          <h3>Graph JSON</h3>
+          <textarea id="graphJson">{{ graph_json }}</textarea>
+          <div id="graphError" class="err"></div>
+
+          <h3 style="margin-top: 0.8rem">Nodes</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Kind</th>
+                <th>Config</th>
+              </tr>
+            </thead>
+            <tbody id="workflowNodeRows"></tbody>
+          </table>
+          <div
+            style="
+              margin-top: 0.8rem;
+              display: flex;
+              gap: 0.5rem;
+              flex-wrap: wrap;
+            "
+          >
+            <a href="/workflows/{{ id }}/edit" class="action-btn"
+              >Back to Edit Form</a
+            >
+            <a href="/workflows/{{ id }}" class="ghost-btn">Back to Detail</a>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="{{ self.workflow_editor_js_url() }}"></script>
+{% endblock %}

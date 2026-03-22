@@ -27,6 +27,7 @@ const APP_JS: &str = include_str!("app.js");
 const CHAT_JS: &str = include_str!("chat.js");
 const TRACE_DETAIL_JS: &str = include_str!("trace-detail.js");
 const AGENT_FORM_JS: &str = include_str!("agent-form.js");
+const WORKFLOW_EDITOR_JS: &str = include_str!("workflow-editor.js");
 
 // Vendored third-party JS (committed to repo, no CDN fetch at runtime).
 const HTMX_JS: &str = include_str!("vendor/htmx.min.js");
@@ -100,6 +101,9 @@ static TRACE_DETAIL_JS_ASSET: LazyLock<Asset> =
 static AGENT_FORM_JS_ASSET: LazyLock<Asset> =
     LazyLock::new(|| fingerprint_static("agent-form", "js", AGENT_FORM_JS));
 
+static WORKFLOW_EDITOR_JS_ASSET: LazyLock<Asset> =
+    LazyLock::new(|| fingerprint_static("workflow-editor", "js", WORKFLOW_EDITOR_JS));
+
 // -- Public API --------------------------------------------------------------
 
 /// Fingerprinted URL for the app stylesheet (e.g. `/static/app.a1b2c3.css`).
@@ -135,6 +139,11 @@ pub fn trace_detail_js_url() -> &'static str {
 /// Fingerprinted URL for the agent form validator JS.
 pub fn agent_form_js_url() -> &'static str {
     &AGENT_FORM_JS_ASSET.url
+}
+
+/// Fingerprinted URL for the workflow graph editor JS.
+pub fn workflow_editor_js_url() -> &'static str {
+    &WORKFLOW_EDITOR_JS_ASSET.url
 }
 
 // -- Route handlers ----------------------------------------------------------
@@ -189,6 +198,10 @@ async fn serve_agent_form_js() -> Response {
     serve_js_immutable(AGENT_FORM_JS_ASSET.content)
 }
 
+async fn serve_workflow_editor_js() -> Response {
+    serve_js_immutable(WORKFLOW_EDITOR_JS_ASSET.content)
+}
+
 /// Serve a JS asset with aggressive immutable cache headers.
 fn serve_js_immutable(content: &'static str) -> Response {
     (
@@ -218,4 +231,5 @@ pub fn static_router() -> Router {
         .route(&CHAT_JS_ASSET.url, get(serve_chat_js))
         .route(&TRACE_DETAIL_JS_ASSET.url, get(serve_trace_detail_js))
         .route(&AGENT_FORM_JS_ASSET.url, get(serve_agent_form_js))
+        .route(&WORKFLOW_EDITOR_JS_ASSET.url, get(serve_workflow_editor_js))
 }
