@@ -507,6 +507,9 @@ async fn main() -> Result<()> {
         .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
         // Chat interface.
         .merge(chat::chat_router().with_state(chat_state))
+        .route_layer(axum::middleware::from_fn(
+            auth::require_same_origin_mutation,
+        ))
         .route_layer(axum::middleware::from_fn(auth::require_auth));
 
     let router = public_routes

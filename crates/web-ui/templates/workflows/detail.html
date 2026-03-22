@@ -96,9 +96,23 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
       </h3>
       <div class="wf-card">
         <div class="wf-k">Endpoint</div>
-        <div class="wf-v mono">{{ webhook_url }}</div>
+        <div class="wf-v mono" id="webhookEndpointMasked">
+          {{ webhook_url_masked }}
+        </div>
         <div class="wf-k" style="margin-top: 0.55rem">Token</div>
-        <div class="wf-v mono">{{ webhook_token }}</div>
+        <div class="wf-v mono" id="webhookTokenMasked">
+          {{ webhook_token_masked }}
+        </div>
+        <button
+          type="button"
+          class="ghost-btn"
+          id="revealWebhookSecretsBtn"
+          data-token="{{ webhook_token }}"
+          data-url="{{ webhook_url }}"
+          style="margin-top: 0.6rem"
+        >
+          Reveal
+        </button>
         <div class="wf-k" style="margin-top: 0.55rem">Last Rotated</div>
         <div class="wf-v">{{ webhook_updated_at }}</div>
         <form
@@ -145,4 +159,25 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
     </div>
   </main>
 </div>
+{% endblock %} {% block extra_js %}
+<script>
+  (function () {
+    const btn = document.getElementById("revealWebhookSecretsBtn");
+    if (!btn) return;
+    const tokenEl = document.getElementById("webhookTokenMasked");
+    const urlEl = document.getElementById("webhookEndpointMasked");
+    let revealed = false;
+    btn.addEventListener("click", function () {
+      if (!tokenEl || !urlEl) return;
+      if (!revealed) {
+        tokenEl.textContent = btn.getAttribute("data-token") || "";
+        urlEl.textContent = btn.getAttribute("data-url") || "";
+        btn.textContent = "Hide";
+        revealed = true;
+      } else {
+        location.reload();
+      }
+    });
+  })();
+</script>
 {% endblock %}

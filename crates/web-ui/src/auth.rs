@@ -10,8 +10,8 @@ use std::sync::Arc;
 use askama::Template;
 use axum::body::Body;
 use axum::extract::{Extension, Request};
-use axum::http::header::{COOKIE, LOCATION, SET_COOKIE};
-use axum::http::StatusCode;
+use axum::http::header::{COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
+use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::Form;
@@ -146,6 +146,64 @@ pub async fn require_auth(
     }
 }
 
+/// Middleware that enforces same-origin checks for cookie-authenticated mutations.
+///
+/// Browser CSRF relies on ambient cookies on cross-site requests. For state-changing
+/// methods we reject requests whose `Origin`/`Referer` do not match `Host`.
+/// Bearer-authenticated API requests are exempt from this check.
+pub async fn require_same_origin_mutation(request: Request, next: Next) -> Response {
+    match *request.method() {
+        Method::GET | Method::HEAD | Method::OPTIONS => return next.run(request).await,
+        _ => {}
+    }
+
+    if request
+        .headers()
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.starts_with("Bearer "))
+        .unwrap_or(false)
+    {
+        return next.run(request).await;
+    }
+
+    let Some(host) = request.headers().get(HOST).and_then(|h| h.to_str().ok()) else {
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::from("Forbidden"))
+            .unwrap();
+    };
+
+    let origin_host = request
+        .headers()
+        .get(ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .and_then(parse_host_from_url)
+        .or_else(|| {
+            request
+                .headers()
+                .get(REFERER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(parse_host_from_url)
+        });
+
+    let Some(origin_host) = origin_host else {
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::from("Forbidden"))
+            .unwrap();
+    };
+
+    if !constant_time_eq(origin_host.as_bytes(), host.as_bytes()) {
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::from("Forbidden"))
+            .unwrap();
+    }
+
+    next.run(request).await
+}
+
 // -- Templates --------------------------------------------------------------
 
 /// Askama template for the standalone login page.
@@ -227,6 +285,19 @@ fn extract_cookie<'a>(cookies: &'a str, name: &str) -> Option<&'a str> {
         }
     }
     None
+}
+
+fn parse_host_from_url(value: &str) -> Option<String> {
+    let value = value.trim();
+    let value = value
+        .strip_prefix("http://")
+        .or_else(|| value.strip_prefix("https://"))?;
+    let host = value.split('/').next()?.trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
 }
 
 #[cfg(test)]

@@ -156,6 +156,7 @@ pub fn spawn_event_trigger_adapter(
         let mut seen: HashSet<Uuid> = HashSet::new();
         let mut seen_order: VecDeque<Uuid> = VecDeque::new();
         let started_at = Utc::now();
+        let mut warned_done_filter_fallback = false;
 
         loop {
             tokio::time::sleep(poll_interval).await;
@@ -165,6 +166,7 @@ pub fn spawn_event_trigger_adapter(
                 started_at,
                 &mut seen,
                 &mut seen_order,
+                &mut warned_done_filter_fallback,
             )
             .await
             {
@@ -311,6 +313,7 @@ async fn process_event_triggers(
     started_at: DateTime<Utc>,
     seen: &mut HashSet<Uuid>,
     seen_order: &mut VecDeque<Uuid>,
+    warned_done_filter_fallback: &mut bool,
 ) -> Result<()> {
     let store = storage.workflow_store();
     let workflows = store.list().await?;
@@ -320,7 +323,19 @@ async fn process_event_triggers(
         bus_messages::topic::TOOL_RESULT,
         bus_messages::topic::AGENT_REPORT,
     ] {
-        let messages = bus.list(topic, Some(MessageStatus::Done), 50).await?;
+        let mut messages = bus.list(topic, Some(MessageStatus::Done), 50).await?;
+        if messages.is_empty() {
+            let fallback = bus.list(topic, None, 50).await?;
+            if !fallback.is_empty() {
+                if !*warned_done_filter_fallback {
+                    warn!(
+                        "MessageBus did not return done-filtered events; using unfiltered fallback for workflow event triggers"
+                    );
+                    *warned_done_filter_fallback = true;
+                }
+                messages = fallback;
+            }
+        }
         for msg in messages {
             if msg.created_at < started_at || seen.contains(&msg.id) {
                 continue;

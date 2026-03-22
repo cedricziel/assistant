@@ -86,7 +86,9 @@ struct WorkflowDetailTemplate {
     updated_at: String,
     graph_json: String,
     webhook_url: String,
+    webhook_url_masked: String,
     webhook_token: String,
+    webhook_token_masked: String,
     webhook_updated_at: String,
     recent_runs: Vec<WorkflowRunView>,
 }
@@ -234,6 +236,8 @@ pub async fn show_workflow(
         .await
         .map_err(internal_error)?;
     let webhook_url = format!("/workflow-hooks/{}/{}", id, endpoint.token);
+    let webhook_url_masked = mask_credential(&webhook_url);
+    let webhook_token_masked = mask_credential(&endpoint.token);
     let recent_runs = store
         .list_runs(workflow_id, 10)
         .await
@@ -265,6 +269,8 @@ pub async fn show_workflow(
         graph_json,
         webhook_url,
         webhook_token: endpoint.token,
+        webhook_url_masked,
+        webhook_token_masked,
         webhook_updated_at: format_ts(endpoint.updated_at),
         recent_runs,
     }))
@@ -923,6 +929,13 @@ fn count_node_types(nodes: &[WorkflowNode]) -> (usize, usize) {
 
 fn format_ts(ts: chrono::DateTime<chrono::Utc>) -> String {
     ts.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+}
+
+fn mask_credential(value: &str) -> String {
+    if value.len() <= 6 {
+        return "******".to_string();
+    }
+    format!("{}...{}", &value[..3], &value[value.len() - 3..])
 }
 
 fn default_graph_json() -> String {
