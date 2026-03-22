@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.44](https://github.com/cedricziel/assistant/compare/v0.1.43...v0.1.44) (2026-03-22)
+
+
+### Features
+
+* **workflows:** add loop-enabled workflow graph management ([#228](https://github.com/cedricziel/assistant/issues/228)) ([fe883e5](https://github.com/cedricziel/assistant/commit/fe883e517e096c46701a4c60077bbfee563ce195))
+
 ## [0.1.43](https://github.com/cedricziel/assistant/compare/v0.1.42...v0.1.43) (2026-03-22)
 
 
