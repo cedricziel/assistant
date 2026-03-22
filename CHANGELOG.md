@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.46](https://github.com/cedricziel/assistant/compare/v0.1.45...v0.1.46) (2026-03-22)
+
+
+### Features
+
+* **web-ui:** redesign workflow form for desktop split layout ([#235](https://github.com/cedricziel/assistant/issues/235)) ([b2d1c21](https://github.com/cedricziel/assistant/commit/b2d1c214f2c6846a5c62f670d9b021455bf24591))
+
+
+### Bug Fixes
+
+* **release:** install protoc in aarch64 cross pre-build ([#232](https://github.com/cedricziel/assistant/issues/232)) ([1596a47](https://github.com/cedricziel/assistant/commit/1596a4767f5053f08880ae92e3d6f262b12c7ed6))
+* **storage:** make agent-scope migrations sqlite-safe ([#233](https://github.com/cedricziel/assistant/issues/233)) ([2a7b5f4](https://github.com/cedricziel/assistant/commit/2a7b5f4d43244c27336192f87a21786e9866d1c1))
+
 ## [0.1.45](https://github.com/cedricziel/assistant/compare/v0.1.44...v0.1.45) (2026-03-22)
 
 
