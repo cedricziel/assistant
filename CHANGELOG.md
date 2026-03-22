@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.43](https://github.com/cedricziel/assistant/compare/v0.1.42...v0.1.43) (2026-03-22)
+
+
+### Features
+
+* **runtime:** introduce multi-agent contexts with scoped runtime and web UI ([#227](https://github.com/cedricziel/assistant/issues/227)) ([f3226b1](https://github.com/cedricziel/assistant/commit/f3226b14aa8aa0b5d189f8582499811928d6da8a))
+* **web-ui:** add health and readiness endpoints ([#225](https://github.com/cedricziel/assistant/issues/225)) ([786ac5c](https://github.com/cedricziel/assistant/commit/786ac5c33273321af4ee0ca2020eb12e4dc395d7))
+
 ## [0.1.42](https://github.com/cedricziel/assistant/compare/v0.1.41...v0.1.42) (2026-03-20)
 
 
