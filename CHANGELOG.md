@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.45](https://github.com/cedricziel/assistant/compare/v0.1.44...v0.1.45) (2026-03-22)
+
+
+### Bug Fixes
+
+* **cli:** enable clap env attribute support ([0949a4e](https://github.com/cedricziel/assistant/commit/0949a4e01fa761e2d187fc9c87ff1874fdbefdd7))
+
 ## [0.1.44](https://github.com/cedricziel/assistant/compare/v0.1.43...v0.1.44) (2026-03-22)
 
 
