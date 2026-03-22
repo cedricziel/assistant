@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use assistant_core::{
     apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
-    validate_agent_id, BusKind, LlmProviderKind, MessageBus,
+    validate_agent_id, BusKind, Interface, LlmProviderKind, MessageBus,
 };
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
@@ -28,11 +28,15 @@ use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_provider_openai::OpenAIProvider;
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
-use assistant_runtime::{spawn_workflow_runner, Orchestrator};
+use assistant_runtime::Orchestrator;
 use assistant_skills::SkillSource;
 use assistant_storage::registry::SkillRegistry;
 use assistant_storage::{default_db_path, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
+use assistant_workflow::{
+    spawn_workflow_runner, AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
+};
+use assistant_workflow_http::HttpRequestActionExecutor;
 use axum::{
     http::StatusCode,
     response::Redirect,
@@ -47,6 +51,7 @@ use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn, Level};
 use tracing_subscriber::EnvFilter;
+use uuid::Uuid;
 
 use auth::AuthConfig;
 
@@ -113,6 +118,21 @@ pub(crate) struct AppState {
     pub(crate) bus_kind: BusKind,
     pub(crate) nats_url: Option<String>,
     pub(crate) nats_token: Option<String>,
+}
+
+struct OrchestratorTurnClient {
+    orchestrator: Arc<Orchestrator>,
+}
+
+#[async_trait::async_trait]
+impl AssistantTurnClient for OrchestratorTurnClient {
+    async fn submit_turn(&self, prompt: &str, conversation_id: Uuid) -> Result<String> {
+        let result = self
+            .orchestrator
+            .submit_turn(prompt, conversation_id, Interface::Scheduler, None)
+            .await?;
+        Ok(result.answer)
+    }
 }
 
 #[tokio::main]
@@ -398,12 +418,16 @@ async fn main() -> Result<()> {
             .await;
     });
 
-    // 6. Spawn workflow run processor (loop guardrails + run telemetry).
-    let _workflow_runner = spawn_workflow_runner(
-        storage.clone(),
-        Some(orchestrator.clone()),
-        Duration::from_secs(2),
-    );
+    // 6. Spawn workflow run processor (loop guardrails + action executors).
+    let turn_client = Arc::new(OrchestratorTurnClient {
+        orchestrator: orchestrator.clone(),
+    });
+    let action_executors: Vec<Arc<dyn WorkflowActionExecutor>> = vec![
+        Arc::new(AssistantTurnActionExecutor::new(turn_client)),
+        Arc::new(HttpRequestActionExecutor::default()),
+    ];
+    let _workflow_runner =
+        spawn_workflow_runner(storage.clone(), Duration::from_secs(2), action_executors);
 
     // -- Agent store (filesystem-backed) --
     let agent_store = AgentStore::default_dir()?;

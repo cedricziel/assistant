@@ -12,6 +12,7 @@ nats = ["dep:assistant-bus-nats"]
 [dependencies]
 assistant-bus-nats = { path = "../bus-nats", optional = true }
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 askama = { workspace = true }
 assistant-a2a-json-schema = { path = "../a2a-json-schema" }
 assistant-core = { path = "../core" }
@@ -21,6 +22,8 @@ assistant-provider-ollama = { path = "../provider-ollama" }
 assistant-provider-openai = { path = "../provider-openai" }
 assistant-provider-moonshot = { path = "../provider-moonshot" }
 assistant-runtime = { path = "../runtime" }
+assistant-workflow = { path = "../workflow" }
+assistant-workflow-http = { path = "../workflow-http" }
 assistant-skills = { path = "../skills" }
 assistant-storage = { path = "../storage" }
 assistant-tool-executor = { path = "../tool-executor" }

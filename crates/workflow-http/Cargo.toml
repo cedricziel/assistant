@@ -1,0 +1,14 @@
+[package]
+name = "assistant-workflow-http"
+version = "0.1.42"
+license.workspace = true
+edition.workspace = true
+description = "HTTP action node executor for assistant-workflow"
+
+[dependencies]
+assistant-workflow = { path = "../workflow" }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

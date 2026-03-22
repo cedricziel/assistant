@@ -16,6 +16,8 @@ members = [
     "crates/provider-openai",
     "crates/provider-moonshot",
     "crates/storage",
+    "crates/workflow",
+    "crates/workflow-http",
     "crates/runtime",
     "crates/tool-executor",
     "crates/mcp-client",

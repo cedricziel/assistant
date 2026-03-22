@@ -1,0 +1,15 @@
+[package]
+name = "assistant-workflow"
+version = "0.1.42"
+license.workspace = true
+edition.workspace = true
+description = "Workflow run engine and action executor abstractions"
+
+[dependencies]
+assistant-storage = { path = "../storage" }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
