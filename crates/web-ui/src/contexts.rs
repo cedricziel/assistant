@@ -85,18 +85,81 @@ async fn use_context(State(state): State<AppState>, Path(id): Path<String>) -> R
     if let Err(e) = store.ensure_exists(&id).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
-    if let Some(home) = dirs::home_dir() {
-        let agent_root = home.join(".assistant").join("agents").join(&id);
-        if let Err(e) = tokio::fs::create_dir_all(&agent_root).await {
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-        }
-    }
-    let workspace_dir = default_workspace_dir(&id);
-    if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
+    if let Err(e) = ensure_agent_dirs(&id).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
     *state.agent_id.write().await = id;
 
     Redirect::to("/contexts?updated=1").into_response()
+}
+
+async fn ensure_agent_dirs(id: &str) -> std::io::Result<()> {
+    if let Some(home) = dirs::home_dir() {
+        let agent_root = home.join(".assistant").join("agents").join(id);
+        tokio::fs::create_dir_all(agent_root).await?;
+    }
+    let workspace_dir = default_workspace_dir(id);
+    tokio::fs::create_dir_all(workspace_dir).await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use assistant_core::BusKind;
+    use assistant_storage::{AssistantAgentStore, StorageLayer};
+    use axum::extract::{Path, State};
+    use tokio::sync::RwLock;
+
+    use super::use_context;
+    use crate::AppState;
+
+    fn test_state(pool: sqlx::SqlitePool) -> AppState {
+        AppState {
+            pool,
+            agent_id: Arc::new(RwLock::new("default".to_string())),
+            trace_limit: 10,
+            log_limit: 10,
+            bus_kind: BusKind::Sqlite,
+            nats_url: None,
+            nats_token: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn use_context_updates_runtime_agent_without_changing_default() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let state = test_state(storage.pool.clone());
+
+        let agents = AssistantAgentStore::new(storage.pool.clone());
+        agents.ensure_default().await.unwrap();
+        agents.ensure_exists("marketing").await.unwrap();
+
+        let response = use_context(
+            State(state.clone()),
+            Path::<String>("marketing".to_string()),
+        )
+        .await;
+
+        assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
+        assert_eq!(*state.agent_id.read().await, "marketing");
+        assert_eq!(agents.default_id().await.unwrap(), "default");
+    }
+
+    #[tokio::test]
+    async fn use_context_rejects_invalid_agent_id() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let state = test_state(storage.pool.clone());
+
+        let response = use_context(
+            State(state.clone()),
+            Path::<String>("../bad-id".to_string()),
+        )
+        .await;
+
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(*state.agent_id.read().await, "default");
+    }
 }
