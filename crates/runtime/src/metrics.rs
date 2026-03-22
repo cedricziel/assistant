@@ -101,6 +101,7 @@ impl MetricsRecorder {
     /// per the GenAI semconv).
     pub fn record_token_usage(
         &self,
+        agent_id: &str,
         model: &str,
         provider: &str,
         operation: &str,
@@ -111,6 +112,7 @@ impl MetricsRecorder {
             KeyValue::new("gen_ai.request.model", model.to_string()),
             KeyValue::new("gen_ai.provider.name", provider.to_string()),
             KeyValue::new("gen_ai.operation.name", operation.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
         ];
 
         let mut input_attrs = common.to_vec();
@@ -125,6 +127,7 @@ impl MetricsRecorder {
     /// Record LLM operation duration.
     pub fn record_operation_duration(
         &self,
+        agent_id: &str,
         model: &str,
         provider: &str,
         operation: &str,
@@ -135,6 +138,7 @@ impl MetricsRecorder {
             KeyValue::new("gen_ai.request.model", model.to_string()),
             KeyValue::new("gen_ai.provider.name", provider.to_string()),
             KeyValue::new("gen_ai.operation.name", operation.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
         ];
         if let Some(err) = error_type {
             attrs.push(KeyValue::new("error.type", err.to_string()));
@@ -143,8 +147,11 @@ impl MetricsRecorder {
     }
 
     /// Record a turn start.
-    pub fn record_turn(&self, skill: Option<&str>, interface: &str) {
-        let mut attrs = vec![KeyValue::new("interface", interface.to_string())];
+    pub fn record_turn(&self, agent_id: &str, skill: Option<&str>, interface: &str) {
+        let mut attrs = vec![
+            KeyValue::new("interface", interface.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
+        ];
         if let Some(s) = skill {
             attrs.push(KeyValue::new("skill", s.to_string()));
         }
@@ -152,22 +159,29 @@ impl MetricsRecorder {
     }
 
     /// Record a tool invocation.
-    pub fn record_tool_invocation(&self, tool_name: &str) {
-        let attrs = [KeyValue::new("tool.name", tool_name.to_string())];
+    pub fn record_tool_invocation(&self, agent_id: &str, tool_name: &str) {
+        let attrs = [
+            KeyValue::new("tool.name", tool_name.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
+        ];
         self.tool_invocations.add(1, &attrs);
     }
 
     /// Record tool execution duration.
-    pub fn record_tool_duration(&self, tool_name: &str, duration_s: f64) {
-        let attrs = [KeyValue::new("tool.name", tool_name.to_string())];
+    pub fn record_tool_duration(&self, agent_id: &str, tool_name: &str, duration_s: f64) {
+        let attrs = [
+            KeyValue::new("tool.name", tool_name.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
+        ];
         self.tool_duration.record(duration_s, &attrs);
     }
 
     /// Record an error.
-    pub fn record_error(&self, error_type: &str, source: &str) {
+    pub fn record_error(&self, agent_id: &str, error_type: &str, source: &str) {
         let attrs = [
             KeyValue::new("error.type", error_type.to_string()),
             KeyValue::new("source", source.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
         ];
         self.error_count.add(1, &attrs);
     }

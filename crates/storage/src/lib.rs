@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod assistant_agents;
 pub mod conversations;
 pub mod logs;
 pub mod memory_chunks;
@@ -11,6 +12,7 @@ pub mod traces;
 pub mod webhooks;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
+pub use assistant_agents::{AssistantAgentRecord, AssistantAgentStore};
 pub use conversations::{ConversationRecord, ConversationStore};
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
@@ -73,6 +75,16 @@ impl StorageLayer {
         ConversationStore::new(self.pool.clone())
     }
 
+    /// Convenience: build a `ConversationStore` scoped to an assistant agent.
+    pub fn conversation_store_for_agent(&self, agent_id: &str) -> ConversationStore {
+        ConversationStore::for_agent(self.pool.clone(), agent_id)
+    }
+
+    /// Convenience: build an `AssistantAgentStore` backed by this pool.
+    pub fn assistant_agent_store(&self) -> AssistantAgentStore {
+        AssistantAgentStore::new(self.pool.clone())
+    }
+
     /// Convenience: build a `RefinementsStore` backed by this pool.
     pub fn refinements_store(&self) -> RefinementsStore {
         RefinementsStore::new(self.pool.clone())
@@ -81,6 +93,11 @@ impl StorageLayer {
     /// Convenience: build a `ScheduledTaskStore` backed by this pool.
     pub fn scheduled_task_store(&self) -> ScheduledTaskStore {
         ScheduledTaskStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a `ScheduledTaskStore` scoped to an assistant agent.
+    pub fn scheduled_task_store_for_agent(&self, agent_id: &str) -> ScheduledTaskStore {
+        ScheduledTaskStore::for_agent(self.pool.clone(), agent_id)
     }
 
     /// Convenience: build a `MemoryChunkStore` backed by this pool.
@@ -103,9 +120,19 @@ impl StorageLayer {
         MetricsStore::new(self.pool.clone())
     }
 
+    /// Convenience: build a [`MetricsStore`] scoped to an assistant agent.
+    pub fn metrics_store_for_agent(&self, agent_id: &str) -> MetricsStore {
+        MetricsStore::for_agent(self.pool.clone(), agent_id)
+    }
+
     /// Convenience: build a [`WebhookStore`] backed by this pool.
     pub fn webhook_store(&self) -> WebhookStore {
         WebhookStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`WebhookStore`] scoped to an assistant agent.
+    pub fn webhook_store_for_agent(&self, agent_id: &str) -> WebhookStore {
+        WebhookStore::for_agent(self.pool.clone(), agent_id)
     }
 }
 
@@ -206,6 +233,18 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "016_webhooks",
             include_str!("../../../migrations/016_webhooks.sql"),
+        ),
+        (
+            "017_assistant_agents",
+            include_str!("../../../migrations/017_assistant_agents.sql"),
+        ),
+        (
+            "018_agent_scope_tasks_webhooks",
+            include_str!("../../../migrations/018_agent_scope_tasks_webhooks.sql"),
+        ),
+        (
+            "019_metrics_agent_scope",
+            include_str!("../../../migrations/019_metrics_agent_scope.sql"),
         ),
     ];
 

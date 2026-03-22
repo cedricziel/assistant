@@ -423,6 +423,7 @@ async fn handle_message(state: Arc<AppState>, event: WebhookEvent) -> Result<()>
                 );
                 let ctx = assistant_core::ExecutionContext {
                     conversation_id,
+                    agent_id: "default".to_string(),
                     turn: 0,
                     interface: Interface::Nextcloud,
                     interactive: false,

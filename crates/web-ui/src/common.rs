@@ -3,6 +3,8 @@
 use askama::Template;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::warn;
 
 // -- Static asset URL trait --------------------------------------------------
@@ -107,4 +109,9 @@ pub fn render_template(tmpl: impl Template) -> Response {
             }
         }
     }
+}
+
+/// Read the currently active assistant context ID from shared web-ui state.
+pub async fn active_agent_id(agent_id: &Arc<RwLock<String>>) -> String {
+    agent_id.read().await.clone()
 }

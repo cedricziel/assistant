@@ -72,6 +72,8 @@ pub const DEFAULT_MAX_AGENT_DEPTH: u32 = 5;
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
     pub conversation_id: Uuid,
+    /// Active assistant agent context ID.
+    pub agent_id: String,
     pub turn: i64,
     /// The interface this turn originated from (cli, signal, mcp)
     pub interface: Interface,
@@ -117,6 +119,8 @@ pub struct AssistantConfig {
     pub mirror: MirrorConfig,
     #[serde(default)]
     pub memory: MemoryConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
     /// Signal messenger interface configuration (optional).
     /// Populated from the `[signal]` section of `config.toml`.
     pub signal: Option<SignalConfig>,
@@ -133,6 +137,25 @@ pub struct AssistantConfig {
     /// Populated from the `[transcription]` section of `config.toml`.
     #[serde(default)]
     pub transcription: Option<TranscriptionConfig>,
+}
+
+/// Active assistant agent configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    #[serde(default = "default_agent_id")]
+    pub id: String,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            id: default_agent_id(),
+        }
+    }
+}
+
+fn default_agent_id() -> String {
+    "default".to_string()
 }
 
 /// Configuration for the Signal messenger interface.

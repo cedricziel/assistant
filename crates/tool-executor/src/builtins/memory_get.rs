@@ -23,7 +23,7 @@ impl MemoryGetHandler {
         Self { config }
     }
 
-    /// Map a target name to an absolute path within `~/.assistant/`.
+    /// Map a target name to an absolute path within the default agent memory root.
     fn resolve_target(&self, target: &str) -> Option<PathBuf> {
         let mem = &self.config.memory;
         let base = base_dir();
@@ -45,7 +45,7 @@ impl MemoryGetHandler {
             _ => return None,
         };
 
-        // Security: verify the resolved path stays within ~/.assistant/.
+        // Security: verify the resolved path stays within the configured memory root.
         let canonical_base = base.canonicalize().unwrap_or(base.clone());
         let canonical_path = if path.exists() {
             path.canonicalize().ok()?

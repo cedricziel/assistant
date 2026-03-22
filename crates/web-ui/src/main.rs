@@ -3,6 +3,7 @@ mod analytics;
 pub mod auth;
 mod chat;
 pub mod common;
+mod contexts;
 mod logs;
 mod pwa;
 pub(crate) mod static_assets;
@@ -16,7 +17,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use assistant_core::{BusKind, LlmProviderKind, MessageBus};
+use assistant_core::{
+    apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
+    validate_agent_id, BusKind, LlmProviderKind, MessageBus,
+};
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
 use assistant_provider_moonshot::MoonshotProvider;
@@ -38,6 +42,7 @@ use clap::Parser;
 use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn, Level};
 use tracing_subscriber::EnvFilter;
@@ -92,11 +97,16 @@ struct Args {
     /// Base URL for the LLM provider (mainly for Ollama).
     #[arg(long, env = "OLLAMA_BASE_URL")]
     llm_base_url: Option<String>,
+
+    /// Assistant agent context ID (e.g. "default", "work", "personal").
+    #[arg(long, env = "ASSISTANT_AGENT")]
+    agent: Option<String>,
 }
 
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) pool: SqlitePool,
+    pub(crate) agent_id: Arc<RwLock<String>>,
     pub(crate) trace_limit: i64,
     pub(crate) log_limit: i64,
     pub(crate) bus_kind: BusKind,
@@ -168,8 +178,50 @@ async fn main() -> Result<()> {
         config.llm.base_url = base_url;
     }
 
+    let cli_agent_override = args.agent.clone();
+    let mut selected_agent = cli_agent_override
+        .clone()
+        .unwrap_or_else(|| config.agent.id.clone());
+    if !validate_agent_id(&selected_agent) {
+        anyhow::bail!(
+            "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
+            selected_agent
+        );
+    }
+    apply_agent_context(&mut config, &selected_agent);
+    if let Some(home) = dirs::home_dir() {
+        let agent_root = home.join(".assistant").join("agents").join(&selected_agent);
+        set_runtime_agent_root(agent_root);
+    }
+    let workspace_dir = default_workspace_dir(&selected_agent);
+    set_runtime_workspace_dir(workspace_dir.clone());
+    tokio::fs::create_dir_all(&workspace_dir)
+        .await
+        .with_context(|| format!("Failed to create workspace at {}", workspace_dir.display()))?;
+
+    let assistant_agents = storage.assistant_agent_store();
+    assistant_agents.ensure_default().await?;
+    if cli_agent_override.is_none() {
+        let default_id = assistant_agents.default_id().await?;
+        selected_agent = default_id;
+        apply_agent_context(&mut config, &selected_agent);
+        if let Some(home) = dirs::home_dir() {
+            let agent_root = home.join(".assistant").join("agents").join(&selected_agent);
+            set_runtime_agent_root(agent_root);
+        }
+        let workspace_dir = default_workspace_dir(&selected_agent);
+        set_runtime_workspace_dir(workspace_dir.clone());
+        tokio::fs::create_dir_all(&workspace_dir)
+            .await
+            .with_context(|| {
+                format!("Failed to create workspace at {}", workspace_dir.display())
+            })?;
+    }
+    assistant_agents.ensure_exists(&selected_agent).await?;
+
     let state = AppState {
         pool: storage.pool.clone(),
+        agent_id: Arc::new(RwLock::new(selected_agent.clone())),
         trace_limit: args.trace_limit,
         log_limit: args.log_limit,
         bus_kind: config.bus.kind.clone(),
@@ -373,9 +425,11 @@ async fn main() -> Result<()> {
 
     let webhook_pages_state = webhooks::pages::WebhookPagesState {
         pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
     };
 
-    let chat_state = chat::ChatState::new(storage.pool.clone(), orchestrator);
+    let chat_state =
+        chat::ChatState::new(storage.pool.clone(), orchestrator, selected_agent.clone());
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
@@ -397,6 +451,7 @@ async fn main() -> Result<()> {
         .merge(traces::traces_router())
         .merge(logs::logs_router())
         .merge(analytics::analytics_router())
+        .merge(contexts::contexts_router())
         .with_state(state)
         // A2A protocol routes (auth-protected endpoints only).
         .merge(a2a::protected_router().with_state(a2a_state))

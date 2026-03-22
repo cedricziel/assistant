@@ -187,6 +187,85 @@ impl TraceStore {
             .collect()
     }
 
+    /// Return metadata for recent traces scoped to a specific assistant agent.
+    pub async fn list_recent_traces_for_agent(
+        &self,
+        limit: i64,
+        skill_filter: Option<&str>,
+        agent_id: &str,
+    ) -> Result<Vec<TraceSummary>> {
+        let rows = sqlx::query(
+            "SELECT \
+                dt.trace_id AS trace_id, \
+                MAX(dt.conversation_id) AS conversation_id, \
+                MIN(dt.start_time) AS trace_start, \
+                MAX(dt.end_time) AS trace_end, \
+                COUNT(*) AS span_count, \
+                SUM(CASE WHEN dt.tool_name IS NOT NULL THEN 1 ELSE 0 END) AS tool_span_count, \
+                SUM(CASE WHEN dt.tool_status = 'error' THEN 1 ELSE 0 END) AS error_count, \
+                GROUP_CONCAT(DISTINCT CASE WHEN dt.tool_name IS NULL THEN '' ELSE dt.tool_name END) AS tool_names, \
+                MAX(CASE WHEN dt.parent_span_id IS NULL THEN dt.name ELSE NULL END) AS root_span_name \
+             FROM distributed_traces dt \
+             INNER JOIN conversations c ON c.id = dt.conversation_id \
+             WHERE c.agent_id = ?1 \
+             GROUP BY dt.trace_id \
+             HAVING (?2 IS NULL) OR SUM(CASE WHEN dt.tool_name = ?2 THEN 1 ELSE 0 END) > 0 \
+             ORDER BY trace_start DESC \
+             LIMIT ?3",
+        )
+        .bind(agent_id)
+        .bind(skill_filter)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let conv_raw: Option<String> = row.try_get("conversation_id").ok().flatten();
+                let conversation_id = match conv_raw {
+                    Some(ref raw) if !raw.is_empty() => Some(Uuid::parse_str(raw)?),
+                    _ => None,
+                };
+                let start_time: DateTime<Utc> = row.get("trace_start");
+                let end_time: DateTime<Utc> = row.get("trace_end");
+                let span_count: i64 = row.get("span_count");
+                let tool_span_count: i64 = row.get("tool_span_count");
+                let error_count: i64 = row.get("error_count");
+                let root_span_name = row
+                    .try_get::<Option<String>, _>("root_span_name")
+                    .ok()
+                    .flatten();
+                let tool_concat = row
+                    .try_get::<Option<String>, _>("tool_names")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let tool_names = tool_concat
+                    .split(',')
+                    .filter_map(|name| {
+                        let trimmed = name.trim();
+                        if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        }
+                    })
+                    .collect();
+                Ok(TraceSummary {
+                    trace_id: row.get("trace_id"),
+                    conversation_id,
+                    start_time,
+                    end_time,
+                    span_count,
+                    tool_span_count,
+                    error_count,
+                    tool_names,
+                    root_span_name,
+                })
+            })
+            .collect()
+    }
+
     /// Fetch every span belonging to a trace ordered by start time so the UI can
     /// render the full hierarchy/timeline.
     pub async fn get_trace(&self, trace_id: &str) -> Result<Vec<RecordedSpan>> {
@@ -199,6 +278,29 @@ impl TraceStore {
              ORDER BY start_time ASC",
         )
         .bind(trace_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(Self::row_to_span).collect()
+    }
+
+    /// Fetch every span for a trace, constrained to one assistant agent.
+    pub async fn get_trace_for_agent(
+        &self,
+        trace_id: &str,
+        agent_id: &str,
+    ) -> Result<Vec<RecordedSpan>> {
+        let rows = sqlx::query(
+            "SELECT dt.span_id, dt.trace_id, dt.parent_span_id, dt.name, dt.conversation_id, dt.turn, \
+                    dt.tool_name, dt.tool_status, dt.tool_observation, dt.tool_error, dt.duration_ms, \
+                    dt.start_time, dt.end_time, dt.attributes, dt.input_tokens, dt.output_tokens \
+             FROM distributed_traces dt \
+             INNER JOIN conversations c ON c.id = dt.conversation_id \
+             WHERE dt.trace_id = ?1 AND c.agent_id = ?2 \
+             ORDER BY dt.start_time ASC",
+        )
+        .bind(trace_id)
+        .bind(agent_id)
         .fetch_all(&self.pool)
         .await?;
 

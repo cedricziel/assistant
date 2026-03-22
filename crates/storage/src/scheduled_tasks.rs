@@ -9,6 +9,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct ScheduledTask {
     pub id: Uuid,
+    pub agent_id: String,
     pub name: String,
     pub cron_expr: String,
     pub prompt: String,
@@ -22,11 +23,22 @@ pub struct ScheduledTask {
 /// SQLite-backed store for scheduled tasks.
 pub struct ScheduledTaskStore {
     pool: SqlitePool,
+    agent_id: String,
 }
 
 impl ScheduledTaskStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            agent_id: "default".to_string(),
+        }
+    }
+
+    pub fn for_agent(pool: SqlitePool, agent_id: impl Into<String>) -> Self {
+        Self {
+            pool,
+            agent_id: agent_id.into(),
+        }
     }
 
     /// Insert a new scheduled task.
@@ -44,10 +56,11 @@ impl ScheduledTaskStore {
 
         sqlx::query(
             "INSERT INTO scheduled_tasks \
-                (id, name, cron_expr, prompt, enabled, once, next_run, created_at) \
-             VALUES (?1, ?2, ?3, ?4, TRUE, ?5, ?6, ?7)",
+                (id, agent_id, name, cron_expr, prompt, enabled, once, next_run, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, TRUE, ?6, ?7, ?8)",
         )
         .bind(&id_str)
+        .bind(&self.agent_id)
         .bind(name)
         .bind(cron_expr)
         .bind(prompt)
@@ -63,11 +76,12 @@ impl ScheduledTaskStore {
     /// List all enabled tasks whose next_run is at or before `now`.
     pub async fn due_tasks(&self, now: DateTime<Utc>) -> Result<Vec<ScheduledTask>> {
         let rows = sqlx::query(
-            "SELECT id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
+            "SELECT id, agent_id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
              FROM scheduled_tasks \
-             WHERE enabled = TRUE AND next_run <= ?1 \
+             WHERE agent_id = ?1 AND enabled = TRUE AND next_run <= ?2 \
              ORDER BY next_run ASC",
         )
+        .bind(&self.agent_id)
         .bind(now)
         .fetch_all(&self.pool)
         .await?;
@@ -78,9 +92,10 @@ impl ScheduledTaskStore {
     /// List all tasks.
     pub async fn list_all(&self) -> Result<Vec<ScheduledTask>> {
         let rows = sqlx::query(
-            "SELECT id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
-             FROM scheduled_tasks ORDER BY created_at ASC",
+            "SELECT id, agent_id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
+             FROM scheduled_tasks WHERE agent_id = ?1 ORDER BY created_at ASC",
         )
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -94,21 +109,29 @@ impl ScheduledTaskStore {
         last_run: DateTime<Utc>,
         next_run: Option<DateTime<Utc>>,
     ) -> Result<()> {
-        sqlx::query("UPDATE scheduled_tasks SET last_run = ?1, next_run = ?2 WHERE id = ?3")
-            .bind(last_run)
-            .bind(next_run)
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE scheduled_tasks
+             SET last_run = ?1, next_run = ?2
+             WHERE id = ?3 AND agent_id = ?4",
+        )
+        .bind(last_run)
+        .bind(next_run)
+        .bind(id.to_string())
+        .bind(&self.agent_id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     /// Disable a task (set `enabled = FALSE`).
     pub async fn disable(&self, id: Uuid) -> Result<bool> {
         let result = sqlx::query(
-            "UPDATE scheduled_tasks SET enabled = FALSE WHERE id = ?1 AND enabled = TRUE",
+            "UPDATE scheduled_tasks
+             SET enabled = FALSE
+             WHERE id = ?1 AND agent_id = ?2 AND enabled = TRUE",
         )
         .bind(id.to_string())
+        .bind(&self.agent_id)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
@@ -116,8 +139,9 @@ impl ScheduledTaskStore {
 
     /// Delete a task permanently.
     pub async fn delete(&self, id: Uuid) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM scheduled_tasks WHERE id = ?1")
+        let result = sqlx::query("DELETE FROM scheduled_tasks WHERE id = ?1 AND agent_id = ?2")
             .bind(id.to_string())
+            .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() > 0)
@@ -126,9 +150,10 @@ impl ScheduledTaskStore {
     /// Find a task by name (case-insensitive).
     pub async fn find_by_name(&self, name: &str) -> Result<Option<ScheduledTask>> {
         let row = sqlx::query(
-            "SELECT id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
-             FROM scheduled_tasks WHERE LOWER(name) = LOWER(?1) LIMIT 1",
+            "SELECT id, agent_id, name, cron_expr, prompt, enabled, once, last_run, next_run, created_at \
+             FROM scheduled_tasks WHERE agent_id = ?1 AND LOWER(name) = LOWER(?2) LIMIT 1",
         )
+        .bind(&self.agent_id)
         .bind(name)
         .fetch_optional(&self.pool)
         .await?;
@@ -334,6 +359,7 @@ fn parse_row(r: sqlx::sqlite::SqliteRow) -> Result<ScheduledTask> {
     let raw_id: String = r.get("id");
     Ok(ScheduledTask {
         id: Uuid::parse_str(&raw_id)?,
+        agent_id: r.get("agent_id"),
         name: r.get("name"),
         cron_expr: r.get("cron_expr"),
         prompt: r.get("prompt"),

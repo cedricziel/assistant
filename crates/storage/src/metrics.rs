@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 /// Query API for the `metric_points` table and its join tables.
 pub struct MetricsStore {
     pool: SqlitePool,
+    agent_id: String,
 }
 
 /// High-level summary for the analytics overview.
@@ -50,7 +51,17 @@ pub struct ResourceRecord {
 
 impl MetricsStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            agent_id: "default".to_string(),
+        }
+    }
+
+    pub fn for_agent(pool: SqlitePool, agent_id: impl Into<String>) -> Self {
+        Self {
+            pool,
+            agent_id: agent_id.into(),
+        }
     }
 
     /// Overall summary for the last `window_hours` hours.
@@ -63,20 +74,24 @@ impl MetricsStore {
         let token_in: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(sum), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'gen_ai.client.token.usage' \
+               AND agent_id = ?2 \
                AND json_extract(attributes, '$.\"gen_ai.token.type\"') = 'input' \
-               AND recorded_at >= datetime('now', ?1)",
+                AND recorded_at >= datetime('now', ?1)",
         )
         .bind(&window)
+        .bind(&self.agent_id)
         .fetch_one(&self.pool)
         .await?;
 
         let token_out: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(sum), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'gen_ai.client.token.usage' \
+               AND agent_id = ?2 \
                AND json_extract(attributes, '$.\"gen_ai.token.type\"') = 'output' \
-               AND recorded_at >= datetime('now', ?1)",
+                AND recorded_at >= datetime('now', ?1)",
         )
         .bind(&window)
+        .bind(&self.agent_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -84,9 +99,11 @@ impl MetricsStore {
         let requests: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'assistant.turn.count' \
-               AND recorded_at >= datetime('now', ?1)",
+               AND agent_id = ?2 \
+                AND recorded_at >= datetime('now', ?1)",
         )
         .bind(&window)
+        .bind(&self.agent_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -94,9 +111,11 @@ impl MetricsStore {
         let tools: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'assistant.tool.invocations' \
-               AND recorded_at >= datetime('now', ?1)",
+               AND agent_id = ?2 \
+                AND recorded_at >= datetime('now', ?1)",
         )
         .bind(&window)
+        .bind(&self.agent_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -106,9 +125,11 @@ impl MetricsStore {
                  CASE WHEN SUM(count) > 0 THEN SUM(sum) / SUM(count) ELSE 0.0 END, 0) AS REAL) \
              FROM metric_points \
              WHERE metric_name = 'gen_ai.client.operation.duration' \
-               AND recorded_at >= datetime('now', ?1)",
+               AND agent_id = ?2 \
+                AND recorded_at >= datetime('now', ?1)",
         )
         .bind(&window)
+        .bind(&self.agent_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -116,9 +137,11 @@ impl MetricsStore {
         let errors: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(SUM(value), 0) AS REAL) FROM metric_points \
              WHERE metric_name = 'assistant.error.count' \
-               AND recorded_at >= datetime('now', ?1)",
+               AND agent_id = ?2 \
+                AND recorded_at >= datetime('now', ?1)",
         )
         .bind(&window)
+        .bind(&self.agent_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -126,9 +149,11 @@ impl MetricsStore {
         let models: Vec<(String,)> = sqlx::query_as(
             "SELECT DISTINCT model FROM metric_points \
              WHERE model IS NOT NULL \
-               AND recorded_at >= datetime('now', ?1)",
+               AND agent_id = ?2 \
+                AND recorded_at >= datetime('now', ?1)",
         )
         .bind(&window)
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -158,11 +183,13 @@ impl MetricsStore {
              FROM metric_points \
              WHERE metric_name = 'gen_ai.client.token.usage' \
                AND recorded_at >= datetime('now', ?2) \
+               AND agent_id = ?3 \
              GROUP BY bucket \
              ORDER BY bucket",
         )
         .bind(bucket_minutes)
         .bind(format!("-{window_hours} hours"))
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -185,11 +212,13 @@ impl MetricsStore {
                  0.0 AS avg_dur \
              FROM metric_points \
              WHERE metric_name = 'gen_ai.client.token.usage' \
-               AND recorded_at >= datetime('now', ?1) \
+                AND recorded_at >= datetime('now', ?1) \
+                AND agent_id = ?2 \
              GROUP BY m \
              ORDER BY input_tok + output_tok DESC",
         )
         .bind(format!("-{window_hours} hours"))
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -214,11 +243,13 @@ impl MetricsStore {
                  0.0 AS avg_dur \
              FROM metric_points \
              WHERE metric_name = 'assistant.tool.invocations' \
-               AND recorded_at >= datetime('now', ?1) \
+                AND recorded_at >= datetime('now', ?1) \
+                AND agent_id = ?2 \
              GROUP BY tn \
              ORDER BY invocations DESC",
         )
         .bind(format!("-{window_hours} hours"))
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -246,12 +277,14 @@ impl MetricsStore {
                  CAST(COALESCE(SUM(value), 0) AS REAL) AS total \
              FROM metric_points \
              WHERE metric_name = 'assistant.turn.count' \
-               AND recorded_at >= datetime('now', ?2) \
+                AND recorded_at >= datetime('now', ?2) \
+                AND agent_id = ?3 \
              GROUP BY bucket \
              ORDER BY bucket",
         )
         .bind(bucket_minutes)
         .bind(format!("-{window_hours} hours"))
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -275,12 +308,14 @@ impl MetricsStore {
                  CAST(COALESCE(SUM(value), 0) AS REAL) AS total \
              FROM metric_points \
              WHERE metric_name = 'assistant.error.count' \
-               AND recorded_at >= datetime('now', ?2) \
+                AND recorded_at >= datetime('now', ?2) \
+                AND agent_id = ?3 \
              GROUP BY bucket \
              ORDER BY bucket",
         )
         .bind(bucket_minutes)
         .bind(format!("-{window_hours} hours"))
+        .bind(&self.agent_id)
         .fetch_all(&self.pool)
         .await?;
 

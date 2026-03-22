@@ -183,6 +183,8 @@ pub struct Orchestrator {
     pub(crate) agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
     /// OTel metric instruments for GenAI and operational metrics.
     pub(crate) metrics: crate::MetricsRecorder,
+    /// Active assistant agent ID for memory/workspace conversation scoping.
+    pub(crate) agent_id: String,
 }
 
 impl Orchestrator {
@@ -211,6 +213,7 @@ impl Orchestrator {
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             metrics: crate::MetricsRecorder::new(),
+            agent_id: config.agent.id.clone(),
         }
     }
 
@@ -358,7 +361,8 @@ impl Orchestrator {
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
     ) -> Result<TurnResult> {
-        self.metrics.record_turn(None, &format!("{interface:?}"));
+        self.metrics
+            .record_turn(&self.agent_id, None, &format!("{interface:?}"));
         info!("Starting turn with extension tools");
 
         let (_conv_cx, turn_cx) = setup_turn_trace(trace_cx, conversation_id, &interface);
@@ -418,6 +422,7 @@ impl Orchestrator {
 
             let ctx = ExecutionContext {
                 conversation_id,
+                agent_id: self.agent_id.clone(),
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: false,
@@ -442,7 +447,7 @@ impl Orchestrator {
                 Err(e) => {
                     crate::history::persist_error_recovery(&conv_store, conversation_id).await;
                     self.metrics
-                        .record_error("llm_error", "run_turn_with_tools");
+                        .record_error(&self.agent_id, "llm_error", "run_turn_with_tools");
                     return Err(e);
                 }
             };
@@ -451,7 +456,12 @@ impl Orchestrator {
                 response.meta(),
                 &response,
                 self.trace_content,
-                Some((&self.metrics, self.llm.provider_name(), llm_elapsed)),
+                Some((
+                    &self.metrics,
+                    &self.agent_id,
+                    self.llm.provider_name(),
+                    llm_elapsed,
+                )),
             );
 
             match response {
@@ -462,6 +472,7 @@ impl Orchestrator {
                         iteration,
                         base_turn,
                         conversation_id,
+                        &self.agent_id,
                         &interface,
                         &ext_map,
                         &conv_store,
@@ -617,7 +628,7 @@ impl Orchestrator {
 
         crate::history::persist_error_recovery(&conv_store, conversation_id).await;
         self.metrics
-            .record_error("max_iterations", "run_turn_with_tools");
+            .record_error(&self.agent_id, "max_iterations", "run_turn_with_tools");
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -634,7 +645,8 @@ impl Orchestrator {
         trace_cx: Option<&OtelContext>,
     ) -> Result<TurnResult> {
         let streaming = token_sink.is_some();
-        self.metrics.record_turn(None, &format!("{interface:?}"));
+        self.metrics
+            .record_turn(&self.agent_id, None, &format!("{interface:?}"));
         info!(
             conversation_id = %conversation_id,
             interface = ?interface,
@@ -665,6 +677,7 @@ impl Orchestrator {
 
             let ctx = ExecutionContext {
                 conversation_id,
+                agent_id: self.agent_id.clone(),
                 turn: iteration as i64,
                 interface: interface.clone(),
                 interactive: matches!(interface, Interface::Cli),
@@ -705,7 +718,8 @@ impl Orchestrator {
                     } else {
                         "run_turn"
                     };
-                    self.metrics.record_error("llm_error", label);
+                    self.metrics
+                        .record_error(&self.agent_id, "llm_error", label);
                     return Err(e);
                 }
             };
@@ -714,7 +728,12 @@ impl Orchestrator {
                 response.meta(),
                 &response,
                 self.trace_content,
-                Some((&self.metrics, self.llm.provider_name(), llm_elapsed)),
+                Some((
+                    &self.metrics,
+                    &self.agent_id,
+                    self.llm.provider_name(),
+                    llm_elapsed,
+                )),
             );
 
             match response {
@@ -818,7 +837,8 @@ impl Orchestrator {
         } else {
             "run_turn"
         };
-        self.metrics.record_error("max_iterations", label);
+        self.metrics
+            .record_error(&self.agent_id, "max_iterations", label);
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations
@@ -833,7 +853,7 @@ impl Orchestrator {
         conversation_id: Uuid,
         attachments: Vec<ContentBlock>,
     ) -> Result<(ConversationStore, Vec<ChatHistoryMessage>, i64)> {
-        let conv_store = self.storage.conversation_store();
+        let conv_store = self.storage.conversation_store_for_agent(&self.agent_id);
         conv_store
             .create_conversation_with_id(conversation_id, None)
             .await?;

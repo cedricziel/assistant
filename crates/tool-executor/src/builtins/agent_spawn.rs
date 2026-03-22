@@ -38,6 +38,10 @@ impl ToolHandler for AgentSpawnHandler {
         json!({
             "type": "object",
             "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Optional existing agent context ID to run this task as (for example: 'marketing'). If omitted, an anonymous subagent is created."
+                },
                 "task": {
                     "type": "string",
                     "description": "What the sub-agent should accomplish. Be specific and self-contained."
@@ -85,7 +89,13 @@ impl ToolHandler for AgentSpawnHandler {
             })
             .unwrap_or_default();
 
-        let agent_id = format!("subagent-{}", uuid::Uuid::new_v4());
+        let agent_id = params
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| format!("subagent-{}", uuid::Uuid::new_v4()));
 
         info!(
             agent_id = %agent_id,
@@ -166,6 +176,7 @@ mod tests {
     fn test_ctx(depth: u32) -> ExecutionContext {
         ExecutionContext {
             conversation_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
             turn: 0,
             interface: Interface::Cli,
             interactive: false,
@@ -277,5 +288,42 @@ mod tests {
         assert!(!out.success);
         assert!(out.content.contains("task"));
         assert_eq!(runner.call_count(), 0, "runner should not be called");
+    }
+
+    #[tokio::test]
+    async fn spawn_uses_existing_agent_id_when_provided() {
+        let runner = Arc::new(MockRunner::new(AgentReport {
+            status: AgentReportStatus::Completed,
+            content: "done".into(),
+            data: None,
+        }));
+        let handler = AgentSpawnHandler::new(runner.clone());
+        let mut params = HashMap::new();
+        params.insert("task".into(), json!("marketing task"));
+        params.insert("agent_id".into(), json!("marketing"));
+
+        let _ = handler.run(params, &test_ctx(0)).await.unwrap();
+        let spawn = runner.last_spawn().unwrap();
+        assert_eq!(spawn.agent_id, "marketing");
+    }
+
+    #[tokio::test]
+    async fn spawn_generates_anonymous_agent_id_by_default() {
+        let runner = Arc::new(MockRunner::new(AgentReport {
+            status: AgentReportStatus::Completed,
+            content: "done".into(),
+            data: None,
+        }));
+        let handler = AgentSpawnHandler::new(runner.clone());
+        let mut params = HashMap::new();
+        params.insert("task".into(), json!("anonymous task"));
+
+        let _ = handler.run(params, &test_ctx(0)).await.unwrap();
+        let spawn = runner.last_spawn().unwrap();
+        assert!(
+            spawn.agent_id.starts_with("subagent-"),
+            "expected anonymous subagent prefix, got {}",
+            spawn.agent_id
+        );
     }
 }

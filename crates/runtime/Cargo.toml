@@ -32,6 +32,9 @@ dirs = { workspace = true }
 toml = { workspace = true }
 sqlx = { workspace = true }
 sha2 = { workspace = true }
+reqwest = { workspace = true }
+hmac = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }

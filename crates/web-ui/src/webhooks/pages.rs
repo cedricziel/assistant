@@ -13,13 +13,14 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 use sqlx::SqlitePool;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use assistant_storage::WebhookStore;
 
 #[cfg(test)]
 use crate::common::html_escape;
-use crate::common::{internal_error, render_template, StaticUrls};
+use crate::common::{active_agent_id, internal_error, render_template, StaticUrls};
 
 // -- Shared state --
 
@@ -27,6 +28,7 @@ use crate::common::{internal_error, render_template, StaticUrls};
 #[derive(Clone)]
 pub struct WebhookPagesState {
     pub pool: SqlitePool,
+    pub agent_id: std::sync::Arc<RwLock<String>>,
 }
 
 // -- Known event types --
@@ -131,7 +133,8 @@ impl StaticUrls for WebhookVerifyTemplate {}
 pub async fn list_webhooks(
     State(state): State<WebhookPagesState>,
 ) -> Result<Response, (StatusCode, String)> {
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     let webhooks = store.list().await.map_err(internal_error)?;
     let count = webhooks.len();
 
@@ -171,7 +174,8 @@ pub async fn create_webhook(
         return (StatusCode::BAD_REQUEST, e).into_response();
     }
 
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     let id = uuid::Uuid::new_v4().to_string();
     let secret = generate_secret();
     let event_types = form.selected_event_types();
@@ -193,7 +197,8 @@ pub async fn show_webhook(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     let wh = store
         .get(&id)
         .await
@@ -226,7 +231,8 @@ pub async fn edit_webhook_form(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     let wh = store
         .get(&id)
         .await
@@ -252,7 +258,8 @@ pub async fn update_webhook(
         return (StatusCode::BAD_REQUEST, e).into_response();
     }
 
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     let event_types = form.selected_event_types();
     let active = form.active.is_some();
 
@@ -271,7 +278,8 @@ pub async fn delete_webhook(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
 ) -> Response {
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     match store.delete(&id).await {
         Ok(true) => Redirect::to("/webhooks").into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")).into_response(),
@@ -284,7 +292,8 @@ pub async fn toggle_webhook(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
 ) -> Response {
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     match store.toggle_active(&id).await {
         Ok(true) => Redirect::to(&format!("/webhooks/{id}")).into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, format!("Webhook '{id}' not found")).into_response(),
@@ -297,7 +306,8 @@ pub async fn rotate_secret(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
 ) -> Response {
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     let new_secret = generate_secret();
     match store.rotate_secret(&id, &new_secret).await {
         Ok(true) => Redirect::to(&format!("/webhooks/{id}")).into_response(),
@@ -315,7 +325,8 @@ pub async fn verify_webhook(
     State(state): State<WebhookPagesState>,
     Path(id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
-    let store = WebhookStore::new(state.pool);
+    let agent_id = active_agent_id(&state.agent_id).await;
+    let store = WebhookStore::for_agent(state.pool, &agent_id);
     let wh = store
         .get(&id)
         .await
@@ -762,6 +773,7 @@ mod tests {
     fn render_webhook_form_edit_populates_fields() {
         let wh = assistant_storage::WebhookRecord {
             id: "wh-test".into(),
+            agent_id: "default".into(),
             name: "My Hook".into(),
             url: "https://example.com/hook".into(),
             secret: "s3cret".into(),

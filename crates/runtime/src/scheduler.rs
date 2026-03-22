@@ -19,6 +19,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::orchestrator::Orchestrator;
+use crate::webhook_dispatch;
 
 /// How often the heartbeat prompt is run (30 minutes).
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30 * 60);
@@ -61,7 +62,7 @@ pub fn spawn_scheduler(
 /// bus.  The worker loop processes them asynchronously.
 async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> Result<()> {
     let now = Utc::now();
-    let task_store = storage.scheduled_task_store();
+    let task_store = storage.scheduled_task_store_for_agent(&orchestrator.agent_id);
     let due = task_store.due_tasks(now).await?;
     let bus = orchestrator.bus();
 
@@ -69,6 +70,36 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
         info!(task_name = %task.name, "Dispatching scheduled task");
 
         let conversation_id = Uuid::new_v4();
+
+        let trigger = serde_json::json!({
+            "task_id": task.id,
+            "task_name": task.name.clone(),
+            "conversation_id": conversation_id,
+            "triggered_at": now,
+        });
+        if let Err(e) = webhook_dispatch::dispatch_event(
+            storage,
+            &orchestrator.agent_id,
+            topic::SCHEDULE_TRIGGER,
+            trigger.clone(),
+        )
+        .await
+        {
+            error!(task_name = %task.name, error = %e, "Failed to dispatch schedule.trigger webhooks");
+        }
+        if let Err(e) = bus
+            .publish(
+                PublishRequest::new(topic::SCHEDULE_TRIGGER, trigger)
+                    .with_agent_id(orchestrator.agent_id.clone())
+                    .with_conversation_id(conversation_id)
+                    .with_interface(format!("{:?}", Interface::Scheduler))
+                    .with_user_id("scheduler"),
+            )
+            .await
+        {
+            error!(task_name = %task.name, error = %e, "Failed to publish schedule.trigger event");
+        }
+
         let turn_req = bus_messages::TurnRequest {
             prompt: task.prompt.clone(),
             conversation_id,
@@ -79,6 +110,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
         let dispatched = match bus
             .publish(
                 PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
+                    .with_agent_id(orchestrator.agent_id.clone())
                     .with_conversation_id(conversation_id)
                     .with_interface(format!("{:?}", Interface::Scheduler))
                     .with_user_id("scheduler"),
@@ -163,6 +195,7 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         .bus()
         .publish(
             PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
+                .with_agent_id(orchestrator.agent_id.clone())
                 .with_conversation_id(conversation_id)
                 .with_interface(format!("{:?}", Interface::Scheduler))
                 .with_user_id("heartbeat"),

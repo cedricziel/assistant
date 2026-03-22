@@ -14,6 +14,7 @@ use tracing::{debug, info, warn, Instrument};
 use uuid::Uuid;
 
 use super::{value_to_params_map, DispatchOutcome, Orchestrator};
+use crate::webhook_dispatch;
 
 impl Orchestrator {
     /// Filter tool specs based on provider capabilities.
@@ -102,9 +103,12 @@ impl Orchestrator {
         turn_attachments: &mut Vec<Attachment>,
     ) -> String {
         let duration_ms = elapsed.as_millis() as i64;
-        self.metrics.record_tool_invocation(tool_name);
         self.metrics
-            .record_tool_duration(tool_name, duration_ms as f64 / 1000.0);
+            .record_tool_invocation(&self.agent_id, tool_name);
+        self.metrics
+            .record_tool_duration(&self.agent_id, tool_name, duration_ms as f64 / 1000.0);
+
+        let mut tool_status = "ok";
 
         let observation = match exec_result {
             Ok(output) => {
@@ -119,11 +123,13 @@ impl Orchestrator {
             }
             Err(err) => {
                 warn!(tool = %tool_name, %err, "Tool execution failed");
-                self.metrics.record_error("tool_error", tool_name);
+                self.metrics
+                    .record_error(&self.agent_id, "tool_error", tool_name);
                 let msg = err.to_string();
                 otel_span.set_attribute(KeyValue::new("duration_ms", duration_ms));
                 otel_span.set_attribute(KeyValue::new("tool_status", "error"));
                 otel_span.set_attribute(KeyValue::new("tool_error", msg.clone()));
+                tool_status = "error";
                 format!("Error executing '{tool_name}': {msg}")
             }
         };
@@ -135,6 +141,24 @@ impl Orchestrator {
             Self::make_tool_result_message(conversation_id, turn_index, tool_name, &observation);
         if let Err(e) = conv_store.save_message(&tr_msg).await {
             warn!("Failed to persist tool-result message: {e}");
+        }
+
+        let event_payload = serde_json::json!({
+            "conversation_id": conversation_id,
+            "turn": turn_index,
+            "tool_name": tool_name,
+            "status": tool_status,
+            "observation": observation,
+        });
+        if let Err(e) = webhook_dispatch::dispatch_event(
+            self.storage.as_ref(),
+            &self.agent_id,
+            assistant_core::topic::TOOL_RESULT,
+            event_payload,
+        )
+        .await
+        {
+            warn!(tool = %tool_name, error = %e, "Failed to dispatch tool.result webhooks");
         }
 
         observation

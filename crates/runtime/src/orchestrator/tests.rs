@@ -13,7 +13,7 @@ use assistant_tool_executor::ToolExecutor;
 use serde_json::{json, Value};
 use uuid::Uuid;
 use wiremock::{
-    matchers::{method, path},
+    matchers::{body_string_contains, method, path},
     Mock, MockServer, ResponseTemplate,
 };
 
@@ -1481,6 +1481,7 @@ async fn run_worker_processes_turn_request() {
                 topic::TURN_REQUEST,
                 serde_json::to_value(&turn_req).unwrap(),
             )
+            .with_agent_id("default")
             .with_conversation_id(conv_id)
             .with_interface("Cli"),
         )
@@ -1580,6 +1581,134 @@ async fn subagent_spawn_complete_round_trip() {
     assert_eq!(record.status, assistant_storage::AgentStatus::Completed);
     assert!(record.completed_at.is_some());
     assert_eq!(record.task, "What is 2+2?");
+}
+
+#[tokio::test]
+async fn conversation_can_delegate_to_anonymous_subagent() {
+    let server = MockServer::start().await;
+
+    let task = "Search the web for rust async testing tips";
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .and(body_string_contains("delegate anonymously"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_args(&[(
+                "agent-spawn",
+                json!({
+                    "task": task,
+                    "allowed_tools": ["web-search"]
+                }),
+            )])),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .and(body_string_contains(task))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("research-result")))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .and(body_string_contains("research-result"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(ollama_answer("parent acknowledged anonymous result")),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let (orch, _storage) = build(&server.uri()).await;
+    let conv_id = Uuid::new_v4();
+
+    let turn = orch
+        .run_turn("please delegate anonymously", conv_id, Interface::Cli, None)
+        .await
+        .unwrap();
+    assert_eq!(turn.answer, "parent acknowledged anonymous result");
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(
+        reqs.len(),
+        3,
+        "expected parent->subagent->parent LLM call sequence"
+    );
+}
+
+#[tokio::test]
+async fn conversation_can_delegate_to_existing_agent_context() {
+    let server = MockServer::start().await;
+
+    let task = "Draft a launch blurb for next week";
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .and(body_string_contains("use marketing"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_args(&[(
+                "agent-spawn",
+                json!({
+                    "agent_id": "marketing",
+                    "task": task
+                }),
+            )])),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .and(body_string_contains(task))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("marketing-result")))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .and(body_string_contains("marketing-result"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(ollama_answer("parent acknowledged marketing result")),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let (orch, storage) = build(&server.uri()).await;
+    storage
+        .assistant_agent_store()
+        .ensure_default()
+        .await
+        .unwrap();
+    storage
+        .assistant_agent_store()
+        .ensure_exists("marketing")
+        .await
+        .unwrap();
+
+    let conv_id = Uuid::new_v4();
+    let turn = orch
+        .run_turn("please use marketing", conv_id, Interface::Cli, None)
+        .await
+        .unwrap();
+    assert_eq!(turn.answer, "parent acknowledged marketing result");
+
+    let marketing = storage
+        .agent_store()
+        .get("marketing")
+        .await
+        .unwrap()
+        .expect("marketing subagent record should exist");
+    assert_eq!(marketing.status, assistant_storage::AgentStatus::Completed);
+    assert_eq!(marketing.task, task);
 }
 
 #[tokio::test]

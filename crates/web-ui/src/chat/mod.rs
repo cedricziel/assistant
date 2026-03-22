@@ -46,6 +46,7 @@ use crate::common::StaticUrls;
 #[derive(Clone)]
 pub struct ChatState {
     pub pool: SqlitePool,
+    pub agent_id: String,
     pub orchestrator: Arc<Orchestrator>,
     /// Pending user messages awaiting streaming, keyed by conversation ID.
     /// Inserted by [`send_message`], consumed by [`stream_response`].
@@ -53,9 +54,10 @@ pub struct ChatState {
 }
 
 impl ChatState {
-    pub fn new(pool: SqlitePool, orchestrator: Arc<Orchestrator>) -> Self {
+    pub fn new(pool: SqlitePool, orchestrator: Arc<Orchestrator>, agent_id: String) -> Self {
         Self {
             pool,
+            agent_id,
             orchestrator,
             pending_messages: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -160,7 +162,7 @@ pub fn chat_router() -> Router<ChatState> {
 
 /// `GET /chat` — full page with conversation list and empty/selected state.
 async fn chat_page(State(state): State<ChatState>) -> Response {
-    let store = ConversationStore::new(state.pool);
+    let store = ConversationStore::for_agent(state.pool, &state.agent_id);
     let convs = store.list_conversations().await.unwrap_or_default();
 
     let conversations = convs.iter().map(conv_to_view).collect();
@@ -185,7 +187,7 @@ async fn conversation_list(
     State(state): State<ChatState>,
     Query(query): Query<ConvSearchQuery>,
 ) -> Response {
-    let store = ConversationStore::new(state.pool);
+    let store = ConversationStore::for_agent(state.pool, &state.agent_id);
     let mut convs = store.list_conversations().await.unwrap_or_default();
 
     // Client-side search filter
@@ -217,7 +219,7 @@ async fn conversation_list(
 /// For htmx requests: returns an updated conversation list fragment.
 /// For full-page requests: redirects to the new conversation.
 async fn new_conversation(State(state): State<ChatState>, headers: HeaderMap) -> Response {
-    let store = ConversationStore::new(state.pool.clone());
+    let store = ConversationStore::for_agent(state.pool.clone(), &state.agent_id);
 
     let conv = match store.create_conversation(Some("New Chat")).await {
         Ok(c) => c,
@@ -271,7 +273,7 @@ async fn load_conversation(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    let store = ConversationStore::new(state.pool.clone());
+    let store = ConversationStore::for_agent(state.pool.clone(), &state.agent_id);
 
     let conv = match store.get_conversation(conv_id).await {
         Ok(Some(c)) => c,
@@ -338,7 +340,7 @@ async fn send_message(
     }
 
     // Auto-title on first message.
-    let store = ConversationStore::new(state.pool.clone());
+    let store = ConversationStore::for_agent(state.pool.clone(), &state.agent_id);
     let prior = store.load_history(conv_id).await.unwrap_or_default();
     if prior.is_empty() {
         let title = if content.len() > 60 {
@@ -498,7 +500,7 @@ async fn delete_conversation(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    let store = ConversationStore::new(state.pool);
+    let store = ConversationStore::for_agent(state.pool, &state.agent_id);
     if let Err(e) = store.delete_conversation(conv_id).await {
         warn!("Failed to delete conversation: {}", e);
         return (

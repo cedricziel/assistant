@@ -70,7 +70,7 @@ impl ToolHandler for ScheduleTaskHandler {
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let name = match params.get("name").and_then(|v| v.as_str()) {
             Some(n) => n.to_string(),
@@ -126,7 +126,7 @@ impl ToolHandler for ScheduleTaskHandler {
 
             let id = self
                 .storage
-                .scheduled_task_store()
+                .scheduled_task_store_for_agent(&ctx.agent_id)
                 .insert(&name, "", &prompt, true, Some(dt))
                 .await?;
 
@@ -161,7 +161,7 @@ impl ToolHandler for ScheduleTaskHandler {
 
         let id = self
             .storage
-            .scheduled_task_store()
+            .scheduled_task_store_for_agent(&ctx.agent_id)
             .insert(&name, &effective_expr, &prompt, once_flag, next_run)
             .await?;
 
@@ -188,6 +188,7 @@ mod tests {
     fn ctx() -> ExecutionContext {
         ExecutionContext {
             conversation_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
             turn: 1,
             interface: Interface::Cli,
             interactive: false,

@@ -47,14 +47,14 @@ impl ToolHandler for ListTasksHandler {
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let enabled_only = params
             .get("enabled_only")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let task_store = self.storage.scheduled_task_store();
+        let task_store = self.storage.scheduled_task_store_for_agent(&ctx.agent_id);
         let tasks = task_store.list_all().await?;
 
         let tasks: Vec<_> = if enabled_only {
@@ -110,6 +110,7 @@ mod tests {
     fn ctx() -> ExecutionContext {
         ExecutionContext {
             conversation_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
             turn: 1,
             interface: Interface::Cli,
             interactive: false,

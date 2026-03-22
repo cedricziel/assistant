@@ -57,7 +57,7 @@ impl ToolHandler for CancelTaskHandler {
     async fn run(
         &self,
         params: HashMap<String, serde_json::Value>,
-        _ctx: &ExecutionContext,
+        ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let id_str = params.get("id").and_then(|v| v.as_str());
         let name = params.get("name").and_then(|v| v.as_str());
@@ -66,7 +66,7 @@ impl ToolHandler for CancelTaskHandler {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let task_store = self.storage.scheduled_task_store();
+        let task_store = self.storage.scheduled_task_store_for_agent(&ctx.agent_id);
 
         // Resolve the task UUID from either `id` or `name`.
         let task_id = if let Some(raw) = id_str {
@@ -129,6 +129,7 @@ mod tests {
     fn ctx() -> ExecutionContext {
         ExecutionContext {
             conversation_id: Uuid::new_v4(),
+            agent_id: "default".to_string(),
             turn: 1,
             interface: Interface::Cli,
             interactive: false,
@@ -154,7 +155,7 @@ mod tests {
     async fn seed_task(storage: &StorageLayer, name: &str) -> String {
         let next = Utc::now() + chrono::Duration::hours(1);
         let id = storage
-            .scheduled_task_store()
+            .scheduled_task_store_for_agent("default")
             .insert(name, "0 * * * *", "prompt", false, Some(next))
             .await
             .unwrap();

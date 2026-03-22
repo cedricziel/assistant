@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
-use assistant_core::{Attachment, ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{
+    runtime_workspace_dir, Attachment, ExecutionContext, ToolHandler, ToolOutput,
+};
 use async_trait::async_trait;
 use tokio::time::Duration;
 use tracing::debug;
@@ -157,7 +159,8 @@ impl ToolHandler for BashHandler {
         let working_dir = params
             .get("working_dir")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .map(|s| s.to_string())
+            .or_else(|| runtime_workspace_dir().map(|path| path.to_string_lossy().to_string()));
 
         let timeout_secs = params
             .get("timeout_secs")
