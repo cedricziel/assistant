@@ -11,7 +11,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::common::{internal_error, render_template, StaticUrls};
+use crate::common::{active_agent_id, internal_error, render_template, StaticUrls};
 use crate::AppState;
 
 // -- Query -------------------------------------------------------------------
@@ -112,7 +112,7 @@ async fn show_analytics(
         1 | 6 | 24 | 72 | 168 => query.window.unwrap_or(24),
         _ => 24,
     };
-    let agent_id = state.agent_id.read().await.clone();
+    let agent_id = active_agent_id(&state.agent_id).await;
     let store = MetricsStore::for_agent(state.pool.clone(), &agent_id);
 
     let summary = store.summary(window_hours).await.map_err(internal_error)?;

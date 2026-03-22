@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
-use crate::common::{internal_error, render_template, StaticUrls};
+use crate::common::{active_agent_id, internal_error, render_template, StaticUrls};
 use crate::AppState;
 
 #[derive(Debug)]
@@ -46,7 +46,7 @@ async fn show_contexts(
     State(state): State<AppState>,
     Query(query): Query<ContextQuery>,
 ) -> Result<Response, (StatusCode, String)> {
-    let current_agent = state.agent_id.read().await.clone();
+    let current_agent = active_agent_id(&state.agent_id).await;
     let store = AssistantAgentStore::new(state.pool.clone());
     store.ensure_default().await.map_err(internal_error)?;
     let rows_raw = store.list().await.map_err(internal_error)?;

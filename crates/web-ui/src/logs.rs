@@ -11,7 +11,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::common::{internal_error, render_template, url_encode, StaticUrls};
+use crate::common::{active_agent_id, internal_error, render_template, url_encode, StaticUrls};
 use crate::AppState;
 
 // -- Query -------------------------------------------------------------------
@@ -115,7 +115,7 @@ async fn show_logs(
     State(state): State<AppState>,
     Query(query): Query<LogQuery>,
 ) -> Result<Response, (StatusCode, String)> {
-    let agent_id = state.agent_id.read().await.clone();
+    let agent_id = active_agent_id(&state.agent_id).await;
     let store = LogStore::new(state.pool.clone());
 
     let severity_label = query
@@ -190,7 +190,7 @@ async fn show_log_detail(
     State(state): State<AppState>,
     Path(log_id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
-    let agent_id = state.agent_id.read().await.clone();
+    let agent_id = active_agent_id(&state.agent_id).await;
     let store = LogStore::new(state.pool.clone());
     let log = store
         .get_log_for_agent(&log_id, &agent_id)
