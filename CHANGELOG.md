@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.47](https://github.com/cedricziel/assistant/compare/v0.1.46...v0.1.47) (2026-03-23)
+
+
+### Bug Fixes
+
+* **ci:** run smoke tests against GitHub Actions Ollama service ([#243](https://github.com/cedricziel/assistant/issues/243)) ([60e4abd](https://github.com/cedricziel/assistant/commit/60e4abd073187c3c37efbb1351a1a11651d03b9c))
+* **web-ui:** harden responsive navigation and accessibility ([#241](https://github.com/cedricziel/assistant/issues/241)) ([e79bd5b](https://github.com/cedricziel/assistant/commit/e79bd5b11661b09041e5f2603705095e62af5a1e))
+
 ## [0.1.46](https://github.com/cedricziel/assistant/compare/v0.1.45...v0.1.46) (2026-03-22)
 
 
