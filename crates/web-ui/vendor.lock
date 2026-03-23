@@ -14,6 +14,13 @@
       "file": "sse.js",
       "url": "https://unpkg.com/htmx-ext-sse@2.2.2/sse.js",
       "sha256": "83eca6fa0611fe2b0bf1700b424b88b5eced38ef448ef9760a2ea08fbc875611"
+    },
+    {
+      "name": "@hotwired/stimulus",
+      "version": "3.2.2",
+      "file": "stimulus.js",
+      "url": "https://cdn.jsdelivr.net/npm/@hotwired/stimulus@3.2.2/dist/stimulus.js",
+      "sha256": "23deecdac6f36c08e8f39fbed6b27f60c850cacad3a34eb71194462b7b1647f3"
     }
   ]
 }
