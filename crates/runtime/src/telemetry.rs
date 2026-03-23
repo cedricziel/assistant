@@ -229,30 +229,17 @@ fn otlp_env_is_set() -> bool {
 /// attributes.  The same resource is attached to traces, logs, and metrics
 /// so all signals can be correlated.
 fn build_resource() -> Resource {
-    let mut attrs = vec![
+    let attrs = vec![
         KeyValue::new(
             "service.name",
             std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "assistant".to_string()),
         ),
         KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-        KeyValue::new("os.type", std::env::consts::OS),
-        KeyValue::new("host.arch", std::env::consts::ARCH),
-        KeyValue::new("process.pid", std::process::id() as i64),
-        KeyValue::new("process.runtime.name", "rust"),
-        KeyValue::new("telemetry.sdk.name", "opentelemetry"),
-        KeyValue::new("telemetry.sdk.language", "rust"),
     ];
 
-    // Parse OTEL_RESOURCE_ATTRIBUTES (key1=val1,key2=val2,…) per the spec.
-    if let Ok(env_attrs) = std::env::var("OTEL_RESOURCE_ATTRIBUTES") {
-        for pair in env_attrs.split(',') {
-            if let Some((key, val)) = pair.trim().split_once('=') {
-                attrs.push(KeyValue::new(key.to_string(), val.to_string()));
-            }
-        }
-    }
-
-    Resource::builder_empty().with_attributes(attrs).build()
+    // Use SDK resource detectors (env/sdk/telemetry) and then apply explicit
+    // service defaults/overrides for this application.
+    Resource::builder().with_attributes(attrs).build()
 }
 
 #[cfg(test)]

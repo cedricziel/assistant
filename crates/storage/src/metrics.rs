@@ -238,10 +238,14 @@ impl MetricsStore {
     pub async fn tool_usage(&self, window_hours: i64) -> Result<Vec<ToolUsageStats>> {
         let rows: Vec<(String, f64, f64)> = sqlx::query_as(
             "SELECT \
-                 COALESCE(json_extract(attributes, '$.\"tool.name\"'), 'unknown') AS tn, \
+                 COALESCE( \
+                     json_extract(attributes, '$.\"span.name\"'), \
+                     json_extract(attributes, '$.\"tool.name\"'), \
+                     'unknown' \
+                 ) AS tn, \
                  CAST(COALESCE(SUM(value), 0) AS REAL) AS invocations, \
                  0.0 AS avg_dur \
-             FROM metric_points \
+              FROM metric_points \
              WHERE metric_name = 'assistant.tool.invocations' \
                 AND recorded_at >= datetime('now', ?1) \
                 AND agent_id = ?2 \

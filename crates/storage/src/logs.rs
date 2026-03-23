@@ -17,6 +17,8 @@ pub struct RecordedLog {
     pub body: Option<String>,
     pub trace_id: Option<String>,
     pub span_id: Option<String>,
+    pub span_name: Option<String>,
+    pub service_name: Option<String>,
     pub target: Option<String>,
     pub attributes: Value,
 }
@@ -53,14 +55,15 @@ impl LogStore {
         trace_id: Option<&str>,
     ) -> Result<Vec<RecordedLog>> {
         let rows = sqlx::query(
-            "SELECT id, timestamp, observed_timestamp, severity_number, severity_text, \
-                    body, trace_id, span_id, target, attributes \
-             FROM logs \
-             WHERE (?1 IS NULL OR severity_number >= ?1) \
-               AND (?2 IS NULL OR target = ?2) \
-               AND (?3 IS NULL OR body LIKE '%' || ?3 || '%') \
-               AND (?4 IS NULL OR trace_id = ?4) \
-             ORDER BY timestamp DESC \
+            "SELECT l.id, l.timestamp, l.observed_timestamp, l.severity_number, l.severity_text, \
+                    l.body, l.trace_id, l.span_id, dt.name AS span_name, l.service_name, l.target, l.attributes \
+             FROM logs l \
+             LEFT JOIN distributed_traces dt ON dt.span_id = l.span_id AND dt.trace_id = l.trace_id \
+             WHERE (?1 IS NULL OR l.severity_number >= ?1) \
+               AND (?2 IS NULL OR l.target = ?2) \
+               AND (?3 IS NULL OR l.body LIKE '%' || ?3 || '%') \
+               AND (?4 IS NULL OR l.trace_id = ?4) \
+             ORDER BY l.timestamp DESC \
              LIMIT ?5",
         )
         .bind(min_severity)
@@ -86,8 +89,9 @@ impl LogStore {
     ) -> Result<Vec<RecordedLog>> {
         let rows = sqlx::query(
             "SELECT l.id, l.timestamp, l.observed_timestamp, l.severity_number, l.severity_text, \
-                    l.body, l.trace_id, l.span_id, l.target, l.attributes \
+                    l.body, l.trace_id, l.span_id, dt.name AS span_name, l.service_name, l.target, l.attributes \
              FROM logs l \
+             LEFT JOIN distributed_traces dt ON dt.span_id = l.span_id AND dt.trace_id = l.trace_id \
              WHERE (?1 IS NULL OR l.severity_number >= ?1) \
                AND (?2 IS NULL OR l.target = ?2) \
                AND (?3 IS NULL OR l.body LIKE '%' || ?3 || '%') \
@@ -116,11 +120,12 @@ impl LogStore {
     /// Return all log records for a specific trace, ordered by time.
     pub async fn list_by_trace(&self, trace_id: &str) -> Result<Vec<RecordedLog>> {
         let rows = sqlx::query(
-            "SELECT id, timestamp, observed_timestamp, severity_number, severity_text, \
-                    body, trace_id, span_id, target, attributes \
-             FROM logs \
-             WHERE trace_id = ?1 \
-             ORDER BY timestamp ASC",
+            "SELECT l.id, l.timestamp, l.observed_timestamp, l.severity_number, l.severity_text, \
+                    l.body, l.trace_id, l.span_id, dt.name AS span_name, l.service_name, l.target, l.attributes \
+             FROM logs l \
+             LEFT JOIN distributed_traces dt ON dt.span_id = l.span_id AND dt.trace_id = l.trace_id \
+             WHERE l.trace_id = ?1 \
+             ORDER BY l.timestamp ASC",
         )
         .bind(trace_id)
         .fetch_all(&self.pool)
@@ -132,10 +137,11 @@ impl LogStore {
     /// Fetch a single log record by ID.
     pub async fn get_log(&self, id: &str) -> Result<Option<RecordedLog>> {
         let row = sqlx::query(
-            "SELECT id, timestamp, observed_timestamp, severity_number, severity_text, \
-                    body, trace_id, span_id, target, attributes \
-             FROM logs \
-             WHERE id = ?1",
+            "SELECT l.id, l.timestamp, l.observed_timestamp, l.severity_number, l.severity_text, \
+                    l.body, l.trace_id, l.span_id, dt.name AS span_name, l.service_name, l.target, l.attributes \
+             FROM logs l \
+             LEFT JOIN distributed_traces dt ON dt.span_id = l.span_id AND dt.trace_id = l.trace_id \
+             WHERE l.id = ?1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -148,8 +154,9 @@ impl LogStore {
     pub async fn get_log_for_agent(&self, id: &str, agent_id: &str) -> Result<Option<RecordedLog>> {
         let row = sqlx::query(
             "SELECT l.id, l.timestamp, l.observed_timestamp, l.severity_number, l.severity_text, \
-                    l.body, l.trace_id, l.span_id, l.target, l.attributes \
+                    l.body, l.trace_id, l.span_id, dt.name AS span_name, l.service_name, l.target, l.attributes \
              FROM logs l \
+             LEFT JOIN distributed_traces dt ON dt.span_id = l.span_id AND dt.trace_id = l.trace_id \
              WHERE l.id = ?1 \
                AND EXISTS ( \
                    SELECT 1 \
@@ -290,6 +297,11 @@ impl LogStore {
             body: row.try_get::<Option<String>, _>("body").ok().flatten(),
             trace_id: row.try_get::<Option<String>, _>("trace_id").ok().flatten(),
             span_id: row.try_get::<Option<String>, _>("span_id").ok().flatten(),
+            span_name: row.try_get::<Option<String>, _>("span_name").ok().flatten(),
+            service_name: row
+                .try_get::<Option<String>, _>("service_name")
+                .ok()
+                .flatten(),
             target: row.try_get::<Option<String>, _>("target").ok().flatten(),
             attributes,
         })

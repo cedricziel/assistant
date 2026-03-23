@@ -13,7 +13,7 @@ breadcrumb %}
       </div>
 
       <div class="facet-group">
-        <h3>Service</h3>
+        <h3>Skill</h3>
         <ul>
           {% for facet in skill_facets %}
           <li>
@@ -119,6 +119,7 @@ breadcrumb %}
           <tr>
             <th>Trace ID</th>
             <th>Service</th>
+            <th>Span</th>
             <th>Duration</th>
             <th>Spans</th>
             <th>Status</th>
@@ -137,7 +138,12 @@ breadcrumb %}
               >
             </td>
             <td>
-              {% if let Some(name) = t.service %} {{ name }} {% else %}
+              {% if let Some(name) = t.service_name %} {{ name }} {% else %}
+              <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if let Some(name) = t.span_name %} {{ name }} {% else %}
               <span class="muted">&mdash;</span>
               {% endif %}
             </td>

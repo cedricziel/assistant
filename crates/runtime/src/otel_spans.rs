@@ -22,7 +22,9 @@ use uuid::Uuid;
 /// trace.
 pub fn start_conversation_context(conversation_id: Uuid, interface: &Interface) -> OtelContext {
     let tracer = global::tracer("assistant.orchestrator");
-    let mut span = tracer.start("conversation");
+    let span_name = "conversation";
+    let mut span = tracer.start(span_name);
+    span.set_attribute(KeyValue::new("span.name", span_name));
     span.set_attribute(KeyValue::new(
         "conversation_id",
         conversation_id.to_string(),
@@ -42,7 +44,8 @@ pub(crate) fn start_tool_span(
 ) -> opentelemetry::global::BoxedSpan {
     let tracer = global::tracer("assistant.orchestrator");
     let span_name = format!("execute_tool {tool_name}");
-    let mut span = tracer.start_with_context(span_name, parent_cx);
+    let mut span = tracer.start_with_context(span_name.clone(), parent_cx);
+    span.set_attribute(KeyValue::new("span.name", span_name));
     span.set_attribute(KeyValue::new(
         "conversation_id",
         conversation_id.to_string(),
@@ -77,7 +80,8 @@ pub(crate) fn start_llm_span(
     let tracer = global::tracer("assistant.orchestrator");
     let model = llm.model_name();
     let span_name = format!("chat {model}");
-    let mut span = tracer.start_with_context(span_name, parent_cx);
+    let mut span = tracer.start_with_context(span_name.clone(), parent_cx);
+    span.set_attribute(KeyValue::new("span.name", span_name));
     span.set_attribute(KeyValue::new(
         "gen_ai.system",
         llm.provider_name().to_string(),

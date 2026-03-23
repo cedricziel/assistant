@@ -52,7 +52,8 @@ struct StatusOptionView {
 struct TraceRowView {
     trace_url: String,
     short_id: String,
-    service: Option<String>,
+    service_name: Option<String>,
+    span_name: Option<String>,
     duration: String,
     span_count: i64,
     is_error: bool,
@@ -100,8 +101,8 @@ impl StaticUrls for TracesPageTemplate {}
 struct TraceDetailTemplate {
     active_page: &'static str,
     short_id: String,
-    first_service: Option<String>,
-    last_service: Option<String>,
+    root_service_name: Option<String>,
+    root_span_name: Option<String>,
     duration: String,
     has_errors: bool,
     waterfall_rows: Vec<WaterfallRowView>,
@@ -252,7 +253,16 @@ async fn show_trace_detail(
         .max()
         .unwrap_or(start + chrono::Duration::milliseconds(1));
     let total_duration_ms = (end - start).num_milliseconds();
-    let distinct_tools = collect_distinct_tools(&spans);
+    let root_span_name = spans
+        .iter()
+        .find(|span| span.parent_span_id.is_none())
+        .map(|span| span.name.clone())
+        .or_else(|| spans.first().map(|span| span.name.clone()));
+    let root_service_name = spans
+        .iter()
+        .find(|span| span.parent_span_id.is_none())
+        .and_then(|span| span.service_name.clone())
+        .or_else(|| spans.first().and_then(|span| span.service_name.clone()));
     let error_spans = spans
         .iter()
         .filter(|span| span.error.is_some() || span.tool_status.as_deref() == Some("error"))
@@ -264,21 +274,14 @@ async fn show_trace_detail(
         trace_id.clone()
     };
 
-    let first_service = distinct_tools.first().cloned();
-    let last_service = if distinct_tools.len() > 1 {
-        distinct_tools.last().cloned()
-    } else {
-        None
-    };
-
     let time_ticks = build_time_ticks(total_duration_ms);
     let waterfall_rows = build_waterfall_rows(start, end, &spans);
 
     let tmpl = TraceDetailTemplate {
         active_page: "traces",
         short_id,
-        first_service,
-        last_service,
+        root_service_name,
+        root_span_name,
         duration: format_duration(total_duration_ms),
         has_errors: error_spans > 0,
         waterfall_rows,
@@ -297,12 +300,31 @@ fn trace_to_row_view(trace: &TraceSummary) -> TraceRowView {
     } else {
         trace.trace_id.clone()
     };
-    let service = trace.tool_names.iter().find(|t| !t.is_empty()).cloned();
+    let span_name = trace
+        .root_span_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            trace
+                .tool_names
+                .iter()
+                .find(|tool| !tool.is_empty())
+                .cloned()
+        });
+    let service_name = trace
+        .root_service_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
 
     TraceRowView {
         trace_url: trace.trace_id.clone(),
         short_id,
-        service,
+        service_name,
+        span_name,
         duration: format_duration(elapsed_ms),
         span_count: trace.span_count,
         is_error: trace.error_count > 0,
@@ -541,19 +563,4 @@ fn build_query_url(
     } else {
         format!("/traces?{}", parts.join("&"))
     }
-}
-
-fn collect_distinct_tools(spans: &[RecordedSpan]) -> Vec<String> {
-    let mut tools: Vec<String> = Vec::new();
-    for span in spans {
-        if let Some(tool) = &span.tool_name {
-            if !tools
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(tool))
-            {
-                tools.push(tool.clone());
-            }
-        }
-    }
-    tools
 }

@@ -12,9 +12,13 @@
       <span class="hdr-trace-id">Trace {{ short_id }}&hellip;</span>
       <span class="hdr-sep">|</span>
       <span class="hdr-svc">
-        {% if let Some(first) = first_service %} {% if let Some(last) =
-        last_service %} {{ first }} &rarr; {{ last }} {% else %} {{ first }} {%
-        endif %} {% else %} &mdash; {% endif %}
+        {% if let Some(name) = root_service_name %} {{ name }} {% else %}
+        &mdash; {% endif %}
+      </span>
+      <span class="hdr-sep">|</span>
+      <span class="hdr-svc">
+        {% if let Some(name) = root_span_name %} {{ name }} {% else %} &mdash;
+        {% endif %}
       </span>
       <span class="hdr-sep">|</span>
       <span class="hdr-dur">{{ duration }}</span>

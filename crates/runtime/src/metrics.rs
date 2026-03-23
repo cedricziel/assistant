@@ -159,18 +159,26 @@ impl MetricsRecorder {
     }
 
     /// Record a tool invocation.
-    pub fn record_tool_invocation(&self, agent_id: &str, tool_name: &str) {
+    pub fn record_tool_invocation(&self, agent_id: &str, tool_name: &str, span_name: &str) {
         let attrs = [
             KeyValue::new("tool.name", tool_name.to_string()),
+            KeyValue::new("span.name", span_name.to_string()),
             KeyValue::new("agent.id", agent_id.to_string()),
         ];
         self.tool_invocations.add(1, &attrs);
     }
 
     /// Record tool execution duration.
-    pub fn record_tool_duration(&self, agent_id: &str, tool_name: &str, duration_s: f64) {
+    pub fn record_tool_duration(
+        &self,
+        agent_id: &str,
+        tool_name: &str,
+        span_name: &str,
+        duration_s: f64,
+    ) {
         let attrs = [
             KeyValue::new("tool.name", tool_name.to_string()),
+            KeyValue::new("span.name", span_name.to_string()),
             KeyValue::new("agent.id", agent_id.to_string()),
         ];
         self.tool_duration.record(duration_s, &attrs);

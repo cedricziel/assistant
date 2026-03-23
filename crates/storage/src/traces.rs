@@ -35,6 +35,7 @@ pub struct TraceSummary {
     pub error_count: i64,
     pub tool_names: Vec<String>,
     pub root_span_name: Option<String>,
+    pub root_service_name: Option<String>,
 }
 
 /// A persisted OpenTelemetry span row enriched with tool metadata.
@@ -44,6 +45,7 @@ pub struct RecordedSpan {
     pub trace_id: String,
     pub parent_span_id: Option<String>,
     pub name: String,
+    pub service_name: Option<String>,
     pub conversation_id: Option<Uuid>,
     pub turn: Option<i64>,
     pub tool_name: Option<String>,
@@ -78,6 +80,7 @@ impl TraceStore {
     ) -> Result<Vec<RecordedSpan>> {
         let rows = sqlx::query(
             "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
+                    service_name, \
                     tool_name, tool_status, tool_observation, tool_error, duration_ms, \
                     start_time, end_time, attributes, input_tokens, output_tokens \
              FROM distributed_traces \
@@ -97,6 +100,7 @@ impl TraceStore {
     pub async fn list_recent(&self, limit: i64) -> Result<Vec<RecordedSpan>> {
         let rows = sqlx::query(
             "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
+                    service_name, \
                     tool_name, tool_status, tool_observation, tool_error, duration_ms, \
                     start_time, end_time, attributes, input_tokens, output_tokens \
              FROM distributed_traces \
@@ -128,7 +132,8 @@ impl TraceStore {
                 SUM(CASE WHEN tool_name IS NOT NULL THEN 1 ELSE 0 END) AS tool_span_count, \
                 SUM(CASE WHEN tool_status = 'error' THEN 1 ELSE 0 END) AS error_count, \
                 GROUP_CONCAT(DISTINCT CASE WHEN tool_name IS NULL THEN '' ELSE tool_name END) AS tool_names, \
-                MAX(CASE WHEN parent_span_id IS NULL THEN name ELSE NULL END) AS root_span_name \
+                MAX(CASE WHEN parent_span_id IS NULL THEN name ELSE NULL END) AS root_span_name, \
+                MAX(CASE WHEN parent_span_id IS NULL THEN service_name ELSE NULL END) AS root_service_name \
             FROM distributed_traces \
             GROUP BY trace_id \
             HAVING (?1 IS NULL) OR SUM(CASE WHEN tool_name = ?1 THEN 1 ELSE 0 END) > 0 \
@@ -154,6 +159,10 @@ impl TraceStore {
                 let error_count: i64 = row.get("error_count");
                 let root_span_name = row
                     .try_get::<Option<String>, _>("root_span_name")
+                    .ok()
+                    .flatten();
+                let root_service_name = row
+                    .try_get::<Option<String>, _>("root_service_name")
                     .ok()
                     .flatten();
                 let tool_concat = row
@@ -182,6 +191,7 @@ impl TraceStore {
                     error_count,
                     tool_names,
                     root_span_name,
+                    root_service_name,
                 })
             })
             .collect()
@@ -204,7 +214,8 @@ impl TraceStore {
                 SUM(CASE WHEN dt.tool_name IS NOT NULL THEN 1 ELSE 0 END) AS tool_span_count, \
                 SUM(CASE WHEN dt.tool_status = 'error' THEN 1 ELSE 0 END) AS error_count, \
                 GROUP_CONCAT(DISTINCT CASE WHEN dt.tool_name IS NULL THEN '' ELSE dt.tool_name END) AS tool_names, \
-                MAX(CASE WHEN dt.parent_span_id IS NULL THEN dt.name ELSE NULL END) AS root_span_name \
+                MAX(CASE WHEN dt.parent_span_id IS NULL THEN dt.name ELSE NULL END) AS root_span_name, \
+                MAX(CASE WHEN dt.parent_span_id IS NULL THEN dt.service_name ELSE NULL END) AS root_service_name \
              FROM distributed_traces dt \
              INNER JOIN conversations c ON c.id = dt.conversation_id \
              WHERE c.agent_id = ?1 \
@@ -235,6 +246,10 @@ impl TraceStore {
                     .try_get::<Option<String>, _>("root_span_name")
                     .ok()
                     .flatten();
+                let root_service_name = row
+                    .try_get::<Option<String>, _>("root_service_name")
+                    .ok()
+                    .flatten();
                 let tool_concat = row
                     .try_get::<Option<String>, _>("tool_names")
                     .ok()
@@ -261,6 +276,7 @@ impl TraceStore {
                     error_count,
                     tool_names,
                     root_span_name,
+                    root_service_name,
                 })
             })
             .collect()
@@ -271,6 +287,7 @@ impl TraceStore {
     pub async fn get_trace(&self, trace_id: &str) -> Result<Vec<RecordedSpan>> {
         let rows = sqlx::query(
             "SELECT span_id, trace_id, parent_span_id, name, conversation_id, turn, \
+                    service_name, \
                     tool_name, tool_status, tool_observation, tool_error, duration_ms, \
                     start_time, end_time, attributes, input_tokens, output_tokens \
              FROM distributed_traces \
@@ -292,6 +309,7 @@ impl TraceStore {
     ) -> Result<Vec<RecordedSpan>> {
         let rows = sqlx::query(
             "SELECT dt.span_id, dt.trace_id, dt.parent_span_id, dt.name, dt.conversation_id, dt.turn, \
+                    dt.service_name, \
                     dt.tool_name, dt.tool_status, dt.tool_observation, dt.tool_error, dt.duration_ms, \
                     dt.start_time, dt.end_time, dt.attributes, dt.input_tokens, dt.output_tokens \
              FROM distributed_traces dt \
@@ -412,6 +430,10 @@ impl TraceStore {
                 .ok()
                 .flatten(),
             name: row.get("name"),
+            service_name: row
+                .try_get::<Option<String>, _>("service_name")
+                .ok()
+                .flatten(),
             conversation_id,
             turn: row.try_get::<Option<i64>, _>("turn").ok().flatten(),
             tool_name: row.try_get::<Option<String>, _>("tool_name").ok().flatten(),

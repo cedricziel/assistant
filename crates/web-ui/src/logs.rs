@@ -53,7 +53,8 @@ struct LogRowView {
     severity_class: &'static str,
     severity_text: String,
     timestamp: String,
-    target: Option<String>,
+    service_name: Option<String>,
+    span_name: Option<String>,
     body_preview: String,
     trace_link: Option<TraceLinkView>,
 }
@@ -91,6 +92,8 @@ struct LogDetailTemplate {
     severity_text: String,
     severity_number: i32,
     timestamp: String,
+    service_name: Option<String>,
+    span_name: Option<String>,
     target: String,
     trace_link: Option<TraceLinkView>,
     span_id: Option<String>,
@@ -210,6 +213,8 @@ async fn show_log_detail(
         .timestamp
         .format("%Y-%m-%d %H:%M:%S%.3f UTC")
         .to_string();
+    let service_name = log.service_name.as_deref().map(str::to_string);
+    let span_name = log.span_name.as_deref().map(str::to_string);
     let target = log.target.as_deref().unwrap_or("\u{2014}").to_string();
 
     let trace_link = trace_id_to_link(log.trace_id.as_ref());
@@ -232,6 +237,8 @@ async fn show_log_detail(
         severity_text,
         severity_number: log.severity_number.unwrap_or(0),
         timestamp,
+        service_name,
+        span_name,
         target,
         trace_link,
         span_id,
@@ -276,7 +283,8 @@ fn log_to_row_view(log: &RecordedLog) -> LogRowView {
         .chars()
         .take(120)
         .collect::<String>();
-    let target = log.target.clone();
+    let service_name = log.service_name.clone();
+    let span_name = log.span_name.clone();
     let timestamp = log.timestamp.format("%H:%M:%S%.3f").to_string();
 
     let trace_link = trace_id_to_link(log.trace_id.as_ref());
@@ -286,7 +294,8 @@ fn log_to_row_view(log: &RecordedLog) -> LogRowView {
         severity_class,
         severity_text,
         timestamp,
-        target,
+        service_name,
+        span_name,
         body_preview,
         trace_link,
     }

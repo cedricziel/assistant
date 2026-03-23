@@ -2,11 +2,13 @@
 
 use chrono::{DateTime, Utc};
 use opentelemetry::logs::{AnyValue, Severity};
+use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
 use serde_json::{Map, Number};
 use sqlx::{SqliteConnection, SqlitePool};
+use std::sync::{Arc, RwLock};
 use tokio::runtime::Handle;
 use uuid::Uuid;
 
@@ -23,6 +25,7 @@ use uuid::Uuid;
 pub struct SqliteLogExporter {
     pool: SqlitePool,
     rt_handle: Handle,
+    service_name: Arc<RwLock<Option<String>>>,
 }
 
 impl SqliteLogExporter {
@@ -35,6 +38,7 @@ impl SqliteLogExporter {
         Self {
             pool,
             rt_handle: Handle::current(),
+            service_name: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -47,7 +51,7 @@ impl SqliteLogExporter {
             .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
 
         for (record, _scope) in batch.iter() {
-            if let Err(err) = Self::persist_log(&mut tx, record).await {
+            if let Err(err) = self.persist_log(&mut tx, record).await {
                 return Err(OTelSdkError::InternalFailure(format!(
                     "SQLite log export failed: {err}"
                 )));
@@ -62,6 +66,7 @@ impl SqliteLogExporter {
     }
 
     async fn persist_log(
+        &self,
         conn: &mut SqliteConnection,
         record: &SdkLogRecord,
     ) -> Result<(), sqlx::Error> {
@@ -86,6 +91,7 @@ impl SqliteLogExporter {
         };
 
         let target = record.target().map(|s| s.to_string());
+        let service_name = self.service_name.read().ok().and_then(|s| s.clone());
 
         let attrs = attributes_to_json(record);
         let attrs_serialized = attrs.to_string();
@@ -93,8 +99,8 @@ impl SqliteLogExporter {
         sqlx::query(
             "INSERT INTO logs \
                 (id, timestamp, observed_timestamp, severity_number, severity_text, \
-                 body, trace_id, span_id, target, attributes) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+                 body, trace_id, span_id, target, service_name, attributes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -106,6 +112,7 @@ impl SqliteLogExporter {
         .bind(&trace_id)
         .bind(&span_id)
         .bind(&target)
+        .bind(&service_name)
         .bind(&attrs_serialized)
         .execute(&mut *conn)
         .await?;
@@ -126,8 +133,14 @@ impl LogExporter for SqliteLogExporter {
         }
     }
 
-    fn set_resource(&mut self, _resource: &Resource) {
-        // Resource metadata is not persisted to the logs table.
+    fn set_resource(&mut self, resource: &Resource) {
+        let service_name = resource
+            .get(&Key::new("service.name"))
+            .map(|value| value.to_string());
+
+        if let Ok(mut current) = self.service_name.write() {
+            *current = service_name;
+        }
     }
 }
 

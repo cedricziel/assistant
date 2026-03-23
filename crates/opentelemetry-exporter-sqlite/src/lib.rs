@@ -76,6 +76,13 @@ pub(crate) mod test_utils {
             .execute(&pool)
             .await
             .unwrap();
+        // 024 — persist service_name on spans/logs
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/024_service_name_on_telemetry.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
 
         pool
     }

@@ -103,10 +103,15 @@ impl Orchestrator {
         turn_attachments: &mut Vec<Attachment>,
     ) -> String {
         let duration_ms = elapsed.as_millis() as i64;
+        let span_name = format!("execute_tool {tool_name}");
         self.metrics
-            .record_tool_invocation(&self.agent_id, tool_name);
-        self.metrics
-            .record_tool_duration(&self.agent_id, tool_name, duration_ms as f64 / 1000.0);
+            .record_tool_invocation(&self.agent_id, tool_name, &span_name);
+        self.metrics.record_tool_duration(
+            &self.agent_id,
+            tool_name,
+            &span_name,
+            duration_ms as f64 / 1000.0,
+        );
 
         let mut tool_status = "ok";
 
