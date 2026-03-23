@@ -16,7 +16,7 @@
   <meta name="apple-mobile-web-app-title" content="Assistant">
   <link rel="apple-touch-icon" href="/pwa/icon.svg">
 
-  <script type="importmap">{"imports":{"htmx.org":"{{ self.htmx_url() }}","htmx-ext-sse":"{{ self.htmx_sse_url() }}","@hotwired/stimulus":"{{ self.stimulus_url() }}","controllers/workflow-secrets":"{{ self.workflow_secrets_controller_js_url() }}"}}</script>
+  <script type="importmap">{"imports":{"htmx.org":"{{ self.htmx_url() }}","htmx-ext-sse":"{{ self.htmx_sse_url() }}","@hotwired/stimulus":"{{ self.stimulus_url() }}","controllers/workflow-editor":"{{ self.workflow_editor_controller_js_url() }}","controllers/workflow-secrets":"{{ self.workflow_secrets_controller_js_url() }}"}}</script>
   <script src="{{ self.htmx_url() }}"></script>
   <script src="{{ self.htmx_sse_url() }}"></script>
   <script type="module" src="{{ self.stimulus_boot_js_url() }}"></script>

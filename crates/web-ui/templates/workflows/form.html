@@ -17,7 +17,7 @@ breadcrumb %}
         </div>
       </div>
 
-      <div class="wf-layout">
+      <div class="wf-layout" data-controller="workflow-editor">
         <section class="wf-pane">
           <h3>Definition</h3>
           <p>Name, describe, and edit graph JSON for this workflow.</p>
@@ -46,16 +46,23 @@ breadcrumb %}
             </label>
 
             <label for="graphJson">
-              Graph JSON
+              Technical details (JSON)
               <textarea
                 id="graphJson"
                 name="graph_json"
                 required
                 aria-describedby="graphError"
+                data-workflow-editor-target="textarea"
+                data-action="input->workflow-editor#onGraphInput"
               >
 {{ graph_json }}</textarea
               >
-              <div id="graphError" class="err" role="alert"></div>
+              <div
+                id="graphError"
+                class="err"
+                role="alert"
+                data-workflow-editor-target="error"
+              ></div>
             </label>
 
             <label class="wf-active" for="workflowActive">
@@ -94,6 +101,7 @@ breadcrumb %}
             class="wf-preview"
             viewBox="0 0 980 420"
             aria-label="Workflow graph preview"
+            data-workflow-editor-target="svg"
           ></svg>
 
           <table class="wf-node-table">
@@ -104,7 +112,10 @@ breadcrumb %}
                 <th>Config</th>
               </tr>
             </thead>
-            <tbody id="workflowNodeRows"></tbody>
+            <tbody
+              id="workflowNodeRows"
+              data-workflow-editor-target="nodeRows"
+            ></tbody>
           </table>
 
           <p class="wf-hint">
@@ -116,6 +127,4 @@ breadcrumb %}
     </div>
   </main>
 </div>
-{% endblock %} {% block extra_js %}
-<script src="{{ self.workflow_editor_js_url() }}"></script>
 {% endblock %}
