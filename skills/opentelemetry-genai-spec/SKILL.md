@@ -15,7 +15,7 @@ systems.
 
 - Emit portable `gen_ai.*` telemetry that works across backends.
 - Follow OTel semantic convention MUST/SHOULD guidance.
-- Avoid leaking prompt, tool, or retrieval sensitive data by default.
+- Avoid leaking prompt, tool, or retrieval-sensitive data by default.
 
 ## Minimum baseline attributes
 

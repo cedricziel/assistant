@@ -2,7 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import * as os from "os";
 import * as path from "path";
 
-const dbPath = path.join(os.tmpdir(), "assistant-e2e-test.db");
+const runTag = process.env.GITHUB_RUN_ID || `${process.pid}`;
+const dbPath = path.join(os.tmpdir(), `assistant-e2e-test-${runTag}.db`);
 
 /**
  * Playwright configuration for visual regression tests.
@@ -24,6 +25,7 @@ export default defineConfig({
 
   /* Fail fast in CI, retry locally */
   retries: process.env.CI ? 0 : 1,
+  workers: process.env.CI ? 1 : undefined,
   timeout: 30_000,
 
   /* Reporter: always generate HTML report for visual diff review.
@@ -65,7 +67,7 @@ export default defineConfig({
   /* Auto-start the server if not already running */
   webServer: {
     command:
-      `cargo run -p assistant-web-ui -- --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
+      `rm -f ${dbPath} && cargo run -p assistant-web-ui -- --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
     url: "http://127.0.0.1:8787/login",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
