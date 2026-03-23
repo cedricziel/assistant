@@ -6,6 +6,7 @@ use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions::attribute::SERVICE_NAME;
 use serde_json::{Map, Number};
 use sqlx::{SqliteConnection, SqlitePool};
 use std::sync::{Arc, RwLock};
@@ -135,7 +136,7 @@ impl LogExporter for SqliteLogExporter {
 
     fn set_resource(&mut self, resource: &Resource) {
         let service_name = resource
-            .get(&Key::new("service.name"))
+            .get(&Key::new(SERVICE_NAME))
             .map(|value| value.to_string());
 
         if let Ok(mut current) = self.service_name.write() {

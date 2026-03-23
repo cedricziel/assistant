@@ -4,6 +4,9 @@ use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{SpanData, SpanExporter};
 use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions::attribute::{
+    GEN_AI_USAGE_INPUT_TOKENS, GEN_AI_USAGE_OUTPUT_TOKENS, SERVICE_NAME,
+};
 use serde_json::{Map, Number};
 use sqlx::{SqliteConnection, SqlitePool};
 use std::sync::{Arc, RwLock};
@@ -115,10 +118,10 @@ impl SqliteSpanExporter {
             .map(|s| s.to_string());
 
         let input_tokens = attrs
-            .get("gen_ai.usage.input_tokens")
+            .get(GEN_AI_USAGE_INPUT_TOKENS)
             .and_then(|v| v.as_i64());
         let output_tokens = attrs
-            .get("gen_ai.usage.output_tokens")
+            .get(GEN_AI_USAGE_OUTPUT_TOKENS)
             .and_then(|v| v.as_i64());
 
         let parent_span_id = if span.parent_span_id == SpanId::INVALID {
@@ -172,7 +175,7 @@ impl SpanExporter for SqliteSpanExporter {
 
     fn set_resource(&mut self, resource: &Resource) {
         let service_name = resource
-            .get(&Key::new("service.name"))
+            .get(&Key::new(SERVICE_NAME))
             .map(|value| value.to_string());
 
         if let Ok(mut current) = self.service_name.write() {

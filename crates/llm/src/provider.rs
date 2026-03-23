@@ -94,7 +94,7 @@ pub trait LlmProvider: Send + Sync {
     // ── Provider identity (for OTel GenAI semantic conventions) ───────────
 
     /// Short, stable identifier for the provider system (e.g. `"ollama"`,
-    /// `"anthropic"`).  Maps to the OTel `gen_ai.system` attribute.
+    /// `"anthropic"`).  Maps to the OTel `gen_ai.provider.name` attribute.
     fn provider_name(&self) -> &str {
         "unknown"
     }

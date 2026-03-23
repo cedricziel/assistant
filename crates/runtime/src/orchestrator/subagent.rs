@@ -16,6 +16,7 @@ use opentelemetry::{
     trace::{Span as _, TraceContextExt, Tracer as _},
     Context as OtelContext, KeyValue,
 };
+use opentelemetry_semantic_conventions::attribute::ERROR_MESSAGE;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, warn, Instrument};
 use uuid::Uuid;
@@ -171,6 +172,7 @@ impl SubagentRunner for Orchestrator {
 
                 // -- OTel: LLM span (child of agent span) ---------------------
                 let mut llm_span = crate::otel_spans::start_llm_span(
+                    conversation_id,
                     self.llm.as_ref(),
                     iteration,
                     &agent_cx,
@@ -190,7 +192,7 @@ impl SubagentRunner for Orchestrator {
                     Ok(r) => r,
                     Err(e) => {
                         llm_span.set_attribute(KeyValue::new("error", true));
-                        llm_span.set_attribute(KeyValue::new("error.message", e.to_string()));
+                        llm_span.set_attribute(KeyValue::new(ERROR_MESSAGE, e.to_string()));
                         llm_span.end();
                         crate::history::persist_error_recovery(&conv_store, conversation_id)
                             .instrument(iteration_span.clone())

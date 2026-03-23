@@ -9,6 +9,7 @@ description = "OpenTelemetry SQLite exporters for spans, logs, and metrics"
 chrono = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 sqlx = { workspace = true }

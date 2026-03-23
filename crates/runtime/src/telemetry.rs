@@ -7,9 +7,11 @@ use opentelemetry_exporter_sqlite::{SqliteLogExporter, SqliteMetricExporter, Sql
 use opentelemetry_sdk::{
     logs::{BatchLogProcessor, SdkLoggerProvider},
     metrics::{PeriodicReader, SdkMeterProvider},
+    propagation::TraceContextPropagator,
     trace::{BatchSpanProcessor, SdkTracerProvider},
     Resource,
 };
+use opentelemetry_semantic_conventions::attribute::{SERVICE_NAME, SERVICE_VERSION};
 use sqlx::SqlitePool;
 use tracing::info;
 use tracing_subscriber::{
@@ -94,6 +96,10 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
 
     if enable_otlp {
         info!("OTLP export enabled — the opentelemetry-otlp crate will read endpoint, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars");
+    }
+
+    if need_otel {
+        global::set_text_map_propagator(TraceContextPropagator::new());
     }
 
     // -- Trace provider --------------------------------------------------
@@ -203,26 +209,10 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
 
 /// Returns `true` when any `OTEL_EXPORTER_OTLP_*` env var is set, indicating
 /// the user wants remote OTLP export.
-///
-/// We check the generic endpoint plus per-signal overrides so that setting
-/// *only* `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (without the generic one)
-/// still activates the OTLP pipeline.
 fn otlp_env_is_set() -> bool {
-    const VARS: &[&str] = &[
-        // Generic
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-        // Per-signal endpoints
-        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-        // Headers (sometimes the only thing set, e.g. for auth tokens)
-        "OTEL_EXPORTER_OTLP_HEADERS",
-        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
-        "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
-        "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
-    ];
-    VARS.iter()
-        .any(|var| std::env::var_os(var).is_some_and(|v| !v.is_empty()))
+    std::env::vars_os().any(|(key, value)| {
+        key.to_string_lossy().starts_with("OTEL_EXPORTER_OTLP_") && !value.is_empty()
+    })
 }
 
 /// Build a shared OTel [`Resource`] with service, OS, process, and SDK
@@ -231,10 +221,10 @@ fn otlp_env_is_set() -> bool {
 fn build_resource() -> Resource {
     let attrs = vec![
         KeyValue::new(
-            "service.name",
+            SERVICE_NAME,
             std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "assistant".to_string()),
         ),
-        KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+        KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
     ];
 
     // Use SDK resource detectors (env/sdk/telemetry) and then apply explicit
