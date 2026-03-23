@@ -77,7 +77,7 @@ Use this decision gate before creating a Stimulus controller:
 import { Controller } from "@hotwired/stimulus";
 
 export default class extends Controller {
-  static targets = ["query", "list"];
+  static targets = ["root", "query", "list"];
 
   apply() {
     const q = this.queryTarget.value.trim().toLowerCase();
