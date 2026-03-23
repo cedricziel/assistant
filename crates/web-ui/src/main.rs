@@ -61,6 +61,7 @@ use a2a::pages::AgentPagesState;
 use a2a::task_store::TaskStore;
 
 #[derive(Parser, Debug)]
+#[command(version)]
 struct Args {
     /// Address to listen on (e.g. 127.0.0.1:8080)
     #[arg(long, default_value = "127.0.0.1:8080")]
