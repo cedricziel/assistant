@@ -76,14 +76,11 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
           <button class="ghost-btn" type="submit">{{ toggle_label }}</button>
         </form>
 
-        <form
-          method="POST"
-          action="/workflows/{{ id }}/delete"
-          onsubmit="return confirm('Delete this workflow?');"
-        >
+        <form method="POST" action="/workflows/{{ id }}/delete">
           <button
             class="ghost-btn"
             type="submit"
+            hx-confirm="Delete this workflow?"
             style="color: #ff9b9b; border-color: #5c2a2a"
           >
             Delete
@@ -107,6 +104,12 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
           type="button"
           class="ghost-btn"
           id="revealWebhookSecretsBtn"
+          data-reveal-webhook-secrets="true"
+          data-token-target="webhookTokenMasked"
+          data-url-target="webhookEndpointMasked"
+          data-token-masked="{{ webhook_token_masked }}"
+          data-url-masked="{{ webhook_url_masked }}"
+          data-revealed="false"
           data-token="{{ webhook_token }}"
           data-url="{{ webhook_url }}"
           style="margin-top: 0.6rem"
@@ -159,25 +162,4 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
     </div>
   </main>
 </div>
-{% endblock %} {% block extra_js %}
-<script>
-  (function () {
-    const btn = document.getElementById("revealWebhookSecretsBtn");
-    if (!btn) return;
-    const tokenEl = document.getElementById("webhookTokenMasked");
-    const urlEl = document.getElementById("webhookEndpointMasked");
-    let revealed = false;
-    btn.addEventListener("click", function () {
-      if (!tokenEl || !urlEl) return;
-      if (!revealed) {
-        tokenEl.textContent = btn.getAttribute("data-token") || "";
-        urlEl.textContent = btn.getAttribute("data-url") || "";
-        btn.textContent = "Hide";
-        revealed = true;
-      } else {
-        location.reload();
-      }
-    });
-  })();
-</script>
 {% endblock %}

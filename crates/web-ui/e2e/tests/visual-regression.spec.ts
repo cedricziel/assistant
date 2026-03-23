@@ -36,6 +36,15 @@ async function navigateAndSettle(page: Page, path: string) {
   await page.waitForTimeout(CSS_SETTLE_MS);
 }
 
+/** Check whether an element currently takes up layout space. */
+async function isVisible(page: Page, selector: string): Promise<boolean> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel) as HTMLElement | null;
+    if (!el) return false;
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  }, selector);
+}
+
 // -- Tests ------------------------------------------------------------------
 
 test.describe("Login page", () => {
@@ -135,5 +144,69 @@ test.describe("Authenticated pages", () => {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
+  });
+
+  test("contexts page loads and shows key UI", async ({ page }) => {
+    await navigateAndSettle(page, "/contexts");
+    await expect(
+      page.getByRole("heading", { name: "Assistant Contexts" }),
+    ).toBeVisible();
+    await expect(page.locator("#main-content")).toBeVisible();
+  });
+
+  test("responsive navigation switches by breakpoint", async ({ page }) => {
+    await navigateAndSettle(page, "/chat");
+    const viewport = page.viewportSize();
+    const width = viewport ? viewport.width : 1280;
+
+    const iconRailVisible = await isVisible(page, ".icon-rail");
+    const topBarVisible = await isVisible(page, ".top-bar");
+    const bottomTabsVisible = await isVisible(page, ".bottom-tabs");
+    const hamburgerVisible = await isVisible(page, ".hamburger");
+
+    if (width < 640) {
+      expect(bottomTabsVisible).toBeTruthy();
+      expect(topBarVisible).toBeFalsy();
+      expect(iconRailVisible).toBeFalsy();
+      expect(hamburgerVisible).toBeFalsy();
+      return;
+    }
+
+    if (width < 900) {
+      expect(bottomTabsVisible).toBeFalsy();
+      expect(topBarVisible).toBeTruthy();
+      expect(iconRailVisible).toBeFalsy();
+      expect(hamburgerVisible).toBeTruthy();
+      return;
+    }
+
+    expect(bottomTabsVisible).toBeFalsy();
+    expect(topBarVisible).toBeTruthy();
+    expect(iconRailVisible).toBeTruthy();
+  });
+
+  test("core routes avoid viewport horizontal overflow", async ({ page }) => {
+    const routes = [
+      "/chat",
+      "/traces",
+      "/logs",
+      "/analytics",
+      "/agents",
+      "/agents/new",
+      "/webhooks",
+      "/webhooks/new",
+      "/workflows",
+      "/workflows/new",
+      "/contexts",
+    ];
+
+    for (const route of routes) {
+      await navigateAndSettle(page, route);
+      const hasOverflow = await page.evaluate(() => {
+        const root = document.documentElement;
+        return root.scrollWidth > root.clientWidth + 1;
+      });
+      expect(hasOverflow, `viewport overflow on ${route}`).toBeFalsy();
+    }
   });
 });
