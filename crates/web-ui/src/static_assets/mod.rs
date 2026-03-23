@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 const BASE_CSS: &str = include_str!("base.css");
 const DEFAULT_CSS: &str = include_str!("../../templates/partials/default_css.html");
 const ENTITY_CSS: &str = include_str!("../../templates/partials/entity_css.html");
+const WORKFLOW_CSS: &str = include_str!("../../templates/partials/workflow_css.html");
 
 // First-party JS modules.
 const APP_JS: &str = include_str!("app.js");
@@ -74,8 +75,8 @@ struct CssBundle {
 
 static CSS_BUNDLE: LazyLock<CssBundle> = LazyLock::new(|| {
     let content = format!(
-        "{}\n\n/* -- default -- */\n{}\n\n/* -- entity -- */\n{}",
-        BASE_CSS, DEFAULT_CSS, ENTITY_CSS,
+        "{}\n\n/* -- default -- */\n{}\n\n/* -- entity -- */\n{}\n\n/* -- workflow -- */\n{}",
+        BASE_CSS, DEFAULT_CSS, ENTITY_CSS, WORKFLOW_CSS,
     );
     let fp = fingerprint("app", "css", &content);
     let etag = format!("\"{}\"", fp.hash);
