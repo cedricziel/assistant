@@ -360,6 +360,31 @@ test.describe("Authenticated pages", () => {
     expect(iconRailVisible).toBeTruthy();
   });
 
+  test("mobile more tab points to active management section", async ({ page }) => {
+    const cases: Array<{ path: string; expectedHref: string }> = [
+      { path: "/agents", expectedHref: "/agents" },
+      { path: "/workflows", expectedHref: "/workflows" },
+      { path: "/webhooks", expectedHref: "/webhooks" },
+      { path: "/contexts", expectedHref: "/contexts" },
+    ];
+
+    for (const item of cases) {
+      await navigateAndSettle(page, item.path);
+
+      const href = await page
+        .locator(".bottom-tabs .tab-item")
+        .nth(4)
+        .getAttribute("href");
+      expect(href, `more tab href on ${item.path}`).toBe(item.expectedHref);
+
+      const ariaCurrent = await page
+        .locator(".bottom-tabs .tab-item")
+        .nth(4)
+        .getAttribute("aria-current");
+      expect(ariaCurrent, `more tab aria-current on ${item.path}`).toBe("page");
+    }
+  });
+
   test("core routes avoid viewport horizontal overflow", async ({ page }) => {
     const routes = [
       "/chat",
