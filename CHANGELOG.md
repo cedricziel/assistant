@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.49](https://github.com/cedricziel/assistant/compare/v0.1.48...v0.1.49) (2026-03-23)
+
+
+### Features
+
+* **web-ui:** introduce Stimulus for workflow secret reveal ([#252](https://github.com/cedricziel/assistant/issues/252)) ([754de60](https://github.com/cedricziel/assistant/commit/754de6077297dae0f08304c44c0ade1c8ce00a6c))
+
+
+### Bug Fixes
+
+* **observability:** propagate root spans across bus and webhook flows ([#250](https://github.com/cedricziel/assistant/issues/250)) ([fff345d](https://github.com/cedricziel/assistant/commit/fff345d9012db93c8359c957c4db9c23f001a665))
+* **web-ui:** harden workflow detail UX and mobile navigation ([#253](https://github.com/cedricziel/assistant/issues/253)) ([6b1cf26](https://github.com/cedricziel/assistant/commit/6b1cf2688b657c2a566bc0dc6267575a27f26064))
+
 ## [0.1.48](https://github.com/cedricziel/assistant/compare/v0.1.47...v0.1.48) (2026-03-23)
 
 
