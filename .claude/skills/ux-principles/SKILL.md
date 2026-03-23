@@ -147,6 +147,57 @@ Use the `{% block extra_js %}` block in templates that extend `base.html`:
 Only `app.js` is loaded globally (in `base.html`). Page-specific JS is loaded
 only on pages that need it.
 
+## Stimulus Hint (Progressive Enhancement)
+
+For interactions that are too stateful for pure HTML + htmx attributes,
+prefer small Stimulus controllers over ad-hoc imperative JS.
+
+Stimulus aligns with this skill's no-inline-JS principle because behavior lives
+in external controller files; templates only declare wiring via data attributes.
+
+```html
+<section
+  data-controller="filters"
+  data-filters-endpoint-value="/traces"
+  data-action="change->filters#submit"
+>
+  <select name="status" data-filters-target="status"></select>
+</section>
+```
+
+```js
+// filters_controller.js
+import { Controller } from "@hotwired/stimulus";
+
+export default class extends Controller {
+  static targets = ["status"];
+  static values = { endpoint: String };
+
+  submit() {
+    // Keep logic minimal; delegate rendering to server/htmx endpoints.
+  }
+}
+```
+
+**Rules:**
+
+- Keep controllers small and feature-scoped (one concern per controller)
+- Prefer declarative `data-action`/`data-target` wiring over manual DOM queries
+- Keep server-rendered HTML as source of truth; use Stimulus for glue/state only
+- Use events (`dispatch`) for cross-controller communication before direct lookup
+- If behavior can be done with native HTML or htmx alone, do not introduce Stimulus
+
+### Component Creation Criteria
+
+Use this sequence when deciding to create a Stimulus component/controller:
+
+1. If semantic HTML/CSS can solve it, do not add a component.
+2. If the main need is request/swap behavior, use htmx attributes and server
+   partials first.
+3. Add Stimulus only when you need client-local state or reusable interactive
+   behavior across elements.
+4. If a controller accumulates unrelated behavior, split it by concern.
+
 ## Semantic HTML
 
 Use the correct element for the job. Screen readers and keyboard users
