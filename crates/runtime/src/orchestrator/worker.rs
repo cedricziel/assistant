@@ -115,6 +115,10 @@ impl Orchestrator {
                         .unwrap_or(Interface::Cli);
 
                     let conv_id = turn_req.conversation_id;
+                    let trace_cx = turn_req
+                        .traceparent
+                        .as_deref()
+                        .map(crate::otel_spans::context_from_traceparent);
                     let interface_name = format!("{:?}", interface);
 
                     debug!(
@@ -148,17 +152,24 @@ impl Orchestrator {
                             conv_id,
                             interface,
                             reg.tools,
-                            None,
+                            trace_cx.as_ref(),
                             reg.attachments,
                         )
                         .await
                     } else if let Some(sink) = token_sink {
                         // Streaming turn (CLI, Signal).
-                        self.run_turn_streaming(&prompt, conv_id, interface, sink, None)
-                            .await
+                        self.run_turn_streaming(
+                            &prompt,
+                            conv_id,
+                            interface,
+                            sink,
+                            trace_cx.as_ref(),
+                        )
+                        .await
                     } else {
                         // Standard non-streaming turn.
-                        self.run_turn(&prompt, conv_id, interface, None).await
+                        self.run_turn(&prompt, conv_id, interface, trace_cx.as_ref())
+                            .await
                     };
 
                     match result {
@@ -311,11 +322,17 @@ impl Orchestrator {
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
         let request_id = Uuid::new_v4();
+        let interface_cx = crate::otel_spans::start_interface_root_context(
+            &interface,
+            "submit_turn",
+            Some(conversation_id),
+        );
         let turn_req = bus_messages::TurnRequest {
             prompt: prompt.to_string(),
             conversation_id,
             extension_tools: vec![],
             timestamp,
+            traceparent: crate::otel_spans::traceparent_from_context(&interface_cx),
         };
 
         self.bus

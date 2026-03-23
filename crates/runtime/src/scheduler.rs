@@ -19,6 +19,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::orchestrator::Orchestrator;
+use crate::otel_spans::{start_interface_root_context, traceparent_from_context};
 use crate::webhook_dispatch;
 
 /// How often the heartbeat prompt is run (30 minutes).
@@ -105,6 +106,17 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
             conversation_id,
             extension_tools: vec![],
             timestamp: Some(Utc::now()),
+            traceparent: None,
+        };
+
+        let interface_cx = start_interface_root_context(
+            &Interface::Scheduler,
+            "schedule.dispatch",
+            Some(conversation_id),
+        );
+        let turn_req = bus_messages::TurnRequest {
+            traceparent: traceparent_from_context(&interface_cx),
+            ..turn_req
         };
 
         let dispatched = match bus
@@ -189,6 +201,17 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         conversation_id,
         extension_tools: vec![],
         timestamp: Some(Utc::now()),
+        traceparent: None,
+    };
+
+    let interface_cx = start_interface_root_context(
+        &Interface::Scheduler,
+        "heartbeat.dispatch",
+        Some(conversation_id),
+    );
+    let turn_req = bus_messages::TurnRequest {
+        traceparent: traceparent_from_context(&interface_cx),
+        ..turn_req
     };
 
     orchestrator
