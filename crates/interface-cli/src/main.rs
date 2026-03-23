@@ -35,7 +35,7 @@ use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "assistant", about = "Local AI assistant")]
+#[command(name = "assistant", about = "Local AI assistant", version)]
 struct Cli {
     /// Assistant agent context ID (e.g. "default", "work", "personal").
     #[arg(long, env = "ASSISTANT_AGENT")]
