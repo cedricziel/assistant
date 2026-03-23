@@ -215,7 +215,7 @@ test.describe("Authenticated pages", () => {
     const bottomTabsVisible = await isVisible(page, ".bottom-tabs");
     const hamburgerVisible = await isVisible(page, ".hamburger");
 
-    if (width < 640) {
+    if (width <= 640) {
       expect(bottomTabsVisible).toBeTruthy();
       expect(topBarVisible).toBeFalsy();
       expect(iconRailVisible).toBeFalsy();
@@ -223,7 +223,7 @@ test.describe("Authenticated pages", () => {
       return;
     }
 
-    if (width < 900) {
+    if (width <= 900) {
       expect(bottomTabsVisible).toBeFalsy();
       expect(topBarVisible).toBeTruthy();
       expect(iconRailVisible).toBeFalsy();

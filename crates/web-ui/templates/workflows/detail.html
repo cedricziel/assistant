@@ -80,6 +80,7 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
           <button
             class="ghost-btn"
             type="submit"
+            hx-post="/workflows/{{ id }}/delete"
             hx-confirm="Delete this workflow?"
             style="color: #ff9b9b; border-color: #5c2a2a"
           >

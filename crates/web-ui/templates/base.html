@@ -113,9 +113,9 @@
       </header>
 
       <!-- Main content -->
-      <main id="main-content" class="content-area" tabindex="-1">
+      <div id="main-content" class="content-area" tabindex="-1">
         {% block content %}{% endblock %}
-      </main>
+      </div>
     </div>
 
     <!-- Bottom tabs (mobile) -->
@@ -144,7 +144,7 @@
         </svg>
         Logs
       </a>
-      <a href="/agents" class="tab-item{% if active_page == "agents" %} active{% endif %}{% if active_page == "webhooks" %} active{% endif %}{% if active_page == "contexts" %} active{% endif %}{% if active_page == "workflows" %} active{% endif %}"{% if active_page == "agents" || active_page == "webhooks" || active_page == "contexts" || active_page == "workflows" %} aria-current="page"{% endif %}>
+      <a href="/agents" class="tab-item{% if active_page == "agents" %} active{% endif %}{% if active_page == "webhooks" %} active{% endif %}{% if active_page == "contexts" %} active{% endif %}{% if active_page == "workflows" %} active{% endif %}"{% if active_page == "agents" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/>
         </svg>
