@@ -382,6 +382,17 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 45
+    services:
+      ollama:
+        image: ollama/ollama:latest
+        ports:
+          - 11434:11434
+        options: >-
+          --health-cmd "ollama list || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v6
 
@@ -402,11 +413,14 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Cache Ollama model
-        uses: actions/cache@v5
-        with:
-          path: ~/.ollama/models
-          key: ollama-qwen2.5-1.5b
+      - name: Pull Ollama smoke-test model
+        run: |
+          curl --fail --silent --show-error http://localhost:11434/api/pull \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"qwen2.5:1.5b","stream":false}'
 
       - name: Run smoke tests
-        run: make test-integration
+        env:
+          OLLAMA_BASE_URL: http://localhost:11434
+          RUST_TEST_THREADS: 1
+        run: cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture --test-threads=1
