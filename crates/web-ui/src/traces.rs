@@ -282,16 +282,12 @@ async fn show_trace_detail(
         .max()
         .unwrap_or(start + chrono::Duration::milliseconds(1));
     let total_duration_ms = (end - start).num_milliseconds();
-    let root_span_name = spans
+    let root_span = spans
         .iter()
         .find(|span| span.parent_span_id.is_none())
-        .map(|span| span.name.clone())
-        .or_else(|| spans.first().map(|span| span.name.clone()));
-    let root_service_name = spans
-        .iter()
-        .find(|span| span.parent_span_id.is_none())
-        .and_then(|span| span.service_name.clone())
-        .or_else(|| spans.first().and_then(|span| span.service_name.clone()));
+        .or_else(|| spans.first());
+    let root_span_name = root_span.map(|span| span.name.clone());
+    let root_service_name = root_span.and_then(|span| span.service_name.clone());
     let error_spans = spans
         .iter()
         .filter(|span| span.error.is_some() || span.tool_status.as_deref() == Some("error"))
@@ -329,19 +325,7 @@ fn trace_to_row_view(trace: &TraceSummary) -> TraceRowView {
     } else {
         trace.trace_id.clone()
     };
-    let span_name = trace
-        .root_span_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            trace
-                .tool_names
-                .iter()
-                .find(|tool| !tool.is_empty())
-                .cloned()
-        });
+    let span_name = trace_span_label(trace);
     let service_name = trace
         .root_service_name
         .as_deref()
@@ -358,6 +342,23 @@ fn trace_to_row_view(trace: &TraceSummary) -> TraceRowView {
         span_count: trace.span_count,
         is_error: trace.error_count > 0,
     }
+}
+
+fn trace_span_label(trace: &TraceSummary) -> Option<String> {
+    trace
+        .root_span_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            trace
+                .tool_names
+                .iter()
+                .map(|tool| tool.trim())
+                .find(|tool| !tool.is_empty())
+                .map(str::to_string)
+        })
 }
 
 fn build_skill_facet_views(
@@ -453,13 +454,7 @@ fn build_group_segments(traces: &[TraceSummary], group_by: &str) -> Vec<GroupSeg
                 .filter(|v| !v.is_empty())
                 .unwrap_or("Unknown")
                 .to_string(),
-            "span" => trace
-                .root_span_name
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .unwrap_or("Unknown")
-                .to_string(),
+            "span" => trace_span_label(trace).unwrap_or_else(|| "Unknown".to_string()),
             _ => {
                 if trace.error_count > 0 {
                     "Error".to_string()

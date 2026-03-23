@@ -227,8 +227,7 @@ fn build_resource() -> Resource {
         KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
     ];
 
-    // Use SDK resource detectors (env/sdk/telemetry) and then apply explicit
-    // service defaults/overrides for this application.
+    // Set explicit resource attributes for this application.
     Resource::builder().with_attributes(attrs).build()
 }
 
