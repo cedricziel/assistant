@@ -10,9 +10,10 @@ breadcrumb %}
   <main class="main">
     <div
       class="panel"
-      data-controller="workflow-editor"
+      data-controller="workflow-editor workflow-view-mode"
       data-workflow-editor-workflow-id-value="{{ id }}"
-      data-workflow-editor-mode-value="graph"
+      data-workflow-view-mode-workflow-id-value="{{ id }}"
+      data-workflow-view-mode-mode-value="graph"
     >
       <div class="panel-head">
         <div>
@@ -31,8 +32,8 @@ breadcrumb %}
             <button
               type="button"
               class="ghost-btn"
-              data-workflow-editor-target="flowToggle"
-              data-action="workflow-editor#switchMode"
+              data-workflow-view-mode-target="flowToggle"
+              data-action="workflow-view-mode#switchMode"
               data-mode="flow"
               aria-pressed="false"
             >
@@ -41,8 +42,8 @@ breadcrumb %}
             <button
               type="button"
               class="ghost-btn"
-              data-workflow-editor-target="graphToggle"
-              data-action="workflow-editor#switchMode"
+              data-workflow-view-mode-target="graphToggle"
+              data-action="workflow-view-mode#switchMode"
               data-mode="graph"
               aria-pressed="false"
             >
@@ -63,7 +64,10 @@ breadcrumb %}
 
       <div class="editor-grid">
         <section class="pane">
-          <div class="editor-surface" data-workflow-editor-target="flowPanel">
+          <div
+            class="editor-surface"
+            data-workflow-view-mode-target="flowPanel"
+          >
             <h3>Flow view</h3>
             <p class="workflow-hint">
               Best for phone screens and step-by-step review.
@@ -76,7 +80,7 @@ breadcrumb %}
 
           <div
             class="editor-surface"
-            data-workflow-editor-target="graphPanel"
+            data-workflow-view-mode-target="graphPanel"
             hidden
           >
             <h3>Graph view</h3>

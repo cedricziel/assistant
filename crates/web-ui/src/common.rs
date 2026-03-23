@@ -55,6 +55,11 @@ pub trait StaticUrls {
         crate::static_assets::workflow_editor_controller_js_url()
     }
 
+    /// Fingerprinted URL for workflow view mode Stimulus controller JS.
+    fn workflow_view_mode_controller_js_url(&self) -> &'static str {
+        crate::static_assets::workflow_view_mode_controller_js_url()
+    }
+
     /// Fingerprinted URL for chat-specific JS.
     fn chat_js_url(&self) -> &'static str {
         crate::static_assets::chat_js_url()

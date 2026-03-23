@@ -1,7 +1,6 @@
 import { Controller } from "@hotwired/stimulus";
 
 const GRAPH_DRAFT_PREFIX = "workflow-editor-draft:";
-const VIEW_PREF_PREFIX = "workflow-editor-view:";
 
 function parseGraph(raw) {
   if (!raw || !raw.trim()) {
@@ -109,15 +108,10 @@ export default class extends Controller {
     "edgeFromInput",
     "edgeToInput",
     "edgeOnInput",
-    "flowPanel",
-    "graphPanel",
-    "flowToggle",
-    "graphToggle",
   ];
 
   static values = {
     workflowId: String,
-    mode: String,
   };
 
   connect() {
@@ -126,10 +120,8 @@ export default class extends Controller {
     this.isSaving = false;
     this.refreshTimer = null;
     this.beforeUnloadHandler = this.beforeUnload.bind(this);
-    this.resizeHandler = this.onResize.bind(this);
 
     window.addEventListener("beforeunload", this.beforeUnloadHandler);
-    window.addEventListener("resize", this.resizeHandler);
 
     if (this.hasWorkflowIdValue) {
       const draft = localStorage.getItem(this.draftStorageKey());
@@ -140,12 +132,10 @@ export default class extends Controller {
     }
 
     this.refreshGraphFromText();
-    this.applyInitialMode();
   }
 
   disconnect() {
     window.removeEventListener("beforeunload", this.beforeUnloadHandler);
-    window.removeEventListener("resize", this.resizeHandler);
     if (this.refreshTimer !== null) {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
@@ -233,12 +223,6 @@ export default class extends Controller {
     this.refreshGraphFromText();
   }
 
-  switchMode(event) {
-    const mode = event.currentTarget.getAttribute("data-mode");
-    if (!mode) return;
-    this.setMode(mode, true);
-  }
-
   save() {
     this.saveDraftToServer();
   }
@@ -267,21 +251,9 @@ export default class extends Controller {
     event.returnValue = "";
   }
 
-  onResize() {
-    if (window.innerWidth < 768) {
-      this.setMode("flow", false);
-    }
-    this.updateModeUi();
-  }
-
   draftStorageKey() {
     if (!this.hasWorkflowIdValue) return "";
     return GRAPH_DRAFT_PREFIX + this.workflowIdValue;
-  }
-
-  viewStorageKey() {
-    if (!this.hasWorkflowIdValue) return "";
-    return VIEW_PREF_PREFIX + this.workflowIdValue;
   }
 
   persistDraft() {
@@ -558,69 +530,6 @@ export default class extends Controller {
 
       this.svgTarget.appendChild(group);
     });
-  }
-
-  applyInitialMode() {
-    if (!this.hasFlowPanelTarget || !this.hasGraphPanelTarget) return;
-    if (window.innerWidth < 768) {
-      this.setMode("flow", false);
-      return;
-    }
-
-    let preferred = "";
-    if (this.hasWorkflowIdValue) {
-      preferred = localStorage.getItem(this.viewStorageKey()) || "";
-    }
-
-    const defaultMode =
-      preferred || (this.hasModeValue ? this.modeValue : "graph");
-    this.setMode(defaultMode, false);
-  }
-
-  setMode(mode, persist) {
-    if (!this.hasFlowPanelTarget || !this.hasGraphPanelTarget) return;
-    const normalized = mode === "graph" ? "graph" : "flow";
-    const enforced = window.innerWidth < 768 ? "flow" : normalized;
-    this.modeValue = enforced;
-
-    if (persist && this.hasWorkflowIdValue) {
-      localStorage.setItem(this.viewStorageKey(), enforced);
-    }
-
-    this.updateModeUi();
-  }
-
-  updateModeUi() {
-    if (!this.hasFlowPanelTarget || !this.hasGraphPanelTarget) return;
-    const mode =
-      this.modeValue === "graph" && window.innerWidth >= 768 ? "graph" : "flow";
-
-    this.flowPanelTarget.hidden = mode !== "flow";
-    this.graphPanelTarget.hidden = mode !== "graph";
-
-    if (this.hasFlowToggleTarget) {
-      const active = mode === "flow";
-      this.flowToggleTarget.classList.toggle("is-active", active);
-      this.flowToggleTarget.setAttribute(
-        "aria-pressed",
-        active ? "true" : "false",
-      );
-    }
-
-    if (this.hasGraphToggleTarget) {
-      const active = mode === "graph";
-      const disabled = window.innerWidth < 768;
-      this.graphToggleTarget.classList.toggle("is-active", active);
-      this.graphToggleTarget.setAttribute(
-        "aria-pressed",
-        active ? "true" : "false",
-      );
-      this.graphToggleTarget.disabled = disabled;
-      this.graphToggleTarget.setAttribute(
-        "title",
-        disabled ? "Graph view is available on tablet and desktop" : "",
-      );
-    }
   }
 
   setStatus(message, isError) {

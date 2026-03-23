@@ -27,6 +27,7 @@ const WORKFLOW_CSS: &str = include_str!("../../templates/partials/workflow_css.h
 const APP_JS: &str = include_str!("app.js");
 const STIMULUS_BOOT_JS: &str = include_str!("stimulus-boot.js");
 const WORKFLOW_EDITOR_CONTROLLER_JS: &str = include_str!("controllers/workflow-editor.js");
+const WORKFLOW_VIEW_MODE_CONTROLLER_JS: &str = include_str!("controllers/workflow-view-mode.js");
 const WORKFLOW_SECRETS_CONTROLLER_JS: &str = include_str!("controllers/workflow-secrets.js");
 const CHAT_JS: &str = include_str!("chat.js");
 const TRACE_DETAIL_JS: &str = include_str!("trace-detail.js");
@@ -116,6 +117,14 @@ static WORKFLOW_EDITOR_CONTROLLER_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| {
     )
 });
 
+static WORKFLOW_VIEW_MODE_CONTROLLER_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| {
+    fingerprint_static(
+        "workflow-view-mode-controller",
+        "js",
+        WORKFLOW_VIEW_MODE_CONTROLLER_JS,
+    )
+});
+
 static CHAT_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| fingerprint_static("chat", "js", CHAT_JS));
 
 static TRACE_DETAIL_JS_ASSET: LazyLock<Asset> =
@@ -167,6 +176,11 @@ pub fn workflow_secrets_controller_js_url() -> &'static str {
 /// Fingerprinted URL for the workflow editor Stimulus controller.
 pub fn workflow_editor_controller_js_url() -> &'static str {
     &WORKFLOW_EDITOR_CONTROLLER_JS_ASSET.url
+}
+
+/// Fingerprinted URL for the workflow view mode Stimulus controller.
+pub fn workflow_view_mode_controller_js_url() -> &'static str {
+    &WORKFLOW_VIEW_MODE_CONTROLLER_JS_ASSET.url
 }
 
 /// Fingerprinted URL for chat-specific JS.
@@ -240,6 +254,10 @@ async fn serve_workflow_editor_controller_js() -> Response {
     serve_js_immutable(WORKFLOW_EDITOR_CONTROLLER_JS_ASSET.content)
 }
 
+async fn serve_workflow_view_mode_controller_js() -> Response {
+    serve_js_immutable(WORKFLOW_VIEW_MODE_CONTROLLER_JS_ASSET.content)
+}
+
 async fn serve_chat_js() -> Response {
     serve_js_immutable(CHAT_JS_ASSET.content)
 }
@@ -287,6 +305,10 @@ pub fn static_router() -> Router {
         .route(
             &WORKFLOW_EDITOR_CONTROLLER_JS_ASSET.url,
             get(serve_workflow_editor_controller_js),
+        )
+        .route(
+            &WORKFLOW_VIEW_MODE_CONTROLLER_JS_ASSET.url,
+            get(serve_workflow_view_mode_controller_js),
         )
         .route(&CHAT_JS_ASSET.url, get(serve_chat_js))
         .route(&TRACE_DETAIL_JS_ASSET.url, get(serve_trace_detail_js))
