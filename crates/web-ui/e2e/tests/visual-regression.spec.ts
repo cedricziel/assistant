@@ -67,6 +67,84 @@ async function createWorkflow(page: Page): Promise<string> {
   return id;
 }
 
+/** Create an agent through the UI and return its id. */
+async function createAgent(page: Page): Promise<string> {
+  await navigateAndSettle(page, "/agents/new");
+
+  const suffix = Date.now();
+  await page.fill('input[name="name"]', `E2E Agent ${suffix}`);
+  await page.fill('textarea[name="description"]', "Agent created by visual regression test");
+  await page.fill('input[name="version"]', "1.0.0");
+
+  await page.locator("form.entity-form button[type='submit']").click();
+
+  await page.waitForURL(/\/agents\/[^/]+$/);
+  const pathname = new URL(page.url()).pathname;
+  const id = pathname.split("/").pop();
+  if (!id) {
+    throw new Error(`failed to parse agent id from ${pathname}`);
+  }
+  return id;
+}
+
+/** Create a webhook through the UI and return its id. */
+async function createWebhook(page: Page): Promise<string> {
+  await navigateAndSettle(page, "/webhooks/new");
+
+  const suffix = Date.now();
+  await page.fill('input[name="name"]', `E2E Webhook ${suffix}`);
+  await page.fill('input[name="url"]', `https://example.com/e2e-${suffix}`);
+  await page.fill('input[name="event_types"]', "turn.result, tool.result");
+
+  await page.locator("form.entity-form button[type='submit']").click();
+
+  await page.waitForURL(/\/webhooks\/[^/]+$/);
+  const pathname = new URL(page.url()).pathname;
+  const id = pathname.split("/").pop();
+  if (!id) {
+    throw new Error(`failed to parse webhook id from ${pathname}`);
+  }
+  return id;
+}
+
+/** Queue a workflow run and return the run id. */
+async function queueWorkflowRun(page: Page, workflowId: string): Promise<string> {
+  const payload = (await page.evaluate(async (id) => {
+    const response = await fetch(`/api/workflows/${id}/test-run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+      credentials: "same-origin",
+    });
+
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      body,
+    };
+  }, workflowId)) as {
+    ok: boolean;
+    status: number;
+    body: { run_id?: string } | null;
+  };
+
+  expect(payload.ok, `workflow test-run request failed (${payload.status})`).toBeTruthy();
+  const runId = payload.body?.run_id;
+  if (!runId) {
+    throw new Error("failed to parse workflow run id from test-run response");
+  }
+  return runId;
+}
+
 // -- Tests ------------------------------------------------------------------
 
 test.describe("Login page", () => {
@@ -136,6 +214,22 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("agent detail and edit screens", async ({ page }) => {
+    const agentId = await createAgent(page);
+
+    await navigateAndSettle(page, `/agents/${agentId}`);
+    await expect(page).toHaveScreenshot("agent-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+
+    await navigateAndSettle(page, `/agents/${agentId}/edit`);
+    await expect(page).toHaveScreenshot("agent-edit.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+  });
+
   test("webhooks list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/webhooks");
     await expect(page).toHaveScreenshot("webhooks-empty.png", {
@@ -147,6 +241,28 @@ test.describe("Authenticated pages", () => {
   test("webhook create form", async ({ page }) => {
     await navigateAndSettle(page, "/webhooks/new");
     await expect(page).toHaveScreenshot("webhook-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+  });
+
+  test("webhook detail and edit screens", async ({ page }) => {
+    const webhookId = await createWebhook(page);
+
+    await navigateAndSettle(page, `/webhooks/${webhookId}`);
+    await expect(page).toHaveScreenshot("webhook-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: [
+        page.locator(".hdr-trace-id"),
+        page.locator(".entity-section").filter({ hasText: "Endpoint URL" }),
+        page.locator("#secret-value"),
+        page.locator(".entity-section").filter({ hasText: "Timestamps" }),
+      ],
+    });
+
+    await navigateAndSettle(page, `/webhooks/${webhookId}/edit`);
+    await expect(page).toHaveScreenshot("webhook-edit.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
@@ -188,6 +304,13 @@ test.describe("Authenticated pages", () => {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
+
+    const runId = await queueWorkflowRun(page, workflowId);
+    await navigateAndSettle(page, `/workflows/${workflowId}/runs/${runId}`);
+    await expect(page).toHaveScreenshot("workflow-run-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
   });
 
   test("chat page", async ({ page }) => {
@@ -198,12 +321,12 @@ test.describe("Authenticated pages", () => {
     });
   });
 
-  test("contexts page loads and shows key UI", async ({ page }) => {
+  test("contexts page", async ({ page }) => {
     await navigateAndSettle(page, "/contexts");
-    await expect(
-      page.getByRole("heading", { name: "Assistant Contexts" }),
-    ).toBeVisible();
-    await expect(page.locator("#main-content")).toBeVisible();
+    await expect(page).toHaveScreenshot("contexts.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
   });
 
   test("responsive navigation switches by breakpoint", async ({ page }) => {
