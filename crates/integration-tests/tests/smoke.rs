@@ -9,6 +9,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::{env, time::Duration};
 
 use anyhow::Result;
 use assistant_core::{types::Interface, AssistantConfig, MessageBus};
@@ -20,7 +21,7 @@ use assistant_tool_executor::ToolExecutor;
 use testcontainers::{
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
-    GenericImage,
+    ContainerAsync, GenericImage,
 };
 use uuid::Uuid;
 
@@ -31,7 +32,7 @@ const MODEL: &str = "qwen2.5:1.5b";
 // ── Container helper ──────────────────────────────────────────────────────────
 
 /// Start an Ollama container, pull the small model, and return the base URL.
-async fn start_ollama() -> Result<(impl Drop, String)> {
+async fn start_ollama_container() -> Result<(ContainerAsync<GenericImage>, String)> {
     let container = GenericImage::new("ollama/ollama", "latest")
         .with_exposed_port(OLLAMA_PORT.tcp())
         .with_wait_for(WaitFor::message_on_stderr("Listening on"))
@@ -48,9 +49,25 @@ async fn start_ollama() -> Result<(impl Drop, String)> {
     Ok((container, base_url))
 }
 
+/// Resolve Ollama endpoint.
+///
+/// If `OLLAMA_BASE_URL` is set, use that endpoint directly (and assume the
+/// configured model is already present). Otherwise, start an ephemeral
+/// container and pull the model for the test run.
+async fn resolve_ollama() -> Result<(Option<ContainerAsync<GenericImage>>, String)> {
+    if let Ok(base_url) = env::var("OLLAMA_BASE_URL") {
+        let base_url = base_url.trim().to_string();
+        anyhow::ensure!(!base_url.is_empty(), "OLLAMA_BASE_URL must not be empty");
+        return Ok((None, base_url));
+    }
+
+    let (container, base_url) = start_ollama_container().await?;
+    Ok((Some(container), base_url))
+}
+
 async fn pull_model(base_url: &str, model: &str) -> Result<()> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(Duration::from_secs(300))
         .build()?;
 
     let resp = client
@@ -131,7 +148,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
 async fn test_memory_round_trip() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = start_ollama().await?;
+    let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
     // Ask the agent to remember a preference — should call memory-update target=user.
@@ -170,7 +187,7 @@ async fn test_memory_round_trip() -> Result<()> {
 async fn test_list_skills() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = start_ollama().await?;
+    let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
     let result = f
@@ -209,7 +226,7 @@ async fn test_list_skills() -> Result<()> {
 async fn test_tool_loop_terminates() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = start_ollama().await?;
+    let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
     let result = f
@@ -227,7 +244,7 @@ async fn test_tool_loop_terminates() -> Result<()> {
 async fn test_self_analyze_runs() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = start_ollama().await?;
+    let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
     // Produce some traces for the memory-write skill.
