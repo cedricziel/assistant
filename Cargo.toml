@@ -134,7 +134,7 @@ lru = "0.16"
 slack-morphism = { version = "2", features = ["hyper"] }
 # Force rustls TLS on the tokio-tungstenite transitive dep (slack-morphism only
 # enables the cert-store feature, not the actual TLS impl, causing wss:// to fail)
-tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
 mattermost_api = "0.8"
 # Internal crates
 opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
