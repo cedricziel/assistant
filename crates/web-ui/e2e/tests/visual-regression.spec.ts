@@ -45,6 +45,28 @@ async function isVisible(page: Page, selector: string): Promise<boolean> {
   }, selector);
 }
 
+/** Create a workflow through the UI and return its id. */
+async function createWorkflow(page: Page): Promise<string> {
+  await navigateAndSettle(page, "/workflows/new");
+
+  const suffix = Date.now();
+  await page.fill('input[name="name"]', `E2E Workflow ${suffix}`);
+  await page.fill(
+    'input[name="description"]',
+    "Workflow created by visual regression test",
+  );
+
+  await page.locator("form.wf-form button[type='submit']").click();
+
+  await page.waitForURL(/\/workflows\/[^/]+$/);
+  const pathname = new URL(page.url()).pathname;
+  const id = pathname.split("/").pop();
+  if (!id) {
+    throw new Error(`failed to parse workflow id from ${pathname}`);
+  }
+  return id;
+}
+
 // -- Tests ------------------------------------------------------------------
 
 test.describe("Login page", () => {
@@ -133,6 +155,35 @@ test.describe("Authenticated pages", () => {
   test("workflow create form", async ({ page }) => {
     await navigateAndSettle(page, "/workflows/new");
     await expect(page).toHaveScreenshot("workflow-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+  });
+
+  test("workflow detail/edit/editor sub-screens", async ({ page }) => {
+    const workflowId = await createWorkflow(page);
+
+    await navigateAndSettle(page, "/workflows");
+    await expect(page).toHaveScreenshot("workflow-list.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+
+    await navigateAndSettle(page, `/workflows/${workflowId}`);
+
+    await expect(page).toHaveScreenshot("workflow-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+
+    await navigateAndSettle(page, `/workflows/${workflowId}/edit`);
+    await expect(page).toHaveScreenshot("workflow-edit.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+
+    await navigateAndSettle(page, `/workflows/${workflowId}/editor`);
+    await expect(page).toHaveScreenshot("workflow-editor.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
