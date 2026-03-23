@@ -179,13 +179,8 @@ export default class extends Controller {
 }
 ```
 
-**Rules:**
-
-- Keep controllers small and feature-scoped (one concern per controller)
-- Prefer declarative `data-action`/`data-target` wiring over manual DOM queries
-- Keep server-rendered HTML as source of truth; use Stimulus for glue/state only
-- Use events (`dispatch`) for cross-controller communication before direct lookup
-- If behavior can be done with native HTML or htmx alone, do not introduce Stimulus
+For detailed Stimulus implementation rules and htmx interop patterns, see
+[`stimulus-playbook`](../stimulus-playbook/SKILL.md).
 
 ### Component Creation Criteria
 
