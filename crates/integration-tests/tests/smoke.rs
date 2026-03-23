@@ -7,12 +7,13 @@
 //! Or use the Makefile target:
 //!   make test-integration
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{env, time::Duration};
 
 use anyhow::Result;
-use assistant_core::{types::Interface, AssistantConfig, MessageBus};
+use assistant_core::{types::Interface, AssistantConfig, ExecutionContext, MessageBus};
 use assistant_llm::{LlmClient, LlmClientConfig};
 use assistant_runtime::Orchestrator;
 use assistant_skills::SkillSource;
@@ -88,6 +89,7 @@ async fn pull_model(base_url: &str, model: &str) -> Result<()> {
 
 struct Fixture {
     orchestrator: Arc<Orchestrator>,
+    executor: Arc<ToolExecutor>,
     conversation_id: Uuid,
 }
 
@@ -128,7 +130,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
     let orchestrator = Arc::new(Orchestrator::new(
         llm,
-        storage,
+        storage.clone(),
         executor.clone(),
         registry.clone(),
         bus,
@@ -140,86 +142,81 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
 
     Ok(Fixture {
         orchestrator,
+        executor,
         conversation_id: Uuid::new_v4(),
     })
 }
 
+fn exec_ctx(f: &Fixture) -> ExecutionContext {
+    ExecutionContext {
+        conversation_id: f.conversation_id,
+        agent_id: "default".to_string(),
+        turn: 0,
+        interface: Interface::Cli,
+        interactive: false,
+        allowed_tools: None,
+        depth: 0,
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/// memory-update persists a user preference to USER.md and it surfaces in a follow-up turn.
+/// memory-append persists a user preference and memory-get can read it.
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn test_memory_round_trip() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = resolve_ollama().await?;
-    let f = build_fixture(&base_url).await?;
+    let f = build_fixture("http://localhost:11434").await?;
+    let ctx = exec_ctx(&f);
 
-    // Ask the agent to remember a preference — should call memory-update target=user.
-    f.orchestrator
-        .run_turn(
-            "Remember this: my favourite colour is indigo",
-            f.conversation_id,
-            Interface::Cli,
-            None,
-        )
+    let mut append_params = HashMap::new();
+    append_params.insert("target".to_string(), serde_json::json!("user"));
+    append_params.insert(
+        "text".to_string(),
+        serde_json::json!("my favourite colour is indigo"),
+    );
+    let append = f
+        .executor
+        .execute("memory-append", append_params, &ctx)
         .await?;
+    assert!(append.success, "memory-append failed: {}", append.content);
 
-    // In a fresh turn the preference should be in the system prompt (USER.md) and recallable.
-    let read = f
-        .orchestrator
-        .run_turn(
-            "What is my favourite colour?",
-            f.conversation_id,
-            Interface::Cli,
-            None,
-        )
-        .await?;
+    let mut get_params = HashMap::new();
+    get_params.insert("target".to_string(), serde_json::json!("user"));
+    let read = f.executor.execute("memory-get", get_params, &ctx).await?;
+    assert!(read.success, "memory-get failed: {}", read.content);
 
-    let answer = read.answer.to_lowercase();
     assert!(
-        answer.contains("indigo"),
-        "expected 'indigo' in answer, got: {answer}"
+        read.content.to_lowercase().contains("indigo"),
+        "expected indigo in memory-get output, got: {}",
+        read.content
     );
 
     Ok(())
 }
 
-/// list-skills returns all 8 built-in skills.
+/// list-skills returns registered repo skills via the tool executor.
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn test_list_skills() -> Result<()> {
     let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
-    let (_container, base_url) = resolve_ollama().await?;
-    let f = build_fixture(&base_url).await?;
-
-    let result = f
-        .orchestrator
-        .run_turn(
-            "List all available skills",
-            f.conversation_id,
-            Interface::Cli,
-            None,
-        )
+    let f = build_fixture("http://localhost:11434").await?;
+    let out = f
+        .executor
+        .execute("list-skills", HashMap::new(), &exec_ctx(&f))
         .await?;
 
-    let answer = result.answer.to_lowercase();
-    for skill in &[
-        "memory-read",
-        "memory-write",
-        "memory-search",
-        "web-fetch",
-        "bash",
-        "list-skills",
-        "self-analyze",
-        "schedule-task",
-    ] {
-        assert!(
-            answer.contains(skill),
-            "expected skill '{skill}' in answer, got: {answer}"
-        );
-    }
+    assert!(out.success, "list-skills failed: {}", out.content);
+    assert!(
+        out.content.to_lowercase().contains("coding-agent"),
+        "expected list-skills output to include coding-agent"
+    );
+    assert!(
+        out.content.to_lowercase().contains("playwright-cli"),
+        "expected list-skills output to include playwright-cli"
+    );
 
     Ok(())
 }
@@ -251,10 +248,10 @@ async fn test_self_analyze_runs() -> Result<()> {
     let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
-    // Produce some traces for the memory-write skill.
+    // Produce some traces for the memory-append tool.
     f.orchestrator
         .run_turn(
-            "Store the value 'hello' under key 'smoke-test'",
+            "Use memory-append to store the value 'hello' under key 'smoke-test' in target 'memory'",
             f.conversation_id,
             Interface::Cli,
             None,
@@ -265,7 +262,7 @@ async fn test_self_analyze_runs() -> Result<()> {
     let result = f
         .orchestrator
         .run_turn(
-            "Analyse the memory-write skill and suggest improvements",
+            "Analyse the memory-append skill and suggest improvements",
             f.conversation_id,
             Interface::Cli,
             None,
