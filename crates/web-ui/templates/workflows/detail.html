@@ -3,19 +3,19 @@ breadcrumb %}
 <a class="breadcrumb-page" href="/workflows">Workflows</a>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">{{ name }}</span>
-{% endblock %} {% block extra_css %} .wf-meta { display:grid;
-grid-template-columns: repeat(3, minmax(0,1fr)); gap:0.75rem; margin-top:1rem; }
-.wf-card { background:#071224; border:1px solid #173153; border-radius:10px;
-padding:0.7rem 0.8rem; } .wf-k { color:#8aa5d8; font-size:0.75rem;
-text-transform:uppercase; letter-spacing:0.06em; } .wf-v { color:#e5e9f0;
-font-size:0.95rem; margin-top:0.2rem; } .wf-actions { display:flex;
-flex-wrap:wrap; gap:0.55rem; margin-top:1rem; } .mono { font-family:
-ui-monospace, monospace; } pre { max-height: 360px; overflow:auto;
+{% endblock %} {% block extra_css %} .wf-page { min-height: 0; } .wf-meta {
+display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:0.75rem;
+margin-top:1rem; } .wf-card { background:#071224; border:1px solid #173153;
+border-radius:10px; padding:0.7rem 0.8rem; } .wf-k { color:#8aa5d8;
+font-size:0.75rem; text-transform:uppercase; letter-spacing:0.06em; } .wf-v {
+color:#e5e9f0; font-size:0.95rem; margin-top:0.2rem; } .wf-actions {
+display:flex; flex-wrap:wrap; gap:0.55rem; margin-top:1rem; } .mono {
+font-family: ui-monospace, monospace; } pre { max-height: 360px; overflow:auto;
 background:#050f1e; border:1px solid #173153; border-radius:8px;
 padding:0.75rem; } @media (max-width: 860px) { .wf-meta {
 grid-template-columns:1fr; } } {% endblock %} {% block content %}
-<div class="layout">
-  <main class="main" style="width: 100%">
+<div class="wf-page">
+  <main class="main">
     <div class="panel">
       <div class="panel-head">
         <div>
@@ -76,14 +76,12 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
           <button class="ghost-btn" type="submit">{{ toggle_label }}</button>
         </form>
 
-        <form
-          method="POST"
-          action="/workflows/{{ id }}/delete"
-          onsubmit="return confirm('Delete this workflow?');"
-        >
+        <form method="POST" action="/workflows/{{ id }}/delete">
           <button
             class="ghost-btn"
             type="submit"
+            hx-post="/workflows/{{ id }}/delete"
+            hx-confirm="Delete this workflow?"
             style="color: #ff9b9b; border-color: #5c2a2a"
           >
             Delete
@@ -107,6 +105,12 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
           type="button"
           class="ghost-btn"
           id="revealWebhookSecretsBtn"
+          data-reveal-webhook-secrets="true"
+          data-token-target="webhookTokenMasked"
+          data-url-target="webhookEndpointMasked"
+          data-token-masked="{{ webhook_token_masked }}"
+          data-url-masked="{{ webhook_url_masked }}"
+          data-revealed="false"
           data-token="{{ webhook_token }}"
           data-url="{{ webhook_url }}"
           style="margin-top: 0.6rem"
@@ -159,25 +163,4 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
     </div>
   </main>
 </div>
-{% endblock %} {% block extra_js %}
-<script>
-  (function () {
-    const btn = document.getElementById("revealWebhookSecretsBtn");
-    if (!btn) return;
-    const tokenEl = document.getElementById("webhookTokenMasked");
-    const urlEl = document.getElementById("webhookEndpointMasked");
-    let revealed = false;
-    btn.addEventListener("click", function () {
-      if (!tokenEl || !urlEl) return;
-      if (!revealed) {
-        tokenEl.textContent = btn.getAttribute("data-token") || "";
-        urlEl.textContent = btn.getAttribute("data-url") || "";
-        btn.textContent = "Hide";
-        revealed = true;
-      } else {
-        location.reload();
-      }
-    });
-  })();
-</script>
 {% endblock %}

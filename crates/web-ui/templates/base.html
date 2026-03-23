@@ -23,12 +23,13 @@
   <style>{% block extra_css %}{% endblock %}</style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="app-shell">
     <!-- Icon rail (desktop) -->
     <nav class="icon-rail" aria-label="Main navigation">
       <div class="rail-brand">A</div>
 
-      <a href="/chat" class="rail-item{% if active_page == "chat" %} active{% endif %}" title="Chat">
+      <a href="/chat" class="rail-item{% if active_page == "chat" %} active{% endif %}" title="Chat"{% if active_page == "chat" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
@@ -36,18 +37,18 @@
 
       <div class="rail-divider"></div>
 
-      <a href="/traces" class="rail-item{% if active_page == "traces" %} active{% endif %}" title="Traces">
+      <a href="/traces" class="rail-item{% if active_page == "traces" %} active{% endif %}" title="Traces"{% if active_page == "traces" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
         </svg>
       </a>
-      <a href="/logs" class="rail-item{% if active_page == "logs" %} active{% endif %}" title="Logs">
+      <a href="/logs" class="rail-item{% if active_page == "logs" %} active{% endif %}" title="Logs"{% if active_page == "logs" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
           <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
         </svg>
       </a>
-      <a href="/analytics" class="rail-item{% if active_page == "analytics" %} active{% endif %}" title="Analytics">
+      <a href="/analytics" class="rail-item{% if active_page == "analytics" %} active{% endif %}" title="Analytics"{% if active_page == "analytics" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
         </svg>
@@ -55,24 +56,24 @@
 
       <div class="rail-divider"></div>
 
-      <a href="/contexts" class="rail-item{% if active_page == "contexts" %} active{% endif %}" title="Contexts">
+      <a href="/contexts" class="rail-item{% if active_page == "contexts" %} active{% endif %}" title="Contexts"{% if active_page == "contexts" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/>
         </svg>
       </a>
-      <a href="/agents" class="rail-item{% if active_page == "agents" %} active{% endif %}" title="Agents">
+      <a href="/agents" class="rail-item{% if active_page == "agents" %} active{% endif %}" title="Agents"{% if active_page == "agents" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/>
           <line x1="9" y1="16" x2="9" y2="16.01"/><line x1="15" y1="16" x2="15" y2="16.01"/>
         </svg>
       </a>
-      <a href="/webhooks" class="rail-item{% if active_page == "webhooks" %} active{% endif %}" title="Webhooks">
+      <a href="/webhooks" class="rail-item{% if active_page == "webhooks" %} active{% endif %}" title="Webhooks"{% if active_page == "webhooks" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
         </svg>
       </a>
-      <a href="/workflows" class="rail-item{% if active_page == "workflows" %} active{% endif %}" title="Workflows">
+      <a href="/workflows" class="rail-item{% if active_page == "workflows" %} active{% endif %}" title="Workflows"{% if active_page == "workflows" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/>
           <path d="M7 5h10"/><path d="M6.5 6.5l4.5 10"/><path d="M17.5 6.5l-4.5 10"/>
@@ -82,7 +83,7 @@
       <div class="rail-spacer"></div>
 
       <form method="POST" action="/logout" style="margin:0">
-        <button type="submit" class="rail-item" title="Sign out" style="border:none;background:none">
+        <button type="submit" class="rail-item" title="Sign out" aria-label="Sign out" style="border:none;background:none">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
           </svg>
@@ -94,7 +95,7 @@
     <div class="app-content">
       <!-- Top bar -->
       <header class="top-bar">
-        <button class="hamburger" aria-label="Menu">
+        <button id="drawerToggle" class="hamburger" aria-label="Open menu" aria-controls="drawer" aria-expanded="false">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
           </svg>
@@ -112,38 +113,38 @@
       </header>
 
       <!-- Main content -->
-      <main class="content-area">
+      <div id="main-content" class="content-area" tabindex="-1">
         {% block content %}{% endblock %}
-      </main>
+      </div>
     </div>
 
     <!-- Bottom tabs (mobile) -->
     <nav class="bottom-tabs" aria-label="Main navigation">
-      <a href="/chat" class="tab-item{% if active_page == "chat" %} active{% endif %}">
+      <a href="/chat" class="tab-item{% if active_page == "chat" %} active{% endif %}"{% if active_page == "chat" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
         Chat
       </a>
-      <a href="/traces" class="tab-item{% if active_page == "traces" %} active{% endif %}">
+      <a href="/traces" class="tab-item{% if active_page == "traces" %} active{% endif %}"{% if active_page == "traces" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
         </svg>
         Traces
       </a>
-      <a href="/analytics" class="tab-item{% if active_page == "analytics" %} active{% endif %}">
+      <a href="/analytics" class="tab-item{% if active_page == "analytics" %} active{% endif %}"{% if active_page == "analytics" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
         </svg>
         Dash
       </a>
-      <a href="/logs" class="tab-item{% if active_page == "logs" %} active{% endif %}">
+      <a href="/logs" class="tab-item{% if active_page == "logs" %} active{% endif %}"{% if active_page == "logs" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
         </svg>
         Logs
       </a>
-      <a href="/agents" class="tab-item{% if active_page == "agents" %} active{% endif %}{% if active_page == "webhooks" %} active{% endif %}{% if active_page == "contexts" %} active{% endif %}{% if active_page == "workflows" %} active{% endif %}">
+      <a href="/agents" class="tab-item{% if active_page == "agents" %} active{% endif %}{% if active_page == "webhooks" %} active{% endif %}{% if active_page == "contexts" %} active{% endif %}{% if active_page == "workflows" %} active{% endif %}"{% if active_page == "agents" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/>
         </svg>
@@ -154,59 +155,59 @@
 
   <!-- Slide-over drawer (tablet) -->
   <div class="drawer-backdrop" id="drawerBackdrop"></div>
-  <aside class="drawer" id="drawer">
+  <aside class="drawer" id="drawer" aria-hidden="true">
     <div class="drawer-header">
       <span class="drawer-brand">Assistant</span>
-      <button class="drawer-close">&times;</button>
+      <button class="drawer-close" aria-label="Close menu">&times;</button>
     </div>
     <nav class="drawer-nav">
-      <a href="/chat" class="drawer-nav-item{% if active_page == "chat" %} active{% endif %}">
+      <a href="/chat" class="drawer-nav-item{% if active_page == "chat" %} active{% endif %}"{% if active_page == "chat" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
         Chat
       </a>
       <div class="drawer-divider"></div>
-      <a href="/traces" class="drawer-nav-item{% if active_page == "traces" %} active{% endif %}">
+      <a href="/traces" class="drawer-nav-item{% if active_page == "traces" %} active{% endif %}"{% if active_page == "traces" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
         </svg>
         Traces
       </a>
-      <a href="/logs" class="drawer-nav-item{% if active_page == "logs" %} active{% endif %}">
+      <a href="/logs" class="drawer-nav-item{% if active_page == "logs" %} active{% endif %}"{% if active_page == "logs" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
           <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
         </svg>
         Logs
       </a>
-      <a href="/analytics" class="drawer-nav-item{% if active_page == "analytics" %} active{% endif %}">
+      <a href="/analytics" class="drawer-nav-item{% if active_page == "analytics" %} active{% endif %}"{% if active_page == "analytics" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
         </svg>
         Analytics
       </a>
       <div class="drawer-divider"></div>
-      <a href="/contexts" class="drawer-nav-item{% if active_page == "contexts" %} active{% endif %}">
+      <a href="/contexts" class="drawer-nav-item{% if active_page == "contexts" %} active{% endif %}"{% if active_page == "contexts" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/>
         </svg>
         Contexts
       </a>
-      <a href="/agents" class="drawer-nav-item{% if active_page == "agents" %} active{% endif %}">
+      <a href="/agents" class="drawer-nav-item{% if active_page == "agents" %} active{% endif %}"{% if active_page == "agents" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/>
         </svg>
         Agents
       </a>
-      <a href="/webhooks" class="drawer-nav-item{% if active_page == "webhooks" %} active{% endif %}">
+      <a href="/webhooks" class="drawer-nav-item{% if active_page == "webhooks" %} active{% endif %}"{% if active_page == "webhooks" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
         </svg>
         Webhooks
       </a>
-      <a href="/workflows" class="drawer-nav-item{% if active_page == "workflows" %} active{% endif %}">
+      <a href="/workflows" class="drawer-nav-item{% if active_page == "workflows" %} active{% endif %}"{% if active_page == "workflows" %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/>
           <path d="M7 5h10"/><path d="M6.5 6.5l4.5 10"/><path d="M17.5 6.5l-4.5 10"/>
