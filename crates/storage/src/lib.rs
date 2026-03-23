@@ -273,6 +273,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "023_workflow_run_step_output",
             include_str!("../../../migrations/023_workflow_run_step_output.sql"),
         ),
+        (
+            "024_service_name_on_telemetry",
+            include_str!("../../../migrations/024_service_name_on_telemetry.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {

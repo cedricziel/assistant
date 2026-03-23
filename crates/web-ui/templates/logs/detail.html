@@ -32,6 +32,20 @@
             <td class="attr-v">{{ timestamp }}</td>
           </tr>
           <tr>
+            <td class="attr-k">Service</td>
+            <td class="attr-v">
+              {% if let Some(name) = service_name %} {{ name }} {% else %}
+              &mdash; {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="attr-k">Span</td>
+            <td class="attr-v">
+              {% if let Some(name) = span_name %} {{ name }} {% else %} &mdash;
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
             <td class="attr-k">Target</td>
             <td class="attr-v">{{ target }}</td>
           </tr>

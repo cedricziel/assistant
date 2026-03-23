@@ -15,11 +15,17 @@ use opentelemetry_sdk::metrics::data::{
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions::attribute::{GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL};
 use serde_json::{Map, Number};
 use sha2::{Digest, Sha256};
 use sqlx::{SqliteConnection, SqlitePool};
 use tokio::runtime::Handle;
 use tracing::warn;
+
+const GEN_AI_PROVIDER_NAME: &str = "gen_ai.provider.name";
+
+#[cfg(test)]
+use opentelemetry_semantic_conventions::attribute::{SERVICE_NAME, SERVICE_VERSION};
 
 /// OpenTelemetry metric exporter that persists data points into the
 /// `metric_points` SQLite table, with resources and scopes normalized
@@ -616,9 +622,9 @@ fn extract_denormalized(attrs: &[KeyValue]) -> DenormalizedAttrs {
 
     for kv in attrs {
         match kv.key.as_str() {
-            "gen_ai.request.model" => da.model = value_as_string(&kv.value),
-            "gen_ai.provider.name" => da.provider = value_as_string(&kv.value),
-            "gen_ai.operation.name" => da.operation = value_as_string(&kv.value),
+            GEN_AI_REQUEST_MODEL => da.model = value_as_string(&kv.value),
+            GEN_AI_PROVIDER_NAME => da.provider = value_as_string(&kv.value),
+            GEN_AI_OPERATION_NAME => da.operation = value_as_string(&kv.value),
             "skill" => da.skill = value_as_string(&kv.value),
             "interface" => da.interface = value_as_string(&kv.value),
             "agent.id" => {
@@ -696,8 +702,8 @@ mod tests {
 
         let resource = Resource::builder_empty()
             .with_attributes([
-                KeyValue::new("service.name", "test"),
-                KeyValue::new("service.version", "0.1.0"),
+                KeyValue::new(SERVICE_NAME, "test"),
+                KeyValue::new(SERVICE_VERSION, "0.1.0"),
             ])
             .build();
 
@@ -753,10 +759,10 @@ mod tests {
     #[test]
     fn different_resources_get_different_fingerprints() {
         let r1 = Resource::builder_empty()
-            .with_attributes([KeyValue::new("service.name", "a")])
+            .with_attributes([KeyValue::new(SERVICE_NAME, "a")])
             .build();
         let r2 = Resource::builder_empty()
-            .with_attributes([KeyValue::new("service.name", "b")])
+            .with_attributes([KeyValue::new(SERVICE_NAME, "b")])
             .build();
         assert_ne!(resource_fingerprint(&r1), resource_fingerprint(&r2));
     }

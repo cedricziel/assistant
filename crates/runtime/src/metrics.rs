@@ -5,6 +5,14 @@
 
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{global, KeyValue};
+use opentelemetry_semantic_conventions::attribute::{
+    ERROR_TYPE, GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL, GEN_AI_TOKEN_TYPE,
+};
+use opentelemetry_semantic_conventions::metric::{
+    GEN_AI_CLIENT_OPERATION_DURATION, GEN_AI_CLIENT_TOKEN_USAGE,
+};
+
+const GEN_AI_PROVIDER_NAME: &str = "gen_ai.provider.name";
 
 /// Holds all metric instruments for recording GenAI and operational metrics.
 ///
@@ -45,13 +53,13 @@ impl MetricsRecorder {
         Self {
             // -- GenAI semconv -----------------------------------------------
             token_usage: meter
-                .f64_histogram("gen_ai.client.token.usage")
+                .f64_histogram(GEN_AI_CLIENT_TOKEN_USAGE)
                 .with_description("Number of input and output tokens used")
                 .with_unit("{token}")
                 .build(),
 
             operation_duration: meter
-                .f64_histogram("gen_ai.client.operation.duration")
+                .f64_histogram(GEN_AI_CLIENT_OPERATION_DURATION)
                 .with_description("GenAI operation duration")
                 .with_unit("s")
                 .build(),
@@ -109,18 +117,18 @@ impl MetricsRecorder {
         output_tokens: u64,
     ) {
         let common = [
-            KeyValue::new("gen_ai.request.model", model.to_string()),
-            KeyValue::new("gen_ai.provider.name", provider.to_string()),
-            KeyValue::new("gen_ai.operation.name", operation.to_string()),
+            KeyValue::new(GEN_AI_REQUEST_MODEL, model.to_string()),
+            KeyValue::new(GEN_AI_PROVIDER_NAME, provider.to_string()),
+            KeyValue::new(GEN_AI_OPERATION_NAME, operation.to_string()),
             KeyValue::new("agent.id", agent_id.to_string()),
         ];
 
         let mut input_attrs = common.to_vec();
-        input_attrs.push(KeyValue::new("gen_ai.token.type", "input"));
+        input_attrs.push(KeyValue::new(GEN_AI_TOKEN_TYPE, "input"));
         self.token_usage.record(input_tokens as f64, &input_attrs);
 
         let mut output_attrs = common.to_vec();
-        output_attrs.push(KeyValue::new("gen_ai.token.type", "output"));
+        output_attrs.push(KeyValue::new(GEN_AI_TOKEN_TYPE, "output"));
         self.token_usage.record(output_tokens as f64, &output_attrs);
     }
 
@@ -135,13 +143,13 @@ impl MetricsRecorder {
         error_type: Option<&str>,
     ) {
         let mut attrs = vec![
-            KeyValue::new("gen_ai.request.model", model.to_string()),
-            KeyValue::new("gen_ai.provider.name", provider.to_string()),
-            KeyValue::new("gen_ai.operation.name", operation.to_string()),
+            KeyValue::new(GEN_AI_REQUEST_MODEL, model.to_string()),
+            KeyValue::new(GEN_AI_PROVIDER_NAME, provider.to_string()),
+            KeyValue::new(GEN_AI_OPERATION_NAME, operation.to_string()),
             KeyValue::new("agent.id", agent_id.to_string()),
         ];
         if let Some(err) = error_type {
-            attrs.push(KeyValue::new("error.type", err.to_string()));
+            attrs.push(KeyValue::new(ERROR_TYPE, err.to_string()));
         }
         self.operation_duration.record(duration_s, &attrs);
     }
@@ -159,18 +167,26 @@ impl MetricsRecorder {
     }
 
     /// Record a tool invocation.
-    pub fn record_tool_invocation(&self, agent_id: &str, tool_name: &str) {
+    pub fn record_tool_invocation(&self, agent_id: &str, tool_name: &str, span_name: &str) {
         let attrs = [
             KeyValue::new("tool.name", tool_name.to_string()),
+            KeyValue::new("span.name", span_name.to_string()),
             KeyValue::new("agent.id", agent_id.to_string()),
         ];
         self.tool_invocations.add(1, &attrs);
     }
 
     /// Record tool execution duration.
-    pub fn record_tool_duration(&self, agent_id: &str, tool_name: &str, duration_s: f64) {
+    pub fn record_tool_duration(
+        &self,
+        agent_id: &str,
+        tool_name: &str,
+        span_name: &str,
+        duration_s: f64,
+    ) {
         let attrs = [
             KeyValue::new("tool.name", tool_name.to_string()),
+            KeyValue::new("span.name", span_name.to_string()),
             KeyValue::new("agent.id", agent_id.to_string()),
         ];
         self.tool_duration.record(duration_s, &attrs);
@@ -179,7 +195,7 @@ impl MetricsRecorder {
     /// Record an error.
     pub fn record_error(&self, agent_id: &str, error_type: &str, source: &str) {
         let attrs = [
-            KeyValue::new("error.type", error_type.to_string()),
+            KeyValue::new(ERROR_TYPE, error_type.to_string()),
             KeyValue::new("source", source.to_string()),
             KeyValue::new("agent.id", agent_id.to_string()),
         ];

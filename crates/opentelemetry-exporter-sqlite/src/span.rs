@@ -1,10 +1,15 @@
 use chrono::{DateTime, Utc};
 use opentelemetry::trace::SpanId;
-use opentelemetry::{KeyValue, Value};
+use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{SpanData, SpanExporter};
+use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions::attribute::{
+    GEN_AI_USAGE_INPUT_TOKENS, GEN_AI_USAGE_OUTPUT_TOKENS, SERVICE_NAME,
+};
 use serde_json::{Map, Number};
 use sqlx::{SqliteConnection, SqlitePool};
+use std::sync::{Arc, RwLock};
 use tokio::runtime::Handle;
 use uuid::Uuid;
 
@@ -17,6 +22,7 @@ use uuid::Uuid;
 pub struct SqliteSpanExporter {
     pool: SqlitePool,
     rt_handle: Handle,
+    service_name: Arc<RwLock<Option<String>>>,
 }
 
 impl SqliteSpanExporter {
@@ -28,6 +34,7 @@ impl SqliteSpanExporter {
         Self {
             pool,
             rt_handle: Handle::current(),
+            service_name: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -40,7 +47,7 @@ impl SqliteSpanExporter {
             .map_err(|e| OTelSdkError::InternalFailure(format!("SQLite begin failed: {e}")))?;
 
         for span in batch {
-            if let Err(err) = SqliteSpanExporter::persist_span(&mut tx, span).await {
+            if let Err(err) = self.persist_span(&mut tx, span).await {
                 return Err(OTelSdkError::InternalFailure(format!(
                     "SQLite span export failed: {err}"
                 )));
@@ -54,7 +61,11 @@ impl SqliteSpanExporter {
         Ok(())
     }
 
-    async fn persist_span(conn: &mut SqliteConnection, span: SpanData) -> Result<(), sqlx::Error> {
+    async fn persist_span(
+        &self,
+        conn: &mut SqliteConnection,
+        span: SpanData,
+    ) -> Result<(), sqlx::Error> {
         let mut attrs = attributes_to_map(&span.attributes);
         let (status_code, status_message) = status_fields(&span.status);
         attrs.insert(
@@ -107,10 +118,10 @@ impl SqliteSpanExporter {
             .map(|s| s.to_string());
 
         let input_tokens = attrs
-            .get("gen_ai.usage.input_tokens")
+            .get(GEN_AI_USAGE_INPUT_TOKENS)
             .and_then(|v| v.as_i64());
         let output_tokens = attrs
-            .get("gen_ai.usage.output_tokens")
+            .get(GEN_AI_USAGE_OUTPUT_TOKENS)
             .and_then(|v| v.as_i64());
 
         let parent_span_id = if span.parent_span_id == SpanId::INVALID {
@@ -119,18 +130,21 @@ impl SqliteSpanExporter {
             Some(span.parent_span_id.to_string())
         };
 
+        let service_name = self.service_name.read().ok().and_then(|s| s.clone());
+
         sqlx::query(
             "INSERT INTO distributed_traces \
-                (span_id, trace_id, parent_span_id, name, conversation_id, turn, tool_name, \
+                (span_id, trace_id, parent_span_id, name, service_name, conversation_id, turn, tool_name, \
                  tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, \
-                 attributes, input_tokens, output_tokens) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16) \
+                  attributes, input_tokens, output_tokens) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17) \
              ON CONFLICT(span_id) DO NOTHING",
         )
         .bind(span.span_context.span_id().to_string())
         .bind(span.span_context.trace_id().to_string())
         .bind(parent_span_id)
         .bind(span.name.to_string())
+        .bind(service_name)
         .bind(conversation_id)
         .bind(turn)
         .bind(tool_name)
@@ -156,6 +170,16 @@ impl SpanExporter for SqliteSpanExporter {
             self.export_inner(batch).await
         } else {
             self.rt_handle.block_on(self.export_inner(batch))
+        }
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        let service_name = resource
+            .get(&Key::new(SERVICE_NAME))
+            .map(|value| value.to_string());
+
+        if let Ok(mut current) = self.service_name.write() {
+            *current = service_name;
         }
     }
 }

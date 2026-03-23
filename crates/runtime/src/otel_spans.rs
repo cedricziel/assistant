@@ -10,9 +10,20 @@ use assistant_llm::{
 use opentelemetry::{
     global,
     trace::{Span as _, TraceContextExt, Tracer as _},
-    Context as OtelContext, KeyValue,
+    Array, Context as OtelContext, KeyValue, StringValue, Value,
+};
+use opentelemetry_semantic_conventions::attribute::{
+    GEN_AI_CONVERSATION_ID, GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL,
+    GEN_AI_RESPONSE_FINISH_REASONS, GEN_AI_RESPONSE_ID, GEN_AI_RESPONSE_MODEL,
+    GEN_AI_USAGE_INPUT_TOKENS, GEN_AI_USAGE_OUTPUT_TOKENS, SERVER_ADDRESS,
 };
 use uuid::Uuid;
+
+const GEN_AI_PROVIDER_NAME: &str = "gen_ai.provider.name";
+const GEN_AI_SYSTEM_INSTRUCTIONS: &str = "gen_ai.system_instructions";
+const GEN_AI_INPUT_MESSAGES: &str = "gen_ai.input.messages";
+const GEN_AI_TOOL_DEFINITIONS: &str = "gen_ai.tool.definitions";
+const GEN_AI_OUTPUT_MESSAGES: &str = "gen_ai.output.messages";
 
 /// Create an OpenTelemetry context carrying a conversation-level root span.
 ///
@@ -22,9 +33,15 @@ use uuid::Uuid;
 /// trace.
 pub fn start_conversation_context(conversation_id: Uuid, interface: &Interface) -> OtelContext {
     let tracer = global::tracer("assistant.orchestrator");
-    let mut span = tracer.start("conversation");
+    let span_name = "conversation";
+    let mut span = tracer.start(span_name);
+    span.set_attribute(KeyValue::new("span.name", span_name));
     span.set_attribute(KeyValue::new(
         "conversation_id",
+        conversation_id.to_string(),
+    ));
+    span.set_attribute(KeyValue::new(
+        GEN_AI_CONVERSATION_ID,
         conversation_id.to_string(),
     ));
     span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
@@ -42,9 +59,14 @@ pub(crate) fn start_tool_span(
 ) -> opentelemetry::global::BoxedSpan {
     let tracer = global::tracer("assistant.orchestrator");
     let span_name = format!("execute_tool {tool_name}");
-    let mut span = tracer.start_with_context(span_name, parent_cx);
+    let mut span = tracer.start_with_context(span_name.clone(), parent_cx);
+    span.set_attribute(KeyValue::new("span.name", span_name));
     span.set_attribute(KeyValue::new(
         "conversation_id",
+        conversation_id.to_string(),
+    ));
+    span.set_attribute(KeyValue::new(
+        GEN_AI_CONVERSATION_ID,
         conversation_id.to_string(),
     ));
     span.set_attribute(KeyValue::new("iteration", iteration as i64));
@@ -66,6 +88,7 @@ pub(crate) fn start_tool_span(
 /// - `gen_ai.tool.definitions` — serialised tool spec list
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn start_llm_span(
+    conversation_id: Uuid,
     llm: &dyn LlmProvider,
     iteration: usize,
     parent_cx: &OtelContext,
@@ -77,26 +100,31 @@ pub(crate) fn start_llm_span(
     let tracer = global::tracer("assistant.orchestrator");
     let model = llm.model_name();
     let span_name = format!("chat {model}");
-    let mut span = tracer.start_with_context(span_name, parent_cx);
+    let mut span = tracer.start_with_context(span_name.clone(), parent_cx);
+    span.set_attribute(KeyValue::new("span.name", span_name));
     span.set_attribute(KeyValue::new(
-        "gen_ai.system",
+        GEN_AI_PROVIDER_NAME,
         llm.provider_name().to_string(),
     ));
-    span.set_attribute(KeyValue::new("gen_ai.request.model", model.to_string()));
-    span.set_attribute(KeyValue::new("gen_ai.operation.name", "chat"));
+    span.set_attribute(KeyValue::new(GEN_AI_REQUEST_MODEL, model.to_string()));
+    span.set_attribute(KeyValue::new(GEN_AI_OPERATION_NAME, "chat"));
     span.set_attribute(KeyValue::new(
-        "server.address",
+        GEN_AI_CONVERSATION_ID,
+        conversation_id.to_string(),
+    ));
+    span.set_attribute(KeyValue::new(
+        SERVER_ADDRESS,
         llm.server_address().to_string(),
     ));
     span.set_attribute(KeyValue::new("iteration", iteration as i64));
 
     if trace_content {
         span.set_attribute(KeyValue::new(
-            "gen_ai.system_instructions",
+            GEN_AI_SYSTEM_INSTRUCTIONS,
             system_prompt.to_string(),
         ));
         let input_json = serialize_history_for_span(history);
-        span.set_attribute(KeyValue::new("gen_ai.input.messages", input_json));
+        span.set_attribute(KeyValue::new(GEN_AI_INPUT_MESSAGES, input_json));
         if !tools.is_empty() {
             let tools_json = serde_json::to_string(
                 &tools
@@ -110,7 +138,7 @@ pub(crate) fn start_llm_span(
                     .collect::<Vec<_>>(),
             )
             .unwrap_or_default();
-            span.set_attribute(KeyValue::new("gen_ai.tool.definitions", tools_json));
+            span.set_attribute(KeyValue::new(GEN_AI_TOOL_DEFINITIONS, tools_json));
         }
     }
 
@@ -130,23 +158,22 @@ pub(crate) fn finish_llm_span(
     metrics: Option<(&crate::MetricsRecorder, &str, &str, std::time::Duration)>,
 ) {
     if let Some(model) = &meta.model {
-        span.set_attribute(KeyValue::new("gen_ai.response.model", model.clone()));
+        span.set_attribute(KeyValue::new(GEN_AI_RESPONSE_MODEL, model.clone()));
     }
     if let Some(id) = &meta.response_id {
-        span.set_attribute(KeyValue::new("gen_ai.response.id", id.clone()));
+        span.set_attribute(KeyValue::new(GEN_AI_RESPONSE_ID, id.clone()));
     }
     if let Some(reason) = &meta.finish_reason {
-        // OTel spec uses a string array; we record the single reason as a scalar.
         span.set_attribute(KeyValue::new(
-            "gen_ai.response.finish_reasons",
-            reason.clone(),
+            GEN_AI_RESPONSE_FINISH_REASONS,
+            Value::Array(Array::String(vec![StringValue::from(reason.clone())])),
         ));
     }
     if let Some(input) = meta.input_tokens {
-        span.set_attribute(KeyValue::new("gen_ai.usage.input_tokens", input as i64));
+        span.set_attribute(KeyValue::new(GEN_AI_USAGE_INPUT_TOKENS, input as i64));
     }
     if let Some(output) = meta.output_tokens {
-        span.set_attribute(KeyValue::new("gen_ai.usage.output_tokens", output as i64));
+        span.set_attribute(KeyValue::new(GEN_AI_USAGE_OUTPUT_TOKENS, output as i64));
     }
 
     if trace_content {
@@ -170,7 +197,7 @@ pub(crate) fn finish_llm_span(
                 serde_json::json!([{"role": "assistant", "thinking": text}]).to_string()
             }
         };
-        span.set_attribute(KeyValue::new("gen_ai.output.messages", output_json));
+        span.set_attribute(KeyValue::new(GEN_AI_OUTPUT_MESSAGES, output_json));
     }
 
     // -- Record OTel metrics alongside the span ---------------------------------

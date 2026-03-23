@@ -431,6 +431,7 @@ impl Orchestrator {
             };
 
             let mut llm_span = crate::otel_spans::start_llm_span(
+                conversation_id,
                 self.llm.as_ref(),
                 iteration,
                 &turn_cx,
@@ -686,6 +687,7 @@ impl Orchestrator {
             };
 
             let mut llm_span = crate::otel_spans::start_llm_span(
+                conversation_id,
                 self.llm.as_ref(),
                 iteration,
                 &turn_cx,

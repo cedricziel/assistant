@@ -113,7 +113,8 @@ breadcrumb %}
           <tr>
             <th>Severity</th>
             <th>Time</th>
-            <th>Target</th>
+            <th>Service</th>
+            <th>Span</th>
             <th>Body</th>
             <th>Trace</th>
           </tr>
@@ -130,7 +131,12 @@ breadcrumb %}
             </td>
             <td class="log-ts">{{ log.timestamp }}</td>
             <td>
-              {% if let Some(target) = log.target %} {{ target }} {% else %}
+              {% if let Some(name) = log.service_name %} {{ name }} {% else %}
+              <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if let Some(name) = log.span_name %} {{ name }} {% else %}
               <span class="muted">&mdash;</span>
               {% endif %}
             </td>
