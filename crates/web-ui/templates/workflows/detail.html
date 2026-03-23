@@ -84,33 +84,36 @@ breadcrumb %}
       <h3 style="margin-top: 1rem; margin-bottom: 0.5rem">
         Inbound Webhook Trigger
       </h3>
-      <div class="wf-card">
+      <div
+        class="wf-card"
+        data-controller="workflow-secrets"
+        data-workflow-secrets-endpoint-value="/api/workflows/{{ id }}/webhook-secrets"
+        data-workflow-secrets-token-masked-value="{{ webhook_token_masked }}"
+        data-workflow-secrets-url-masked-value="{{ webhook_url_masked }}"
+      >
         <div class="wf-k">Endpoint</div>
-        <div class="wf-v workflow-mono" id="webhookEndpointMasked">
+        <div class="wf-v workflow-mono" data-workflow-secrets-target="url">
           {{ webhook_url_masked }}
         </div>
         <div class="wf-k" style="margin-top: 0.55rem">Token</div>
-        <div class="wf-v workflow-mono" id="webhookTokenMasked">
+        <div class="wf-v workflow-mono" data-workflow-secrets-target="token">
           {{ webhook_token_masked }}
         </div>
         <button
           type="button"
           class="ghost-btn"
-          id="revealWebhookSecretsBtn"
-          data-reveal-webhook-secrets="true"
-          data-secrets-endpoint="/api/workflows/{{ id }}/webhook-secrets"
-          data-token-target="webhookTokenMasked"
-          data-url-target="webhookEndpointMasked"
-          data-token-masked="{{ webhook_token_masked }}"
-          data-url-masked="{{ webhook_url_masked }}"
-          data-status-target="webhookSecretsStatus"
-          data-revealed="false"
+          data-workflow-secrets-target="button"
+          data-action="workflow-secrets#toggle"
           aria-pressed="false"
           style="margin-top: 0.6rem"
         >
           Reveal
         </button>
-        <div id="webhookSecretsStatus" class="wf-k" aria-live="polite"></div>
+        <div
+          class="wf-k"
+          data-workflow-secrets-target="status"
+          aria-live="polite"
+        ></div>
         <div class="wf-k" style="margin-top: 0.55rem">Last Rotated</div>
         <div class="wf-v">{{ webhook_updated_at }}</div>
         <form

@@ -25,6 +25,8 @@ const WORKFLOW_CSS: &str = include_str!("../../templates/partials/workflow_css.h
 
 // First-party JS modules.
 const APP_JS: &str = include_str!("app.js");
+const STIMULUS_BOOT_JS: &str = include_str!("stimulus-boot.js");
+const WORKFLOW_SECRETS_CONTROLLER_JS: &str = include_str!("controllers/workflow-secrets.js");
 const CHAT_JS: &str = include_str!("chat.js");
 const TRACE_DETAIL_JS: &str = include_str!("trace-detail.js");
 const AGENT_FORM_JS: &str = include_str!("agent-form.js");
@@ -33,6 +35,7 @@ const WORKFLOW_EDITOR_JS: &str = include_str!("workflow-editor.js");
 // Vendored third-party JS (committed to repo, no CDN fetch at runtime).
 const HTMX_JS: &str = include_str!("vendor/htmx.min.js");
 const HTMX_SSE_JS: &str = include_str!("vendor/sse.js");
+const STIMULUS_JS: &str = include_str!("vendor/stimulus.js");
 
 // -- Fingerprinted asset -----------------------------------------------------
 
@@ -94,6 +97,17 @@ static SSE_ASSET: LazyLock<Asset> =
 
 static APP_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| fingerprint_static("app", "js", APP_JS));
 
+static STIMULUS_BOOT_JS_ASSET: LazyLock<Asset> =
+    LazyLock::new(|| fingerprint_static("stimulus-boot", "js", STIMULUS_BOOT_JS));
+
+static WORKFLOW_SECRETS_CONTROLLER_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| {
+    fingerprint_static(
+        "workflow-secrets-controller",
+        "js",
+        WORKFLOW_SECRETS_CONTROLLER_JS,
+    )
+});
+
 static CHAT_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| fingerprint_static("chat", "js", CHAT_JS));
 
 static TRACE_DETAIL_JS_ASSET: LazyLock<Asset> =
@@ -104,6 +118,9 @@ static AGENT_FORM_JS_ASSET: LazyLock<Asset> =
 
 static WORKFLOW_EDITOR_JS_ASSET: LazyLock<Asset> =
     LazyLock::new(|| fingerprint_static("workflow-editor", "js", WORKFLOW_EDITOR_JS));
+
+static STIMULUS_ASSET: LazyLock<Asset> =
+    LazyLock::new(|| fingerprint_static("stimulus", "js", STIMULUS_JS));
 
 // -- Public API --------------------------------------------------------------
 
@@ -125,6 +142,21 @@ pub fn htmx_sse_url() -> &'static str {
 /// Fingerprinted URL for the app shell JS.
 pub fn app_js_url() -> &'static str {
     &APP_JS_ASSET.url
+}
+
+/// Fingerprinted URL for the vendored Stimulus runtime.
+pub fn stimulus_url() -> &'static str {
+    &STIMULUS_ASSET.url
+}
+
+/// Fingerprinted URL for Stimulus app bootstrapping.
+pub fn stimulus_boot_js_url() -> &'static str {
+    &STIMULUS_BOOT_JS_ASSET.url
+}
+
+/// Fingerprinted URL for the workflow secrets Stimulus controller.
+pub fn workflow_secrets_controller_js_url() -> &'static str {
+    &WORKFLOW_SECRETS_CONTROLLER_JS_ASSET.url
 }
 
 /// Fingerprinted URL for chat-specific JS.
@@ -187,6 +219,18 @@ async fn serve_app_js() -> Response {
     serve_js_immutable(APP_JS_ASSET.content)
 }
 
+async fn serve_stimulus_js() -> Response {
+    serve_js_immutable(STIMULUS_ASSET.content)
+}
+
+async fn serve_stimulus_boot_js() -> Response {
+    serve_js_immutable(STIMULUS_BOOT_JS_ASSET.content)
+}
+
+async fn serve_workflow_secrets_controller_js() -> Response {
+    serve_js_immutable(WORKFLOW_SECRETS_CONTROLLER_JS_ASSET.content)
+}
+
 async fn serve_chat_js() -> Response {
     serve_js_immutable(CHAT_JS_ASSET.content)
 }
@@ -227,8 +271,14 @@ pub fn static_router() -> Router {
         // Vendored JS
         .route(&HTMX_ASSET.url, get(serve_htmx))
         .route(&SSE_ASSET.url, get(serve_sse))
+        .route(&STIMULUS_ASSET.url, get(serve_stimulus_js))
         // First-party JS
         .route(&APP_JS_ASSET.url, get(serve_app_js))
+        .route(&STIMULUS_BOOT_JS_ASSET.url, get(serve_stimulus_boot_js))
+        .route(
+            &WORKFLOW_SECRETS_CONTROLLER_JS_ASSET.url,
+            get(serve_workflow_secrets_controller_js),
+        )
         .route(&CHAT_JS_ASSET.url, get(serve_chat_js))
         .route(&TRACE_DETAIL_JS_ASSET.url, get(serve_trace_detail_js))
         .route(&AGENT_FORM_JS_ASSET.url, get(serve_agent_form_js))

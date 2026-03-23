@@ -35,6 +35,21 @@ pub trait StaticUrls {
         crate::static_assets::app_js_url()
     }
 
+    /// Fingerprinted URL for the vendored Stimulus runtime.
+    fn stimulus_url(&self) -> &'static str {
+        crate::static_assets::stimulus_url()
+    }
+
+    /// Fingerprinted URL for Stimulus app bootstrap JS.
+    fn stimulus_boot_js_url(&self) -> &'static str {
+        crate::static_assets::stimulus_boot_js_url()
+    }
+
+    /// Fingerprinted URL for workflow secrets Stimulus controller JS.
+    fn workflow_secrets_controller_js_url(&self) -> &'static str {
+        crate::static_assets::workflow_secrets_controller_js_url()
+    }
+
     /// Fingerprinted URL for chat-specific JS.
     fn chat_js_url(&self) -> &'static str {
         crate::static_assets::chat_js_url()
