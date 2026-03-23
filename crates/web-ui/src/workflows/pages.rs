@@ -85,9 +85,7 @@ struct WorkflowDetailTemplate {
     created_at: String,
     updated_at: String,
     graph_json: String,
-    webhook_url: String,
     webhook_url_masked: String,
-    webhook_token: String,
     webhook_token_masked: String,
     webhook_updated_at: String,
     recent_runs: Vec<WorkflowRunView>,
@@ -236,8 +234,9 @@ pub async fn show_workflow(
         .await
         .map_err(internal_error)?;
     let webhook_url = format!("/workflow-hooks/{}/{}", id, endpoint.token);
+    let webhook_token = endpoint.token.clone();
     let webhook_url_masked = mask_credential(&webhook_url);
-    let webhook_token_masked = mask_credential(&endpoint.token);
+    let webhook_token_masked = mask_credential(&webhook_token);
     let recent_runs = store
         .list_runs(workflow_id, 10)
         .await
@@ -267,8 +266,6 @@ pub async fn show_workflow(
         created_at: format_ts(workflow.created_at),
         updated_at: format_ts(workflow.updated_at),
         graph_json,
-        webhook_url,
-        webhook_token: endpoint.token,
         webhook_url_masked,
         webhook_token_masked,
         webhook_updated_at: format_ts(endpoint.updated_at),
@@ -552,6 +549,12 @@ pub struct WorkflowWebhookTriggerAccepted {
     status: String,
 }
 
+#[derive(Serialize)]
+pub struct WorkflowWebhookSecretsResponse {
+    webhook_url: String,
+    webhook_token: String,
+}
+
 /// `GET /api/workflows` -- List workflows.
 pub async fn api_list_workflows(
     State(state): State<WorkflowPagesState>,
@@ -597,6 +600,34 @@ pub async fn api_get_workflow(
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, "Workflow not found".to_string()))?;
     Ok(Json(to_api_detail(workflow)))
+}
+
+/// `GET /api/workflows/:id/webhook-secrets` -- Reveal webhook URL/token.
+pub async fn api_get_workflow_webhook_secrets(
+    State(state): State<WorkflowPagesState>,
+    Path(id): Path<String>,
+) -> Result<Json<WorkflowWebhookSecretsResponse>, (StatusCode, String)> {
+    let workflow_id = parse_uuid(&id)?;
+    let store = workflow_store(&state).await;
+
+    let workflow = store
+        .get(workflow_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or((StatusCode::NOT_FOUND, "Workflow not found".to_string()))?;
+    let endpoint = store
+        .get_webhook_endpoint(workflow_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "Workflow webhook endpoint not found".to_string(),
+        ))?;
+
+    Ok(Json(WorkflowWebhookSecretsResponse {
+        webhook_url: format!("/workflow-hooks/{}/{}", workflow.id, endpoint.token),
+        webhook_token: endpoint.token,
+    }))
 }
 
 /// `PUT /api/workflows/:id` -- Update workflow.

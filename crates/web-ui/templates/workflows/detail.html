@@ -76,12 +76,14 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
           <button class="ghost-btn" type="submit">{{ toggle_label }}</button>
         </form>
 
-        <form method="POST" action="/workflows/{{ id }}/delete">
+        <form
+          method="POST"
+          action="/workflows/{{ id }}/delete"
+          data-confirm="Delete this workflow? This cannot be undone."
+        >
           <button
             class="ghost-btn"
             type="submit"
-            hx-post="/workflows/{{ id }}/delete"
-            hx-confirm="Delete this workflow?"
             style="color: #ff9b9b; border-color: #5c2a2a"
           >
             Delete
@@ -106,17 +108,19 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
           class="ghost-btn"
           id="revealWebhookSecretsBtn"
           data-reveal-webhook-secrets="true"
+          data-secrets-endpoint="/api/workflows/{{ id }}/webhook-secrets"
           data-token-target="webhookTokenMasked"
           data-url-target="webhookEndpointMasked"
           data-token-masked="{{ webhook_token_masked }}"
           data-url-masked="{{ webhook_url_masked }}"
+          data-status-target="webhookSecretsStatus"
           data-revealed="false"
-          data-token="{{ webhook_token }}"
-          data-url="{{ webhook_url }}"
+          aria-pressed="false"
           style="margin-top: 0.6rem"
         >
           Reveal
         </button>
+        <div id="webhookSecretsStatus" class="wf-k" aria-live="polite"></div>
         <div class="wf-k" style="margin-top: 0.55rem">Last Rotated</div>
         <div class="wf-v">{{ webhook_updated_at }}</div>
         <form

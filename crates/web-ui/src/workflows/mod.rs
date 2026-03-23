@@ -42,6 +42,10 @@ pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
                 .delete(pages::api_delete_workflow),
         )
         .route(
+            "/api/workflows/{id}/webhook-secrets",
+            get(pages::api_get_workflow_webhook_secrets),
+        )
+        .route(
             "/api/workflows/{id}/activate",
             post(pages::api_activate_workflow),
         )

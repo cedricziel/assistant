@@ -68,6 +68,15 @@ function trapDrawerFocus(event) {
   }
 }
 
+function setWebhookRevealStatus(revealBtn, message, isError) {
+  var statusTargetId = revealBtn.getAttribute("data-status-target");
+  if (!statusTargetId) return;
+  var statusTarget = document.getElementById(statusTargetId);
+  if (!statusTarget) return;
+  statusTarget.textContent = message || "";
+  statusTarget.style.color = isError ? "#ff9b9b" : "#8aa5d8";
+}
+
 document.addEventListener("click", function (e) {
   if (e.target.closest(".hamburger")) {
     toggleDrawer();
@@ -102,13 +111,63 @@ document.addEventListener("click", function (e) {
     urlTarget.textContent = revealBtn.getAttribute("data-url-masked") || "";
     revealBtn.textContent = "Reveal";
     revealBtn.setAttribute("data-revealed", "false");
+    revealBtn.setAttribute("aria-pressed", "false");
+    setWebhookRevealStatus(revealBtn, "", false);
     return;
   }
 
-  tokenTarget.textContent = revealBtn.getAttribute("data-token") || "";
-  urlTarget.textContent = revealBtn.getAttribute("data-url") || "";
-  revealBtn.textContent = "Hide";
-  revealBtn.setAttribute("data-revealed", "true");
+  var cachedToken = revealBtn.getAttribute("data-token") || "";
+  var cachedUrl = revealBtn.getAttribute("data-url") || "";
+  if (cachedToken && cachedUrl) {
+    tokenTarget.textContent = cachedToken;
+    urlTarget.textContent = cachedUrl;
+    revealBtn.textContent = "Hide";
+    revealBtn.setAttribute("data-revealed", "true");
+    revealBtn.setAttribute("aria-pressed", "true");
+    setWebhookRevealStatus(revealBtn, "Secrets revealed", false);
+    return;
+  }
+
+  var endpoint = revealBtn.getAttribute("data-secrets-endpoint");
+  if (!endpoint) return;
+
+  revealBtn.disabled = true;
+  revealBtn.textContent = "Loading...";
+  setWebhookRevealStatus(revealBtn, "Loading secrets...", false);
+
+  fetch(endpoint, {
+    method: "GET",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+    },
+  })
+    .then(function (res) {
+      if (!res.ok) {
+        throw new Error("Failed to load webhook secrets");
+      }
+      return res.json();
+    })
+    .then(function (payload) {
+      if (!payload || !payload.webhook_token || !payload.webhook_url) {
+        throw new Error("Webhook secret payload is incomplete");
+      }
+      revealBtn.setAttribute("data-token", payload.webhook_token);
+      revealBtn.setAttribute("data-url", payload.webhook_url);
+      tokenTarget.textContent = payload.webhook_token;
+      urlTarget.textContent = payload.webhook_url;
+      revealBtn.textContent = "Hide";
+      revealBtn.setAttribute("data-revealed", "true");
+      revealBtn.setAttribute("aria-pressed", "true");
+      setWebhookRevealStatus(revealBtn, "Secrets revealed", false);
+    })
+    .catch(function () {
+      revealBtn.textContent = "Reveal";
+      setWebhookRevealStatus(revealBtn, "Unable to reveal secrets", true);
+    })
+    .finally(function () {
+      revealBtn.disabled = false;
+    });
 });
 
 // -- Clickable table rows ([data-href]) -------------------------------------
@@ -132,6 +191,20 @@ document.addEventListener("keydown", function (e) {
   var row = e.target.closest("[data-href]");
   if (row) window.location = row.getAttribute("data-href");
 });
+
+document.addEventListener(
+  "submit",
+  function (e) {
+    var form = e.target;
+    if (!form || !form.getAttribute) return;
+    var message = form.getAttribute("data-confirm");
+    if (!message) return;
+    if (!window.confirm(message)) {
+      e.preventDefault();
+    }
+  },
+  true,
+);
 
 // -- Service Worker registration --------------------------------------------
 
