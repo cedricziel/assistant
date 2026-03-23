@@ -3,7 +3,63 @@ breadcrumb %}
 <span class="breadcrumb-page">Observability</span>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">Traces</span>
-{% endblock %} {% block extra_css %}{% endblock %} {% block content %}
+{% endblock %} {% block extra_css %}
+<style>
+  .grouping-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: #8aa5d8;
+    font-size: 0.85rem;
+  }
+
+  .grouping-controls select {
+    background: #020511;
+    border: 1px solid #15243b;
+    color: #e5e9f0;
+    border-radius: 8px;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.85rem;
+  }
+
+  .trace-group-chart {
+    margin-bottom: 1rem;
+    border: 1px solid #0f1f36;
+    border-radius: 12px;
+    padding: 0.8rem;
+    background: #030a15;
+  }
+
+  .trace-group-bar {
+    display: flex;
+    height: 14px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(148, 163, 184, 0.1);
+  }
+
+  .trace-group-segment {
+    min-width: 2px;
+  }
+
+  .trace-group-legend {
+    margin-top: 0.6rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.9rem;
+    font-size: 0.8rem;
+    color: #a0bfe0;
+  }
+
+  .trace-group-legend i {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 999px;
+    margin-right: 0.35rem;
+  }
+</style>
+{% endblock %} {% block content %}
 <div class="layout">
   <aside class="sidebar">
     <div class="sidebar-inner">
@@ -39,7 +95,13 @@ breadcrumb %}
           <input type="hidden" name="conversation" value="{{ conv }}" />
           {% endif %} {% if let Some(dur) = min_duration_ms %}
           <input type="hidden" name="min_duration_ms" value="{{ dur }}" />
-          {% endif %} {% for opt in status_options %}
+          {% endif %}
+          <input
+            type="hidden"
+            name="group_by"
+            value="{{ selected_group_by }}"
+          />
+          {% for opt in status_options %}
           <label class="radio-label">
             <input
               type="radio"
@@ -74,6 +136,11 @@ breadcrumb %}
           {% endif %} {% if let Some(status) = selected_status %}
           <input type="hidden" name="status" value="{{ status }}" />
           {% endif %}
+          <input
+            type="hidden"
+            name="group_by"
+            value="{{ selected_group_by }}"
+          />
           <input
             type="number"
             name="min_duration_ms"
@@ -112,8 +179,62 @@ breadcrumb %}
     <div class="panel trace-panel">
       <div class="panel-head">
         <div><h2>Traces</h2></div>
-        <span class="pill">{{ filtered_count }} of {{ total_count }}</span>
+        <div class="grouping-controls">
+          <form method="get">
+            {% if let Some(skill) = selected_skill %}
+            <input type="hidden" name="skill" value="{{ skill }}" />
+            {% endif %} {% if let Some(conv) = selected_conversation %}
+            <input type="hidden" name="conversation" value="{{ conv }}" />
+            {% endif %} {% if let Some(status) = selected_status %}
+            <input type="hidden" name="status" value="{{ status }}" />
+            {% endif %} {% if let Some(dur) = min_duration_ms %}
+            <input type="hidden" name="min_duration_ms" value="{{ dur }}" />
+            {% endif %}
+            <label>
+              Group by
+              <select name="group_by">
+                {% for opt in group_by_options %}
+                <option
+                  value="{{ opt.value }}"
+                  {%
+                  if
+                  opt.selected
+                  %}selected{%
+                  endif
+                  %}
+                >
+                  {{ opt.label }}
+                </option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Apply</button>
+          </form>
+          <span class="pill">{{ filtered_count }} of {{ total_count }}</span>
+        </div>
       </div>
+
+      <div class="trace-group-chart" aria-label="Trace grouping summary">
+        <div class="subtle">{{ grouping_title }}</div>
+        <div class="trace-group-bar">
+          {% for segment in group_segments %}
+          <div
+            class="trace-group-segment"
+            style="width:{{ segment.pct }}%;background:{{ segment.color }}"
+            title="{{ segment.label }}: {{ segment.count }}"
+          ></div>
+          {% endfor %}
+        </div>
+        <div class="trace-group-legend">
+          {% for segment in group_segments %}
+          <span
+            ><i style="background:{{ segment.color }}"></i>{{ segment.label }}
+            ({{ segment.count }})</span
+          >
+          {% endfor %}
+        </div>
+      </div>
+
       <table class="trace-table">
         <thead>
           <tr>

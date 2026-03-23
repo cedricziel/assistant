@@ -29,6 +29,7 @@ struct TraceQuery {
     status: Option<String>,
     conversation: Option<String>,
     min_duration_ms: Option<i64>,
+    group_by: Option<String>,
 }
 
 // -- View models -------------------------------------------------------------
@@ -46,6 +47,21 @@ struct StatusOptionView {
     value: &'static str,
     label: &'static str,
     checked: bool,
+}
+
+/// A grouping selector option for the overview chart.
+struct GroupByOptionView {
+    value: &'static str,
+    label: &'static str,
+    selected: bool,
+}
+
+/// One segment in the stacked grouping chart.
+struct GroupSegmentView {
+    label: String,
+    count: usize,
+    pct: String,
+    color: String,
 }
 
 /// A row in the trace list table.
@@ -87,7 +103,11 @@ struct TracesPageTemplate {
     selected_conversation: Option<String>,
     min_duration_ms: Option<i64>,
     min_duration_str: String,
+    selected_group_by: String,
+    group_by_options: Vec<GroupByOptionView>,
     // Content
+    group_segments: Vec<GroupSegmentView>,
+    grouping_title: String,
     traces: Vec<TraceRowView>,
     filtered_count: usize,
     total_count: usize,
@@ -151,6 +171,7 @@ async fn show_dashboard(
         .map(|s| s.to_string());
 
     let min_duration_ms = query.min_duration_ms;
+    let selected_group_by = normalize_group_by(query.group_by.as_deref()).to_string();
 
     let all_traces = store
         .list_recent_traces_for_agent(state.trace_limit, None, &agent_id)
@@ -165,6 +186,7 @@ async fn show_dashboard(
         status_value.as_deref(),
         conversation_value.as_deref(),
         min_duration_ms,
+        Some(selected_group_by.as_str()),
     );
     let status_options = build_status_options(status_value.as_deref());
 
@@ -205,6 +227,9 @@ async fn show_dashboard(
     }
 
     let filtered_count = traces.len();
+    let group_segments = build_group_segments(&traces, selected_group_by.as_str());
+    let group_by_options = build_group_by_options(selected_group_by.as_str());
+    let grouping_title = format!("Grouped by {}", selected_group_by);
 
     let trace_rows: Vec<TraceRowView> = traces.iter().map(trace_to_row_view).collect();
 
@@ -217,6 +242,10 @@ async fn show_dashboard(
         selected_conversation: conversation_value,
         min_duration_ms,
         min_duration_str: min_duration_ms.map(|d| d.to_string()).unwrap_or_default(),
+        selected_group_by,
+        group_by_options,
+        group_segments,
+        grouping_title,
         traces: trace_rows,
         filtered_count,
         total_count,
@@ -337,6 +366,7 @@ fn build_skill_facet_views(
     selected_status: Option<&str>,
     conversation: Option<&str>,
     min_duration_ms: Option<i64>,
+    group_by: Option<&str>,
 ) -> Vec<SkillFacetView> {
     let facets = build_skill_facets(traces);
     facets
@@ -351,6 +381,7 @@ fn build_skill_facet_views(
                 selected_status,
                 conversation,
                 min_duration_ms,
+                group_by,
             );
             SkillFacetView {
                 name,
@@ -381,6 +412,103 @@ fn build_status_options(selected: Option<&str>) -> Vec<StatusOptionView> {
             }
         })
         .collect()
+}
+
+fn build_group_by_options(selected: &str) -> Vec<GroupByOptionView> {
+    let options: &[(&str, &str)] = &[
+        ("status", "Status"),
+        ("service", "Service"),
+        ("span", "Span"),
+    ];
+    options
+        .iter()
+        .map(|(value, label)| GroupByOptionView {
+            value,
+            label,
+            selected: selected.eq_ignore_ascii_case(value),
+        })
+        .collect()
+}
+
+fn normalize_group_by(raw: Option<&str>) -> &'static str {
+    match raw.map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) if v == "service" => "service",
+        Some(v) if v == "span" => "span",
+        _ => "status",
+    }
+}
+
+fn build_group_segments(traces: &[TraceSummary], group_by: &str) -> Vec<GroupSegmentView> {
+    if traces.is_empty() {
+        return Vec::new();
+    }
+
+    let mut groups: HashMap<String, usize> = HashMap::new();
+    for trace in traces {
+        let key = match group_by {
+            "service" => trace
+                .root_service_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .unwrap_or("Unknown")
+                .to_string(),
+            "span" => trace
+                .root_span_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .unwrap_or("Unknown")
+                .to_string(),
+            _ => {
+                if trace.error_count > 0 {
+                    "Error".to_string()
+                } else {
+                    "Success".to_string()
+                }
+            }
+        };
+        *groups.entry(key).or_insert(0) += 1;
+    }
+
+    let mut items: Vec<(String, usize)> = groups.into_iter().collect();
+    items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+    if items.len() > 8 {
+        let other_count: usize = items.iter().skip(7).map(|(_, count)| *count).sum();
+        items.truncate(7);
+        if other_count > 0 {
+            items.push(("Other".to_string(), other_count));
+        }
+    }
+
+    let total = traces.len() as f64;
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (label, count))| GroupSegmentView {
+            pct: format!("{:.2}", (count as f64 / total) * 100.0),
+            color: segment_color(group_by, idx, &label).to_string(),
+            label,
+            count,
+        })
+        .collect()
+}
+
+fn segment_color(group_by: &str, idx: usize, label: &str) -> &'static str {
+    if group_by == "status" {
+        if label.eq_ignore_ascii_case("error") {
+            return "#f87171";
+        }
+        if label.eq_ignore_ascii_case("success") {
+            return "#63e6be";
+        }
+    }
+
+    const PALETTE: [&str; 8] = [
+        "#6ec6ff", "#63e6be", "#fbbf24", "#a78bfa", "#fb7185", "#34d399", "#f59e0b", "#60a5fa",
+    ];
+    PALETTE[idx % PALETTE.len()]
 }
 
 fn build_time_ticks(total_ms: i64) -> Vec<String> {
@@ -469,6 +597,9 @@ fn build_waterfall_rows(
             if let Some(err) = &span.error {
                 m["error"] = serde_json::Value::String(err.clone());
             }
+            if let Some(service_name) = &span.service_name {
+                m["service_name"] = serde_json::Value::String(service_name.clone());
+            }
             let attrs_json = serde_json::to_string(&m).unwrap_or_else(|_| "{}".to_string());
 
             WaterfallRowView {
@@ -544,6 +675,7 @@ fn build_query_url(
     status: Option<&str>,
     conversation: Option<&str>,
     min_duration_ms: Option<i64>,
+    group_by: Option<&str>,
 ) -> String {
     let mut parts = Vec::new();
     if let Some(value) = skill.filter(|s| !s.is_empty()) {
@@ -557,6 +689,9 @@ fn build_query_url(
     }
     if let Some(value) = min_duration_ms {
         parts.push(format!("min_duration_ms={value}"));
+    }
+    if let Some(value) = group_by.filter(|s| !s.is_empty()) {
+        parts.push(format!("group_by={}", url_encode(value)));
     }
     if parts.is_empty() {
         "/traces".to_string()
