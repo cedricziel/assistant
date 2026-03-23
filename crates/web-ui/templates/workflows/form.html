@@ -3,31 +3,8 @@ breadcrumb %}
 <a class="breadcrumb-page" href="/workflows">Workflows</a>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">{{ heading }}</span>
-{% endblock %} {% block extra_css %} .wf-page { min-height: 0; } .wf-layout {
-display: grid; grid-template-columns: minmax(360px, 480px) minmax(500px, 1fr);
-gap: 1rem; align-items: start; } .wf-pane { background: #071224; border: 1px
-solid #173153; border-radius: 12px; padding: 1rem; } .wf-pane h3 {
-margin-bottom: 0.3rem; } .wf-pane p { color: #8ba2c6; font-size: 0.9rem;
-margin-bottom: 0.8rem; } .wf-form { display: grid; gap: 0.9rem; } .wf-form label
-{ display: grid; gap: 0.38rem; font-size: 0.9rem; color: #9eb2d8; } .wf-form
-input[type="text"], .wf-form textarea { width: 100%; background: #040d1b;
-border: 1px solid #173153; color: #e5e9f0; border-radius: 8px; padding: 0.65rem
-0.75rem; } .wf-form textarea { min-height: 330px; font-family: ui-monospace,
-monospace; } .wf-active { display: flex; align-items: center; gap: 0.45rem;
-color: #e5e9f0; } .wf-actions { display: flex; gap: 0.6rem; flex-wrap: wrap;
-margin-top: 0.25rem; } .err { color: #ff8a8a; font-size: 0.84rem; min-height:
-1.2rem; } .wf-preview-header { display: flex; justify-content: space-between;
-gap: 0.6rem; align-items: baseline; } .wf-preview-header .muted { font-size:
-0.82rem; color: #8aa5d8; } .wf-preview { width: 100%; min-height: 360px;
-background: #040d1b; border: 1px dashed #225081; border-radius: 10px; }
-.wf-node-table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
-.wf-node-table th, .wf-node-table td { text-align: left; padding: 0.45rem
-0.4rem; border-bottom: 1px solid #112744; font-size: 0.82rem; } .wf-node-table
-th { color: #8aa5d8; text-transform: uppercase; letter-spacing: 0.06em;
-font-size: 0.74rem; } .wf-hint { margin-top: 0.75rem; color: #8aa5d8; font-size:
-0.82rem; } @media (max-width: 1100px) { .wf-layout { grid-template-columns: 1fr;
-} } {% endblock %} {% block content %}
-<div class="wf-page">
+{% endblock %} {% block content %}
+<div class="wf-page workflow-form-page">
   <main class="main">
     <div class="panel">
       <div class="panel-head">

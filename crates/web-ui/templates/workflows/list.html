@@ -3,10 +3,8 @@ breadcrumb %}
 <span class="breadcrumb-page">Automation</span>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">Workflows</span>
-{% endblock %} {% block extra_css %} .mono { font-family: ui-monospace,
-monospace; } .caps { text-transform: uppercase; letter-spacing: 0.06em;
-font-size: 0.72rem; color: #8aa5d8; } {% endblock %} {% block content %}
-<div class="layout">
+{% endblock %} {% block content %}
+<div class="layout workflow-list-page">
   <aside class="sidebar">
     <div class="sidebar-inner">
       <div class="brand">
@@ -60,7 +58,7 @@ font-size: 0.72rem; color: #8aa5d8; } {% endblock %} {% block content %}
               <span class="primary">{{ row.name }}</span>
               {% if !row.description.is_empty() %}
               <div
-                class="mono"
+                class="workflow-mono"
                 style="font-size: 0.8rem; color: #8aa5d8; margin-top: 0.2rem"
               >
                 {{ row.description }}
@@ -69,11 +67,11 @@ font-size: 0.72rem; color: #8aa5d8; } {% endblock %} {% block content %}
             </td>
             <td>
               {{ row.node_count }} nodes / {{ row.edge_count }} edges
-              <div class="caps">
+              <div class="workflow-caps">
                 {{ row.trigger_count }} trigger · {{ row.action_count }} action
               </div>
             </td>
-            <td class="mono">
+            <td class="workflow-mono">
               {{ row.max_steps }} steps / {{ row.max_visits_per_node }} visits
             </td>
             <td>

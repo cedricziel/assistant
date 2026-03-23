@@ -162,6 +162,9 @@ function bindWorkflowEditor() {
     : null;
   const storageKey = workflowId ? "workflow-editor-draft:" + workflowId : null;
   let isDirty = false;
+  let isSaving = false;
+  let refreshTimer = null;
+  const saveBtnLabel = saveBtn ? saveBtn.textContent : "Save Graph";
 
   function setStatus(message, isError) {
     if (!statusBox) return;
@@ -172,6 +175,13 @@ function bindWorkflowEditor() {
   function markDirty() {
     isDirty = true;
     setStatus("Unsaved changes", false);
+  }
+
+  function setSavingState(saving) {
+    isSaving = saving;
+    if (!saveBtn) return;
+    saveBtn.disabled = saving;
+    saveBtn.textContent = saving ? "Saving..." : saveBtnLabel;
   }
 
   function persistDraft() {
@@ -185,6 +195,9 @@ function bindWorkflowEditor() {
   }
 
   function saveDraftToServer() {
+    if (isSaving) {
+      return Promise.resolve(false);
+    }
     if (!workflowId) {
       return Promise.resolve(false);
     }
@@ -193,6 +206,7 @@ function bindWorkflowEditor() {
       setStatus("Cannot save invalid graph JSON", true);
       return Promise.resolve(false);
     }
+    setSavingState(true);
 
     return fetch("/api/workflows/" + workflowId)
       .then(function (res) {
@@ -225,6 +239,9 @@ function bindWorkflowEditor() {
       .catch(function (err) {
         setStatus(String(err), true);
         return false;
+      })
+      .finally(function () {
+        setSavingState(false);
       });
   }
 
@@ -249,6 +266,16 @@ function bindWorkflowEditor() {
       }
       return null;
     }
+  }
+
+  function scheduleRefresh() {
+    if (refreshTimer !== null) {
+      clearTimeout(refreshTimer);
+    }
+    refreshTimer = window.setTimeout(function () {
+      refreshTimer = null;
+      refreshFromTextArea();
+    }, 120);
   }
 
   const addNodeBtn = document.getElementById("addNodeBtn");
@@ -353,7 +380,7 @@ function bindWorkflowEditor() {
   textarea.addEventListener("input", function () {
     markDirty();
     persistDraft();
-    refreshFromTextArea();
+    scheduleRefresh();
   });
 
   window.addEventListener("beforeunload", function (event) {

@@ -3,18 +3,8 @@ breadcrumb %}
 <a class="breadcrumb-page" href="/workflows">Workflows</a>
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">{{ name }}</span>
-{% endblock %} {% block extra_css %} .wf-page { min-height: 0; } .wf-meta {
-display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:0.75rem;
-margin-top:1rem; } .wf-card { background:#071224; border:1px solid #173153;
-border-radius:10px; padding:0.7rem 0.8rem; } .wf-k { color:#8aa5d8;
-font-size:0.75rem; text-transform:uppercase; letter-spacing:0.06em; } .wf-v {
-color:#e5e9f0; font-size:0.95rem; margin-top:0.2rem; } .wf-actions {
-display:flex; flex-wrap:wrap; gap:0.55rem; margin-top:1rem; } .mono {
-font-family: ui-monospace, monospace; } pre { max-height: 360px; overflow:auto;
-background:#050f1e; border:1px solid #173153; border-radius:8px;
-padding:0.75rem; } @media (max-width: 860px) { .wf-meta {
-grid-template-columns:1fr; } } {% endblock %} {% block content %}
-<div class="wf-page">
+{% endblock %} {% block content %}
+<div class="wf-page workflow-detail-page">
   <main class="main">
     <div class="panel">
       <div class="panel-head">
@@ -96,11 +86,11 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
       </h3>
       <div class="wf-card">
         <div class="wf-k">Endpoint</div>
-        <div class="wf-v mono" id="webhookEndpointMasked">
+        <div class="wf-v workflow-mono" id="webhookEndpointMasked">
           {{ webhook_url_masked }}
         </div>
         <div class="wf-k" style="margin-top: 0.55rem">Token</div>
-        <div class="wf-v mono" id="webhookTokenMasked">
+        <div class="wf-v workflow-mono" id="webhookTokenMasked">
           {{ webhook_token_masked }}
         </div>
         <button
@@ -163,7 +153,7 @@ grid-template-columns:1fr; } } {% endblock %} {% block content %}
       {% endif %}
 
       <h3 style="margin-top: 1rem; margin-bottom: 0.5rem">Graph JSON</h3>
-      <pre><code>{{ graph_json }}</code></pre>
+      <pre class="workflow-code"><code>{{ graph_json }}</code></pre>
     </div>
   </main>
 </div>

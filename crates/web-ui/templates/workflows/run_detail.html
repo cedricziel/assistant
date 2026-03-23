@@ -7,24 +7,14 @@ block breadcrumb %}
 >
 <span class="breadcrumb-sep">/</span>
 <span class="breadcrumb-current">Run {{ run_id }}</span>
-{% endblock %} {% block extra_css %} .wf-page { min-height: 0; } .run-meta {
-display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:0.65rem;
-margin-bottom: 1rem; } .card { background:#071224; border:1px solid #173153;
-border-radius:10px; padding:0.7rem 0.8rem; } .k { color:#8aa5d8;
-font-size:0.74rem; text-transform:uppercase; letter-spacing:0.06em; } .v {
-color:#e5e9f0; margin-top:0.25rem; } .mono { font-family: ui-monospace,
-monospace; } pre { background:#050f1e; border:1px solid #173153;
-border-radius:8px; padding:0.7rem; max-height:220px; overflow:auto; } @media
-(max-width: 980px) { .run-meta { grid-template-columns: 1fr 1fr; } } @media
-(max-width: 700px) { .run-meta { grid-template-columns: 1fr; } } {% endblock %}
-{% block content %}
-<div class="wf-page">
+{% endblock %} {% block content %}
+<div class="wf-page workflow-run-page">
   <main class="main">
     <div class="panel">
       <div class="panel-head">
         <div>
           <h2>Workflow Run</h2>
-          <p class="mono">{{ run_id }}</p>
+          <p class="workflow-mono">{{ run_id }}</p>
         </div>
         <a class="ghost-btn" href="/workflows/{{ workflow_id }}"
           >Back to Workflow</a
@@ -58,7 +48,7 @@ border-radius:8px; padding:0.7rem; max-height:220px; overflow:auto; } @media
       {% endif %}
 
       <h3 style="margin-bottom: 0.4rem">Trigger Payload</h3>
-      <pre><code>{{ trigger_payload_json }}</code></pre>
+      <pre class="workflow-code"><code>{{ trigger_payload_json }}</code></pre>
 
       <h3 style="margin-top: 1rem; margin-bottom: 0.4rem">Step Timeline</h3>
       {% if steps.is_empty() %}
@@ -77,14 +67,16 @@ border-radius:8px; padding:0.7rem; max-height:220px; overflow:auto; } @media
         <tbody>
           {% for step in steps %}
           <tr>
-            <td class="mono">{{ step.step_index }}</td>
-            <td class="mono">{{ step.node_id }}</td>
+            <td class="workflow-mono">{{ step.step_index }}</td>
+            <td class="workflow-mono">{{ step.node_id }}</td>
             <td>{{ step.node_kind }}</td>
             <td>
               {{ step.note_text }}
               <details style="margin-top: 0.35rem">
-                <summary class="mono">output</summary>
-                <pre><code>{{ step.output_json }}</code></pre>
+                <summary class="workflow-mono">output</summary>
+                <pre
+                  class="workflow-code"
+                ><code>{{ step.output_json }}</code></pre>
               </details>
             </td>
             <td>{{ step.occurred_at }}</td>
