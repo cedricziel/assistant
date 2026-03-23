@@ -422,4 +422,5 @@ jobs:
       - name: Run smoke tests
         env:
           OLLAMA_BASE_URL: http://localhost:11434
-        run: make test-integration
+          RUST_TEST_THREADS: 1
+        run: cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture --test-threads=1

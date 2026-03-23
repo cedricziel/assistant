@@ -15,7 +15,7 @@ test:
 	cargo test --workspace
 
 test-integration:
-	cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture
+	cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture --test-threads=1
 
 lint:
 	# The `signal` feature introduces presage/libsignal git deps that conflict

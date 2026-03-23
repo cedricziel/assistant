@@ -61,6 +61,10 @@ async fn resolve_ollama() -> Result<(Option<ContainerAsync<GenericImage>>, Strin
         return Ok((None, base_url));
     }
 
+    if env::var("CI").is_ok() {
+        anyhow::bail!("OLLAMA_BASE_URL must be set in CI for smoke tests");
+    }
+
     let (container, base_url) = start_ollama_container().await?;
     Ok((Some(container), base_url))
 }
