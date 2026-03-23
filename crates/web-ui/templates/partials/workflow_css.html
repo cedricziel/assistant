@@ -65,4 +65,29 @@ grid-template-columns: 1fr; } .workflow-editor-page .controls .row {
 grid-template-columns: 1fr; } } @media (max-width: 860px) {
 .workflow-detail-page .wf-meta { grid-template-columns: 1fr; } } @media
 (max-width: 700px) { .workflow-run-page .run-meta { grid-template-columns: 1fr;
-} }
+} } .workflow-editor-page .workflow-editor-top-actions { display: flex; gap:
+0.55rem; align-items: center; flex-wrap: wrap; } .workflow-editor-page
+#editorStatus { font-size: 0.82rem; color: #8aa5d8; } .workflow-editor-page
+.workflow-view-toggle { display: inline-flex; gap: 0.35rem; padding: 0.2rem;
+border-radius: 10px; border: 1px solid #173153; background: #061327; }
+.workflow-editor-page .workflow-view-toggle .ghost-btn { padding: 0.35rem
+0.65rem; } .workflow-editor-page .workflow-view-toggle .ghost-btn.is-active {
+border-color: #6ec6ff; color: #e5f0ff; background: rgba(110, 198, 255, 0.14); }
+.workflow-editor-page .workflow-hint { color: #8aa5d8; font-size: 0.83rem;
+margin-bottom: 0.6rem; } .workflow-editor-page .editor-surface { margin-bottom:
+0.9rem; } .workflow-editor-page .wf-flow-canvas { display: grid; gap: 0.65rem; }
+.workflow-editor-page .wf-flow-card { background: #04101f; border: 1px solid
+#173153; border-radius: 10px; padding: 0.75rem; } .workflow-editor-page
+.wf-flow-card h4 { font-size: 0.96rem; margin-bottom: 0.25rem; }
+.workflow-editor-page .wf-flow-card p { color: #9db1d8; font-size: 0.86rem;
+margin-bottom: 0.5rem; } .workflow-editor-page .wf-flow-next { display: flex;
+flex-wrap: wrap; gap: 0.4rem; } .workflow-editor-page .wf-flow-chip { font-size:
+0.75rem; padding: 0.2rem 0.45rem; border-radius: 999px; color: #b9d6ff;
+background: rgba(110, 198, 255, 0.14); border: 1px solid #225081; }
+.workflow-editor-page .workflow-advanced { margin-top: 0.75rem; }
+.workflow-editor-page .workflow-advanced summary { cursor: pointer; color:
+#b9d6ff; font-size: 0.88rem; margin-bottom: 0.55rem; } .workflow-editor-page
+.workflow-editor-links { margin-top: 0.8rem; display: flex; gap: 0.5rem;
+flex-wrap: wrap; } @media (max-width: 767px) { .workflow-editor-page
+.workflow-editor-top-actions { align-items: flex-start; } .workflow-editor-page
+.workflow-view-toggle { order: 1; } }
