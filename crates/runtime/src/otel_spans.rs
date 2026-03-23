@@ -12,7 +12,7 @@ use assistant_llm::{
 use opentelemetry::{
     global,
     propagation::{Extractor, Injector},
-    trace::{Span as _, TraceContextExt, Tracer as _},
+    trace::{Span as _, SpanKind, TraceContextExt, Tracer as _},
     Array, Context as OtelContext, KeyValue, StringValue, Value,
 };
 use opentelemetry_semantic_conventions::attribute::{
@@ -95,6 +95,46 @@ pub fn context_from_traceparent(traceparent: &str) -> OtelContext {
             traceparent: Some(traceparent),
         })
     })
+}
+
+/// Create a bus interaction span (`produce` or `consume`) under `parent_cx`.
+pub fn start_bus_span(
+    span_kind: SpanKind,
+    topic: &str,
+    conversation_id: Option<Uuid>,
+    parent_cx: &OtelContext,
+) -> opentelemetry::global::BoxedSpan {
+    let tracer = global::tracer("assistant.bus");
+    let operation = match span_kind {
+        SpanKind::Producer => "produce",
+        SpanKind::Consumer => "consume",
+        SpanKind::Client => "client",
+        SpanKind::Server => "server",
+        SpanKind::Internal => "internal",
+    };
+    let span_name = format!("bus.{operation} {topic}");
+    let mut span = tracer.build_with_context(
+        tracer.span_builder(span_name.clone()).with_kind(span_kind),
+        parent_cx,
+    );
+    span.set_attribute(KeyValue::new("span.name", span_name));
+    span.set_attribute(KeyValue::new("messaging.system", "assistant.bus"));
+    span.set_attribute(KeyValue::new("messaging.operation", operation.to_string()));
+    span.set_attribute(KeyValue::new(
+        "messaging.destination.name",
+        topic.to_string(),
+    ));
+    if let Some(conversation_id) = conversation_id {
+        span.set_attribute(KeyValue::new(
+            "conversation_id",
+            conversation_id.to_string(),
+        ));
+        span.set_attribute(KeyValue::new(
+            GEN_AI_CONVERSATION_ID,
+            conversation_id.to_string(),
+        ));
+    }
+    span
 }
 
 struct HeaderInjector<'a>(&'a mut HashMap<String, String>);
