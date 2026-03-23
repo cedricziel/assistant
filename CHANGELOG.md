@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.48](https://github.com/cedricziel/assistant/compare/v0.1.47...v0.1.48) (2026-03-23)
+
+
+### Bug Fixes
+
+* **observability:** separate service and span names across telemetry ([#247](https://github.com/cedricziel/assistant/issues/247)) ([cde3b18](https://github.com/cedricziel/assistant/commit/cde3b18d6deeafa7d13bbba9abed70821d77af59))
+* **web-ui:** follow up PR247 review feedback ([#249](https://github.com/cedricziel/assistant/issues/249)) ([f170099](https://github.com/cedricziel/assistant/commit/f17009974eded36c21b45734ebee34e26ed589d8))
+* **web-ui:** restore scrolling on workflow pages ([#245](https://github.com/cedricziel/assistant/issues/245)) ([eb657f4](https://github.com/cedricziel/assistant/commit/eb657f4ccd55f5ba971bb2cd08b701dac58371b4))
+
 ## [0.1.47](https://github.com/cedricziel/assistant/compare/v0.1.46...v0.1.47) (2026-03-23)
 
 
