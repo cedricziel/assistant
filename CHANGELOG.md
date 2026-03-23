@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.50](https://github.com/cedricziel/assistant/compare/v0.1.49...v0.1.50) (2026-03-23)
+
+
+### Features
+
+* **web-ui:** make workflow editor mobile-first and Stimulus-driven ([#256](https://github.com/cedricziel/assistant/issues/256)) ([e23450a](https://github.com/cedricziel/assistant/commit/e23450ab6251eb91cc597808cdc1d6af9b47a373))
+
+
+### Bug Fixes
+
+* **binaries:** add clap version flags to all clap programs ([#254](https://github.com/cedricziel/assistant/issues/254)) ([924aab7](https://github.com/cedricziel/assistant/commit/924aab75ac3698f8f9c6ceebf888ee2ef3e752b3))
+* **interface-slack:** align websocket TLS dependency versions ([#257](https://github.com/cedricziel/assistant/issues/257)) ([0e88526](https://github.com/cedricziel/assistant/commit/0e8852642fe083f43791dbd272c76d766f5ddd9f))
+
 ## [0.1.49](https://github.com/cedricziel/assistant/compare/v0.1.48...v0.1.49) (2026-03-23)
 
 
