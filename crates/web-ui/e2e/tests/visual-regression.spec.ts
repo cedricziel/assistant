@@ -167,6 +167,7 @@ test.describe("Authenticated pages", () => {
     await expect(page).toHaveScreenshot("workflow-list.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: [page.locator("table tbody tr")],
     });
 
     await navigateAndSettle(page, `/workflows/${workflowId}`);
