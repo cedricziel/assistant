@@ -65,6 +65,13 @@ pub struct TurnRequest {
     /// the agent knows exactly when each message arrived.
     #[serde(default)]
     pub timestamp: Option<DateTime<Utc>>,
+    /// W3C Trace Context `traceparent` for cross-queue trace propagation.
+    ///
+    /// Producers can set this so workers reconstruct parent context before
+    /// running the turn, preserving a single distributed trace across
+    /// publish/claim async boundaries.
+    #[serde(default)]
+    pub traceparent: Option<String>,
 }
 
 /// The final result of a completed turn.
@@ -222,12 +229,16 @@ mod tests {
             conversation_id: Uuid::new_v4(),
             extension_tools: vec!["reply".into(), "react".into()],
             timestamp: None,
+            traceparent: Some(
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+            ),
         };
         let json = serde_json::to_value(&req).unwrap();
         let back: TurnRequest = serde_json::from_value(json).unwrap();
         assert_eq!(back.prompt, req.prompt);
         assert_eq!(back.conversation_id, req.conversation_id);
         assert_eq!(back.extension_tools, req.extension_tools);
+        assert_eq!(back.traceparent, req.traceparent);
     }
 
     #[test]

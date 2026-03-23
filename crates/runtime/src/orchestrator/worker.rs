@@ -10,6 +10,10 @@ use anyhow::Result;
 use assistant_core::{bus_messages, topic, ClaimFilter, Interface, PublishRequest, ToolHandler};
 use assistant_llm::ContentBlock;
 use chrono::{DateTime, Local, Utc};
+use opentelemetry::{
+    trace::{Span as _, SpanKind, TraceContextExt},
+    Context as OtelContext, KeyValue,
+};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -115,6 +119,24 @@ impl Orchestrator {
                         .unwrap_or(Interface::Cli);
 
                     let conv_id = turn_req.conversation_id;
+                    let trace_cx = turn_req
+                        .traceparent
+                        .as_deref()
+                        .map(crate::otel_spans::context_from_traceparent);
+                    let consume_parent_cx = trace_cx.clone().unwrap_or_else(OtelContext::current);
+                    let mut bus_consume_span = crate::otel_spans::start_bus_span(
+                        SpanKind::Consumer,
+                        topic::TURN_REQUEST,
+                        Some(conv_id),
+                        &consume_parent_cx,
+                    );
+                    bus_consume_span
+                        .set_attribute(KeyValue::new("bus.message_id", msg.id.to_string()));
+                    if let Some(batch_id) = msg.batch_id {
+                        bus_consume_span
+                            .set_attribute(KeyValue::new("bus.batch_id", batch_id.to_string()));
+                    }
+                    let bus_consume_cx = consume_parent_cx.with_span(bus_consume_span);
                     let interface_name = format!("{:?}", interface);
 
                     debug!(
@@ -148,17 +170,24 @@ impl Orchestrator {
                             conv_id,
                             interface,
                             reg.tools,
-                            None,
+                            Some(&bus_consume_cx),
                             reg.attachments,
                         )
                         .await
                     } else if let Some(sink) = token_sink {
                         // Streaming turn (CLI, Signal).
-                        self.run_turn_streaming(&prompt, conv_id, interface, sink, None)
-                            .await
+                        self.run_turn_streaming(
+                            &prompt,
+                            conv_id,
+                            interface,
+                            sink,
+                            Some(&bus_consume_cx),
+                        )
+                        .await
                     } else {
                         // Standard non-streaming turn.
-                        self.run_turn(&prompt, conv_id, interface, None).await
+                        self.run_turn(&prompt, conv_id, interface, Some(&bus_consume_cx))
+                            .await
                     };
 
                     match result {
@@ -182,8 +211,21 @@ impl Orchestrator {
                                 pub_req = pub_req.with_batch_id(bid);
                             }
 
+                            let mut produce_result_span = crate::otel_spans::start_bus_span(
+                                SpanKind::Producer,
+                                topic::TURN_RESULT,
+                                Some(conv_id),
+                                &bus_consume_cx,
+                            );
                             match self.bus.publish(pub_req).await {
-                                Ok(_) => {
+                                Ok(published_id) => {
+                                    produce_result_span.set_attribute(KeyValue::new(
+                                        "bus.message_id",
+                                        published_id.to_string(),
+                                    ));
+                                    produce_result_span
+                                        .set_attribute(KeyValue::new("bus.status", "ok"));
+                                    produce_result_span.end();
                                     if let Err(e) = self.bus.ack(msg.id).await {
                                         warn!(
                                             error = %e,
@@ -217,10 +259,33 @@ impl Orchestrator {
                                         worker_id,
                                         "Turn completed via worker"
                                     );
+                                    bus_consume_cx
+                                        .span()
+                                        .set_attribute(KeyValue::new("bus.status", "ok"));
+                                    bus_consume_cx.span().end();
                                 }
                                 Err(e) => {
+                                    produce_result_span
+                                        .set_attribute(KeyValue::new("bus.status", "error"));
+                                    produce_result_span.set_attribute(KeyValue::new("error", true));
+                                    produce_result_span.set_attribute(KeyValue::new(
+                                        "error.message",
+                                        e.to_string(),
+                                    ));
+                                    produce_result_span.end();
                                     warn!(error = %e, "Failed to publish TurnResult, nacking request");
                                     let _ = self.bus.nack(msg.id).await;
+                                    bus_consume_cx
+                                        .span()
+                                        .set_attribute(KeyValue::new("bus.status", "error"));
+                                    bus_consume_cx
+                                        .span()
+                                        .set_attribute(KeyValue::new("error", true));
+                                    bus_consume_cx.span().set_attribute(KeyValue::new(
+                                        "error.message",
+                                        e.to_string(),
+                                    ));
+                                    bus_consume_cx.span().end();
                                 }
                             }
                         }
@@ -250,7 +315,32 @@ impl Orchestrator {
                             if let Some(bid) = msg.batch_id {
                                 pub_req = pub_req.with_batch_id(bid);
                             }
-                            let _ = self.bus.publish(pub_req).await;
+                            let mut produce_result_span = crate::otel_spans::start_bus_span(
+                                SpanKind::Producer,
+                                topic::TURN_RESULT,
+                                Some(conv_id),
+                                &bus_consume_cx,
+                            );
+                            match self.bus.publish(pub_req).await {
+                                Ok(published_id) => {
+                                    produce_result_span.set_attribute(KeyValue::new(
+                                        "bus.message_id",
+                                        published_id.to_string(),
+                                    ));
+                                    produce_result_span
+                                        .set_attribute(KeyValue::new("bus.status", "ok"));
+                                }
+                                Err(pub_err) => {
+                                    produce_result_span
+                                        .set_attribute(KeyValue::new("bus.status", "error"));
+                                    produce_result_span.set_attribute(KeyValue::new("error", true));
+                                    produce_result_span.set_attribute(KeyValue::new(
+                                        "error.message",
+                                        pub_err.to_string(),
+                                    ));
+                                }
+                            }
+                            produce_result_span.end();
 
                             let err_payload = serde_json::json!({
                                 "conversation_id": conv_id,
@@ -275,6 +365,16 @@ impl Orchestrator {
                             }
 
                             let _ = self.bus.fail(msg.id).await;
+                            bus_consume_cx
+                                .span()
+                                .set_attribute(KeyValue::new("bus.status", "error"));
+                            bus_consume_cx
+                                .span()
+                                .set_attribute(KeyValue::new("error", true));
+                            bus_consume_cx
+                                .span()
+                                .set_attribute(KeyValue::new("error.message", e.to_string()));
+                            bus_consume_cx.span().end();
                         }
                     }
                 }
@@ -311,14 +411,27 @@ impl Orchestrator {
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
         let request_id = Uuid::new_v4();
+        let interface_cx = crate::otel_spans::start_interface_root_context(
+            &interface,
+            "submit_turn",
+            Some(conversation_id),
+        );
         let turn_req = bus_messages::TurnRequest {
             prompt: prompt.to_string(),
             conversation_id,
             extension_tools: vec![],
             timestamp,
+            traceparent: crate::otel_spans::traceparent_from_context(&interface_cx),
         };
 
-        self.bus
+        let mut produce_request_span = crate::otel_spans::start_bus_span(
+            SpanKind::Producer,
+            topic::TURN_REQUEST,
+            Some(conversation_id),
+            &interface_cx,
+        );
+        let publish_result = self
+            .bus
             .publish(
                 PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
                     .with_agent_id(self.agent_id.clone())
@@ -327,7 +440,22 @@ impl Orchestrator {
                     .with_reply_to(topic::TURN_RESULT)
                     .with_batch_id(request_id),
             )
-            .await?;
+            .await;
+        match publish_result {
+            Ok(message_id) => {
+                produce_request_span
+                    .set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
+                produce_request_span.set_attribute(KeyValue::new("bus.status", "ok"));
+                produce_request_span.end();
+            }
+            Err(e) => {
+                produce_request_span.set_attribute(KeyValue::new("bus.status", "error"));
+                produce_request_span.set_attribute(KeyValue::new("error", true));
+                produce_request_span.set_attribute(KeyValue::new("error.message", e.to_string()));
+                produce_request_span.end();
+                return Err(e);
+            }
+        }
 
         // Poll for the result with a 10-minute timeout.
         // Match by both conversation_id and batch_id (request_id) so
@@ -350,8 +478,18 @@ impl Orchestrator {
                 .claim_filtered(topic::TURN_RESULT, "submit_turn", &filter)
                 .await?
             {
+                let mut consume_result_span = crate::otel_spans::start_bus_span(
+                    SpanKind::Consumer,
+                    topic::TURN_RESULT,
+                    Some(conversation_id),
+                    &interface_cx,
+                );
+                consume_result_span
+                    .set_attribute(KeyValue::new("bus.message_id", msg.id.to_string()));
                 let bus_result: bus_messages::TurnResult = serde_json::from_value(msg.payload)?;
                 self.bus.ack(msg.id).await?;
+                consume_result_span.set_attribute(KeyValue::new("bus.status", "ok"));
+                consume_result_span.end();
                 return Ok(TurnResult {
                     answer: bus_result.content,
                     attachments: bus_result.attachments,

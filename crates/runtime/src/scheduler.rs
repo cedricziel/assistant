@@ -15,10 +15,15 @@ use assistant_core::{bus_messages, strip_html_comments, topic, Interface, Publis
 use assistant_storage::StorageLayer;
 use chrono::Utc;
 use cron::Schedule;
+use opentelemetry::{
+    trace::{Span as _, SpanKind},
+    KeyValue,
+};
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::orchestrator::Orchestrator;
+use crate::otel_spans::{start_interface_root_context, traceparent_from_context};
 use crate::webhook_dispatch;
 
 /// How often the heartbeat prompt is run (30 minutes).
@@ -70,6 +75,11 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
         info!(task_name = %task.name, "Dispatching scheduled task");
 
         let conversation_id = Uuid::new_v4();
+        let interface_cx = start_interface_root_context(
+            &Interface::Scheduler,
+            "schedule.dispatch",
+            Some(conversation_id),
+        );
 
         let trigger = serde_json::json!({
             "task_id": task.id,
@@ -87,7 +97,13 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
         {
             error!(task_name = %task.name, error = %e, "Failed to dispatch schedule.trigger webhooks");
         }
-        if let Err(e) = bus
+        let mut produce_trigger_span = crate::otel_spans::start_bus_span(
+            SpanKind::Producer,
+            topic::SCHEDULE_TRIGGER,
+            Some(conversation_id),
+            &interface_cx,
+        );
+        match bus
             .publish(
                 PublishRequest::new(topic::SCHEDULE_TRIGGER, trigger)
                     .with_agent_id(orchestrator.agent_id.clone())
@@ -97,16 +113,39 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
             )
             .await
         {
-            error!(task_name = %task.name, error = %e, "Failed to publish schedule.trigger event");
+            Ok(message_id) => {
+                produce_trigger_span
+                    .set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
+                produce_trigger_span.set_attribute(KeyValue::new("bus.status", "ok"));
+            }
+            Err(e) => {
+                produce_trigger_span.set_attribute(KeyValue::new("bus.status", "error"));
+                produce_trigger_span.set_attribute(KeyValue::new("error", true));
+                produce_trigger_span.set_attribute(KeyValue::new("error.message", e.to_string()));
+                error!(task_name = %task.name, error = %e, "Failed to publish schedule.trigger event");
+            }
         }
+        produce_trigger_span.end();
 
         let turn_req = bus_messages::TurnRequest {
             prompt: task.prompt.clone(),
             conversation_id,
             extension_tools: vec![],
             timestamp: Some(Utc::now()),
+            traceparent: None,
         };
 
+        let turn_req = bus_messages::TurnRequest {
+            traceparent: traceparent_from_context(&interface_cx),
+            ..turn_req
+        };
+
+        let mut produce_turn_span = crate::otel_spans::start_bus_span(
+            SpanKind::Producer,
+            topic::TURN_REQUEST,
+            Some(conversation_id),
+            &interface_cx,
+        );
         let dispatched = match bus
             .publish(
                 PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
@@ -117,7 +156,10 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
             )
             .await
         {
-            Ok(_) => {
+            Ok(message_id) => {
+                produce_turn_span
+                    .set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
+                produce_turn_span.set_attribute(KeyValue::new("bus.status", "ok"));
                 info!(
                     task_name = %task.name,
                     conversation_id = %conversation_id,
@@ -126,6 +168,9 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
                 true
             }
             Err(e) => {
+                produce_turn_span.set_attribute(KeyValue::new("bus.status", "error"));
+                produce_turn_span.set_attribute(KeyValue::new("error", true));
+                produce_turn_span.set_attribute(KeyValue::new("error.message", e.to_string()));
                 error!(
                     task_name = %task.name,
                     error = %e,
@@ -134,6 +179,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
                 false
             }
         };
+        produce_turn_span.end();
 
         if !dispatched {
             continue;
@@ -189,9 +235,26 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         conversation_id,
         extension_tools: vec![],
         timestamp: Some(Utc::now()),
+        traceparent: None,
     };
 
-    orchestrator
+    let interface_cx = start_interface_root_context(
+        &Interface::Scheduler,
+        "heartbeat.dispatch",
+        Some(conversation_id),
+    );
+    let turn_req = bus_messages::TurnRequest {
+        traceparent: traceparent_from_context(&interface_cx),
+        ..turn_req
+    };
+
+    let mut produce_turn_span = crate::otel_spans::start_bus_span(
+        SpanKind::Producer,
+        topic::TURN_REQUEST,
+        Some(conversation_id),
+        &interface_cx,
+    );
+    let publish_result = orchestrator
         .bus()
         .publish(
             PublishRequest::new(topic::TURN_REQUEST, serde_json::to_value(&turn_req)?)
@@ -200,7 +263,22 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
                 .with_interface(format!("{:?}", Interface::Scheduler))
                 .with_user_id("heartbeat"),
         )
-        .await?;
+        .await;
+    match publish_result {
+        Ok(message_id) => {
+            produce_turn_span
+                .set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
+            produce_turn_span.set_attribute(KeyValue::new("bus.status", "ok"));
+            produce_turn_span.end();
+        }
+        Err(e) => {
+            produce_turn_span.set_attribute(KeyValue::new("bus.status", "error"));
+            produce_turn_span.set_attribute(KeyValue::new("error", true));
+            produce_turn_span.set_attribute(KeyValue::new("error.message", e.to_string()));
+            produce_turn_span.end();
+            return Err(e);
+        }
+    }
 
     info!(
         conversation_id = %conversation_id,

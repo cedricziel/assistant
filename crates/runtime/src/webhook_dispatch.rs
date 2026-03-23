@@ -1,5 +1,10 @@
 use anyhow::Result;
 use hmac::{Hmac, Mac};
+use opentelemetry::{
+    global,
+    trace::{Span as _, TraceContextExt, Tracer as _},
+    Context as OtelContext, KeyValue,
+};
 use serde_json::Value;
 use sha2::Sha256;
 use tracing::{info, warn};
@@ -16,11 +21,27 @@ pub async fn dispatch_event(
     event_type: &str,
     payload: Value,
 ) -> Result<usize> {
+    let tracer = global::tracer("assistant.webhooks");
+    let parent_cx = OtelContext::current();
+    let mut dispatch_span = tracer.start_with_context("webhook.dispatch", &parent_cx);
+    dispatch_span.set_attribute(KeyValue::new("agent_id", agent_id.to_string()));
+    dispatch_span.set_attribute(KeyValue::new("event_type", event_type.to_string()));
+    let dispatch_cx = parent_cx.with_span(dispatch_span);
+
     let store = storage.webhook_store_for_agent(agent_id);
     let webhooks = store.list_active_for_event(event_type).await?;
     if webhooks.is_empty() {
+        dispatch_cx
+            .span()
+            .set_attribute(KeyValue::new("webhook.subscriber_count", 0_i64));
+        dispatch_cx.span().end();
         return Ok(0);
     }
+
+    dispatch_cx.span().set_attribute(KeyValue::new(
+        "webhook.subscriber_count",
+        webhooks.len() as i64,
+    ));
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -30,6 +51,10 @@ pub async fn dispatch_event(
     let mut delivered = 0usize;
 
     for webhook in webhooks {
+        let mut delivery_span = tracer.start_with_context("webhook.delivery", &dispatch_cx);
+        delivery_span.set_attribute(KeyValue::new("webhook.id", webhook.id.clone()));
+        delivery_span.set_attribute(KeyValue::new("webhook.url", webhook.url.clone()));
+
         let signature = compute_signature(&webhook.secret, &body);
         let result = client
             .post(&webhook.url)
@@ -44,8 +69,18 @@ pub async fn dispatch_event(
         match result {
             Ok(resp) if resp.status().is_success() => {
                 delivered += 1;
+                delivery_span.set_attribute(KeyValue::new(
+                    "http.status_code",
+                    resp.status().as_u16() as i64,
+                ));
+                delivery_span.set_attribute(KeyValue::new("webhook.status", "ok"));
             }
             Ok(resp) => {
+                delivery_span.set_attribute(KeyValue::new(
+                    "http.status_code",
+                    resp.status().as_u16() as i64,
+                ));
+                delivery_span.set_attribute(KeyValue::new("webhook.status", "error"));
                 warn!(
                     webhook_id = %webhook.id,
                     event_type,
@@ -54,6 +89,9 @@ pub async fn dispatch_event(
                 );
             }
             Err(e) => {
+                delivery_span.set_attribute(KeyValue::new("webhook.status", "error"));
+                delivery_span.set_attribute(KeyValue::new("error", true));
+                delivery_span.set_attribute(KeyValue::new("error.message", e.to_string()));
                 warn!(
                     webhook_id = %webhook.id,
                     event_type,
@@ -62,7 +100,14 @@ pub async fn dispatch_event(
                 );
             }
         }
+
+        delivery_span.end();
     }
+
+    dispatch_cx
+        .span()
+        .set_attribute(KeyValue::new("webhook.delivered", delivered as i64));
+    dispatch_cx.span().end();
 
     info!(
         event_type,

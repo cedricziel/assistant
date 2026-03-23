@@ -3,13 +3,16 @@
 //! These are pure functions that create and enrich OTel spans for
 //! LLM calls, tool executions, and conversation-level contexts.
 
+use std::collections::HashMap;
+
 use assistant_core::Interface;
 use assistant_llm::{
     ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, LlmResponseMeta, ToolSpec,
 };
 use opentelemetry::{
     global,
-    trace::{Span as _, TraceContextExt, Tracer as _},
+    propagation::{Extractor, Injector},
+    trace::{Span as _, SpanKind, TraceContextExt, Tracer as _},
     Array, Context as OtelContext, KeyValue, StringValue, Value,
 };
 use opentelemetry_semantic_conventions::attribute::{
@@ -46,6 +49,122 @@ pub fn start_conversation_context(conversation_id: Uuid, interface: &Interface) 
     ));
     span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
     OtelContext::current().with_span(span)
+}
+
+/// Create an OTel root span for an inbound interface event.
+///
+/// This is used at interface/webhook boundaries so downstream turn spans can be
+/// linked through async bus handoffs via propagated trace context.
+pub fn start_interface_root_context(
+    interface: &Interface,
+    operation: &str,
+    conversation_id: Option<Uuid>,
+) -> OtelContext {
+    let tracer = global::tracer("assistant.interface");
+    let span_name = format!("interface.{operation}");
+    let mut span = tracer.start(span_name.clone());
+    span.set_attribute(KeyValue::new("span.name", span_name));
+    span.set_attribute(KeyValue::new("interface", format!("{:?}", interface)));
+    span.set_attribute(KeyValue::new("operation", operation.to_string()));
+    if let Some(conversation_id) = conversation_id {
+        span.set_attribute(KeyValue::new(
+            "conversation_id",
+            conversation_id.to_string(),
+        ));
+        span.set_attribute(KeyValue::new(
+            GEN_AI_CONVERSATION_ID,
+            conversation_id.to_string(),
+        ));
+    }
+    OtelContext::current().with_span(span)
+}
+
+/// Inject W3C trace context into a `traceparent` header value.
+pub fn traceparent_from_context(cx: &OtelContext) -> Option<String> {
+    let mut carrier = HashMap::new();
+    global::get_text_map_propagator(|prop| {
+        prop.inject_context(cx, &mut HeaderInjector(&mut carrier));
+    });
+    carrier.get("traceparent").cloned()
+}
+
+/// Rebuild an OpenTelemetry context from a W3C `traceparent` value.
+pub fn context_from_traceparent(traceparent: &str) -> OtelContext {
+    global::get_text_map_propagator(|prop| {
+        prop.extract(&HeaderExtractor {
+            traceparent: Some(traceparent),
+        })
+    })
+}
+
+/// Create a bus interaction span (`produce` or `consume`) under `parent_cx`.
+pub fn start_bus_span(
+    span_kind: SpanKind,
+    topic: &str,
+    conversation_id: Option<Uuid>,
+    parent_cx: &OtelContext,
+) -> opentelemetry::global::BoxedSpan {
+    let tracer = global::tracer("assistant.bus");
+    let operation = match span_kind {
+        SpanKind::Producer => "produce",
+        SpanKind::Consumer => "consume",
+        SpanKind::Client => "client",
+        SpanKind::Server => "server",
+        SpanKind::Internal => "internal",
+    };
+    let span_name = format!("bus.{operation} {topic}");
+    let mut span = tracer.build_with_context(
+        tracer.span_builder(span_name.clone()).with_kind(span_kind),
+        parent_cx,
+    );
+    span.set_attribute(KeyValue::new("span.name", span_name));
+    span.set_attribute(KeyValue::new("messaging.system", "assistant.bus"));
+    span.set_attribute(KeyValue::new("messaging.operation", operation.to_string()));
+    span.set_attribute(KeyValue::new(
+        "messaging.destination.name",
+        topic.to_string(),
+    ));
+    if let Some(conversation_id) = conversation_id {
+        span.set_attribute(KeyValue::new(
+            "conversation_id",
+            conversation_id.to_string(),
+        ));
+        span.set_attribute(KeyValue::new(
+            GEN_AI_CONVERSATION_ID,
+            conversation_id.to_string(),
+        ));
+    }
+    span
+}
+
+struct HeaderInjector<'a>(&'a mut HashMap<String, String>);
+
+impl Injector for HeaderInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        self.0.insert(key.to_ascii_lowercase(), value);
+    }
+}
+
+struct HeaderExtractor<'a> {
+    traceparent: Option<&'a str>,
+}
+
+impl Extractor for HeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        if key.eq_ignore_ascii_case("traceparent") {
+            self.traceparent
+        } else {
+            None
+        }
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        if self.traceparent.is_some() {
+            vec!["traceparent"]
+        } else {
+            vec![]
+        }
+    }
 }
 
 pub(crate) fn start_tool_span(

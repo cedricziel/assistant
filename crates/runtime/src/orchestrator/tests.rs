@@ -1474,6 +1474,7 @@ async fn run_worker_processes_turn_request() {
         conversation_id: conv_id,
         extension_tools: vec![],
         timestamp: None,
+        traceparent: None,
     };
     orch.bus()
         .publish(

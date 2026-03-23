@@ -28,7 +28,7 @@ use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_provider_openai::OpenAIProvider;
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
-use assistant_runtime::Orchestrator;
+use assistant_runtime::{init_tracing, Orchestrator};
 use assistant_skills::SkillSource;
 use assistant_storage::registry::SkillRegistry;
 use assistant_storage::{default_db_path, StorageLayer};
@@ -50,8 +50,7 @@ use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
-use tracing::{info, warn, Level};
-use tracing_subscriber::EnvFilter;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use auth::AuthConfig;
@@ -140,13 +139,6 @@ impl AssistantTurnClient for OrchestratorTurnClient {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::default().add_directive(Level::INFO.into())),
-        )
-        .init();
-
     // -- Auth token (required) -----------------------------------------------
     let auth_token = match args.auth_token.map(|t| t.trim().to_string()) {
         Some(t) if !t.is_empty() => t,
@@ -199,6 +191,8 @@ async fn main() -> Result<()> {
     if let Some(base_url) = args.llm_base_url {
         config.llm.base_url = base_url;
     }
+
+    let _otel_guard = init_tracing(storage.pool.clone(), config.mirror.trace_enabled)?;
 
     let cli_agent_override = args.agent.clone();
     let mut selected_agent = cli_agent_override
