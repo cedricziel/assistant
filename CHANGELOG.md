@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.53](https://github.com/cedricziel/assistant/compare/v0.1.52...v0.1.53) (2026-03-24)
+
+
+### Features
+
+* **interface-cli:** unify runtime entrypoints and service migration ([#264](https://github.com/cedricziel/assistant/issues/264)) ([f9fe94c](https://github.com/cedricziel/assistant/commit/f9fe94c347f46952f46e93be2ef81be39ed34dbb))
+
 ## [0.1.52](https://github.com/cedricziel/assistant/compare/v0.1.51...v0.1.52) (2026-03-24)
 
 
