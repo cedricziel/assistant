@@ -1598,9 +1598,21 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
     };
 
     let result_msg = &results[0];
-    assert_eq!(result_msg.batch_id, Some(request_id));
-    assert_eq!(result_msg.correlation_id, Some(request_id));
-    assert_eq!(result_msg.causation_id, Some(request_msg_id));
+    assert_eq!(
+        result_msg.batch_id,
+        Some(request_id),
+        "TURN_RESULT should preserve the request batch_id"
+    );
+    assert_eq!(
+        result_msg.correlation_id,
+        Some(request_id),
+        "TURN_RESULT should preserve the request correlation_id"
+    );
+    assert_eq!(
+        result_msg.causation_id,
+        Some(request_msg_id),
+        "TURN_RESULT should set causation_id to the TURN_REQUEST message id"
+    );
 
     worker.abort();
 }

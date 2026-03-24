@@ -179,11 +179,6 @@ pub struct Orchestrator {
     /// Per-conversation extension tool registrations for interface-specific
     /// turns dispatched through the bus.  Consumed by the worker.
     pub(crate) extension_registrations: tokio::sync::RwLock<HashMap<Uuid, ExtensionRegistration>>,
-    /// Per-conversation submit metadata registered by interfaces.
-    ///
-    /// Consumed by `submit_turn` to enrich interface/bus telemetry with
-    /// interface-specific IDs (e.g. Slack event IDs, thread IDs).
-    pub(crate) submit_metadata: tokio::sync::RwLock<HashMap<Uuid, HashMap<String, String>>>,
     /// Cancellation tokens for running subagents, keyed by agent ID.
     pub(crate) agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
     /// OTel metric instruments for GenAI and operational metrics.
@@ -216,7 +211,6 @@ impl Orchestrator {
             trace_content: config.mirror.trace_content,
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
-            submit_metadata: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),

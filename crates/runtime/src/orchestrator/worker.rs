@@ -53,21 +53,6 @@ impl Orchestrator {
         );
     }
 
-    /// Register interface-specific submit metadata for one turn.
-    ///
-    /// Call this before [`submit_turn`](Self::submit_turn). The metadata is
-    /// consumed by `submit_turn` and attached to interface/bus telemetry.
-    pub async fn register_submit_metadata(
-        &self,
-        conversation_id: Uuid,
-        attributes: HashMap<String, String>,
-    ) {
-        self.submit_metadata
-            .write()
-            .await
-            .insert(conversation_id, attributes);
-    }
-
     /// Record a deduplicated Slack event for observability.
     pub fn record_slack_duplicate_event(&self, event_kind: &str) {
         self.metrics
@@ -242,7 +227,7 @@ impl Orchestrator {
                             .with_causation_id(msg.id);
                             if let Some(bid) = msg.batch_id {
                                 pub_req = pub_req.with_batch_id(bid);
-                            } else {
+                            } else if msg.correlation_id.is_some() {
                                 self.metrics.record_submit_result_unmatched(
                                     &self.agent_id,
                                     &interface_name,
@@ -362,7 +347,7 @@ impl Orchestrator {
                             .with_causation_id(msg.id);
                             if let Some(bid) = msg.batch_id {
                                 pub_req = pub_req.with_batch_id(bid);
-                            } else {
+                            } else if msg.correlation_id.is_some() {
                                 self.metrics.record_submit_result_unmatched(
                                     &self.agent_id,
                                     &interface_name,
@@ -472,14 +457,28 @@ impl Orchestrator {
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
+        self.submit_turn_with_metadata(
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            HashMap::new(),
+        )
+        .await
+    }
+
+    /// Submit a turn through the message bus and wait for the result, enriched
+    /// with interface-provided metadata attributes.
+    pub async fn submit_turn_with_metadata(
+        &self,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+        submit_metadata: HashMap<String, String>,
+    ) -> Result<TurnResult> {
         let request_id = Uuid::new_v4();
         let interface_label = format!("{interface:?}");
-        let submit_metadata = self
-            .submit_metadata
-            .write()
-            .await
-            .remove(&conversation_id)
-            .unwrap_or_default();
         let interface_cx = crate::otel_spans::start_interface_root_context(
             &interface,
             "submit_turn",
