@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.55](https://github.com/cedricziel/assistant/compare/v0.1.54...v0.1.55) (2026-03-24)
+
+
+### Bug Fixes
+
+* **release:** trigger release-please ([23725b9](https://github.com/cedricziel/assistant/commit/23725b9928ac188a7027b470be8eae85bdf4cf76))
+
 ## [0.1.54](https://github.com/cedricziel/assistant/compare/v0.1.53...v0.1.54) (2026-03-24)
 
 
