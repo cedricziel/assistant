@@ -262,6 +262,10 @@ impl Orchestrator {
                                         warn!(
                                             error = %e,
                                             msg_id = %msg.id,
+                                            conversation_id = %conv_id,
+                                            interface = %interface_name,
+                                            batch_id = ?msg.batch_id,
+                                            correlation_id = ?msg.correlation_id,
                                             "Failed to ack bus message"
                                         );
                                     }

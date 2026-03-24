@@ -877,11 +877,17 @@ async fn main() -> Result<()> {
 
     let bs = bootstrap(&home, confirmation_cb, storage.clone(), config).await?;
 
-    // 5b. Spawn the turn worker (processes bus messages from scheduler, MCP, etc.).
-    let worker_orch = bs.orchestrator.clone();
-    let _worker = tokio::spawn(async move {
-        worker_orch.run_worker("main-worker").await;
-    });
+    // 5b. Spawn the main turn worker (processes generic bus messages).
+    // In interface-only modes we run a dedicated, interface-filtered worker
+    // below to avoid duplicate consumption of the same turn requests.
+    let _worker = if !is_slack_only && !is_mattermost_only && !is_nextcloud_only {
+        let worker_orch = bs.orchestrator.clone();
+        Some(tokio::spawn(async move {
+            worker_orch.run_worker("main-worker").await;
+        }))
+    } else {
+        None
+    };
 
     // 6. MCP mode — run the stdio JSON-RPC server and exit.
     #[cfg(feature = "mcp")]
@@ -947,12 +953,13 @@ async fn main() -> Result<()> {
             info!("Registered ambient tool: {tool_name}");
         }
 
-        // Spawn the turn worker — required for submit_turn to process bus
-        // messages.  Without this the interface would timeout waiting for
-        // a turn result.
+        // Spawn a Slack-filtered turn worker. Using an interface filter avoids
+        // duplicate handling when other workers are active in the same process.
         let worker_orch = bs.orchestrator.clone();
         let _worker = tokio::spawn(async move {
-            worker_orch.run_worker("slack-worker").await;
+            worker_orch
+                .run_worker_filtered("slack-worker", Some("Slack"))
+                .await;
         });
 
         info!("Starting Slack-only mode");
@@ -968,12 +975,13 @@ async fn main() -> Result<()> {
         )?;
         let iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
 
-        // Spawn the turn worker — required for submit_turn to process bus
-        // messages.  Without this the interface would timeout waiting for
-        // a turn result.
+        // Spawn a Mattermost-filtered turn worker to prevent duplicate
+        // consumption with other workers.
         let worker_orch = bs.orchestrator.clone();
         let _worker = tokio::spawn(async move {
-            worker_orch.run_worker("mattermost-worker").await;
+            worker_orch
+                .run_worker_filtered("mattermost-worker", Some("Mattermost"))
+                .await;
         });
 
         info!("Starting Mattermost-only mode");
@@ -989,12 +997,13 @@ async fn main() -> Result<()> {
         )?;
         let iface = NextcloudInterface::new(nc_cfg, bs.orchestrator.clone());
 
-        // Spawn the turn worker — required for submit_turn to process bus
-        // messages.  Without this the interface would timeout waiting for
-        // a turn result.
+        // Spawn a Nextcloud-filtered turn worker to prevent duplicate
+        // consumption with other workers.
         let worker_orch = bs.orchestrator.clone();
         let _worker = tokio::spawn(async move {
-            worker_orch.run_worker("nextcloud-worker").await;
+            worker_orch
+                .run_worker_filtered("nextcloud-worker", Some("Nextcloud"))
+                .await;
         });
 
         info!("Starting Nextcloud Talk-only mode");
