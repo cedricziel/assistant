@@ -1546,6 +1546,77 @@ async fn submit_turn_publishes_and_waits_for_result() {
     assert_eq!(result.answer, "submitted answer");
 }
 
+#[tokio::test]
+async fn worker_propagates_submit_correlation_fields_to_turn_result() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "correlated response").await;
+
+    let (orch, _storage) = build(&server.uri()).await;
+
+    let orch_worker = orch.clone();
+    let worker = tokio::spawn(async move {
+        orch_worker.run_worker("test-worker").await;
+    });
+
+    let conv_id = Uuid::new_v4();
+    let request_id = Uuid::new_v4();
+    let turn_req = bus_messages::TurnRequest {
+        prompt: "hello correlation".to_string(),
+        conversation_id: conv_id,
+        extension_tools: vec![],
+        timestamp: None,
+        traceparent: None,
+    };
+
+    let request_msg_id = orch
+        .bus()
+        .publish(
+            PublishRequest::new(
+                topic::TURN_REQUEST,
+                serde_json::to_value(&turn_req).unwrap(),
+            )
+            .with_agent_id("default")
+            .with_conversation_id(conv_id)
+            .with_interface("Cli")
+            .with_correlation_id(request_id)
+            .with_batch_id(request_id),
+        )
+        .await
+        .unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let results = loop {
+        let r = orch.bus().list(topic::TURN_RESULT, None, 10).await.unwrap();
+        if !r.is_empty() {
+            break r;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for correlated TurnResult"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+
+    let result_msg = &results[0];
+    assert_eq!(
+        result_msg.batch_id,
+        Some(request_id),
+        "TURN_RESULT should preserve the request batch_id"
+    );
+    assert_eq!(
+        result_msg.correlation_id,
+        Some(request_id),
+        "TURN_RESULT should preserve the request correlation_id"
+    );
+    assert_eq!(
+        result_msg.causation_id,
+        Some(request_msg_id),
+        "TURN_RESULT should set causation_id to the TURN_REQUEST message id"
+    );
+
+    worker.abort();
+}
+
 // ── Subagent integration tests ────────────────────────────────────────────
 
 use assistant_core::{AgentReportStatus, AgentSpawn, SubagentRunner, DEFAULT_MAX_AGENT_DEPTH};

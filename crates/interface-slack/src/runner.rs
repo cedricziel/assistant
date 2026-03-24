@@ -75,6 +75,8 @@ struct SlackIncomingEvent {
 /// orchestrator turn once the per-conversation lock is acquired.
 struct PendingMessage {
     text: String,
+    event_ts: SlackTs,
+    event_kind: String,
     user_id: String,
     channel_id: String,
     thread_ts: SlackTs,
@@ -720,9 +722,30 @@ async fn on_push_event(
     {
         let mut seen = processed_ts.lock().await;
         if !seen.insert(incoming.event_ts.0.clone()) {
-            debug!(ts = %incoming.event_ts.0, "Skipping duplicate event (already processed on other connection)");
+            let duplicate_kind = match incoming.kind {
+                SlackIncomingKind::Message => "message",
+                SlackIncomingKind::Reaction { .. } => "reaction",
+            };
+            orchestrator.record_slack_duplicate_event(duplicate_kind);
+            debug!(
+                channel = %channel_id,
+                user = %user_id,
+                event_ts = %incoming.event_ts.0,
+                thread_ts = %thread_ts.0,
+                event_kind = duplicate_kind,
+                dedupe_decision = "drop_duplicate",
+                "Skipping duplicate event (already processed on other connection)"
+            );
             return Ok(());
         }
+        debug!(
+            channel = %channel_id,
+            user = %user_id,
+            event_ts = %incoming.event_ts.0,
+            thread_ts = %thread_ts.0,
+            dedupe_decision = "accept",
+            "Accepted Slack event after dedupe check"
+        );
         // Prune to prevent unbounded growth. Clear older entries but retain the
         // ts we just inserted so a delayed duplicate from the other connection
         // is still rejected after the prune.
@@ -939,6 +962,8 @@ async fn on_push_event(
             .or_default()
             .push(PendingMessage {
                 text: text.clone(),
+                event_ts: incoming.event_ts.clone(),
+                event_kind: event_kind.to_string(),
                 user_id: user_id.clone(),
                 channel_id: channel_id.clone(),
                 thread_ts: thread_ts.clone(),
@@ -1049,6 +1074,26 @@ async fn on_push_event(
         .register_extensions(conversation_id, extensions, all_attachments.clone())
         .await;
 
+    let batch_event_kind = {
+        let mut kinds = batch
+            .iter()
+            .map(|m| m.event_kind.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        if kinds.len() == 1 {
+            kinds.drain().next().unwrap_or("message").to_string()
+        } else {
+            "mixed".to_string()
+        }
+    };
+
+    let mut submit_metadata = HashMap::new();
+    submit_metadata.insert("slack.channel_id".to_string(), channel_id.clone());
+    submit_metadata.insert("slack.thread_ts".to_string(), thread_ts.0.clone());
+    submit_metadata.insert("slack.event_ts".to_string(), last.event_ts.0.clone());
+    submit_metadata.insert("slack.message_ts".to_string(), last.msg_ts.0.clone());
+    submit_metadata.insert("slack.batch_size".to_string(), batch_size.to_string());
+    submit_metadata.insert("slack.event_kind".to_string(), batch_event_kind);
+
     let orchestrator_start = std::time::Instant::now();
     debug!(
         conversation_id = %conversation_id,
@@ -1064,11 +1109,12 @@ async fn on_push_event(
         DateTime::from_timestamp(secs, nsecs)
     });
     let turn_result = orchestrator
-        .submit_turn(
+        .submit_turn_with_metadata(
             &contextualized_text,
             conversation_id,
             Interface::Slack,
             msg_ts,
+            submit_metadata,
         )
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
@@ -1101,7 +1147,16 @@ async fn on_push_event(
 
     match turn_result {
         Err(e) => {
-            error!(error = %e, elapsed_ms, batch_size, "orchestrator error");
+            error!(
+                error = %e,
+                elapsed_ms,
+                batch_size,
+                conversation_id = %conversation_id,
+                channel = %channel_id,
+                thread_ts = %thread_ts.0,
+                slack_event_ts = %incoming.event_ts.0,
+                "orchestrator error"
+            );
             // Note: the orchestrator already persists a synthetic assistant
             // message on error (persist_error_recovery) so the conversation
             // history keeps proper User→Assistant alternation.
@@ -1880,6 +1935,8 @@ mod tests {
     fn make_pending(user: &str, channel: &str, text: &str, ts: &str) -> PendingMessage {
         PendingMessage {
             text: text.to_string(),
+            event_ts: SlackTs(ts.to_string()),
+            event_kind: "message".to_string(),
             user_id: user.to_string(),
             channel_id: channel.to_string(),
             thread_ts: SlackTs("1700000000.000000".to_string()),

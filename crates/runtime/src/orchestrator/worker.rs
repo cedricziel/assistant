@@ -3,6 +3,7 @@
 //! These methods handle claiming messages from the message bus, dispatching
 //! them to the appropriate `run_turn*` variant, and publishing results back.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -50,6 +51,12 @@ impl Orchestrator {
             conversation_id,
             ExtensionRegistration { tools, attachments },
         );
+    }
+
+    /// Record a deduplicated Slack event for observability.
+    pub fn record_slack_duplicate_event(&self, event_kind: &str) {
+        self.metrics
+            .record_slack_duplicate_event(&self.agent_id, event_kind);
     }
 
     /// Run the turn-processing worker loop.
@@ -135,6 +142,16 @@ impl Orchestrator {
                     if let Some(batch_id) = msg.batch_id {
                         bus_consume_span
                             .set_attribute(KeyValue::new("bus.batch_id", batch_id.to_string()));
+                        bus_consume_span.set_attribute(KeyValue::new(
+                            "submit.request_id",
+                            batch_id.to_string(),
+                        ));
+                    }
+                    if let Some(correlation_id) = msg.correlation_id {
+                        bus_consume_span.set_attribute(KeyValue::new(
+                            "bus.correlation_id",
+                            correlation_id.to_string(),
+                        ));
                     }
                     let bus_consume_cx = consume_parent_cx.with_span(bus_consume_span);
                     let interface_name = format!("{:?}", interface);
@@ -206,9 +223,24 @@ impl Orchestrator {
                                 serde_json::to_value(&bus_result).unwrap_or_default(),
                             )
                             .with_agent_id(self.agent_id.clone())
-                            .with_conversation_id(conv_id);
+                            .with_conversation_id(conv_id)
+                            .with_causation_id(msg.id);
                             if let Some(bid) = msg.batch_id {
                                 pub_req = pub_req.with_batch_id(bid);
+                            } else if msg.correlation_id.is_some() {
+                                self.metrics.record_submit_result_unmatched(
+                                    &self.agent_id,
+                                    &interface_name,
+                                    "missing_request_id",
+                                );
+                                warn!(
+                                    conversation_id = %conv_id,
+                                    msg_id = %msg.id,
+                                    "turn.request missing batch_id; submit_turn correlation may fail"
+                                );
+                            }
+                            if let Some(correlation_id) = msg.correlation_id.or(msg.batch_id) {
+                                pub_req = pub_req.with_correlation_id(correlation_id);
                             }
 
                             let mut produce_result_span = crate::otel_spans::start_bus_span(
@@ -311,9 +343,24 @@ impl Orchestrator {
                                 serde_json::to_value(&err_result).unwrap_or_default(),
                             )
                             .with_agent_id(self.agent_id.clone())
-                            .with_conversation_id(conv_id);
+                            .with_conversation_id(conv_id)
+                            .with_causation_id(msg.id);
                             if let Some(bid) = msg.batch_id {
                                 pub_req = pub_req.with_batch_id(bid);
+                            } else if msg.correlation_id.is_some() {
+                                self.metrics.record_submit_result_unmatched(
+                                    &self.agent_id,
+                                    &interface_name,
+                                    "missing_request_id",
+                                );
+                                warn!(
+                                    conversation_id = %conv_id,
+                                    msg_id = %msg.id,
+                                    "turn.request missing batch_id; submit_turn correlation may fail"
+                                );
+                            }
+                            if let Some(correlation_id) = msg.correlation_id.or(msg.batch_id) {
+                                pub_req = pub_req.with_correlation_id(correlation_id);
                             }
                             let mut produce_result_span = crate::otel_spans::start_bus_span(
                                 SpanKind::Producer,
@@ -410,11 +457,50 @@ impl Orchestrator {
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
+        self.submit_turn_with_metadata(
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            HashMap::new(),
+        )
+        .await
+    }
+
+    /// Submit a turn through the message bus and wait for the result, enriched
+    /// with interface-provided metadata attributes.
+    pub async fn submit_turn_with_metadata(
+        &self,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+        submit_metadata: HashMap<String, String>,
+    ) -> Result<TurnResult> {
         let request_id = Uuid::new_v4();
+        let interface_label = format!("{interface:?}");
         let interface_cx = crate::otel_spans::start_interface_root_context(
             &interface,
             "submit_turn",
             Some(conversation_id),
+        );
+        interface_cx
+            .span()
+            .set_attribute(KeyValue::new("submit.request_id", request_id.to_string()));
+        interface_cx
+            .span()
+            .set_attribute(KeyValue::new("bus.correlation_id", request_id.to_string()));
+        for (key, value) in &submit_metadata {
+            interface_cx
+                .span()
+                .set_attribute(KeyValue::new(key.clone(), value.clone()));
+        }
+        info!(
+            conversation_id = %conversation_id,
+            request_id = %request_id,
+            interface = %interface_label,
+            submit_state = "pending",
+            "submit_turn waiter state"
         );
         let turn_req = bus_messages::TurnRequest {
             prompt: prompt.to_string(),
@@ -430,6 +516,9 @@ impl Orchestrator {
             Some(conversation_id),
             &interface_cx,
         );
+        for (key, value) in &submit_metadata {
+            produce_request_span.set_attribute(KeyValue::new(key.clone(), value.clone()));
+        }
         let publish_result = self
             .bus
             .publish(
@@ -438,6 +527,7 @@ impl Orchestrator {
                     .with_conversation_id(conversation_id)
                     .with_interface(format!("{:?}", interface))
                     .with_reply_to(topic::TURN_RESULT)
+                    .with_correlation_id(request_id)
                     .with_batch_id(request_id),
             )
             .await;
@@ -445,6 +535,12 @@ impl Orchestrator {
             Ok(message_id) => {
                 produce_request_span
                     .set_attribute(KeyValue::new("bus.message_id", message_id.to_string()));
+                produce_request_span
+                    .set_attribute(KeyValue::new("bus.batch_id", request_id.to_string()));
+                produce_request_span
+                    .set_attribute(KeyValue::new("bus.correlation_id", request_id.to_string()));
+                produce_request_span
+                    .set_attribute(KeyValue::new("submit.request_id", request_id.to_string()));
                 produce_request_span.set_attribute(KeyValue::new("bus.status", "ok"));
                 produce_request_span.end();
             }
@@ -461,23 +557,52 @@ impl Orchestrator {
         // Match by both conversation_id and batch_id (request_id) so
         // overlapping turns for the same conversation don't collide.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(600);
+        let late_result_deadline = deadline + Duration::from_secs(2);
+        let filter = ClaimFilter::new()
+            .with_agent_id(self.agent_id.clone())
+            .with_conversation_id(conversation_id)
+            .with_batch_id(request_id);
         loop {
-            if tokio::time::Instant::now() > deadline {
+            let now = tokio::time::Instant::now();
+            if now > late_result_deadline {
+                self.metrics
+                    .record_submit_timeout(&self.agent_id, &interface_label);
+                info!(
+                    conversation_id = %conversation_id,
+                    request_id = %request_id,
+                    interface = %interface_label,
+                    submit_state = "timeout",
+                    "submit_turn waiter state"
+                );
                 anyhow::bail!(
                     "submit_turn timed out waiting for result \
                      (conversation_id={conversation_id}, request_id={request_id})"
                 );
             }
 
-            let filter = ClaimFilter::new()
-                .with_agent_id(self.agent_id.clone())
-                .with_conversation_id(conversation_id)
-                .with_batch_id(request_id);
             if let Some(msg) = self
                 .bus
                 .claim_filtered(topic::TURN_RESULT, "submit_turn", &filter)
                 .await?
             {
+                if msg.batch_id != Some(request_id) {
+                    self.metrics.record_submit_result_unmatched(
+                        &self.agent_id,
+                        &interface_label,
+                        "batch_id_mismatch",
+                    );
+                    warn!(
+                        conversation_id = %conversation_id,
+                        request_id = %request_id,
+                        msg_id = %msg.id,
+                        msg_batch_id = ?msg.batch_id,
+                        submit_state = "mismatch",
+                        "submit_turn received mismatched turn.result batch_id"
+                    );
+                    self.bus.nack(msg.id).await?;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    continue;
+                }
                 let mut consume_result_span = crate::otel_spans::start_bus_span(
                     SpanKind::Consumer,
                     topic::TURN_RESULT,
@@ -486,10 +611,55 @@ impl Orchestrator {
                 );
                 consume_result_span
                     .set_attribute(KeyValue::new("bus.message_id", msg.id.to_string()));
+                consume_result_span
+                    .set_attribute(KeyValue::new("bus.batch_id", request_id.to_string()));
+                consume_result_span
+                    .set_attribute(KeyValue::new("bus.correlation_id", request_id.to_string()));
+                consume_result_span
+                    .set_attribute(KeyValue::new("submit.request_id", request_id.to_string()));
                 let bus_result: bus_messages::TurnResult = serde_json::from_value(msg.payload)?;
+                if bus_result.conversation_id != conversation_id {
+                    self.metrics.record_submit_result_unmatched(
+                        &self.agent_id,
+                        &interface_label,
+                        "conversation_id_mismatch",
+                    );
+                    warn!(
+                        conversation_id = %conversation_id,
+                        request_id = %request_id,
+                        msg_id = %msg.id,
+                        result_conversation_id = %bus_result.conversation_id,
+                        submit_state = "mismatch",
+                        "submit_turn received mismatched turn.result conversation_id"
+                    );
+                    self.bus.nack(msg.id).await?;
+                    consume_result_span.set_attribute(KeyValue::new("bus.status", "mismatch"));
+                    consume_result_span.end();
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    continue;
+                }
                 self.bus.ack(msg.id).await?;
                 consume_result_span.set_attribute(KeyValue::new("bus.status", "ok"));
                 consume_result_span.end();
+                if now > deadline {
+                    self.metrics
+                        .record_submit_late_result(&self.agent_id, &interface_label);
+                    info!(
+                        conversation_id = %conversation_id,
+                        request_id = %request_id,
+                        interface = %interface_label,
+                        submit_state = "late_result",
+                        "submit_turn waiter state"
+                    );
+                } else {
+                    info!(
+                        conversation_id = %conversation_id,
+                        request_id = %request_id,
+                        interface = %interface_label,
+                        submit_state = "matched",
+                        "submit_turn waiter state"
+                    );
+                }
                 return Ok(TurnResult {
                     answer: bus_result.content,
                     attachments: bus_result.attachments,
