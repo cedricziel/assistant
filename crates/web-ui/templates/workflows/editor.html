@@ -9,47 +9,21 @@ breadcrumb %}
 <div class="wf-page workflow-editor-page">
   <main class="main">
     <div
-      class="panel"
+      class="panel wf-editor-panel"
       data-controller="workflow-editor workflow-view-mode"
       data-workflow-editor-workflow-id-value="{{ id }}"
       data-workflow-view-mode-workflow-id-value="{{ id }}"
-      data-workflow-view-mode-mode-value="graph"
+      data-workflow-view-mode-mode-value="flow"
     >
-      <div class="panel-head">
+      <header class="wf-editor-hero">
         <div>
-          <h2>Workflow Builder</h2>
+          <h2>Workflow Editor</h2>
           <p>
-            Shape the steps for <strong>{{ name }}</strong> without digging
-            through raw internals.
+            Build and review <strong>{{ name }}</strong> without editing raw
+            JSON.
           </p>
         </div>
         <div class="workflow-editor-top-actions">
-          <div
-            class="workflow-view-toggle"
-            role="group"
-            aria-label="Workflow view mode"
-          >
-            <button
-              type="button"
-              class="ghost-btn"
-              data-workflow-view-mode-target="flowToggle"
-              data-action="workflow-view-mode#switchMode"
-              data-mode="flow"
-              aria-pressed="false"
-            >
-              Flow
-            </button>
-            <button
-              type="button"
-              class="ghost-btn"
-              data-workflow-view-mode-target="graphToggle"
-              data-action="workflow-view-mode#switchMode"
-              data-mode="graph"
-              aria-pressed="false"
-            >
-              Graph
-            </button>
-          </div>
           <span id="editorStatus" data-workflow-editor-target="status"></span>
           <button
             type="button"
@@ -60,163 +34,205 @@ breadcrumb %}
             Save changes
           </button>
         </div>
-      </div>
+      </header>
 
-      <div class="editor-grid">
-        <section class="pane">
-          <div
-            class="editor-surface"
-            data-workflow-view-mode-target="flowPanel"
-          >
-            <h3>Flow view</h3>
-            <p class="workflow-hint">
-              Best for phone screens and step-by-step review.
-            </p>
+      <div class="wf-editor-layout">
+        <section class="wf-editor-main">
+          <section class="pane wf-editor-surface">
             <div
-              class="wf-flow-canvas"
-              data-workflow-editor-target="flow"
-            ></div>
-          </div>
+              class="workflow-view-toggle"
+              role="group"
+              aria-label="Workflow editor mode"
+            >
+              <button
+                type="button"
+                class="ghost-btn is-active"
+                data-workflow-view-mode-target="flowToggle"
+                data-action="workflow-view-mode#switchMode"
+                data-mode="flow"
+                aria-pressed="true"
+              >
+                Workflow
+              </button>
+              <button
+                type="button"
+                class="ghost-btn"
+                data-workflow-view-mode-target="graphToggle"
+                data-action="workflow-view-mode#switchMode"
+                data-mode="graph"
+                aria-pressed="false"
+              >
+                Graph
+              </button>
+              <button
+                type="button"
+                class="ghost-btn"
+                data-workflow-view-mode-target="stepsToggle"
+                data-action="workflow-view-mode#switchMode"
+                data-mode="steps"
+                aria-pressed="false"
+              >
+                Steps
+              </button>
+            </div>
 
-          <div
-            class="editor-surface"
-            data-workflow-view-mode-target="graphPanel"
-            hidden
-          >
-            <h3>Graph view</h3>
             <p class="workflow-hint">
-              Best for tablet and desktop when branches are easier to map
-              visually.
+              Desktop keeps this selector on top. Mobile pins it near the
+              bottom.
             </p>
-            <svg
-              id="workflowGraphPreview"
-              viewBox="0 0 980 420"
-              aria-label="Workflow graph preview"
-              data-workflow-editor-target="svg"
-            ></svg>
-          </div>
 
-          <div class="controls">
-            <h3>Add Step</h3>
-            <div class="row">
-              <label for="nodeIdInput" class="visually-hidden">Step Name</label>
-              <input
-                id="nodeIdInput"
-                placeholder="step name"
-                data-workflow-editor-target="nodeIdInput"
-              />
-              <label for="nodeKindInput" class="visually-hidden"
-                >Step Kind</label
-              >
-              <select
-                id="nodeKindInput"
-                data-workflow-editor-target="nodeKindInput"
-              >
-                <option value="trigger">Starts workflow</option>
-                <option value="action" selected>Run step</option>
-                <option value="condition">Decision</option>
-              </select>
-              <label for="nodeTypeInput" class="visually-hidden"
-                >Step Detail</label
-              >
-              <input
-                id="nodeTypeInput"
-                placeholder="what this step does"
-                data-workflow-editor-target="nodeTypeInput"
-              />
-              <button type="button" data-action="workflow-editor#addNode">
-                Add Step
-              </button>
-            </div>
-          </div>
+            <div
+              class="editor-surface"
+              data-workflow-view-mode-target="flowPanel"
+            >
+              <h3>Workflow Mode</h3>
+              <p class="workflow-hint">
+                Add steps, connect transitions, and verify flow in one place.
+              </p>
 
-          <div class="controls">
-            <h3>Connect Steps</h3>
-            <div class="row">
-              <label for="edgeFromInput" class="visually-hidden"
-                >From Step</label
-              >
-              <input
-                id="edgeFromInput"
-                placeholder="from step"
-                data-workflow-editor-target="edgeFromInput"
-              />
-              <label for="edgeToInput" class="visually-hidden">To Step</label>
-              <input
-                id="edgeToInput"
-                placeholder="to step"
-                data-workflow-editor-target="edgeToInput"
-              />
-              <label for="edgeOnInput" class="visually-hidden"
-                >Condition Label</label
-              >
-              <input
-                id="edgeOnInput"
-                placeholder="when this happens (optional)"
-                data-workflow-editor-target="edgeOnInput"
-              />
-              <button type="button" data-action="workflow-editor#addEdge">
-                Connect
-              </button>
+              <div class="wf-inline-tools" aria-label="Flow tools">
+                <button
+                  type="button"
+                  class="ghost-btn wf-mini-btn"
+                  data-action="workflow-editor#addStep"
+                >
+                  Add Step
+                </button>
+                <button
+                  type="button"
+                  class="ghost-btn wf-mini-btn"
+                  data-action="workflow-editor#beginConnect"
+                >
+                  Connect Steps
+                </button>
+                <button
+                  type="button"
+                  class="ghost-btn wf-mini-btn"
+                  data-action="workflow-editor#cancelConnect"
+                >
+                  Cancel Connect
+                </button>
+              </div>
+
+              <div
+                class="wf-flow-canvas"
+                data-workflow-editor-target="flow"
+              ></div>
             </div>
-          </div>
+
+            <div
+              class="editor-surface"
+              data-workflow-view-mode-target="graphPanel"
+              hidden
+            >
+              <h3>Graph Mode</h3>
+              <p class="workflow-hint">
+                Best on tablet and desktop for complex branches.
+              </p>
+              <div class="wf-inline-tools" aria-label="Graph tools">
+                <button
+                  type="button"
+                  class="ghost-btn wf-mini-btn"
+                  data-action="workflow-editor#addStep"
+                >
+                  Add Step
+                </button>
+                <button
+                  type="button"
+                  class="ghost-btn wf-mini-btn"
+                  data-action="workflow-editor#beginConnect"
+                >
+                  Connect Steps
+                </button>
+                <button
+                  type="button"
+                  class="ghost-btn wf-mini-btn"
+                  data-action="workflow-editor#cancelConnect"
+                >
+                  Cancel Connect
+                </button>
+              </div>
+              <svg
+                id="workflowGraphPreview"
+                viewBox="0 0 980 420"
+                aria-label="Workflow graph preview"
+                data-workflow-editor-target="svg"
+              ></svg>
+            </div>
+
+            <div
+              class="editor-surface"
+              data-workflow-view-mode-target="stepsPanel"
+              hidden
+            >
+              <h3>Steps Mode</h3>
+              <p class="workflow-hint">
+                Verify ordering and purpose of every step.
+              </p>
+
+              <table>
+                <thead>
+                  <tr>
+                    <th>Step</th>
+                    <th>Purpose</th>
+                    <th>Reference</th>
+                  </tr>
+                </thead>
+                <tbody
+                  id="workflowNodeRows"
+                  data-workflow-editor-target="nodeRows"
+                ></tbody>
+              </table>
+            </div>
+          </section>
         </section>
 
-        <section class="pane">
-          <h3>Step List</h3>
-          <p class="workflow-hint">
-            Use this list to confirm ordering and purpose of each step.
-          </p>
+        <aside class="wf-editor-meta">
+          <section class="pane">
+            <h3>Metadata</h3>
+            <p class="workflow-hint">Review and navigation live here.</p>
+            <div class="wf-k">Workflow</div>
+            <div class="wf-v">{{ name }}</div>
+            <div class="wf-k">Status</div>
+            <div class="wf-v">Use Save to persist graph changes.</div>
+            <div class="workflow-editor-links">
+              <a
+                href="/workflows/{{ id }}"
+                class="ghost-btn"
+                data-action="workflow-editor#navigate"
+                >Back to Detail</a
+              >
+              <a
+                href="/workflows/{{ id }}/edit"
+                class="ghost-btn"
+                data-action="workflow-editor#navigate"
+                >Open Edit Form</a
+              >
+            </div>
+          </section>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Step</th>
-                <th>Purpose</th>
-                <th>Reference</th>
-              </tr>
-            </thead>
-            <tbody
-              id="workflowNodeRows"
-              data-workflow-editor-target="nodeRows"
-            ></tbody>
-          </table>
-
-          <details class="workflow-advanced">
-            <summary>Technical details (JSON)</summary>
-            <label for="graphJson" class="visually-hidden"
-              >Workflow Graph JSON</label
-            >
-            <textarea
-              id="graphJson"
-              aria-describedby="graphError"
-              data-workflow-editor-target="textarea"
-              data-action="input->workflow-editor#onGraphInput"
-            >
+          <section class="pane">
+            <details class="workflow-advanced">
+              <summary>Advanced JSON</summary>
+              <label for="graphJson" class="visually-hidden"
+                >Workflow Graph JSON</label
+              >
+              <textarea
+                id="graphJson"
+                aria-describedby="graphError"
+                data-workflow-editor-target="textarea"
+                data-action="input->workflow-editor#onGraphInput"
+              >
 {{ graph_json }}</textarea
-            >
-            <div
-              id="graphError"
-              class="err"
-              data-workflow-editor-target="error"
-            ></div>
-          </details>
-
-          <div class="workflow-editor-links">
-            <a
-              href="/workflows/{{ id }}/edit"
-              class="action-btn"
-              data-action="workflow-editor#navigate"
-              >Back to Edit Form</a
-            >
-            <a
-              href="/workflows/{{ id }}"
-              class="ghost-btn"
-              data-action="workflow-editor#navigate"
-              >Back to Detail</a
-            >
-          </div>
-        </section>
+              >
+              <div
+                id="graphError"
+                class="err"
+                data-workflow-editor-target="error"
+              ></div>
+            </details>
+          </section>
+        </aside>
       </div>
     </div>
   </main>

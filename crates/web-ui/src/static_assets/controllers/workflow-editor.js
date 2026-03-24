@@ -118,6 +118,7 @@ export default class extends Controller {
     this.graph = null;
     this.isDirty = false;
     this.isSaving = false;
+    this.pendingConnectSource = null;
     this.refreshTimer = null;
     this.beforeUnloadHandler = this.beforeUnload.bind(this);
 
@@ -146,6 +147,195 @@ export default class extends Controller {
     this.markDirty();
     this.persistDraft();
     this.scheduleRefresh();
+  }
+
+  addStep(event) {
+    const sourceId = event?.currentTarget?.getAttribute("data-source-id") || "";
+    this.addStepWithPrompt(sourceId);
+  }
+
+  beginConnect(event) {
+    const sourceId = event?.currentTarget?.getAttribute("data-source-id") || "";
+    if (sourceId) {
+      this.pendingConnectSource = sourceId;
+      this.setStatus(
+        `Connecting from '${sourceId}'. Click destination step.`,
+        false,
+      );
+      return;
+    }
+
+    this.pendingConnectSource = "";
+    this.setStatus("Connection mode active. Click source step.", false);
+  }
+
+  cancelConnect() {
+    this.pendingConnectSource = null;
+    this.setStatus("Connection mode cancelled.", false);
+  }
+
+  pickConnectNode(nodeId) {
+    if (this.pendingConnectSource === null) return;
+
+    if (this.pendingConnectSource === "") {
+      this.pendingConnectSource = nodeId;
+      this.setStatus(
+        `Source '${nodeId}' selected. Click destination step.`,
+        false,
+      );
+      this.refreshGraphFromText();
+      return;
+    }
+
+    if (this.pendingConnectSource === nodeId) {
+      this.setStatus("Pick a different destination step.", true);
+      return;
+    }
+
+    const labelRaw = window.prompt("Connection label (optional)", "") || "";
+    const ok = this.addEdgeByIds(
+      this.pendingConnectSource,
+      nodeId,
+      labelRaw.trim(),
+    );
+    if (ok) {
+      this.pendingConnectSource = null;
+    }
+  }
+
+  nextSuggestedNodeId(graph, prefix) {
+    const used = new Set(
+      graph.nodes.map(function (node) {
+        return node.id;
+      }),
+    );
+
+    let i = 1;
+    while (used.has(prefix + "-" + i)) i += 1;
+    return prefix + "-" + i;
+  }
+
+  promptForNode(defaultId) {
+    const rawId = window.prompt("Step name", defaultId);
+    if (rawId === null) return null;
+    const nodeId = rawId.trim();
+    if (!nodeId) {
+      this.setError("Step name cannot be empty");
+      return null;
+    }
+
+    const kindRaw = window.prompt(
+      "Step kind: trigger, action, or condition",
+      "action",
+    );
+    if (kindRaw === null) return null;
+
+    const typeRaw = window.prompt(
+      "Step type (example: assistant_turn, http_request, manual)",
+      "custom",
+    );
+    if (typeRaw === null) return null;
+
+    return {
+      id: nodeId,
+      kind: normalizeKind(kindRaw.trim().toLowerCase()),
+      config: {
+        type: (typeRaw.trim() || "custom").toLowerCase(),
+      },
+    };
+  }
+
+  addStepWithPrompt(sourceId) {
+    const graph = this.currentGraph();
+    if (!graph) return;
+
+    const node = this.promptForNode(this.nextSuggestedNodeId(graph, "step"));
+    if (!node) return;
+
+    if (
+      graph.nodes.some(function (existing) {
+        return existing.id === node.id;
+      })
+    ) {
+      this.setError("That step name already exists");
+      return;
+    }
+
+    graph.nodes.push(node);
+
+    if (sourceId) {
+      const labelRaw = window.prompt("Connection label (optional)", "") || "";
+      const edgeAdded = this.pushEdge(
+        graph,
+        sourceId,
+        node.id,
+        labelRaw.trim(),
+      );
+      if (!edgeAdded) {
+        graph.nodes = graph.nodes.filter(function (existing) {
+          return existing.id !== node.id;
+        });
+        return;
+      }
+    }
+
+    this.writeGraph(graph);
+    this.markDirty();
+    this.persistDraft();
+    this.refreshGraphFromText();
+    this.setStatus(`Added step '${node.id}'.`, false);
+  }
+
+  pushEdge(graph, from, to, label) {
+    const knownIds = new Set(
+      graph.nodes.map(function (node) {
+        return node.id;
+      }),
+    );
+
+    if (!knownIds.has(from) || !knownIds.has(to)) {
+      this.setError("Both steps must already exist");
+      return false;
+    }
+
+    if (from === to) {
+      this.setError("A step cannot connect to itself");
+      return false;
+    }
+
+    const normalizedLabel = label || null;
+    const duplicate = graph.edges.some(function (edge) {
+      return (
+        edge.from === from &&
+        edge.to === to &&
+        (edge.on || null) === normalizedLabel
+      );
+    });
+    if (duplicate) {
+      this.setError("That connection already exists");
+      return false;
+    }
+
+    graph.edges.push({
+      from,
+      to,
+      on: normalizedLabel,
+    });
+    return true;
+  }
+
+  addEdgeByIds(from, to, label) {
+    const graph = this.currentGraph();
+    if (!graph) return false;
+
+    if (!this.pushEdge(graph, from, to, label)) return false;
+
+    this.writeGraph(graph);
+    this.markDirty();
+    this.persistDraft();
+    this.refreshGraphFromText();
+    this.setStatus(`Connected '${from}' to '${to}'.`, false);
+    return true;
   }
 
   addNode() {
@@ -211,11 +401,7 @@ export default class extends Controller {
       return;
     }
 
-    graph.edges.push({
-      from: from,
-      to: to,
-      on: onLabel || null,
-    });
+    if (!this.pushEdge(graph, from, to, onLabel)) return;
 
     this.writeGraph(graph);
     this.markDirty();
@@ -350,6 +536,50 @@ export default class extends Controller {
       const subtitle = document.createElement("p");
       subtitle.textContent = subtitleFromNode(node);
       card.appendChild(subtitle);
+
+      const actions = document.createElement("div");
+      actions.className = "wf-flow-actions";
+
+      const addButton = document.createElement("button");
+      addButton.type = "button";
+      addButton.className = "ghost-btn wf-mini-btn";
+      addButton.textContent = "+ Next step";
+      addButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.addStepWithPrompt(node.id);
+      });
+      actions.appendChild(addButton);
+
+      const connectButton = document.createElement("button");
+      connectButton.type = "button";
+      connectButton.className = "ghost-btn wf-mini-btn";
+      connectButton.textContent = "Connect";
+      connectButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.pendingConnectSource = node.id;
+        this.setStatus(
+          `Connecting from '${node.id}'. Click destination step.`,
+          false,
+        );
+        this.refreshGraphFromText();
+      });
+      actions.appendChild(connectButton);
+
+      card.appendChild(actions);
+
+      if (this.pendingConnectSource === node.id) {
+        card.classList.add("is-connect-source");
+      }
+
+      card.addEventListener("click", (event) => {
+        if (
+          event.target instanceof HTMLElement &&
+          event.target.closest("button")
+        ) {
+          return;
+        }
+        this.pickConnectNode(node.id);
+      });
 
       const next = outgoing.get(node.id) || [];
       if (next.length > 0) {
@@ -500,8 +730,14 @@ export default class extends Controller {
         "fill",
         node.kind === "trigger" ? "#1b3452" : "#13263d",
       );
-      rect.setAttribute("stroke", "#6ec6ff");
-      rect.setAttribute("stroke-width", "1.2");
+      rect.setAttribute(
+        "stroke",
+        this.pendingConnectSource === node.id ? "#fbbf24" : "#6ec6ff",
+      );
+      rect.setAttribute(
+        "stroke-width",
+        this.pendingConnectSource === node.id ? "2" : "1.2",
+      );
       group.appendChild(rect);
 
       const title = document.createElementNS(
@@ -527,6 +763,63 @@ export default class extends Controller {
       subtitle.setAttribute("text-anchor", "middle");
       subtitle.textContent = node.id;
       group.appendChild(subtitle);
+
+      const connectHandle = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "circle",
+      );
+      connectHandle.setAttribute("cx", String(pos.x + nodeWidth + 8));
+      connectHandle.setAttribute("cy", String(pos.y + nodeHeight / 2));
+      connectHandle.setAttribute("r", "8");
+      connectHandle.setAttribute("fill", "#0b2d4d");
+      connectHandle.setAttribute("stroke", "#6ec6ff");
+      connectHandle.setAttribute("stroke-width", "1.2");
+      connectHandle.style.cursor = "pointer";
+      connectHandle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.pendingConnectSource = node.id;
+        this.setStatus(
+          `Connecting from '${node.id}'. Click destination node.`,
+          false,
+        );
+        this.refreshGraphFromText();
+      });
+      group.appendChild(connectHandle);
+
+      const addHandle = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "circle",
+      );
+      addHandle.setAttribute("cx", String(pos.x + nodeWidth - 12));
+      addHandle.setAttribute("cy", String(pos.y + 12));
+      addHandle.setAttribute("r", "9");
+      addHandle.setAttribute("fill", "#163453");
+      addHandle.setAttribute("stroke", "#7aa2ff");
+      addHandle.setAttribute("stroke-width", "1.2");
+      addHandle.style.cursor = "pointer";
+      addHandle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.addStepWithPrompt(node.id);
+      });
+      group.appendChild(addHandle);
+
+      const plus = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "text",
+      );
+      plus.setAttribute("x", String(pos.x + nodeWidth - 12));
+      plus.setAttribute("y", String(pos.y + 16));
+      plus.setAttribute("fill", "#cfe1ff");
+      plus.setAttribute("font-size", "12");
+      plus.setAttribute("text-anchor", "middle");
+      plus.textContent = "+";
+      plus.style.pointerEvents = "none";
+      group.appendChild(plus);
+
+      group.style.cursor = "pointer";
+      group.addEventListener("click", () => {
+        this.pickConnectNode(node.id);
+      });
 
       this.svgTarget.appendChild(group);
     });

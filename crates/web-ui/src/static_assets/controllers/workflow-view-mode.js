@@ -7,9 +7,11 @@ export default class extends Controller {
     "flowPanel",
     "graphPanel",
     "runsPanel",
+    "stepsPanel",
     "flowToggle",
     "graphToggle",
     "runsToggle",
+    "stepsToggle",
   ];
 
   static values = {
@@ -64,7 +66,8 @@ export default class extends Controller {
 
   setMode(mode, persist) {
     if (!this.hasFlowPanelTarget || !this.hasGraphPanelTarget) return;
-    const normalized = mode === "graph" || mode === "runs" ? mode : "flow";
+    const normalized =
+      mode === "graph" || mode === "runs" || mode === "steps" ? mode : "flow";
     const enforced =
       window.innerWidth < 768 && normalized === "graph" ? "flow" : normalized;
     this.modeValue = enforced;
@@ -79,7 +82,9 @@ export default class extends Controller {
   updateModeUi() {
     if (!this.hasFlowPanelTarget || !this.hasGraphPanelTarget) return;
     const desktopMode =
-      this.modeValue === "graph" || this.modeValue === "runs"
+      this.modeValue === "graph" ||
+      this.modeValue === "runs" ||
+      this.modeValue === "steps"
         ? this.modeValue
         : "flow";
     const mode = window.innerWidth >= 768 ? desktopMode : "flow";
@@ -88,6 +93,9 @@ export default class extends Controller {
     this.graphPanelTarget.hidden = mode !== "graph";
     if (this.hasRunsPanelTarget) {
       this.runsPanelTarget.hidden = mode !== "runs";
+    }
+    if (this.hasStepsPanelTarget) {
+      this.stepsPanelTarget.hidden = mode !== "steps";
     }
 
     if (this.hasFlowToggleTarget) {
@@ -118,6 +126,15 @@ export default class extends Controller {
       const active = mode === "runs";
       this.runsToggleTarget.classList.toggle("is-active", active);
       this.runsToggleTarget.setAttribute(
+        "aria-pressed",
+        active ? "true" : "false",
+      );
+    }
+
+    if (this.hasStepsToggleTarget) {
+      const active = mode === "steps";
+      this.stepsToggleTarget.classList.toggle("is-active", active);
+      this.stepsToggleTarget.setAttribute(
         "aria-pressed",
         active ? "true" : "false",
       );

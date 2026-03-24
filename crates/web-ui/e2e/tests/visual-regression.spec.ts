@@ -329,6 +329,28 @@ test.describe("Authenticated pages", () => {
       maxDiffPixelRatio: MAX_DIFF_RATIO,
     });
 
+    await page
+      .locator(".workflow-editor-page [data-mode='steps']")
+      .first()
+      .click();
+    await page.waitForTimeout(CSS_SETTLE_MS);
+    await expect(page).toHaveScreenshot("workflow-editor-steps.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+
+    if (width >= 768) {
+      await page
+        .locator(".workflow-editor-page [data-mode='graph']")
+        .first()
+        .click();
+      await page.waitForTimeout(CSS_SETTLE_MS);
+      await expect(page).toHaveScreenshot("workflow-editor-graph.png", {
+        fullPage: true,
+        maxDiffPixelRatio: MAX_DIFF_RATIO,
+      });
+    }
+
     const runId = await queueWorkflowRun(page, workflowId);
     await navigateAndSettle(page, `/workflows/${workflowId}/runs/${runId}`);
     await expect(page).toHaveScreenshot("workflow-run-detail.png", {
