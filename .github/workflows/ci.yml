@@ -154,8 +154,10 @@ jobs:
       - name: Vendor JS dependencies
         run: make vendor
 
-      - name: Build web-ui binary
-        run: cargo build -p assistant-web-ui
+      - name: Build unified assistant binaries
+        run: |
+          cargo build -p assistant-cli
+          cargo build -p assistant-web-ui
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

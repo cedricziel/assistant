@@ -275,6 +275,7 @@ dependencies = [
  "assistant-core",
  "assistant-interface-mattermost",
  "assistant-interface-nextcloud",
+ "assistant-interface-signal",
  "assistant-interface-slack",
  "assistant-llm",
  "assistant-mcp-client",

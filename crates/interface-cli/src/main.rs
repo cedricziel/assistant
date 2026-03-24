@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
+use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -80,6 +82,48 @@ enum Command {
     Agent {
         #[command(subcommand)]
         command: AgentCommand,
+    },
+    /// Run orchestrator-managed interfaces and optional REPL.
+    Orchestrator {
+        #[command(subcommand)]
+        command: OrchestratorCommand,
+    },
+    /// Run only a turn worker process.
+    Worker {
+        /// Interface filter (e.g. slack, mattermost, nextcloud, web, signal, any).
+        #[arg(long, default_value = "any")]
+        interface: String,
+        /// Worker ID shown in logs and claim ownership.
+        #[arg(long, default_value = "worker")]
+        id: String,
+    },
+    /// Run the web UI through the unified assistant binary.
+    Webui {
+        #[command(subcommand)]
+        command: WebUiCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum OrchestratorCommand {
+    /// Start orchestrator runtime.
+    Run {
+        /// Optional comma-separated interface list (slack,mattermost,nextcloud,signal).
+        #[arg(long)]
+        interfaces: Option<String>,
+        /// Run without interactive REPL.
+        #[arg(long)]
+        no_repl: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WebUiCommand {
+    /// Serve the web UI and A2A endpoints.
+    Serve {
+        /// Additional flags forwarded to assistant-web-ui (e.g. --listen, --auth-token).
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 }
 
@@ -164,6 +208,109 @@ fn load_config_messages(config_path: &Path) -> (AssistantConfig, Vec<ConfigLoadM
             )));
             (AssistantConfig::default(), messages)
         }
+    }
+}
+
+fn normalize_worker_interface(interface: &str) -> Option<String> {
+    match interface.trim().to_lowercase().as_str() {
+        "" | "any" | "all" => None,
+        "slack" => Some("Slack".to_string()),
+        "mattermost" => Some("Mattermost".to_string()),
+        "nextcloud" => Some("Nextcloud".to_string()),
+        "web" | "webui" => Some("Web".to_string()),
+        "signal" => Some("Signal".to_string()),
+        other => Some(other.to_string()),
+    }
+}
+
+fn parse_interface_selection(input: Option<&str>) -> HashSet<String> {
+    input
+        .map(|raw| {
+            raw.split(',')
+                .map(|v| v.trim().to_lowercase())
+                .filter(|v| !v.is_empty())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn interface_selected(selected: &HashSet<String>, interface: &str) -> bool {
+    selected.is_empty() || selected.contains(interface)
+}
+
+async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
+    let args = match command {
+        WebUiCommand::Serve { args } => args,
+    };
+
+    let local_path = std::env::current_exe().ok().and_then(|exe| {
+        exe.parent().map(|dir| {
+            #[cfg(windows)]
+            {
+                dir.join("assistant-web-ui.exe")
+            }
+            #[cfg(not(windows))]
+            {
+                dir.join("assistant-web-ui")
+            }
+        })
+    });
+
+    if let Some(path) = local_path {
+        let mut local = TokioCommand::new(&path);
+        local.args(args);
+        match local.status().await {
+            Ok(status) => {
+                if status.success() {
+                    return Ok(());
+                }
+                let code = status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string());
+                anyhow::bail!("assistant-web-ui exited with status {code}");
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err).context("Failed to start local `assistant-web-ui`"),
+        }
+    }
+
+    let mut direct = TokioCommand::new("assistant-web-ui");
+    direct.args(args);
+    match direct.status().await {
+        Ok(status) => {
+            if status.success() {
+                return Ok(());
+            }
+            let code = status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".to_string());
+            anyhow::bail!("assistant-web-ui exited with status {code}");
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            let mut cargo = TokioCommand::new("cargo");
+            cargo
+                .arg("run")
+                .arg("-p")
+                .arg("assistant-web-ui")
+                .arg("--")
+                .args(args);
+            let status = cargo
+                .status()
+                .await
+                .context("Failed to start fallback `cargo run -p assistant-web-ui`")?;
+            if status.success() {
+                Ok(())
+            } else {
+                let code = status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string());
+                anyhow::bail!("webui fallback exited with status {code}");
+            }
+        }
+        Err(err) => Err(err).context("Failed to start `assistant-web-ui`"),
     }
 }
 
@@ -346,6 +493,10 @@ fn print_help() {
          /review                       Review pending skill refinement proposals\n\
          /install <path|owner/repo>    Install a skill from disk or GitHub\n\
          Agent management: run `assistant agent --help` in another shell\n\
+         Runtime modes:\n\
+           assistant orchestrator run [--interfaces ...] [--no-repl]\n\
+           assistant worker --interface <name|any> --id <worker-id>\n\
+           assistant webui serve [--listen ... --auth-token ...]\n\
          /model <name>                 Switch model (takes effect on next startup)\n\
          /help                         Show this help message\n\
          /quit | /exit                 Exit the assistant\n\
@@ -809,6 +960,22 @@ async fn main() -> Result<()> {
         return cmd_agent(&db_path, command).await;
     }
 
+    if let Some(Command::Webui { command }) = &cli.command {
+        return cmd_webui(command).await;
+    }
+
+    let (orchestrator_interfaces, orchestrator_no_repl) =
+        if let Some(Command::Orchestrator { command }) = &cli.command {
+            match command {
+                OrchestratorCommand::Run {
+                    interfaces,
+                    no_repl,
+                } => (parse_interface_selection(interfaces.as_deref()), *no_repl),
+            }
+        } else {
+            (HashSet::new(), false)
+        };
+
     // 4. Prepare confirmation behavior before bootstrapping the stack.
     //
     //    MCP and Slack/Mattermost modes use auto-deny confirmation (no terminal
@@ -833,14 +1000,18 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "nextcloud"))]
     let is_nextcloud_only = false;
 
-    let confirmation_cb: Arc<dyn ConfirmationCallback> =
-        if is_mcp || is_slack_only || is_mattermost_only || is_nextcloud_only {
-            Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
-                interface_name: "background",
-            })
-        } else {
-            Arc::new(CliConfirmation)
-        };
+    let confirmation_cb: Arc<dyn ConfirmationCallback> = if is_mcp
+        || is_slack_only
+        || is_mattermost_only
+        || is_nextcloud_only
+        || orchestrator_no_repl
+    {
+        Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
+            interface_name: "background",
+        })
+    } else {
+        Arc::new(CliConfirmation)
+    };
 
     let storage = Arc::new(
         StorageLayer::new(&db_path)
@@ -876,6 +1047,16 @@ async fn main() -> Result<()> {
     }
 
     let bs = bootstrap(&home, confirmation_cb, storage.clone(), config).await?;
+
+    // 5a. Worker-only mode.
+    if let Some(Command::Worker { interface, id }) = &cli.command {
+        let iface_filter = normalize_worker_interface(interface);
+        info!(worker_id = %id, interface = ?iface_filter, "Starting worker-only mode");
+        bs.orchestrator
+            .run_worker_filtered(id, iface_filter.as_deref())
+            .await;
+        return Ok(());
+    }
 
     // 5b. Spawn the main turn worker (processes generic bus messages).
     // In interface-only modes we run a dedicated, interface-filtered worker
@@ -1017,7 +1198,7 @@ async fn main() -> Result<()> {
 
     // 10a. Slack — register slack-post as an ambient tool and start in background.
     #[cfg(feature = "slack")]
-    if bs.config.slack.is_some() {
+    if bs.config.slack.is_some() && interface_selected(&orchestrator_interfaces, "slack") {
         use assistant_interface_slack::SlackInterface;
         let slack_cfg = bs.config.slack.clone().unwrap_or_default();
         let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
@@ -1041,7 +1222,8 @@ async fn main() -> Result<()> {
 
     // 10b. Mattermost — start in background if configured.
     #[cfg(feature = "mattermost")]
-    if bs.config.mattermost.is_some() {
+    if bs.config.mattermost.is_some() && interface_selected(&orchestrator_interfaces, "mattermost")
+    {
         use assistant_interface_mattermost::MattermostInterface;
         let mm_cfg = bs.config.mattermost.clone().unwrap_or_default();
         let iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
@@ -1057,7 +1239,7 @@ async fn main() -> Result<()> {
     //      installing process-wide signal handlers (which would conflict
     //      with the REPL's Ctrl-C handling).
     #[cfg(feature = "nextcloud")]
-    if bs.config.nextcloud.is_some() {
+    if bs.config.nextcloud.is_some() && interface_selected(&orchestrator_interfaces, "nextcloud") {
         use assistant_interface_nextcloud::NextcloudInterface;
         let nc_cfg = bs.config.nextcloud.clone().unwrap_or_default();
         let shutdown_token = tokio_util::sync::CancellationToken::new();
@@ -1068,6 +1250,26 @@ async fn main() -> Result<()> {
                 tracing::error!("Nextcloud Talk interface error: {e}");
             }
         });
+    }
+
+    // 10d. Signal — start in background if configured.
+    #[cfg(feature = "signal")]
+    if bs.config.signal.is_some() && interface_selected(&orchestrator_interfaces, "signal") {
+        use assistant_interface_signal::SignalInterface;
+        let sig_cfg = bs.config.signal.clone().unwrap_or_default();
+        let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        tokio::spawn(async move {
+            if let Err(e) = iface.run().await {
+                tracing::error!("Signal interface error: {e}");
+            }
+        });
+    }
+
+    if orchestrator_no_repl {
+        info!("Orchestrator running without REPL; waiting for shutdown signal");
+        tokio::signal::ctrl_c().await?;
+        info!("Shutdown signal received");
+        return Ok(());
     }
 
     // 11. One conversation per session.

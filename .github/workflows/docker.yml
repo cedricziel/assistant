@@ -10,10 +10,10 @@ permissions:
   packages: write
 
 jobs:
-  # Single unified image — all interfaces (Slack, Mattermost, MCP) are subcommands.
+  # Single unified image — orchestrator/webui/worker/mcp are subcommands.
   # Use CMD override to run a specific mode:
   #   docker run ghcr.io/cedricziel/assistant/assistant assistant mcp
-  #   docker run ghcr.io/cedricziel/assistant/assistant assistant slack
+  #   docker run ghcr.io/cedricziel/assistant/assistant assistant orchestrator run --interfaces slack --no-repl
   build-assistant:
     name: Build assistant image
     runs-on: ubuntu-latest

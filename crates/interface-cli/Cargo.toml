@@ -9,9 +9,10 @@ description = "Interactive CLI REPL for the local AI assistant"
 slack = ["dep:assistant-interface-slack"]
 mattermost = ["dep:assistant-interface-mattermost"]
 nextcloud = ["dep:assistant-interface-nextcloud"]
+signal = ["dep:assistant-interface-signal"]
 mcp = ["dep:assistant-mcp-server"]
 nats = ["dep:assistant-bus-nats"]
-default = ["slack", "mattermost", "nextcloud", "mcp", "nats"]
+default = ["slack", "mattermost", "nextcloud", "signal", "mcp", "nats"]
 
 [[bin]]
 name = "assistant"
@@ -36,6 +37,7 @@ assistant-runtime = { path = "../runtime" }
 assistant-interface-slack = { path = "../interface-slack", optional = true }
 assistant-interface-mattermost = { path = "../interface-mattermost", optional = true }
 assistant-interface-nextcloud = { path = "../interface-nextcloud", optional = true }
+assistant-interface-signal = { path = "../interface-signal", optional = true }
 assistant-mcp-server = { path = "../mcp-server", optional = true }
 assistant-bus-nats = { path = "../bus-nats", optional = true }
 assistant-mcp-client = { path = "../mcp-client" }
