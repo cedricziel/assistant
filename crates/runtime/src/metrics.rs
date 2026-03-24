@@ -37,6 +37,14 @@ pub struct MetricsRecorder {
     pub conversation_count: Counter<u64>,
     /// `assistant.agent.spawn.count` — sub-agents spawned.
     pub agent_spawn_count: Counter<u64>,
+    /// `assistant.submit.timeout_total` — submit_turn timeouts.
+    pub submit_timeout_count: Counter<u64>,
+    /// `assistant.submit.late_result_total` — results matched after timeout deadline.
+    pub submit_late_result_count: Counter<u64>,
+    /// `assistant.submit.result_unmatched_total` — result correlation mismatches.
+    pub submit_result_unmatched_count: Counter<u64>,
+    /// `assistant.slack.duplicate_event_total` — duplicate Slack events dropped.
+    pub slack_duplicate_event_count: Counter<u64>,
 }
 
 impl Default for MetricsRecorder {
@@ -99,6 +107,30 @@ impl MetricsRecorder {
                 .u64_counter("assistant.agent.spawn.count")
                 .with_description("Number of sub-agents spawned")
                 .with_unit("{agent}")
+                .build(),
+
+            submit_timeout_count: meter
+                .u64_counter("assistant.submit.timeout_total")
+                .with_description("Number of submit_turn timeout outcomes")
+                .with_unit("{timeout}")
+                .build(),
+
+            submit_late_result_count: meter
+                .u64_counter("assistant.submit.late_result_total")
+                .with_description("Number of submit_turn late result matches")
+                .with_unit("{result}")
+                .build(),
+
+            submit_result_unmatched_count: meter
+                .u64_counter("assistant.submit.result_unmatched_total")
+                .with_description("Number of submit/result correlation mismatches")
+                .with_unit("{result}")
+                .build(),
+
+            slack_duplicate_event_count: meter
+                .u64_counter("assistant.slack.duplicate_event_total")
+                .with_description("Number of duplicate Slack events dropped")
+                .with_unit("{event}")
                 .build(),
         }
     }
@@ -200,5 +232,43 @@ impl MetricsRecorder {
             KeyValue::new("agent.id", agent_id.to_string()),
         ];
         self.error_count.add(1, &attrs);
+    }
+
+    /// Record a submit_turn timeout.
+    pub fn record_submit_timeout(&self, agent_id: &str, interface: &str) {
+        let attrs = [
+            KeyValue::new("interface", interface.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
+        ];
+        self.submit_timeout_count.add(1, &attrs);
+    }
+
+    /// Record a submit_turn late result match.
+    pub fn record_submit_late_result(&self, agent_id: &str, interface: &str) {
+        let attrs = [
+            KeyValue::new("interface", interface.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
+        ];
+        self.submit_late_result_count.add(1, &attrs);
+    }
+
+    /// Record a submit/result correlation mismatch.
+    pub fn record_submit_result_unmatched(&self, agent_id: &str, interface: &str, reason: &str) {
+        let attrs = [
+            KeyValue::new("interface", interface.to_string()),
+            KeyValue::new("reason", reason.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
+        ];
+        self.submit_result_unmatched_count.add(1, &attrs);
+    }
+
+    /// Record a duplicate Slack event that was deduplicated by the runner.
+    pub fn record_slack_duplicate_event(&self, agent_id: &str, event_kind: &str) {
+        let attrs = [
+            KeyValue::new("interface", "Slack"),
+            KeyValue::new("event.kind", event_kind.to_string()),
+            KeyValue::new("agent.id", agent_id.to_string()),
+        ];
+        self.slack_duplicate_event_count.add(1, &attrs);
     }
 }
