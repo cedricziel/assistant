@@ -105,7 +105,9 @@ pub async fn link_device(store_path: &Path, device_name: &str) -> Result<()> {
         link_result.map_err(|e| anyhow::anyhow!("Device linking failed: {e}"))?;
 
         println!("\nDevice linked successfully!");
-        println!("Run `assistant-signal run` to start the listener.");
+        println!(
+            "Run `assistant orchestrator run --interfaces signal --no-repl` to start the listener."
+        );
         Ok(())
     }
 }

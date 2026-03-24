@@ -7,7 +7,7 @@
 //!
 //! # Architecture
 //!
-//! - Device linking is performed once via `assistant-signal link` (see
+//! - Device linking is performed once via `assistant signal link` (see
 //!   [`link_device`]).
 //! - A background tokio task runs a presage listener loop (see
 //!   [`SignalInterface::run`]).

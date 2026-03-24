@@ -12,6 +12,7 @@ mod webhooks;
 mod workflows;
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -136,10 +137,7 @@ impl AssistantTurnClient for OrchestratorTurnClient {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
+async fn run_with_args(args: Args) -> Result<()> {
     // -- Auth token (required) -----------------------------------------------
     let auth_token = match args.auth_token.map(|t| t.trim().to_string()) {
         Some(t) if !t.is_empty() => t,
@@ -526,6 +524,25 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router.into_make_service()).await?;
     Ok(())
+}
+
+pub async fn run_from_env() -> Result<()> {
+    let args = Args::parse();
+    run_with_args(args).await
+}
+
+pub async fn run_from_iter<I, T>(iter: I) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let args = Args::try_parse_from(iter).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    run_with_args(args).await
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    run_from_env().await
 }
 
 async fn health() -> StatusCode {

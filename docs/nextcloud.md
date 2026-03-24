@@ -83,7 +83,7 @@ export NEXTCLOUD_TALK_SECRET=<shared-secret>
 make run-nextcloud
 
 # Via cargo
-cargo run -p assistant-cli --features nextcloud -- nextcloud
+cargo run -p assistant-cli --features nextcloud -- orchestrator run --interfaces nextcloud --no-repl
 ```
 
 ### Background mode (REPL + Nextcloud)

@@ -97,22 +97,14 @@ jobs:
             cargo build --release --target ${{ matrix.target }} -p assistant-cli
           fi
 
-      - name: Build assistant-web-ui
+      - name: Validate assistant runtime subcommands
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p assistant-web-ui
-          else
-            cargo build --release --target ${{ matrix.target }} -p assistant-web-ui
-          fi
-
-      - name: Build assistant-signal (non-fatal)
-        continue-on-error: true
-        run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p assistant-interface-signal --features signal
-          else
-            cargo build --release --target ${{ matrix.target }} -p assistant-interface-signal --features signal
-          fi
+          target/${{ matrix.target }}/release/assistant --help
+          target/${{ matrix.target }}/release/assistant orchestrator run --help
+          target/${{ matrix.target }}/release/assistant worker --help
+          target/${{ matrix.target }}/release/assistant webui serve --help
+          target/${{ matrix.target }}/release/assistant signal --help
 
       - name: Create archive
         shell: bash
@@ -124,14 +116,6 @@ jobs:
           # Copy unified binary (Slack, Mattermost, MCP are subcommands of `assistant`)
           cp "target/${{ matrix.target }}/release/assistant" "${ARCHIVE}/" || \
             cp "target/${{ matrix.target }}/release/assistant.exe" "${ARCHIVE}/" 2>/dev/null || true
-
-          # Copy web-ui binary
-          cp "target/${{ matrix.target }}/release/assistant-web-ui" "${ARCHIVE}/" || \
-            cp "target/${{ matrix.target }}/release/assistant-web-ui.exe" "${ARCHIVE}/" 2>/dev/null || true
-
-          # Copy signal binary if it was built (still a separate feature-gated binary)
-          cp "target/${{ matrix.target }}/release/assistant-signal" "${ARCHIVE}/" 2>/dev/null || true
-          cp "target/${{ matrix.target }}/release/assistant-signal.exe" "${ARCHIVE}/" 2>/dev/null || true
 
           # Copy config template
           cp config.toml "${ARCHIVE}/config.toml.example"

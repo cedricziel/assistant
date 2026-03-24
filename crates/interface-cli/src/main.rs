@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,6 +32,9 @@ use assistant_runtime::{
 use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
+
+#[cfg(feature = "signal")]
+use assistant_interface_signal::config::SignalConfigExt;
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -80,6 +84,65 @@ enum Command {
     Agent {
         #[command(subcommand)]
         command: AgentCommand,
+    },
+    /// Run orchestrator-managed interfaces and optional REPL.
+    Orchestrator {
+        #[command(subcommand)]
+        command: OrchestratorCommand,
+    },
+    /// Run only a turn worker process.
+    Worker {
+        /// Interface filter (e.g. slack, mattermost, nextcloud, web, signal, any).
+        #[arg(long, default_value = "any")]
+        interface: String,
+        /// Worker ID shown in logs and claim ownership.
+        #[arg(long, default_value = "worker")]
+        id: String,
+    },
+    /// Run the web UI through the unified assistant binary.
+    Webui {
+        #[command(subcommand)]
+        command: WebUiCommand,
+    },
+    /// Manage Signal device linking through the unified assistant CLI.
+    #[cfg(feature = "signal")]
+    Signal {
+        #[command(subcommand)]
+        command: SignalCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum OrchestratorCommand {
+    /// Start orchestrator runtime.
+    Run {
+        /// Optional comma-separated interface list (slack,mattermost,nextcloud,signal).
+        #[arg(long)]
+        interfaces: Option<String>,
+        /// Run without interactive REPL.
+        #[arg(long)]
+        no_repl: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WebUiCommand {
+    /// Serve the web UI and A2A endpoints.
+    Serve {
+        /// Additional web UI flags (e.g. --listen, --auth-token).
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+}
+
+#[cfg(feature = "signal")]
+#[derive(Subcommand)]
+enum SignalCommand {
+    /// Link this machine as a Signal secondary device.
+    Link {
+        /// Name shown for this device in the Signal app.
+        #[arg(long, default_value = "Assistant")]
+        device_name: String,
     },
 }
 
@@ -163,6 +226,55 @@ fn load_config_messages(config_path: &Path) -> (AssistantConfig, Vec<ConfigLoadM
                 config_path.display()
             )));
             (AssistantConfig::default(), messages)
+        }
+    }
+}
+
+fn normalize_worker_interface(interface: &str) -> Option<String> {
+    match interface.trim().to_lowercase().as_str() {
+        "" | "any" | "all" => None,
+        "slack" => Some("Slack".to_string()),
+        "mattermost" => Some("Mattermost".to_string()),
+        "nextcloud" => Some("Nextcloud".to_string()),
+        "web" | "webui" => Some("Web".to_string()),
+        "signal" => Some("Signal".to_string()),
+        other => Some(other.to_string()),
+    }
+}
+
+fn parse_interface_selection(input: Option<&str>) -> HashSet<String> {
+    input
+        .map(|raw| {
+            raw.split(',')
+                .map(|v| v.trim().to_lowercase())
+                .filter(|v| !v.is_empty())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn interface_selected(selected: &HashSet<String>, interface: &str) -> bool {
+    selected.is_empty() || selected.contains(interface)
+}
+
+async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
+    let args = match command {
+        WebUiCommand::Serve { args } => args,
+    };
+
+    let argv = std::iter::once("assistant-web-ui".to_string())
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>();
+    assistant_web_ui::run_from_iter(argv).await
+}
+
+#[cfg(feature = "signal")]
+async fn cmd_signal(command: &SignalCommand, config: &AssistantConfig) -> Result<()> {
+    match command {
+        SignalCommand::Link { device_name } => {
+            let signal_cfg = config.signal.clone().unwrap_or_default();
+            let store_path = signal_cfg.resolved_store_path();
+            assistant_interface_signal::link_device(&store_path, device_name).await
         }
     }
 }
@@ -346,6 +458,11 @@ fn print_help() {
          /review                       Review pending skill refinement proposals\n\
          /install <path|owner/repo>    Install a skill from disk or GitHub\n\
          Agent management: run `assistant agent --help` in another shell\n\
+         Runtime modes:\n\
+           assistant orchestrator run [--interfaces ...] [--no-repl]\n\
+           assistant worker --interface <name|any> --id <worker-id>\n\
+           assistant webui serve [--listen ... --auth-token ...]\n\
+           assistant signal link [--device-name Assistant]\n\
          /model <name>                 Switch model (takes effect on next startup)\n\
          /help                         Show this help message\n\
          /quit | /exit                 Exit the assistant\n\
@@ -809,6 +926,29 @@ async fn main() -> Result<()> {
         return cmd_agent(&db_path, command).await;
     }
 
+    if let Some(Command::Webui { command }) = &cli.command {
+        return cmd_webui(command).await;
+    }
+
+    #[cfg(feature = "signal")]
+    if let Some(Command::Signal { command }) = &cli.command {
+        return cmd_signal(command, &config).await;
+    }
+
+    let (orchestrator_interfaces, orchestrator_no_repl) =
+        if let Some(Command::Orchestrator { command }) = &cli.command {
+            match command {
+                OrchestratorCommand::Run {
+                    interfaces,
+                    no_repl,
+                } => (parse_interface_selection(interfaces.as_deref()), *no_repl),
+            }
+        } else {
+            (HashSet::new(), false)
+        };
+    let orchestrator_interface_filtered = matches!(cli.command, Some(Command::Orchestrator { .. }))
+        && !orchestrator_interfaces.is_empty();
+
     // 4. Prepare confirmation behavior before bootstrapping the stack.
     //
     //    MCP and Slack/Mattermost modes use auto-deny confirmation (no terminal
@@ -833,14 +973,18 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "nextcloud"))]
     let is_nextcloud_only = false;
 
-    let confirmation_cb: Arc<dyn ConfirmationCallback> =
-        if is_mcp || is_slack_only || is_mattermost_only || is_nextcloud_only {
-            Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
-                interface_name: "background",
-            })
-        } else {
-            Arc::new(CliConfirmation)
-        };
+    let confirmation_cb: Arc<dyn ConfirmationCallback> = if is_mcp
+        || is_slack_only
+        || is_mattermost_only
+        || is_nextcloud_only
+        || orchestrator_no_repl
+    {
+        Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
+            interface_name: "background",
+        })
+    } else {
+        Arc::new(CliConfirmation)
+    };
 
     let storage = Arc::new(
         StorageLayer::new(&db_path)
@@ -877,10 +1021,24 @@ async fn main() -> Result<()> {
 
     let bs = bootstrap(&home, confirmation_cb, storage.clone(), config).await?;
 
+    // 5a. Worker-only mode.
+    if let Some(Command::Worker { interface, id }) = &cli.command {
+        let iface_filter = normalize_worker_interface(interface);
+        info!(worker_id = %id, interface = ?iface_filter, "Starting worker-only mode");
+        bs.orchestrator
+            .run_worker_filtered(id, iface_filter.as_deref())
+            .await;
+        return Ok(());
+    }
+
     // 5b. Spawn the main turn worker (processes generic bus messages).
     // In interface-only modes we run a dedicated, interface-filtered worker
     // below to avoid duplicate consumption of the same turn requests.
-    let _worker = if !is_slack_only && !is_mattermost_only && !is_nextcloud_only {
+    let _worker = if !is_slack_only
+        && !is_mattermost_only
+        && !is_nextcloud_only
+        && !orchestrator_interface_filtered
+    {
         let worker_orch = bs.orchestrator.clone();
         Some(tokio::spawn(async move {
             worker_orch.run_worker("main-worker").await;
@@ -1017,7 +1175,7 @@ async fn main() -> Result<()> {
 
     // 10a. Slack — register slack-post as an ambient tool and start in background.
     #[cfg(feature = "slack")]
-    if bs.config.slack.is_some() {
+    if bs.config.slack.is_some() && interface_selected(&orchestrator_interfaces, "slack") {
         use assistant_interface_slack::SlackInterface;
         let slack_cfg = bs.config.slack.clone().unwrap_or_default();
         let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
@@ -1041,7 +1199,8 @@ async fn main() -> Result<()> {
 
     // 10b. Mattermost — start in background if configured.
     #[cfg(feature = "mattermost")]
-    if bs.config.mattermost.is_some() {
+    if bs.config.mattermost.is_some() && interface_selected(&orchestrator_interfaces, "mattermost")
+    {
         use assistant_interface_mattermost::MattermostInterface;
         let mm_cfg = bs.config.mattermost.clone().unwrap_or_default();
         let iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
@@ -1057,7 +1216,7 @@ async fn main() -> Result<()> {
     //      installing process-wide signal handlers (which would conflict
     //      with the REPL's Ctrl-C handling).
     #[cfg(feature = "nextcloud")]
-    if bs.config.nextcloud.is_some() {
+    if bs.config.nextcloud.is_some() && interface_selected(&orchestrator_interfaces, "nextcloud") {
         use assistant_interface_nextcloud::NextcloudInterface;
         let nc_cfg = bs.config.nextcloud.clone().unwrap_or_default();
         let shutdown_token = tokio_util::sync::CancellationToken::new();
@@ -1068,6 +1227,34 @@ async fn main() -> Result<()> {
                 tracing::error!("Nextcloud Talk interface error: {e}");
             }
         });
+    }
+
+    // 10d. Signal — start in background if configured.
+    #[cfg(feature = "signal")]
+    if bs.config.signal.is_some() && interface_selected(&orchestrator_interfaces, "signal") {
+        use assistant_interface_signal::SignalInterface;
+        let sig_cfg = bs.config.signal.clone().unwrap_or_default();
+        let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+
+        let worker_orch = bs.orchestrator.clone();
+        let _signal_worker = tokio::spawn(async move {
+            worker_orch
+                .run_worker_filtered("signal-worker", Some("Signal"))
+                .await;
+        });
+
+        if orchestrator_no_repl {
+            info!("Running Signal interface in foreground (--no-repl)");
+            return iface.run().await;
+        }
+        warn!("Signal interface requires --no-repl in unified orchestrator mode; skipping startup");
+    }
+
+    if orchestrator_no_repl {
+        info!("Orchestrator running without REPL; waiting for shutdown signal");
+        tokio::signal::ctrl_c().await?;
+        info!("Shutdown signal received");
+        return Ok(());
     }
 
     // 11. One conversation per session.

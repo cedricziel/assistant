@@ -13,7 +13,7 @@ const dbPath = path.join(os.tmpdir(), `assistant-e2e-test-${runTag}.db`);
  *   - Tablet  (768px)  — hamburger menu, no icon rail  (breakpoint: 900px)
  *   - Mobile  (375px)  — bottom tab bar, no top bar    (breakpoint: 640px)
  *
- * The web-ui server must be running at BASE_URL before tests start.
+ * The assistant webui server must be running at BASE_URL before tests start.
  * Set E2E_BASE_URL to override the default address.
  */
 export default defineConfig({
@@ -67,7 +67,7 @@ export default defineConfig({
   /* Auto-start the server if not already running */
   webServer: {
     command:
-      `rm -f ${dbPath} && cargo run -p assistant-web-ui -- --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
+      `rm -f ${dbPath} && cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
     url: "http://127.0.0.1:8787/login",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

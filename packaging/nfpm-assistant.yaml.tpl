@@ -3,7 +3,7 @@ arch: "ARCH_PLACEHOLDER"
 platform: "linux"
 version: "VERSION_PLACEHOLDER"
 maintainer: "Cedric Ziel <cedric@cedric-ziel.com>"
-description: "Local self-improving AI assistant (unified: REPL + MCP + Slack + Mattermost + Nextcloud)"
+description: "Local self-improving AI assistant (unified: orchestrator + worker + webui + MCP + interfaces)"
 homepage: "https://github.com/cedricziel/assistant"
 license: "MIT"
 
@@ -24,12 +24,6 @@ contents:
   # Main binary
   - src: BIN_DIR_PLACEHOLDER/assistant
     dst: /usr/local/bin/assistant
-    file_info:
-      mode: 0755
-
-  # Web UI binary
-  - src: BIN_DIR_PLACEHOLDER/assistant-web-ui
-    dst: /usr/local/bin/assistant-web-ui
     file_info:
       mode: 0755
 

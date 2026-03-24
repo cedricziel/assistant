@@ -10,10 +10,11 @@ permissions:
   packages: write
 
 jobs:
-  # Single unified image — all interfaces (Slack, Mattermost, MCP) are subcommands.
+  # Single unified image — orchestrator/webui/worker/mcp are subcommands.
   # Use CMD override to run a specific mode:
   #   docker run ghcr.io/cedricziel/assistant/assistant assistant mcp
-  #   docker run ghcr.io/cedricziel/assistant/assistant assistant slack
+  #   docker run ghcr.io/cedricziel/assistant/assistant assistant orchestrator run --interfaces slack --no-repl
+  #   docker run ghcr.io/cedricziel/assistant/assistant assistant webui serve --listen 0.0.0.0:8080 --auth-token changeme
   build-assistant:
     name: Build assistant image
     runs-on: ubuntu-latest
@@ -47,47 +48,6 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.assistant
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-assistant-signal:
-    name: Build assistant-signal image
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/cedricziel/assistant/assistant-signal
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest
-
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/Dockerfile.assistant-signal
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

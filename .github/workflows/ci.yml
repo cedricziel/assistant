@@ -46,6 +46,14 @@ jobs:
       - name: cargo check
         run: cargo check --workspace --all-features
 
+      - name: Validate unified runtime subcommands
+        run: |
+          cargo run -p assistant-cli -- --help
+          cargo run -p assistant-cli -- orchestrator run --help
+          cargo run -p assistant-cli -- worker --help
+          cargo run -p assistant-cli -- webui serve --help
+          cargo run -p assistant-cli -- signal --help
+
   test:
     name: Test
     if: github.event.action != 'closed'
@@ -57,7 +65,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
       - name: Vendor JS dependencies
         run: make vendor
@@ -140,6 +148,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install system dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
+
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -154,8 +165,9 @@ jobs:
       - name: Vendor JS dependencies
         run: make vendor
 
-      - name: Build web-ui binary
-        run: cargo build -p assistant-web-ui
+      - name: Build unified assistant binary
+        run: |
+          cargo build -p assistant-cli
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

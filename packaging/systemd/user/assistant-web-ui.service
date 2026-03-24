@@ -9,7 +9,7 @@ Type=simple
 # Load token and optional overrides from user config.
 # Create this file with: echo 'ASSISTANT_WEB_TOKEN=<your-token>' > ~/.config/assistant/web-ui.env
 EnvironmentFile=-%h/.config/assistant/web-ui.env
-ExecStart=/usr/local/bin/assistant-web-ui
+ExecStart=/usr/local/bin/assistant webui serve
 Restart=always
 RestartSec=5
 

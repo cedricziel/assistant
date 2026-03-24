@@ -20,7 +20,7 @@ cargo test -p assistant-runtime test_name
 cargo test -p assistant-tool-executor test_name -- --nocapture
 ```
 
-Run targets: `make run` (REPL), `make run-mcp` (MCP stdio), `make run-slack`, `make run-mattermost`.
+Run targets: `make run` (orchestrator), `make run-mcp` (MCP stdio), `make run-slack`, `make run-mattermost`, `make run-nextcloud`, `make run-signal`, `make run-webui`, `make run-worker`.
 
 **Always run `make lint` and `make format` before committing.** Pre-commit hooks
 enforce `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo machete --with-metadata`.
@@ -32,31 +32,31 @@ Install hooks after cloning: `make install-hooks`.
 
 Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 
-| Crate (package name)             | Path                                   | Purpose                                                    |
-| -------------------------------- | -------------------------------------- | ---------------------------------------------------------- |
-| `assistant-core`                 | `crates/core`                          | Shared types, ToolHandler trait, MessageBus trait          |
-| `assistant-llm`                  | `crates/llm`                           | LlmProvider trait, EmbeddingProvider, LlmClient            |
-| `assistant-provider-ollama`      | `crates/provider-ollama`               | Ollama LlmProvider implementation                          |
-| `assistant-provider-anthropic`   | `crates/provider-anthropic`            | Anthropic LlmProvider implementation                       |
-| `assistant-provider-openai`      | `crates/provider-openai`               | OpenAI LlmProvider implementation                          |
-| `assistant-provider-moonshot`    | `crates/provider-moonshot`             | Moonshot/Kimi LlmProvider (OpenAI-compatible)              |
-| `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins               |
-| `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus |
-| `assistant-bus-nats`             | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)        |
-| `assistant-runtime`              | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler      |
-| `assistant-tool-executor`        | `crates/tool-executor`                 | ToolHandler registry, builtin tools, dispatch              |
-| `assistant-mcp-server`           | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                              |
-| `assistant-mcp-client`           | `crates/mcp-client`                    | MCP client for external MCP server connections             |
-| `assistant-cli`                  | `crates/interface-cli`                 | Unified binary: REPL + subcommands                         |
-| `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot library                                          |
-| `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot library                                     |
-| `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot                                 |
-| `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface stub (feature-gated)                      |
-| `assistant-web-ui`               | `crates/web-ui`                        | Trace analysis web UI + A2A protocol server                |
-| `assistant-transcription`        | `crates/transcription`                 | Voice transcription providers (Whisper, Ollama, etc)       |
-| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`               | A2A protocol JSON Schema types                             |
-| `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite` | SQLite exporter for OpenTelemetry spans/logs               |
-| `assistant-integration-tests`    | `crates/integration-tests`             | End-to-end smoke tests                                     |
+| Crate (package name)             | Path                                   | Purpose                                                                |
+| -------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
+| `assistant-core`                 | `crates/core`                          | Shared types, ToolHandler trait, MessageBus trait                      |
+| `assistant-llm`                  | `crates/llm`                           | LlmProvider trait, EmbeddingProvider, LlmClient                        |
+| `assistant-provider-ollama`      | `crates/provider-ollama`               | Ollama LlmProvider implementation                                      |
+| `assistant-provider-anthropic`   | `crates/provider-anthropic`            | Anthropic LlmProvider implementation                                   |
+| `assistant-provider-openai`      | `crates/provider-openai`               | OpenAI LlmProvider implementation                                      |
+| `assistant-provider-moonshot`    | `crates/provider-moonshot`             | Moonshot/Kimi LlmProvider (OpenAI-compatible)                          |
+| `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins                           |
+| `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus             |
+| `assistant-bus-nats`             | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)                    |
+| `assistant-runtime`              | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler                  |
+| `assistant-tool-executor`        | `crates/tool-executor`                 | ToolHandler registry, builtin tools, dispatch                          |
+| `assistant-mcp-server`           | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                                          |
+| `assistant-mcp-client`           | `crates/mcp-client`                    | MCP client for external MCP server connections                         |
+| `assistant-cli`                  | `crates/interface-cli`                 | Unified binary: REPL + subcommands                                     |
+| `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot library                                                      |
+| `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot library                                                 |
+| `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot                                             |
+| `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface stub (feature-gated)                                  |
+| `assistant-web-ui`               | `crates/web-ui`                        | Web UI/A2A server implementation (invoked via `assistant webui serve`) |
+| `assistant-transcription`        | `crates/transcription`                 | Voice transcription providers (Whisper, Ollama, etc)                   |
+| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`               | A2A protocol JSON Schema types                                         |
+| `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite` | SQLite exporter for OpenTelemetry spans/logs                           |
+| `assistant-integration-tests`    | `crates/integration-tests`             | End-to-end smoke tests                                                 |
 
 Dependency order (no cycles):
 
