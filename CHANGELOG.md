@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.51](https://github.com/cedricziel/assistant/compare/v0.1.50...v0.1.51) (2026-03-24)
+
+
+### Features
+
+* **observability:** add submit_turn lifecycle and correlation telemetry ([#259](https://github.com/cedricziel/assistant/issues/259)) ([ab0a005](https://github.com/cedricziel/assistant/commit/ab0a00580b63618be6910e41819207f31bfde3e4))
+* **web-ui:** redesign workflow detail and editor navigation ([#260](https://github.com/cedricziel/assistant/issues/260)) ([7825d59](https://github.com/cedricziel/assistant/commit/7825d59ac68d9190ad7f64bfeeb88607c9bde169))
+
 ## [0.1.50](https://github.com/cedricziel/assistant/compare/v0.1.49...v0.1.50) (2026-03-23)
 
 
