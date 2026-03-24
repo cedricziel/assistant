@@ -4,6 +4,7 @@ version = "0.1.52"
 license.workspace = true
 edition.workspace = true
 description = "Signal messenger interface for the assistant (feature-gated)"
+autobins = false
 
 # The "signal" feature gates the actual presage (Signal) messenger integration.
 # Build with:
@@ -37,7 +38,3 @@ qr2term = { workspace = true }
 assistant-bus-nats = { path = "../bus-nats", optional = true }
 presage = { git = "https://github.com/whisperfish/presage", branch = "main", optional = true }
 presage-store-sqlite = { git = "https://github.com/whisperfish/presage", branch = "main", optional = true }
-
-[[bin]]
-name = "assistant-signal"
-path = "src/main.rs"

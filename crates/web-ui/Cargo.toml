@@ -4,6 +4,7 @@ version = "0.1.52"
 edition.workspace = true
 license.workspace = true
 description = "Web-based trace analysis UI and A2A protocol server for the assistant"
+autobins = false
 
 [features]
 default = ["nats"]
