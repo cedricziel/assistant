@@ -114,15 +114,6 @@ jobs:
             cargo build --release --target ${{ matrix.target }} -p assistant-web-ui
           fi
 
-      - name: Build assistant-signal (non-fatal)
-        continue-on-error: true
-        run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p assistant-interface-signal --features signal
-          else
-            cargo build --release --target ${{ matrix.target }} -p assistant-interface-signal --features signal
-          fi
-
       - name: Create archive
         shell: bash
         run: |
@@ -134,13 +125,9 @@ jobs:
           cp "target/${{ matrix.target }}/release/assistant" "${ARCHIVE}/" || \
             cp "target/${{ matrix.target }}/release/assistant.exe" "${ARCHIVE}/" 2>/dev/null || true
 
-          # Copy web-ui binary
+          # Copy web-ui helper binary used by `assistant webui serve`
           cp "target/${{ matrix.target }}/release/assistant-web-ui" "${ARCHIVE}/" || \
             cp "target/${{ matrix.target }}/release/assistant-web-ui.exe" "${ARCHIVE}/" 2>/dev/null || true
-
-          # Copy signal binary if it was built (still a separate feature-gated binary)
-          cp "target/${{ matrix.target }}/release/assistant-signal" "${ARCHIVE}/" 2>/dev/null || true
-          cp "target/${{ matrix.target }}/release/assistant-signal.exe" "${ARCHIVE}/" 2>/dev/null || true
 
           # Copy config template
           cp config.toml "${ARCHIVE}/config.toml.example"

@@ -405,8 +405,9 @@ systemctl --user disable --now assistant-slack
 
 ## Docker
 
-All interfaces are baked into the same `assistant` binary. The Dockerfiles in
-`docker/` use the unified binary with a different entrypoint per mode:
+The Docker image uses `assistant` as the primary entrypoint for all runtime
+modes. Web UI serving is exposed via `assistant webui serve` (backed by the
+bundled `assistant-web-ui` helper binary):
 
 ```sh
 # Interactive REPL (default)

@@ -18,9 +18,6 @@ test-integration:
 	cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture --test-threads=1
 
 lint:
-	# The `signal` feature introduces presage/libsignal git deps that conflict
-	# with other workspace crates at the crate.io version of curve25519-dalek.
-	# Run `make lint-signal` separately after resolving those deps.
 	cargo clippy --workspace -- -D warnings
 
 lint-signal:

@@ -14,6 +14,7 @@ jobs:
   # Use CMD override to run a specific mode:
   #   docker run ghcr.io/cedricziel/assistant/assistant assistant mcp
   #   docker run ghcr.io/cedricziel/assistant/assistant assistant orchestrator run --interfaces slack --no-repl
+  #   docker run ghcr.io/cedricziel/assistant/assistant assistant webui serve --listen 0.0.0.0:8080 --auth-token changeme
   build-assistant:
     name: Build assistant image
     runs-on: ubuntu-latest

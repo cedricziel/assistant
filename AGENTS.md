@@ -20,7 +20,7 @@ cargo test -p assistant-runtime test_name
 cargo test -p assistant-tool-executor test_name -- --nocapture
 ```
 
-Run targets: `make run` (orchestrator), `make run-mcp` (MCP stdio), `make run-slack`, `make run-mattermost`, `make run-webui`, `make run-worker`.
+Run targets: `make run` (orchestrator), `make run-mcp` (MCP stdio), `make run-slack`, `make run-mattermost`, `make run-nextcloud`, `make run-signal`, `make run-webui`, `make run-worker`.
 
 **Always run `make lint` and `make format` before committing.** Pre-commit hooks
 enforce `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo machete --with-metadata`.
