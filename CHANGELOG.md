@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.54](https://github.com/cedricziel/assistant/compare/v0.1.53...v0.1.54) (2026-03-24)
+
+
+### Bug Fixes
+
+* **release:** install modern protoc in cross aarch64 builds ([#276](https://github.com/cedricziel/assistant/issues/276)) ([fa4ac34](https://github.com/cedricziel/assistant/commit/fa4ac346357370c13c4bdb2360bf5ea4986b7a87))
+
 ## [0.1.53](https://github.com/cedricziel/assistant/compare/v0.1.52...v0.1.53) (2026-03-24)
 
 
