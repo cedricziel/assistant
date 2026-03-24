@@ -3,7 +3,16 @@ import { Controller } from "@hotwired/stimulus";
 const VIEW_PREF_PREFIX = "workflow-editor-view:";
 
 export default class extends Controller {
-  static targets = ["flowPanel", "graphPanel", "flowToggle", "graphToggle"];
+  static targets = [
+    "flowPanel",
+    "graphPanel",
+    "runsPanel",
+    "stepsPanel",
+    "flowToggle",
+    "graphToggle",
+    "runsToggle",
+    "stepsToggle",
+  ];
 
   static values = {
     workflowId: String,
@@ -27,7 +36,7 @@ export default class extends Controller {
   }
 
   onResize() {
-    if (window.innerWidth < 768) {
+    if (window.innerWidth < 768 && this.modeValue === "graph") {
       this.setMode("flow", false);
     }
     this.updateModeUi();
@@ -51,14 +60,16 @@ export default class extends Controller {
     }
 
     const defaultMode =
-      preferred || (this.hasModeValue ? this.modeValue : "graph");
+      preferred || (this.hasModeValue ? this.modeValue : "flow");
     this.setMode(defaultMode, false);
   }
 
   setMode(mode, persist) {
     if (!this.hasFlowPanelTarget || !this.hasGraphPanelTarget) return;
-    const normalized = mode === "graph" ? "graph" : "flow";
-    const enforced = window.innerWidth < 768 ? "flow" : normalized;
+    const normalized =
+      mode === "graph" || mode === "runs" || mode === "steps" ? mode : "flow";
+    const enforced =
+      window.innerWidth < 768 && normalized === "graph" ? "flow" : normalized;
     this.modeValue = enforced;
 
     if (persist && this.hasWorkflowIdValue) {
@@ -70,11 +81,22 @@ export default class extends Controller {
 
   updateModeUi() {
     if (!this.hasFlowPanelTarget || !this.hasGraphPanelTarget) return;
-    const mode =
-      this.modeValue === "graph" && window.innerWidth >= 768 ? "graph" : "flow";
+    const desktopMode =
+      this.modeValue === "graph" ||
+      this.modeValue === "runs" ||
+      this.modeValue === "steps"
+        ? this.modeValue
+        : "flow";
+    const mode = window.innerWidth >= 768 ? desktopMode : "flow";
 
     this.flowPanelTarget.hidden = mode !== "flow";
     this.graphPanelTarget.hidden = mode !== "graph";
+    if (this.hasRunsPanelTarget) {
+      this.runsPanelTarget.hidden = mode !== "runs";
+    }
+    if (this.hasStepsPanelTarget) {
+      this.stepsPanelTarget.hidden = mode !== "steps";
+    }
 
     if (this.hasFlowToggleTarget) {
       const active = mode === "flow";
@@ -97,6 +119,24 @@ export default class extends Controller {
       this.graphToggleTarget.setAttribute(
         "title",
         disabled ? "Graph view is available on tablet and desktop" : "",
+      );
+    }
+
+    if (this.hasRunsToggleTarget) {
+      const active = mode === "runs";
+      this.runsToggleTarget.classList.toggle("is-active", active);
+      this.runsToggleTarget.setAttribute(
+        "aria-pressed",
+        active ? "true" : "false",
+      );
+    }
+
+    if (this.hasStepsToggleTarget) {
+      const active = mode === "steps";
+      this.stepsToggleTarget.classList.toggle("is-active", active);
+      this.stepsToggleTarget.setAttribute(
+        "aria-pressed",
+        active ? "true" : "false",
       );
     }
   }

@@ -6,157 +6,252 @@ breadcrumb %}
 {% endblock %} {% block content %}
 <div class="wf-page workflow-detail-page">
   <main class="main">
-    <div class="panel">
-      <div class="panel-head">
-        <div>
+    <div class="panel wf-detail-panel">
+      <header class="wf-hero">
+        <div class="wf-hero-main">
+          <div class="wf-hero-meta">
+            {% if active %}
+            <span class="hdr-badge ok">Active</span>
+            {% else %}
+            <span class="hdr-badge error">Inactive</span>
+            {% endif %}
+            <span class="trace-id">{{ short_id }}&hellip;</span>
+          </div>
+
           <h2>{{ name }}</h2>
-          <p>{{ description }}</p>
+          {% if description.is_empty() %}
+          <p class="wf-hero-description">No description yet.</p>
+          {% else %}
+          <p class="wf-hero-description">{{ description }}</p>
+          {% endif %}
         </div>
-        <span class="trace-id">{{ short_id }}&hellip;</span>
-      </div>
 
-      <div style="margin-top: 0.4rem">
-        {% if active %}
-        <span class="hdr-badge ok">active</span>
-        {% else %}
-        <span class="hdr-badge error">inactive</span>
-        {% endif %}
-      </div>
-
-      <div class="wf-meta">
-        <div class="wf-card">
-          <div class="wf-k">Graph</div>
-          <div class="wf-v">
-            {{ node_count }} nodes / {{ edge_count }} edges
-          </div>
-        </div>
-        <div class="wf-card">
-          <div class="wf-k">Node Types</div>
-          <div class="wf-v">
-            {{ trigger_count }} trigger / {{ action_count }} action
-          </div>
-        </div>
-        <div class="wf-card">
-          <div class="wf-k">Loop Guardrails</div>
-          <div class="wf-v">
-            {{ max_steps }} max steps / {{ max_visits_per_node }} max node
-            visits
-          </div>
-        </div>
-      </div>
-
-      <div class="wf-meta" style="margin-top: 0.75rem">
-        <div class="wf-card">
-          <div class="wf-k">Created</div>
-          <div class="wf-v">{{ created_at }}</div>
-        </div>
-        <div class="wf-card">
-          <div class="wf-k">Updated</div>
-          <div class="wf-v">{{ updated_at }}</div>
-        </div>
-      </div>
-
-      <div class="wf-actions">
-        <a class="action-btn" href="/workflows/{{ id }}/edit">Edit</a>
-        <a class="ghost-btn" href="/workflows/{{ id }}/editor"
-          >Open Graph Editor</a
-        >
-
-        <form method="POST" action="/workflows/{{ id }}/toggle">
-          <button class="ghost-btn" type="submit">{{ toggle_label }}</button>
-        </form>
-
-        <form
-          method="POST"
-          action="/workflows/{{ id }}/delete"
-          data-confirm="Delete this workflow? This cannot be undone."
-        >
-          <button
-            class="ghost-btn"
-            type="submit"
-            style="color: #ff9b9b; border-color: #5c2a2a"
+        <nav class="wf-actions" aria-label="Workflow actions">
+          <a class="action-btn" href="/workflows/{{ id }}/edit"
+            >Edit Workflow</a
           >
-            Delete
-          </button>
-        </form>
-      </div>
+          <a class="ghost-btn" href="/workflows/{{ id }}/editor"
+            >Open Graph Editor</a
+          >
 
-      <h3 style="margin-top: 1rem; margin-bottom: 0.5rem">
-        Inbound Webhook Trigger
-      </h3>
-      <div
-        class="wf-card"
-        data-controller="workflow-secrets"
-        data-workflow-secrets-endpoint-value="/api/workflows/{{ id }}/webhook-secrets"
-        data-workflow-secrets-token-masked-value="{{ webhook_token_masked }}"
-        data-workflow-secrets-url-masked-value="{{ webhook_url_masked }}"
-      >
-        <div class="wf-k">Endpoint</div>
-        <div class="wf-v workflow-mono" data-workflow-secrets-target="url">
-          {{ webhook_url_masked }}
-        </div>
-        <div class="wf-k" style="margin-top: 0.55rem">Token</div>
-        <div class="wf-v workflow-mono" data-workflow-secrets-target="token">
-          {{ webhook_token_masked }}
-        </div>
-        <button
-          type="button"
-          class="ghost-btn"
-          data-workflow-secrets-target="button"
-          data-action="workflow-secrets#toggle"
-          aria-pressed="false"
-          style="margin-top: 0.6rem"
-        >
-          Reveal
-        </button>
-        <div
-          class="wf-k"
-          data-workflow-secrets-target="status"
-          aria-live="polite"
-        ></div>
-        <div class="wf-k" style="margin-top: 0.55rem">Last Rotated</div>
-        <div class="wf-v">{{ webhook_updated_at }}</div>
-        <form
-          method="POST"
-          action="/workflows/{{ id }}/webhook/rotate"
-          style="margin-top: 0.75rem"
-        >
-          <button class="ghost-btn" type="submit">Rotate Webhook Token</button>
-        </form>
-      </div>
+          <form method="POST" action="/workflows/{{ id }}/toggle">
+            <button class="ghost-btn" type="submit">{{ toggle_label }}</button>
+          </form>
 
-      <h3 style="margin-top: 1rem; margin-bottom: 0.5rem">Recent Runs</h3>
-      {% if recent_runs.is_empty() %}
-      <p class="empty">No runs recorded yet.</p>
-      {% else %}
-      <table class="trace-table">
-        <thead>
-          <tr>
-            <th>Run</th>
-            <th>Trigger</th>
-            <th>Status</th>
-            <th>Started</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for run in recent_runs %}
-          <tr>
-            <td class="trace-id">
-              <a href="/workflows/{{ id }}/runs/{{ run.run_id }}"
-                >{{ run.id }}&hellip;</a
+          <form
+            method="POST"
+            action="/workflows/{{ id }}/delete"
+            data-confirm="Delete this workflow? This cannot be undone."
+          >
+            <button class="ghost-btn ghost-btn-danger" type="submit">
+              Delete
+            </button>
+          </form>
+        </nav>
+      </header>
+
+      <div class="wf-detail-layout">
+        <section class="wf-primary-column">
+          <section
+            class="wf-block wf-flow-block"
+            aria-labelledby="flow-title"
+            data-controller="workflow-editor workflow-view-mode"
+            data-workflow-view-mode-mode-value="flow"
+          >
+            <textarea
+              class="wf-hidden-json"
+              data-workflow-editor-target="textarea"
+              aria-hidden="true"
+              tabindex="-1"
+            >
+{{ graph_json }}</textarea
+            >
+
+            <div class="wf-block-head">
+              <h3 id="flow-title">Workflow Flow</h3>
+              <div
+                class="workflow-view-toggle"
+                role="group"
+                aria-label="Flow view mode"
               >
-            </td>
-            <td>{{ run.trigger_type }}</td>
-            <td>{{ run.status }}</td>
-            <td>{{ run.started_at }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% endif %}
+                <button
+                  type="button"
+                  class="ghost-btn is-active"
+                  data-mode="flow"
+                  data-action="workflow-view-mode#switchMode"
+                  data-workflow-view-mode-target="flowToggle"
+                  aria-pressed="true"
+                >
+                  Flow
+                </button>
+                <button
+                  type="button"
+                  class="ghost-btn"
+                  data-mode="graph"
+                  data-action="workflow-view-mode#switchMode"
+                  data-workflow-view-mode-target="graphToggle"
+                  aria-pressed="false"
+                >
+                  Graph
+                </button>
+                <button
+                  type="button"
+                  class="ghost-btn"
+                  data-mode="runs"
+                  data-action="workflow-view-mode#switchMode"
+                  data-workflow-view-mode-target="runsToggle"
+                  aria-pressed="false"
+                >
+                  Runs
+                </button>
+              </div>
+            </div>
 
-      <h3 style="margin-top: 1rem; margin-bottom: 0.5rem">Graph JSON</h3>
-      <pre class="workflow-code"><code>{{ graph_json }}</code></pre>
+            <p class="wf-block-note">
+              Read-only visualization of the current workflow definition.
+            </p>
+
+            <div
+              class="wf-flow-view"
+              data-workflow-view-mode-target="flowPanel"
+              data-workflow-editor-target="flow"
+            ></div>
+
+            <div
+              class="wf-graph-view"
+              data-workflow-view-mode-target="graphPanel"
+              hidden
+            >
+              <svg
+                class="wf-preview"
+                viewBox="0 0 980 420"
+                aria-label="Workflow graph"
+                data-workflow-editor-target="svg"
+              ></svg>
+            </div>
+
+            <div
+              class="wf-runs-view"
+              data-workflow-view-mode-target="runsPanel"
+              hidden
+            >
+              <div class="wf-block-head wf-runs-head">
+                <h4>Recent Runs</h4>
+                <span class="wf-block-note">Latest 10 executions</span>
+              </div>
+              {% if recent_runs.is_empty() %}
+              <p class="empty">
+                No runs recorded yet. Trigger this workflow to see runs here.
+              </p>
+              {% else %}
+              <div class="wf-table-wrap">
+                <table class="trace-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Run</th>
+                      <th scope="col">Trigger</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Started</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for run in recent_runs %}
+                    <tr>
+                      <td class="trace-id">
+                        <a href="/workflows/{{ id }}/runs/{{ run.run_id }}"
+                          >{{ run.id }}&hellip;</a
+                        >
+                      </td>
+                      <td>{{ run.trigger_type }}</td>
+                      <td>{{ run.status }}</td>
+                      <td>{{ run.started_at }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% endif %}
+            </div>
+          </section>
+        </section>
+
+        <aside class="wf-secondary-column">
+          <section class="wf-block" aria-labelledby="metadata-title">
+            <div class="wf-block-head">
+              <h3 id="metadata-title">Metadata</h3>
+            </div>
+            <div class="wf-k">Status</div>
+            <div class="wf-v">
+              {% if active %}Active{% else %}Inactive{% endif %}
+            </div>
+            <div class="wf-k">Nodes</div>
+            <div class="wf-v">{{ node_count }}</div>
+            <div class="wf-k">Edges</div>
+            <div class="wf-v">{{ edge_count }}</div>
+            <div class="wf-k">Node Mix</div>
+            <div class="wf-v">
+              {{ trigger_count }} trigger / {{ action_count }} action
+            </div>
+            <div class="wf-k">Loop Guardrails</div>
+            <div class="wf-v">
+              {{ max_steps }} steps / {{ max_visits_per_node }} visits
+            </div>
+            <div class="wf-k">Created</div>
+            <div class="wf-v">{{ created_at }}</div>
+            <div class="wf-k">Updated</div>
+            <div class="wf-v">{{ updated_at }}</div>
+          </section>
+
+          {% if has_webhook_trigger %}
+          <section
+            class="wf-block wf-webhook-block"
+            aria-labelledby="webhook-title"
+            data-controller="workflow-secrets"
+            data-workflow-secrets-endpoint-value="/api/workflows/{{ id }}/webhook-secrets"
+            data-workflow-secrets-token-masked-value="{{ webhook_token_masked }}"
+            data-workflow-secrets-url-masked-value="{{ webhook_url_masked }}"
+          >
+            <div class="wf-block-head">
+              <h3 id="webhook-title">Webhook Trigger</h3>
+            </div>
+            <div class="wf-k">Endpoint</div>
+            <div class="wf-v workflow-mono" data-workflow-secrets-target="url">
+              {{ webhook_url_masked }}
+            </div>
+            <div class="wf-k">Token</div>
+            <div
+              class="wf-v workflow-mono"
+              data-workflow-secrets-target="token"
+            >
+              {{ webhook_token_masked }}
+            </div>
+
+            <div class="wf-webhook-actions">
+              <button
+                type="button"
+                class="ghost-btn"
+                data-workflow-secrets-target="button"
+                data-action="workflow-secrets#toggle"
+                aria-pressed="false"
+              >
+                Reveal
+              </button>
+              <form method="POST" action="/workflows/{{ id }}/webhook/rotate">
+                <button class="ghost-btn" type="submit">Rotate Token</button>
+              </form>
+            </div>
+
+            <div class="wf-k">Last Rotated</div>
+            <div class="wf-v">{{ webhook_updated_at }}</div>
+            <div
+              class="wf-k wf-webhook-status"
+              data-workflow-secrets-target="status"
+              aria-live="polite"
+            ></div>
+          </section>
+          {% endif %}
+        </aside>
+      </div>
     </div>
   </main>
 </div>

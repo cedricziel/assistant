@@ -85,6 +85,7 @@ struct WorkflowDetailTemplate {
     created_at: String,
     updated_at: String,
     graph_json: String,
+    has_webhook_trigger: bool,
     webhook_url_masked: String,
     webhook_token_masked: String,
     webhook_updated_at: String,
@@ -229,14 +230,21 @@ pub async fn show_workflow(
     let graph_json =
         serde_json::to_string_pretty(&workflow.graph).unwrap_or_else(|_| "{}".to_string());
     let short_id = id[..8.min(id.len())].to_string();
-    let endpoint = store
-        .ensure_webhook_endpoint(workflow_id)
-        .await
-        .map_err(internal_error)?;
-    let webhook_url = format!("/workflow-hooks/{}/{}", id, endpoint.token);
-    let webhook_token = endpoint.token.clone();
-    let webhook_url_masked = mask_credential(&webhook_url);
-    let webhook_token_masked = mask_credential(&webhook_token);
+    let has_webhook_trigger = workflow_has_webhook_trigger(&workflow.graph.nodes);
+    let (webhook_url_masked, webhook_token_masked, webhook_updated_at) = if has_webhook_trigger {
+        let endpoint = store
+            .ensure_webhook_endpoint(workflow_id)
+            .await
+            .map_err(internal_error)?;
+        let webhook_url = format!("/workflow-hooks/{}/{}", id, endpoint.token);
+        (
+            mask_credential(&webhook_url),
+            mask_credential(&endpoint.token),
+            format_ts(endpoint.updated_at),
+        )
+    } else {
+        (String::new(), String::new(), String::new())
+    };
     let recent_runs = store
         .list_runs(workflow_id, 10)
         .await
@@ -266,9 +274,10 @@ pub async fn show_workflow(
         created_at: format_ts(workflow.created_at),
         updated_at: format_ts(workflow.updated_at),
         graph_json,
+        has_webhook_trigger,
         webhook_url_masked,
         webhook_token_masked,
-        webhook_updated_at: format_ts(endpoint.updated_at),
+        webhook_updated_at,
         recent_runs,
     }))
 }
@@ -956,6 +965,18 @@ fn count_node_types(nodes: &[WorkflowNode]) -> (usize, usize) {
         .filter(|n| n.kind == WorkflowNodeKind::Action)
         .count();
     (trigger_count, action_count)
+}
+
+fn workflow_has_webhook_trigger(nodes: &[WorkflowNode]) -> bool {
+    nodes.iter().any(|node| {
+        node.kind == WorkflowNodeKind::Trigger
+            && node
+                .config
+                .get("type")
+                .and_then(|value| value.as_str())
+                .map(|value| value == "webhook")
+                .unwrap_or(false)
+    })
 }
 
 fn format_ts(ts: chrono::DateTime<chrono::Utc>) -> String {
