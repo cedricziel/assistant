@@ -106,14 +106,6 @@ jobs:
           target/${{ matrix.target }}/release/assistant webui serve --help
           target/${{ matrix.target }}/release/assistant signal --help
 
-      - name: Build assistant-web-ui helper binary
-        run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p assistant-web-ui
-          else
-            cargo build --release --target ${{ matrix.target }} -p assistant-web-ui
-          fi
-
       - name: Create archive
         shell: bash
         run: |
@@ -124,10 +116,6 @@ jobs:
           # Copy unified binary (Slack, Mattermost, MCP are subcommands of `assistant`)
           cp "target/${{ matrix.target }}/release/assistant" "${ARCHIVE}/" || \
             cp "target/${{ matrix.target }}/release/assistant.exe" "${ARCHIVE}/" 2>/dev/null || true
-
-          # Copy web-ui helper binary used by `assistant webui serve`
-          cp "target/${{ matrix.target }}/release/assistant-web-ui" "${ARCHIVE}/" || \
-            cp "target/${{ matrix.target }}/release/assistant-web-ui.exe" "${ARCHIVE}/" 2>/dev/null || true
 
           # Copy config template
           cp config.toml "${ARCHIVE}/config.toml.example"

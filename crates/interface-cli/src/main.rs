@@ -8,7 +8,6 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
-use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -33,6 +32,9 @@ use assistant_runtime::{
 use assistant_skills::SkillSource;
 use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
+
+#[cfg(feature = "signal")]
+use assistant_interface_signal::config::SignalConfigExt;
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -127,7 +129,7 @@ enum OrchestratorCommand {
 enum WebUiCommand {
     /// Serve the web UI and A2A endpoints.
     Serve {
-        /// Additional flags forwarded to assistant-web-ui (e.g. --listen, --auth-token).
+        /// Additional web UI flags (e.g. --listen, --auth-token).
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -260,159 +262,20 @@ async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
         WebUiCommand::Serve { args } => args,
     };
 
-    let local_path = std::env::current_exe().ok().and_then(|exe| {
-        exe.parent().map(|dir| {
-            #[cfg(windows)]
-            {
-                dir.join("assistant-web-ui.exe")
-            }
-            #[cfg(not(windows))]
-            {
-                dir.join("assistant-web-ui")
-            }
-        })
-    });
-
-    if let Some(path) = local_path {
-        let mut local = TokioCommand::new(&path);
-        local.args(args);
-        match local.status().await {
-            Ok(status) => {
-                if status.success() {
-                    return Ok(());
-                }
-                let code = status
-                    .code()
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| "signal".to_string());
-                anyhow::bail!("assistant-web-ui exited with status {code}");
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err).context("Failed to start local `assistant-web-ui`"),
-        }
-    }
-
-    let mut direct = TokioCommand::new("assistant-web-ui");
-    direct.args(args);
-    match direct.status().await {
-        Ok(status) => {
-            if status.success() {
-                return Ok(());
-            }
-            let code = status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "signal".to_string());
-            anyhow::bail!("assistant-web-ui exited with status {code}");
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            let mut cargo = TokioCommand::new("cargo");
-            cargo
-                .arg("run")
-                .arg("-p")
-                .arg("assistant-web-ui")
-                .arg("--")
-                .args(args);
-            let status = cargo
-                .status()
-                .await
-                .context("Failed to start fallback `cargo run -p assistant-web-ui`")?;
-            if status.success() {
-                Ok(())
-            } else {
-                let code = status
-                    .code()
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| "signal".to_string());
-                anyhow::bail!("webui fallback exited with status {code}");
-            }
-        }
-        Err(err) => Err(err).context("Failed to start `assistant-web-ui`"),
-    }
+    let argv = std::iter::once("assistant-web-ui".to_string())
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>();
+    assistant_web_ui::run_from_iter(argv).await
 }
 
 #[cfg(feature = "signal")]
-async fn cmd_signal(command: &SignalCommand) -> Result<()> {
-    let args: Vec<String> = match command {
+async fn cmd_signal(command: &SignalCommand, config: &AssistantConfig) -> Result<()> {
+    match command {
         SignalCommand::Link { device_name } => {
-            vec![
-                "link".to_string(),
-                "--device-name".to_string(),
-                device_name.clone(),
-            ]
+            let signal_cfg = config.signal.clone().unwrap_or_default();
+            let store_path = signal_cfg.resolved_store_path();
+            assistant_interface_signal::link_device(&store_path, device_name).await
         }
-    };
-
-    let local_path = std::env::current_exe().ok().and_then(|exe| {
-        exe.parent().map(|dir| {
-            #[cfg(windows)]
-            {
-                dir.join("assistant-signal.exe")
-            }
-            #[cfg(not(windows))]
-            {
-                dir.join("assistant-signal")
-            }
-        })
-    });
-
-    if let Some(path) = local_path {
-        let mut local = TokioCommand::new(&path);
-        local.args(&args);
-        match local.status().await {
-            Ok(status) => {
-                if status.success() {
-                    return Ok(());
-                }
-                let code = status
-                    .code()
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| "signal".to_string());
-                anyhow::bail!("assistant-signal exited with status {code}");
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err).context("Failed to start local `assistant-signal`"),
-        }
-    }
-
-    let mut direct = TokioCommand::new("assistant-signal");
-    direct.args(&args);
-    match direct.status().await {
-        Ok(status) => {
-            if status.success() {
-                return Ok(());
-            }
-            let code = status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "signal".to_string());
-            anyhow::bail!("assistant-signal exited with status {code}");
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            let mut cargo = TokioCommand::new("cargo");
-            cargo
-                .arg("run")
-                .arg("-p")
-                .arg("assistant-interface-signal")
-                .arg("--features")
-                .arg("signal")
-                .arg("--")
-                .args(&args);
-            let status = cargo
-                .status()
-                .await
-                .context("Failed to start fallback `cargo run -p assistant-interface-signal --features signal`")?;
-            if status.success() {
-                Ok(())
-            } else {
-                let code = status
-                    .code()
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| "signal".to_string());
-                anyhow::bail!("signal fallback exited with status {code}");
-            }
-        }
-        Err(err) => Err(err).context("Failed to start `assistant-signal`"),
     }
 }
 
@@ -1069,7 +932,7 @@ async fn main() -> Result<()> {
 
     #[cfg(feature = "signal")]
     if let Some(Command::Signal { command }) = &cli.command {
-        return cmd_signal(command).await;
+        return cmd_signal(command, &config).await;
     }
 
     let (orchestrator_interfaces, orchestrator_no_repl) =

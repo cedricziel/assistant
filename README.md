@@ -406,8 +406,7 @@ systemctl --user disable --now assistant-slack
 ## Docker
 
 The Docker image uses `assistant` as the primary entrypoint for all runtime
-modes. Web UI serving is exposed via `assistant webui serve` (backed by the
-bundled `assistant-web-ui` helper binary):
+modes, including Web UI serving via `assistant webui serve`:
 
 ```sh
 # Interactive REPL (default)

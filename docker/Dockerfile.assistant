@@ -12,8 +12,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY . .
 
-RUN cargo build --release -p assistant-cli && \
-    cargo build --release -p assistant-web-ui
+RUN cargo build --release -p assistant-cli
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -24,7 +23,6 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/assistant /usr/local/bin/assistant
-COPY --from=builder /app/target/release/assistant-web-ui /usr/local/bin/assistant-web-ui
 COPY config.toml /etc/assistant/config.toml.example
 
 ENTRYPOINT ["assistant"]
