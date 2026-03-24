@@ -102,6 +102,12 @@ enum Command {
         #[command(subcommand)]
         command: WebUiCommand,
     },
+    /// Manage Signal device linking through the unified assistant CLI.
+    #[cfg(feature = "signal")]
+    Signal {
+        #[command(subcommand)]
+        command: SignalCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -124,6 +130,17 @@ enum WebUiCommand {
         /// Additional flags forwarded to assistant-web-ui (e.g. --listen, --auth-token).
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
+    },
+}
+
+#[cfg(feature = "signal")]
+#[derive(Subcommand)]
+enum SignalCommand {
+    /// Link this machine as a Signal secondary device.
+    Link {
+        /// Name shown for this device in the Signal app.
+        #[arg(long, default_value = "Assistant")]
+        device_name: String,
     },
 }
 
@@ -314,6 +331,91 @@ async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
     }
 }
 
+#[cfg(feature = "signal")]
+async fn cmd_signal(command: &SignalCommand) -> Result<()> {
+    let args: Vec<String> = match command {
+        SignalCommand::Link { device_name } => {
+            vec![
+                "link".to_string(),
+                "--device-name".to_string(),
+                device_name.clone(),
+            ]
+        }
+    };
+
+    let local_path = std::env::current_exe().ok().and_then(|exe| {
+        exe.parent().map(|dir| {
+            #[cfg(windows)]
+            {
+                dir.join("assistant-signal.exe")
+            }
+            #[cfg(not(windows))]
+            {
+                dir.join("assistant-signal")
+            }
+        })
+    });
+
+    if let Some(path) = local_path {
+        let mut local = TokioCommand::new(&path);
+        local.args(&args);
+        match local.status().await {
+            Ok(status) => {
+                if status.success() {
+                    return Ok(());
+                }
+                let code = status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string());
+                anyhow::bail!("assistant-signal exited with status {code}");
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err).context("Failed to start local `assistant-signal`"),
+        }
+    }
+
+    let mut direct = TokioCommand::new("assistant-signal");
+    direct.args(&args);
+    match direct.status().await {
+        Ok(status) => {
+            if status.success() {
+                return Ok(());
+            }
+            let code = status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".to_string());
+            anyhow::bail!("assistant-signal exited with status {code}");
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            let mut cargo = TokioCommand::new("cargo");
+            cargo
+                .arg("run")
+                .arg("-p")
+                .arg("assistant-interface-signal")
+                .arg("--features")
+                .arg("signal")
+                .arg("--")
+                .args(&args);
+            let status = cargo
+                .status()
+                .await
+                .context("Failed to start fallback `cargo run -p assistant-interface-signal --features signal`")?;
+            if status.success() {
+                Ok(())
+            } else {
+                let code = status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string());
+                anyhow::bail!("signal fallback exited with status {code}");
+            }
+        }
+        Err(err) => Err(err).context("Failed to start `assistant-signal`"),
+    }
+}
+
 // ── /review command ───────────────────────────────────────────────────────────
 
 async fn cmd_review(storage: &StorageLayer, registry: &SkillRegistry) -> Result<()> {
@@ -497,6 +599,7 @@ fn print_help() {
            assistant orchestrator run [--interfaces ...] [--no-repl]\n\
            assistant worker --interface <name|any> --id <worker-id>\n\
            assistant webui serve [--listen ... --auth-token ...]\n\
+           assistant signal link [--device-name Assistant]\n\
          /model <name>                 Switch model (takes effect on next startup)\n\
          /help                         Show this help message\n\
          /quit | /exit                 Exit the assistant\n\
@@ -964,6 +1067,11 @@ async fn main() -> Result<()> {
         return cmd_webui(command).await;
     }
 
+    #[cfg(feature = "signal")]
+    if let Some(Command::Signal { command }) = &cli.command {
+        return cmd_signal(command).await;
+    }
+
     let (orchestrator_interfaces, orchestrator_no_repl) =
         if let Some(Command::Orchestrator { command }) = &cli.command {
             match command {
@@ -1258,11 +1366,11 @@ async fn main() -> Result<()> {
         use assistant_interface_signal::SignalInterface;
         let sig_cfg = bs.config.signal.clone().unwrap_or_default();
         let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
-        tokio::spawn(async move {
-            if let Err(e) = iface.run().await {
-                tracing::error!("Signal interface error: {e}");
-            }
-        });
+        if orchestrator_no_repl {
+            info!("Running Signal interface in foreground (--no-repl)");
+            return iface.run().await;
+        }
+        warn!("Signal interface requires --no-repl in unified orchestrator mode; skipping startup");
     }
 
     if orchestrator_no_repl {

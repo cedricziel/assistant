@@ -6,7 +6,7 @@ A minimalist, self-improving personal AI assistant written in Rust.
 - **Agent Skills native** — skills are portable `SKILL.md` directories following the [agentskills.io](https://agentskills.io) open standard
 - **Self-improving** — passively logs execution traces and proposes SKILL.md refinements for human review
 - **MCP server** — exposes skills via the [Model Context Protocol](https://modelcontextprotocol.io) so Claude Code and other tools can discover and invoke them
-- **Multi-interface** — single `assistant` binary runs the CLI REPL, Slack bot, Mattermost bot, and MCP server concurrently via subcommands and background tasks
+- **Multi-interface** — single `assistant` binary runs orchestrator, workers, web UI, MCP, and chat interfaces via subcommands
 - **Ambient skills** — active interfaces register their capabilities (e.g. `slack-post`) into the skill executor so the agent can use them from any context
 
 ## Quick start
@@ -44,16 +44,18 @@ assistant> /quit
 The single binary supports several subcommands:
 
 ```sh
-assistant             # Interactive REPL + all configured interfaces in background
-assistant mcp         # stdio MCP server (for Claude Code, Cursor, etc.)
-assistant slack       # Slack bot only (no REPL)
-assistant mattermost  # Mattermost bot only (no REPL)
-assistant nextcloud   # Nextcloud Talk webhook bot
+assistant orchestrator run                          # REPL + configured interfaces
+assistant orchestrator run --no-repl                # background daemon mode
+assistant orchestrator run --interfaces slack       # only selected interface(s)
+assistant worker --interface any --id worker-1      # dedicated turn worker
+assistant webui serve --listen 127.0.0.1:8080 ...  # web UI + A2A server
+assistant signal link --device-name AssistantBot    # link Signal device
+assistant mcp                                       # stdio MCP server
 ```
 
-If Slack, Mattermost, and/or Nextcloud credentials are present in
-`~/.assistant/config.toml`, those bots start automatically in the background
-when running the interactive REPL.
+If Slack, Mattermost, Nextcloud, and/or Signal credentials are present in
+`~/.assistant/config.toml`, interfaces start automatically when running
+`assistant orchestrator run`.
 
 ## Model recommendations (2026)
 
@@ -276,11 +278,11 @@ assistant/
 │   ├── transcription/                  # Voice transcription providers (Whisper, Ollama, Deepgram)
 │   ├── mcp-server/                     # MCP stdio server library (used by `assistant mcp`)
 │   ├── mcp-client/                     # MCP client for connecting to external MCP servers
-│   ├── interface-cli/                  # Unified binary: REPL + background interfaces
+│   ├── interface-cli/                  # Unified binary: orchestrator, worker, webui, MCP
 │   ├── interface-slack/                # Slack Socket Mode library + ambient tools
 │   ├── interface-mattermost/           # Mattermost WebSocket library
 │   ├── interface-nextcloud/            # Nextcloud Talk webhook bot
-│   ├── interface-signal/               # Signal interface (feature-gated, separate binary)
+│   ├── interface-signal/               # Signal interface library
 │   ├── web-ui/                         # Trace analysis web UI + A2A protocol server
 │   ├── a2a-json-schema/                # A2A protocol JSON Schema types
 │   ├── opentelemetry-exporter-sqlite/  # SQLite exporter for OpenTelemetry spans/logs
@@ -300,10 +302,12 @@ make lint           # cargo clippy --workspace -D warnings
 make format         # cargo fmt --all
 make run            # cargo run -p assistant-cli  (REPL + background interfaces)
 make run-mcp        # cargo run -p assistant-cli -- mcp
-make run-slack      # cargo run -p assistant-cli -- slack
-make run-mattermost # cargo run -p assistant-cli -- mattermost
+make run-slack      # cargo run -p assistant-cli -- orchestrator run --interfaces slack --no-repl
+make run-mattermost # cargo run -p assistant-cli -- orchestrator run --interfaces mattermost --no-repl
+make run-nextcloud  # cargo run -p assistant-cli -- orchestrator run --interfaces nextcloud --no-repl
+make run-signal     # cargo run -p assistant-cli -- orchestrator run --interfaces signal --no-repl
 # Trace analysis UI (auth token required)
-ASSISTANT_WEB_TOKEN=changeme cargo run -p assistant-web-ui -- --listen 127.0.0.1:8080
+ASSISTANT_WEB_TOKEN=changeme cargo run -p assistant-cli -- webui serve --listen 127.0.0.1:8080
 ```
 
 ## Observability
@@ -365,6 +369,8 @@ $EDITOR ~/.assistant/config.toml      # add Slack/Mattermost credentials
 # 3. Enable and start whichever bots you need
 systemctl --user enable --now assistant-slack
 systemctl --user enable --now assistant-mattermost
+systemctl --user enable --now assistant-nextcloud
+systemctl --user enable --now assistant-web-ui
 
 # 4. (Once) persist across reboots without staying logged in
 loginctl enable-linger $USER
@@ -383,6 +389,8 @@ sudo apt upgrade assistant
 ```sh
 journalctl --user -u assistant-slack -f
 journalctl --user -u assistant-mattermost -f
+journalctl --user -u assistant-nextcloud -f
+journalctl --user -u assistant-web-ui -f
 ```
 
 ### Stop / disable
@@ -392,8 +400,8 @@ systemctl --user disable --now assistant-slack
 ```
 
 > **Note:** The interactive REPL (`assistant` with no subcommand) is not
-> suited for running as a service — use `assistant slack` or
-> `assistant mattermost` subcommands which handle `SIGTERM` gracefully.
+> suited for running as a service — use
+> `assistant orchestrator run --interfaces <name> --no-repl`.
 
 ## Docker
 
@@ -408,10 +416,13 @@ docker run ghcr.io/cedricziel/assistant/assistant
 docker run ghcr.io/cedricziel/assistant/assistant assistant mcp
 
 # Slack bot
-docker run ghcr.io/cedricziel/assistant/assistant assistant slack
+docker run ghcr.io/cedricziel/assistant/assistant assistant orchestrator run --interfaces slack --no-repl
 
 # Mattermost bot
-docker run ghcr.io/cedricziel/assistant/assistant assistant mattermost
+docker run ghcr.io/cedricziel/assistant/assistant assistant orchestrator run --interfaces mattermost --no-repl
+
+# Web UI
+docker run ghcr.io/cedricziel/assistant/assistant assistant webui serve --listen 0.0.0.0:8080 --auth-token changeme
 ```
 
 Mount your config at runtime:
@@ -423,14 +434,13 @@ docker run -v ~/.assistant/config.toml:/etc/assistant/config.toml \
 
 ## Signal interface
 
-The Signal interface is feature-gated and ships as a separate binary due to
-dependency conflicts with other workspace crates:
+Signal is available through orchestrator mode:
 
 ```sh
-cargo build -p assistant-interface-signal --features signal
+assistant orchestrator run --interfaces signal --no-repl
 ```
 
-See `crates/interface-signal/README.md` for setup instructions.
+See `crates/interface-signal/README.md` for setup and device linking details.
 
 ## Further documentation
 

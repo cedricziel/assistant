@@ -11,7 +11,7 @@ replying in the same Signal thread.
 ## Prerequisites
 
 1. **A registered Signal account** — a phone number already linked to Signal.
-2. **Device linking** — you must run `assistant-signal link` once before starting
+2. **Device linking** — you must run `assistant signal link` once before starting
    the listener (see below).
 3. **Rust toolchain** — the full feature build requires `presage` from git (see
    [Building](#building)).
@@ -48,7 +48,7 @@ cargo build -p assistant-interface-signal --features signal
 Before starting the listener, link this machine as a Signal secondary device.
 
 ```sh
-./target/debug/assistant-signal link --device-name "AssistantBot"
+cargo run -p assistant-cli -- signal link --device-name "AssistantBot"
 ```
 
 1. A QR code is printed to the terminal.
@@ -67,7 +67,7 @@ The linked device state is stored in the path configured by `store_path` in
 Once the device is linked:
 
 ```sh
-./target/debug/assistant-signal run
+cargo run -p assistant-cli -- orchestrator run --interfaces signal --no-repl
 ```
 
 Any Signal message sent to the linked number is dispatched to the
@@ -110,13 +110,13 @@ allowed_senders = []
 Signal message
      │
      ▼
-assistant-signal (binary)
+assistant (binary)
      │
-     ├── link subcommand ──► presage::Manager::link_secondary_device
+     ├── signal link subcommand ──► presage::Manager::link_secondary_device
      │                              │
      │                        QR code printed to terminal
      │
-     └── run subcommand ──► SignalInterface::run()
+     └── orchestrator run --interfaces signal --no-repl ──► SignalInterface::run()
                                     │
                          presage::Manager::receive_messages()
                                     │  (streaming)
@@ -142,9 +142,9 @@ cargo build -p assistant-interface-signal --features signal
 cargo clippy -p assistant-interface-signal --features signal -- -D warnings
 
 # Link device (requires Signal app):
-./target/debug/assistant-signal link --device-name "AssistantBot"
+cargo run -p assistant-cli -- signal link --device-name "AssistantBot"
 
 # Start listener:
-./target/debug/assistant-signal run
+cargo run -p assistant-cli -- orchestrator run --interfaces signal --no-repl
 # → send a Signal message to the linked number → bot replies
 ```

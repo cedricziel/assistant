@@ -48,6 +48,7 @@ for your user account:
        systemctl --user enable --now assistant-slack
        systemctl --user enable --now assistant-mattermost
        systemctl --user enable --now assistant-nextcloud
+       systemctl --user enable --now assistant-web-ui
 
   3. To have the service start at boot even when you are not logged in:
 
@@ -57,6 +58,7 @@ for your user account:
     journalctl --user -u assistant-slack -f
     journalctl --user -u assistant-mattermost -f
     journalctl --user -u assistant-nextcloud -f
+    journalctl --user -u assistant-web-ui -f
 
 MSG
 fi

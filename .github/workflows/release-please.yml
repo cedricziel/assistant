@@ -97,7 +97,16 @@ jobs:
             cargo build --release --target ${{ matrix.target }} -p assistant-cli
           fi
 
-      - name: Build assistant-web-ui
+      - name: Validate assistant runtime subcommands
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          target/${{ matrix.target }}/release/assistant --help
+          target/${{ matrix.target }}/release/assistant orchestrator run --help
+          target/${{ matrix.target }}/release/assistant worker --help
+          target/${{ matrix.target }}/release/assistant webui serve --help
+          target/${{ matrix.target }}/release/assistant signal --help
+
+      - name: Build assistant-web-ui helper binary
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
             cross build --release --target ${{ matrix.target }} -p assistant-web-ui

@@ -3,7 +3,7 @@ arch: "ARCH_PLACEHOLDER"
 platform: "linux"
 version: "VERSION_PLACEHOLDER"
 maintainer: "Cedric Ziel <cedric@cedric-ziel.com>"
-description: "Local self-improving AI assistant (unified: REPL + MCP + Slack + Mattermost + Nextcloud)"
+description: "Local self-improving AI assistant (unified: orchestrator + worker + webui + MCP + interfaces)"
 homepage: "https://github.com/cedricziel/assistant"
 license: "MIT"
 

@@ -1,6 +1,6 @@
 # Authentication
 
-The web UI requires a single shared token for all access.  There is no
+The web UI requires a single shared token for all access. There is no
 multi-user support yet — the token acts as a password that gates both
 the browser UI and API endpoints.
 
@@ -10,13 +10,13 @@ Set the token via CLI flag or environment variable:
 
 ```sh
 # Environment variable
-ASSISTANT_WEB_TOKEN=my-secret-token cargo run -p assistant-web-ui
+ASSISTANT_WEB_TOKEN=my-secret-token cargo run -p assistant-cli -- webui serve
 
 # CLI flag
-cargo run -p assistant-web-ui -- --auth-token my-secret-token
+cargo run -p assistant-cli -- webui serve --auth-token my-secret-token
 ```
 
-The server **refuses to start** if no token is configured.  Whitespace
+The server **refuses to start** if no token is configured. Whitespace
 is trimmed automatically.
 
 ## Browser flow
@@ -35,7 +35,7 @@ is trimmed automatically.
 ### Session cookie details
 
 The cookie value is an HMAC-SHA256 digest derived from the auth token —
-it never contains the raw token.  Verification is constant-time.
+it never contains the raw token. Verification is constant-time.
 
 ```
 cookie = hex(HMAC-SHA256(key=auth_token, msg="assistant-web-session-v1"))
@@ -58,12 +58,12 @@ Unauthenticated API requests receive `401 Unauthorized` with a
 
 ## Route protection
 
-| Route | Auth required |
-|-------|---------------|
-| `/login` (GET, POST) | No |
-| `/logout` (POST) | No |
+| Route                     | Auth required            |
+| ------------------------- | ------------------------ |
+| `/login` (GET, POST)      | No                       |
+| `/logout` (POST)          | No                       |
 | `/.well-known/agent.json` | No (public per A2A spec) |
-| Everything else | Yes |
+| Everything else           | Yes                      |
 
 The `/.well-known/agent.json` endpoint is intentionally public so that
 A2A callers can discover the authentication requirements before making
@@ -72,7 +72,7 @@ authenticated requests.
 ## Auto-hardening
 
 At startup, the web UI injects a `bearer_token` security scheme into the
-A2A agent card.  This means the public agent card at
+A2A agent card. This means the public agent card at
 `/.well-known/agent.json` advertises:
 
 ```json
@@ -85,9 +85,7 @@ A2A agent card.  This means the public agent card at
       }
     }
   },
-  "securityRequirements": [
-    { "bearer_token": [] }
-  ]
+  "securityRequirements": [{ "bearer_token": [] }]
 }
 ```
 

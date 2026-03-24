@@ -46,6 +46,14 @@ jobs:
       - name: cargo check
         run: cargo check --workspace --all-features
 
+      - name: Validate unified runtime subcommands
+        run: |
+          cargo run -p assistant-cli -- --help
+          cargo run -p assistant-cli -- orchestrator run --help
+          cargo run -p assistant-cli -- worker --help
+          cargo run -p assistant-cli -- webui serve --help
+          cargo run -p assistant-cli -- signal --help
+
   test:
     name: Test
     if: github.event.action != 'closed'
