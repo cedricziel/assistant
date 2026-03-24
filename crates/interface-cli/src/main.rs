@@ -1083,6 +1083,8 @@ async fn main() -> Result<()> {
         } else {
             (HashSet::new(), false)
         };
+    let orchestrator_interface_filtered = matches!(cli.command, Some(Command::Orchestrator { .. }))
+        && !orchestrator_interfaces.is_empty();
 
     // 4. Prepare confirmation behavior before bootstrapping the stack.
     //
@@ -1169,7 +1171,11 @@ async fn main() -> Result<()> {
     // 5b. Spawn the main turn worker (processes generic bus messages).
     // In interface-only modes we run a dedicated, interface-filtered worker
     // below to avoid duplicate consumption of the same turn requests.
-    let _worker = if !is_slack_only && !is_mattermost_only && !is_nextcloud_only {
+    let _worker = if !is_slack_only
+        && !is_mattermost_only
+        && !is_nextcloud_only
+        && !orchestrator_interface_filtered
+    {
         let worker_orch = bs.orchestrator.clone();
         Some(tokio::spawn(async move {
             worker_orch.run_worker("main-worker").await;
@@ -1366,6 +1372,14 @@ async fn main() -> Result<()> {
         use assistant_interface_signal::SignalInterface;
         let sig_cfg = bs.config.signal.clone().unwrap_or_default();
         let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+
+        let worker_orch = bs.orchestrator.clone();
+        let _signal_worker = tokio::spawn(async move {
+            worker_orch
+                .run_worker_filtered("signal-worker", Some("Signal"))
+                .await;
+        });
+
         if orchestrator_no_repl {
             info!("Running Signal interface in foreground (--no-repl)");
             return iface.run().await;
