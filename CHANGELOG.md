@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.52](https://github.com/cedricziel/assistant/compare/v0.1.51...v0.1.52) (2026-03-24)
+
+
+### Bug Fixes
+
+* **interface-cli:** prevent duplicate turn consumption in interface modes ([#262](https://github.com/cedricziel/assistant/issues/262)) ([6b2f9f6](https://github.com/cedricziel/assistant/commit/6b2f9f61624ed5effaef900d7c3525cfcb350383))
+
 ## [0.1.51](https://github.com/cedricziel/assistant/compare/v0.1.50...v0.1.51) (2026-03-24)
 
 
