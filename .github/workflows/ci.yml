@@ -81,9 +81,6 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
-
       - name: cargo test
         run: cargo test --workspace
 
@@ -96,9 +93,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
         with:
           components: clippy
 
@@ -153,6 +147,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
       - name: Cache cargo
         uses: actions/cache@v5
