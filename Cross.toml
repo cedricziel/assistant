@@ -1,5 +1,7 @@
 [target.aarch64-unknown-linux-gnu]
 pre-build = [
     "dpkg --add-architecture arm64",
-    "apt-get update && apt-get install -y libssl-dev:arm64 pkg-config protobuf-compiler",
+    "apt-get update && apt-get install -y libssl-dev:arm64 pkg-config curl unzip",
+    "curl -sSL -o /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v27.5/protoc-27.5-linux-x86_64.zip",
+    "unzip -o /tmp/protoc.zip -d /usr/local",
 ]
