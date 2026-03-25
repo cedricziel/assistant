@@ -277,6 +277,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "024_service_name_on_telemetry",
             include_str!("../../../migrations/024_service_name_on_telemetry.sql"),
         ),
+        (
+            "025_distributed_traces_drop_conversation_fk",
+            include_str!("../../../migrations/025_distributed_traces_drop_conversation_fk.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {
