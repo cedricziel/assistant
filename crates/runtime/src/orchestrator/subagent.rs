@@ -57,6 +57,11 @@ impl SubagentRunner for Orchestrator {
         }
 
         let conversation_id = Uuid::new_v4();
+        let execution_agent_id = if spawn.persona_bound {
+            spawn.agent_id.clone()
+        } else {
+            format!("anonymous::{}", spawn.agent_id)
+        };
         let parent_conversation_id = spawn
             .parent_conversation_id
             .unwrap_or(conversation_id)
@@ -123,7 +128,12 @@ impl SubagentRunner for Orchestrator {
 
         // Set up the conversation and history with the task as the user message.
         let (conv_store, mut history, base_turn) = self
-            .prepare_history(&spawn.task, conversation_id, Vec::new())
+            .prepare_history(
+                &spawn.task,
+                conversation_id,
+                Vec::new(),
+                &execution_agent_id,
+            )
             .await?;
 
         // Record the agent in the lifecycle table.
@@ -338,7 +348,7 @@ impl SubagentRunner for Orchestrator {
 
                             let ctx = ExecutionContext {
                                 conversation_id,
-                                agent_id: self.agent_id.clone(),
+                                agent_id: execution_agent_id.clone(),
                                 turn: iteration as i64,
                                 interface: Interface::Scheduler,
                                 interactive: false,

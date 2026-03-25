@@ -186,6 +186,9 @@ pub struct AgentSpawn {
     /// Empty means all tools.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// Whether this subagent should run bound to `agent_id` as a Persona.
+    #[serde(default)]
+    pub persona_bound: bool,
     /// Parent conversation ID that initiated this delegated task.
     #[serde(default)]
     pub parent_conversation_id: Option<Uuid>,
@@ -338,6 +341,7 @@ mod tests {
             system_prompt: Some("You are a research agent.".into()),
             model: None,
             allowed_tools: vec!["web-fetch".into(), "file-write".into()],
+            persona_bound: true,
             parent_conversation_id: Some(Uuid::new_v4()),
             parent_agent_id: Some("default".into()),
         };
@@ -347,6 +351,7 @@ mod tests {
         assert_eq!(back.allowed_tools.len(), 2);
         assert!(back.system_prompt.is_some());
         assert!(back.model.is_none());
+        assert!(back.persona_bound);
         assert!(back.parent_conversation_id.is_some());
         assert_eq!(back.parent_agent_id.as_deref(), Some("default"));
     }
@@ -361,6 +366,7 @@ mod tests {
         assert!(spawn.system_prompt.is_none());
         assert!(spawn.model.is_none());
         assert!(spawn.allowed_tools.is_empty());
+        assert!(!spawn.persona_bound);
         assert!(spawn.parent_conversation_id.is_none());
         assert!(spawn.parent_agent_id.is_none());
     }
