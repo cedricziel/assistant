@@ -536,7 +536,7 @@ fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Re
 
 async fn cmd_agent(db_path: &Path, command: &AgentCommand) -> Result<()> {
     let storage = StorageLayer::new(db_path).await?;
-    let store = storage.assistant_agent_store();
+    let store = storage.persona_store();
     store.ensure_default().await?;
 
     match command {
@@ -991,10 +991,10 @@ async fn main() -> Result<()> {
             .await
             .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
     );
-    let assistant_agents = storage.assistant_agent_store();
-    assistant_agents.ensure_default().await?;
+    let personas = storage.persona_store();
+    personas.ensure_default().await?;
     if cli_agent_override.is_none() {
-        let default_id = assistant_agents.default_id().await?;
+        let default_id = personas.default_id().await?;
         if default_id != selected_agent {
             selected_agent = default_id;
             apply_agent_context(&mut config, &selected_agent);
@@ -1009,7 +1009,7 @@ async fn main() -> Result<()> {
                 })?;
         }
     }
-    assistant_agents.ensure_exists(&selected_agent).await?;
+    personas.ensure_exists(&selected_agent).await?;
 
     let _otel_guard = init_tracing(storage.pool.clone(), config.mirror.trace_enabled)?;
     for msg in config_logs {

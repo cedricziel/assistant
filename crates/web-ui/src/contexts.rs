@@ -1,8 +1,8 @@
-//! Assistant context (agent) management pages.
+//! Persona context management pages.
 
 use askama::Template;
 use assistant_core::{default_workspace_dir, validate_agent_id};
-use assistant_storage::AssistantAgentStore;
+use assistant_storage::PersonaStore;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
@@ -47,7 +47,7 @@ async fn show_contexts(
     Query(query): Query<ContextQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let current_agent = active_agent_id(&state.agent_id).await;
-    let store = AssistantAgentStore::new(state.pool.clone());
+    let store = PersonaStore::new(state.pool.clone());
     store.ensure_default().await.map_err(internal_error)?;
     let rows_raw = store.list().await.map_err(internal_error)?;
     let default_agent = store.default_id().await.map_err(internal_error)?;
@@ -78,7 +78,7 @@ async fn use_context(State(state): State<AppState>, Path(id): Path<String>) -> R
         return (StatusCode::BAD_REQUEST, "Invalid agent ID".to_string()).into_response();
     }
 
-    let store = AssistantAgentStore::new(state.pool.clone());
+    let store = PersonaStore::new(state.pool.clone());
     if let Err(e) = store.ensure_default().await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
@@ -109,7 +109,7 @@ mod tests {
     use std::sync::Arc;
 
     use assistant_core::BusKind;
-    use assistant_storage::{AssistantAgentStore, StorageLayer};
+    use assistant_storage::{PersonaStore, StorageLayer};
     use axum::extract::{Path, State};
     use tokio::sync::RwLock;
 
@@ -133,7 +133,7 @@ mod tests {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let state = test_state(storage.pool.clone());
 
-        let agents = AssistantAgentStore::new(storage.pool.clone());
+        let agents = PersonaStore::new(storage.pool.clone());
         agents.ensure_default().await.unwrap();
         agents.ensure_exists("marketing").await.unwrap();
 

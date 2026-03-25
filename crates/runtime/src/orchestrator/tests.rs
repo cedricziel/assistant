@@ -1755,13 +1755,9 @@ async fn conversation_can_delegate_to_existing_agent_context() {
         .await;
 
     let (orch, storage) = build(&server.uri()).await;
+    storage.persona_store().ensure_default().await.unwrap();
     storage
-        .assistant_agent_store()
-        .ensure_default()
-        .await
-        .unwrap();
-    storage
-        .assistant_agent_store()
+        .persona_store()
         .ensure_exists("marketing")
         .await
         .unwrap();

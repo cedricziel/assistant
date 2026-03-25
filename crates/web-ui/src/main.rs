@@ -214,10 +214,10 @@ async fn run_with_args(args: Args) -> Result<()> {
         .await
         .with_context(|| format!("Failed to create workspace at {}", workspace_dir.display()))?;
 
-    let assistant_agents = storage.assistant_agent_store();
-    assistant_agents.ensure_default().await?;
+    let personas = storage.persona_store();
+    personas.ensure_default().await?;
     if cli_agent_override.is_none() {
-        let default_id = assistant_agents.default_id().await?;
+        let default_id = personas.default_id().await?;
         selected_agent = default_id;
         apply_agent_context(&mut config, &selected_agent);
         if let Some(home) = dirs::home_dir() {
@@ -232,7 +232,7 @@ async fn run_with_args(args: Args) -> Result<()> {
                 format!("Failed to create workspace at {}", workspace_dir.display())
             })?;
     }
-    assistant_agents.ensure_exists(&selected_agent).await?;
+    personas.ensure_exists(&selected_agent).await?;
 
     let state = AppState {
         pool: storage.pool.clone(),
