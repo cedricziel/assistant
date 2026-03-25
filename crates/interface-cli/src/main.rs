@@ -41,9 +41,9 @@ use assistant_interface_signal::config::SignalConfigExt;
 #[derive(Parser)]
 #[command(name = "assistant", about = "Local AI assistant", version)]
 struct Cli {
-    /// Assistant agent context ID (e.g. "default", "work", "personal").
-    #[arg(long, env = "ASSISTANT_AGENT")]
-    agent: Option<String>,
+    /// Persona context ID (e.g. "default", "work", "personal").
+    #[arg(long, env = "ASSISTANT_PERSONA")]
+    persona: Option<String>,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -80,10 +80,10 @@ enum Command {
     /// The bot receives messages via webhooks from the Nextcloud Talk server.
     #[cfg(feature = "nextcloud")]
     Nextcloud,
-    /// Manage assistant agent contexts.
-    Agent {
+    /// Manage Persona contexts.
+    Persona {
         #[command(subcommand)]
-        command: AgentCommand,
+        command: PersonaCommand,
     },
     /// Run orchestrator-managed interfaces and optional REPL.
     Orchestrator {
@@ -147,20 +147,20 @@ enum SignalCommand {
 }
 
 #[derive(Subcommand)]
-enum AgentCommand {
-    /// List all configured agents.
+enum PersonaCommand {
+    /// List all configured Personas.
     List,
-    /// Create an agent context.
+    /// Create a Persona context.
     Create {
-        /// Agent ID (letters, numbers, '-', '_').
+        /// Persona ID (letters, numbers, '-', '_').
         id: String,
-        /// Mark the created/existing agent as default.
+        /// Mark the created/existing Persona as default.
         #[arg(long)]
         default: bool,
     },
-    /// Set an existing agent as default.
+    /// Set an existing Persona as default.
     Use {
-        /// Agent ID to mark as default.
+        /// Persona ID to mark as default.
         id: String,
     },
 }
@@ -457,7 +457,7 @@ fn print_help() {
          /skills [name]                 List all skills, or show detail for one\n\
          /review                       Review pending skill refinement proposals\n\
          /install <path|owner/repo>    Install a skill from disk or GitHub\n\
-         Agent management: run `assistant agent --help` in another shell\n\
+         Persona management: run `assistant persona --help` in another shell\n\
          Runtime modes:\n\
            assistant orchestrator run [--interfaces ...] [--no-repl]\n\
            assistant worker --interface <name|any> --id <worker-id>\n\
@@ -534,29 +534,29 @@ fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Re
     Ok(())
 }
 
-async fn cmd_agent(db_path: &Path, command: &AgentCommand) -> Result<()> {
+async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
     let storage = StorageLayer::new(db_path).await?;
     let store = storage.persona_store();
     store.ensure_default().await?;
 
     match command {
-        AgentCommand::List => {
+        PersonaCommand::List => {
             let items = store.list().await?;
             if items.is_empty() {
-                println!("No agents configured.");
+                println!("No Personas configured.");
                 return Ok(());
             }
-            println!("Configured agents:\n");
+            println!("Configured Personas:\n");
             for item in items {
                 let marker = if item.is_default { "*" } else { " " };
                 println!("{marker} {:20} {}", item.id, item.name);
             }
             println!("\n* default");
         }
-        AgentCommand::Create { id, default } => {
+        PersonaCommand::Create { id, default } => {
             if !validate_agent_id(id) {
                 anyhow::bail!(
-                    "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
+                    "Invalid Persona ID '{}'. Use only letters, numbers, '-' and '_'.",
                     id
                 );
             }
@@ -569,15 +569,15 @@ async fn cmd_agent(db_path: &Path, command: &AgentCommand) -> Result<()> {
             let workspace = default_workspace_dir(id);
             tokio::fs::create_dir_all(&root).await?;
             tokio::fs::create_dir_all(&workspace).await?;
-            println!("Agent '{}' is ready.", id);
+            println!("Persona '{}' is ready.", id);
             if *default {
-                println!("Default agent set to '{}'.", id);
+                println!("Default Persona set to '{}'.", id);
             }
         }
-        AgentCommand::Use { id } => {
+        PersonaCommand::Use { id } => {
             if !validate_agent_id(id) {
                 anyhow::bail!(
-                    "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
+                    "Invalid Persona ID '{}'. Use only letters, numbers, '-' and '_'.",
                     id
                 );
             }
@@ -587,7 +587,7 @@ async fn cmd_agent(db_path: &Path, command: &AgentCommand) -> Result<()> {
             let workspace = default_workspace_dir(id);
             tokio::fs::create_dir_all(&root).await?;
             tokio::fs::create_dir_all(&workspace).await?;
-            println!("Default agent set to '{}'.", id);
+            println!("Default Persona set to '{}'.", id);
         }
     }
 
@@ -891,19 +891,19 @@ async fn main() -> Result<()> {
     let config_path = assistant_dir.join("config.toml");
     let (mut config, config_logs) = load_config_messages(&config_path);
 
-    let cli_agent_override = cli.agent.clone();
-    let mut selected_agent = cli_agent_override
+    let cli_persona_override = cli.persona.clone();
+    let mut selected_persona = cli_persona_override
         .clone()
         .unwrap_or_else(|| config.agent.id.clone());
-    if !validate_agent_id(&selected_agent) {
+    if !validate_agent_id(&selected_persona) {
         anyhow::bail!(
-            "Invalid agent ID '{}'. Use only letters, numbers, '-' and '_'.",
-            selected_agent
+            "Invalid Persona ID '{}'. Use only letters, numbers, '-' and '_'.",
+            selected_persona
         );
     }
-    apply_agent_context(&mut config, &selected_agent);
-    let agent_root = assistant_dir.join("agents").join(&selected_agent);
-    let workspace_dir = default_workspace_dir(&selected_agent);
+    apply_agent_context(&mut config, &selected_persona);
+    let agent_root = assistant_dir.join("agents").join(&selected_persona);
+    let workspace_dir = default_workspace_dir(&selected_persona);
     set_runtime_agent_root(agent_root);
     set_runtime_workspace_dir(workspace_dir.clone());
     tokio::fs::create_dir_all(&workspace_dir)
@@ -922,8 +922,8 @@ async fn main() -> Result<()> {
         return cmd_reset(&db_path, &config, *yes);
     }
 
-    if let Some(Command::Agent { command }) = &cli.command {
-        return cmd_agent(&db_path, command).await;
+    if let Some(Command::Persona { command }) = &cli.command {
+        return cmd_persona(&db_path, command).await;
     }
 
     if let Some(Command::Webui { command }) = &cli.command {
@@ -993,13 +993,13 @@ async fn main() -> Result<()> {
     );
     let personas = storage.persona_store();
     personas.ensure_default().await?;
-    if cli_agent_override.is_none() {
+    if cli_persona_override.is_none() {
         let default_id = personas.default_id().await?;
-        if default_id != selected_agent {
-            selected_agent = default_id;
-            apply_agent_context(&mut config, &selected_agent);
-            let agent_root = assistant_dir.join("agents").join(&selected_agent);
-            let workspace_dir = default_workspace_dir(&selected_agent);
+        if default_id != selected_persona {
+            selected_persona = default_id;
+            apply_agent_context(&mut config, &selected_persona);
+            let agent_root = assistant_dir.join("agents").join(&selected_persona);
+            let workspace_dir = default_workspace_dir(&selected_persona);
             set_runtime_agent_root(agent_root);
             set_runtime_workspace_dir(workspace_dir.clone());
             tokio::fs::create_dir_all(&workspace_dir)
@@ -1009,7 +1009,7 @@ async fn main() -> Result<()> {
                 })?;
         }
     }
-    personas.ensure_exists(&selected_agent).await?;
+    personas.ensure_exists(&selected_persona).await?;
 
     let _otel_guard = init_tracing(storage.pool.clone(), config.mirror.trace_enabled)?;
     for msg in config_logs {
@@ -1274,8 +1274,8 @@ async fn main() -> Result<()> {
     }
 
     println!(
-        "Assistant ready. Agent: {}  Model: {}  (type /help for commands)\n",
-        selected_agent, bs.config.llm.model
+        "Assistant ready. Persona: {}  Model: {}  (type /help for commands)\n",
+        selected_persona, bs.config.llm.model
     );
 
     // 13. Build the reedline editor and prompt.
