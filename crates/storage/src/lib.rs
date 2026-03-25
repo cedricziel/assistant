@@ -1,10 +1,10 @@
 pub mod agents;
-pub mod assistant_agents;
 pub mod conversations;
 pub mod logs;
 pub mod memory_chunks;
 pub mod message_bus;
 pub mod metrics;
+pub mod personas;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
@@ -13,7 +13,6 @@ pub mod webhooks;
 pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
-pub use assistant_agents::{AssistantAgentRecord, AssistantAgentStore};
 pub use conversations::{ConversationRecord, ConversationStore};
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
@@ -21,6 +20,7 @@ pub use message_bus::SqliteMessageBus;
 pub use metrics::{
     MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord, TimeSeriesPoint, ToolUsageStats,
 };
+pub use personas::{PersonaRecord, PersonaStore};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
@@ -81,14 +81,14 @@ impl StorageLayer {
         ConversationStore::new(self.pool.clone())
     }
 
-    /// Convenience: build a `ConversationStore` scoped to an assistant agent.
+    /// Convenience: build a `ConversationStore` scoped to a Persona.
     pub fn conversation_store_for_agent(&self, agent_id: &str) -> ConversationStore {
         ConversationStore::for_agent(self.pool.clone(), agent_id)
     }
 
-    /// Convenience: build an `AssistantAgentStore` backed by this pool.
-    pub fn assistant_agent_store(&self) -> AssistantAgentStore {
-        AssistantAgentStore::new(self.pool.clone())
+    /// Convenience: build a `PersonaStore` backed by this pool.
+    pub fn persona_store(&self) -> PersonaStore {
+        PersonaStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `RefinementsStore` backed by this pool.
@@ -101,7 +101,7 @@ impl StorageLayer {
         ScheduledTaskStore::new(self.pool.clone())
     }
 
-    /// Convenience: build a `ScheduledTaskStore` scoped to an assistant agent.
+    /// Convenience: build a `ScheduledTaskStore` scoped to a Persona.
     pub fn scheduled_task_store_for_agent(&self, agent_id: &str) -> ScheduledTaskStore {
         ScheduledTaskStore::for_agent(self.pool.clone(), agent_id)
     }
@@ -126,7 +126,7 @@ impl StorageLayer {
         MetricsStore::new(self.pool.clone())
     }
 
-    /// Convenience: build a [`MetricsStore`] scoped to an assistant agent.
+    /// Convenience: build a [`MetricsStore`] scoped to a Persona.
     pub fn metrics_store_for_agent(&self, agent_id: &str) -> MetricsStore {
         MetricsStore::for_agent(self.pool.clone(), agent_id)
     }
@@ -141,7 +141,7 @@ impl StorageLayer {
         WorkflowStore::new(self.pool.clone())
     }
 
-    /// Convenience: build a [`WebhookStore`] scoped to an assistant agent.
+    /// Convenience: build a [`WebhookStore`] scoped to a Persona.
     pub fn webhook_store_for_agent(&self, agent_id: &str) -> WebhookStore {
         WebhookStore::for_agent(self.pool.clone(), agent_id)
     }
@@ -281,6 +281,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "025_distributed_traces_drop_conversation_fk",
             include_str!("../../../migrations/025_distributed_traces_drop_conversation_fk.sql"),
         ),
+        (
+            "026_personas",
+            include_str!("../../../migrations/026_personas.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {
@@ -328,11 +332,18 @@ mod tests {
         assert!(column_exists(pool, "metric_points", "agent_id").await?);
 
         let applied: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM _migrations WHERE name IN ('017_assistant_agents', '018_agent_scope_tasks_webhooks', '019_metrics_agent_scope')",
+            "SELECT COUNT(*) FROM _migrations WHERE name IN ('017_assistant_agents', '018_agent_scope_tasks_webhooks', '019_metrics_agent_scope', '026_personas')",
         )
         .fetch_one(pool)
         .await?;
-        assert_eq!(applied, 3, "new agent-scope migrations should be applied");
+        assert_eq!(applied, 4, "new persona-scope migrations should be applied");
+
+        let table_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='personas'",
+        )
+        .fetch_one(pool)
+        .await?;
+        assert_eq!(table_exists, 1, "personas table should exist");
 
         let _ = tokio::fs::remove_file(&db_path).await;
         Ok(())
