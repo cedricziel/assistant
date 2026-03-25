@@ -1636,6 +1636,8 @@ async fn subagent_spawn_complete_round_trip() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        parent_conversation_id: None,
+        parent_agent_id: None,
     };
 
     let report = orch.run_subagent(spawn, 0).await.unwrap();
@@ -1696,7 +1698,7 @@ async fn conversation_can_delegate_to_anonymous_subagent() {
         .mount(&server)
         .await;
 
-    let (orch, _storage) = build(&server.uri()).await;
+    let (orch, storage) = build(&server.uri()).await;
     let conv_id = Uuid::new_v4();
 
     let turn = orch
@@ -1704,6 +1706,15 @@ async fn conversation_can_delegate_to_anonymous_subagent() {
         .await
         .unwrap();
     assert_eq!(turn.answer, "parent acknowledged anonymous result");
+
+    let records = storage
+        .agent_store()
+        .list_by_parent_conversation(&conv_id.to_string())
+        .await
+        .unwrap();
+    assert_eq!(records.len(), 1, "expected one delegated subagent record");
+    assert_eq!(records[0].parent_conversation_id, conv_id.to_string());
+    assert_eq!(records[0].parent_agent_id.as_deref(), Some("default"));
 
     let reqs = server.received_requests().await.unwrap();
     assert_eq!(
@@ -1769,6 +1780,15 @@ async fn conversation_can_delegate_to_existing_agent_context() {
         .unwrap();
     assert_eq!(turn.answer, "parent acknowledged marketing result");
 
+    let delegated = storage
+        .agent_store()
+        .list_by_parent_conversation(&conv_id.to_string())
+        .await
+        .unwrap();
+    assert_eq!(delegated.len(), 1, "expected one delegated subagent record");
+    assert_eq!(delegated[0].parent_conversation_id, conv_id.to_string());
+    assert_eq!(delegated[0].parent_agent_id.as_deref(), Some("default"));
+
     let marketing = storage
         .agent_store()
         .get("marketing")
@@ -1793,6 +1813,8 @@ async fn subagent_nesting_depth_limit_enforced() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        parent_conversation_id: None,
+        parent_agent_id: None,
     };
 
     let report = orch
@@ -1843,6 +1865,8 @@ async fn subagent_tool_filtering_restricts_tools() {
         model: None,
         // Only allow file-read — bash should be rejected.
         allowed_tools: vec!["file-read".into()],
+        parent_conversation_id: None,
+        parent_agent_id: None,
     };
 
     let report = orch.run_subagent(spawn, 0).await.unwrap();
@@ -1898,6 +1922,8 @@ async fn subagent_cancellation_stops_loop() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        parent_conversation_id: None,
+        parent_agent_id: None,
     };
 
     // Cancel the agent before it starts by pre-cancelling.
@@ -1959,6 +1985,8 @@ async fn subagent_llm_error_records_failed_status() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        parent_conversation_id: None,
+        parent_agent_id: None,
     };
 
     let report = orch.run_subagent(spawn, 0).await.unwrap();
@@ -2044,6 +2072,8 @@ async fn subagent_thinking_step_persisted_to_db() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        parent_conversation_id: None,
+        parent_agent_id: None,
     };
 
     let report = orch.run_subagent(spawn, 0).await.unwrap();
@@ -2134,6 +2164,8 @@ async fn subagent_max_iterations_returns_failed_status() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        parent_conversation_id: None,
+        parent_agent_id: None,
     };
 
     let report = orch.run_subagent(spawn, 0).await.unwrap();

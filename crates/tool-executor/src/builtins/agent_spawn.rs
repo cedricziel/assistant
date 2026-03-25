@@ -111,6 +111,8 @@ impl ToolHandler for AgentSpawnHandler {
             system_prompt,
             model: None,
             allowed_tools,
+            parent_conversation_id: Some(ctx.conversation_id),
+            parent_agent_id: Some(ctx.agent_id.clone()),
         };
 
         let report = self.runner.run_subagent(spawn, ctx.depth).await?;

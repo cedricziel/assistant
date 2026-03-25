@@ -57,6 +57,14 @@ impl SubagentRunner for Orchestrator {
         }
 
         let conversation_id = Uuid::new_v4();
+        let parent_conversation_id = spawn
+            .parent_conversation_id
+            .unwrap_or(conversation_id)
+            .to_string();
+        let parent_agent_id = spawn
+            .parent_agent_id
+            .clone()
+            .unwrap_or_else(|| self.agent_id.clone());
 
         // -- OTel: root subagent span (child of current context) ---------------
         let tracer = global::tracer("assistant.orchestrator");
@@ -122,8 +130,8 @@ impl SubagentRunner for Orchestrator {
         if let Err(e) = agent_store
             .create(
                 &spawn.agent_id,
-                None,
-                &conversation_id.to_string(),
+                Some(&parent_agent_id),
+                &parent_conversation_id,
                 &conversation_id.to_string(),
                 &spawn.task,
                 new_depth,
