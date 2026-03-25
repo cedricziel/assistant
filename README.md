@@ -452,18 +452,19 @@ See `crates/interface-signal/README.md` for setup and device linking details.
 
 ## Further documentation
 
-| Topic                                         | Description                                           |
-| --------------------------------------------- | ----------------------------------------------------- |
-| [OpenTelemetry](docs/opentelemetry.md)        | Emitted spans, metrics, and supported env vars        |
-| [Slack interface](docs/slack.md)              | Setup, ambient tools, and event handling              |
-| [Nextcloud Talk interface](docs/nextcloud.md) | Webhook bot setup and message flow                    |
-| [OpenAI provider](docs/openai.md)             | API key and OAuth PKCE auth, Azure/vLLM compatibility |
-| [Moonshot provider](docs/moonshot.md)         | Kimi K2/K2.5 models, regional endpoints               |
-| [Web UI](docs/web-ui.md)                      | Trace analysis dashboard and A2A protocol server      |
-| [Authentication](docs/authentication.md)      | Web UI token auth, cookie flow, and A2A security      |
-| [Message bus](docs/messaging.md)              | Durable topic-based message bus architecture          |
-| [Voice transcription](docs/transcription.md)  | Whisper, Ollama, and Deepgram transcription providers |
-| [Glossary](docs/glossary.md)                  | Canonical Persona/Subagent/A2A terminology            |
+| Topic                                          | Description                                           |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| [OpenTelemetry](docs/opentelemetry.md)         | Emitted spans, metrics, and supported env vars        |
+| [Slack interface](docs/slack.md)               | Setup, ambient tools, and event handling              |
+| [Nextcloud Talk interface](docs/nextcloud.md)  | Webhook bot setup and message flow                    |
+| [OpenAI provider](docs/openai.md)              | API key and OAuth PKCE auth, Azure/vLLM compatibility |
+| [Moonshot provider](docs/moonshot.md)          | Kimi K2/K2.5 models, regional endpoints               |
+| [Web UI](docs/web-ui.md)                       | Trace analysis dashboard and A2A protocol server      |
+| [Authentication](docs/authentication.md)       | Web UI token auth, cookie flow, and A2A security      |
+| [Message bus](docs/messaging.md)               | Durable topic-based message bus architecture          |
+| [Voice transcription](docs/transcription.md)   | Whisper, Ollama, and Deepgram transcription providers |
+| [Glossary](docs/glossary.md)                   | Canonical Persona/Subagent/A2A terminology            |
+| [Persona migration](docs/persona-migration.md) | Breaking cutover guide for Persona model migration    |
 
 ## License
 
