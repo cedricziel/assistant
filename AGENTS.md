@@ -69,6 +69,11 @@ interface-cli -> runtime -> llm -> core
                     '-> mcp-server, interface-slack, interface-mattermost, interface-nextcloud (optional features)
 ```
 
+## Architecture Decisions
+
+- ADRs live in `docs/adr/`.
+- When making architectural changes, add or update an ADR in `docs/adr/`.
+
 ## Code Style
 
 ### Formatting
