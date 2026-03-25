@@ -83,6 +83,13 @@ pub(crate) mod test_utils {
         .execute(&pool)
         .await
         .unwrap();
+        // 025 — make distributed_traces independent from conversations
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/025_distributed_traces_drop_conversation_fk.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
 
         pool
     }

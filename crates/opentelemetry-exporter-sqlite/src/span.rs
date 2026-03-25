@@ -403,4 +403,65 @@ mod tests {
         assert_eq!(attrs["otel.status_code"], "error");
         assert_eq!(attrs["otel.status_message"], "timeout");
     }
+
+    #[tokio::test]
+    async fn test_export_persists_orphan_conversation_id() {
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteSpanExporter::new(pool.clone());
+
+        let mut span = make_span("orphan-conv", Some("bash"), Status::Ok);
+        let orphan_conversation_id = Uuid::new_v4().to_string();
+        span.attributes.push(KeyValue::new(
+            "conversation_id",
+            orphan_conversation_id.clone(),
+        ));
+
+        exporter.export(vec![span]).await.unwrap();
+
+        let conversation_id: Option<String> =
+            sqlx::query_scalar("SELECT conversation_id FROM distributed_traces LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            conversation_id.as_deref(),
+            Some(orphan_conversation_id.as_str())
+        );
+
+        let attrs: String = sqlx::query_scalar("SELECT attributes FROM distributed_traces LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let attrs: serde_json::Value = serde_json::from_str(&attrs).unwrap();
+        assert_eq!(attrs["conversation_id"], orphan_conversation_id);
+    }
+
+    #[tokio::test]
+    async fn test_export_persists_existing_conversation_id() {
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteSpanExporter::new(pool.clone());
+
+        let conversation_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id) VALUES (?1)")
+            .bind(conversation_id.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut span = make_span("existing-conv", Some("bash"), Status::Ok);
+        span.attributes.push(KeyValue::new(
+            "conversation_id",
+            conversation_id.to_string(),
+        ));
+
+        exporter.export(vec![span]).await.unwrap();
+
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT conversation_id FROM distributed_traces LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let conversation_id_str = conversation_id.to_string();
+        assert_eq!(stored.as_deref(), Some(conversation_id_str.as_str()));
+    }
 }
