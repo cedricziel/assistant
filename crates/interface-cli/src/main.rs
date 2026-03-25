@@ -257,6 +257,48 @@ fn interface_selected(selected: &HashSet<String>, interface: &str) -> bool {
     selected.is_empty() || selected.contains(interface)
 }
 
+#[cfg(test)]
+mod cli_parse_tests {
+    use clap::Parser;
+
+    use super::{Cli, Command, OrchestratorCommand, PersonaCommand};
+
+    #[test]
+    fn parses_persona_subcommand_list() {
+        let cli = Cli::try_parse_from(["assistant", "persona", "list"]).unwrap();
+        match cli.command {
+            Some(Command::Persona { command }) => {
+                assert!(matches!(command, PersonaCommand::List));
+            }
+            _ => panic!("expected persona list command"),
+        }
+    }
+
+    #[test]
+    fn parses_persona_flag_for_runtime_selection() {
+        let cli =
+            Cli::try_parse_from(["assistant", "--persona", "marketing", "orchestrator", "run"])
+                .unwrap();
+
+        assert_eq!(cli.persona.as_deref(), Some("marketing"));
+        match cli.command {
+            Some(Command::Orchestrator { command }) => {
+                assert!(matches!(command, OrchestratorCommand::Run { .. }));
+            }
+            _ => panic!("expected orchestrator run command"),
+        }
+    }
+
+    #[test]
+    fn rejects_legacy_agent_subcommand_name() {
+        let parse = Cli::try_parse_from(["assistant", "agent", "list"]);
+        assert!(
+            parse.is_err(),
+            "legacy `agent` subcommand should be rejected"
+        );
+    }
+}
+
 async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
     let args = match command {
         WebUiCommand::Serve { args } => args,

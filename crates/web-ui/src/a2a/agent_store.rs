@@ -535,4 +535,14 @@ mod tests {
         assert!(content.contains("name: Persisted"));
         assert!(content.contains("Persisted agent"));
     }
+
+    #[test]
+    fn for_persona_uses_persona_scoped_directory_layout() {
+        let store = AgentStore::for_persona("marketing").unwrap();
+        let rendered = store.agents_dir.to_string_lossy();
+        assert!(
+            rendered.contains("agents/marketing/a2a-profiles"),
+            "expected persona-scoped A2A profile dir, got: {rendered}"
+        );
+    }
 }

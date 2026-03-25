@@ -144,6 +144,8 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
+        let location = response.headers().get("location").unwrap().to_str().unwrap();
+        assert_eq!(location, "/personas?updated=1");
         assert_eq!(*state.agent_id.read().await, "marketing");
         assert_eq!(agents.default_id().await.unwrap(), "default");
     }
