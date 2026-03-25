@@ -1,7 +1,7 @@
 # Message Bus
 
 A durable, topic-based message bus that decouples components and enables
-multi-agent, multi-user, multi-interface communication.
+multi-persona, multi-user, multi-interface communication.
 
 ## Architecture
 
@@ -42,11 +42,11 @@ Orchestrator ──publish──> [bus_messages] ──claim──> Interface
 ## Routing Model
 
 Topics represent **message types**, not destinations. Routing to specific
-agents, users, or conversations is done via metadata fields on the message
+Personas, users, or conversations is done via metadata fields on the message
 and `ClaimFilter` on consumption.
 
 This means the topic space stays flat and manageable regardless of how many
-agents or users exist. Consumers filter what they care about at claim time.
+Personas or users exist. Consumers filter what they care about at claim time.
 
 ## Topics
 
@@ -57,9 +57,9 @@ agents or users exist. Consumers filter what they care about at claim time.
 | `turn.result`      | Orchestrator  | Interface        | Final answer ready                  |
 | `tool.execute`     | Orchestrator  | Tool executor    | Run a tool                          |
 | `tool.result`      | Tool executor | Orchestrator     | Tool output                         |
-| `agent.spawn`      | Agent         | Agent supervisor | Create a sub-agent                  |
-| `agent.report`     | Sub-agent     | Parent agent     | Sub-agent finished                  |
-| `agent.terminate`  | Supervisor    | Agent            | Shut down an agent                  |
+| `agent.spawn`      | Persona       | Agent supervisor | Create a Subagent Process           |
+| `agent.report`     | Subagent      | Parent Persona   | Subagent Process finished           |
+| `agent.terminate`  | Supervisor    | Persona          | Shut down a Subagent Process        |
 | `schedule.trigger` | Scheduler     | Orchestrator     | Cron task fired                     |
 
 ## Typed Envelopes
@@ -113,13 +113,13 @@ if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
 
 ### Available envelopes
 
-**`TurnRequest`** -- user or agent initiates a turn:
+**`TurnRequest`** -- user or Persona initiates a turn:
 
 - `prompt: String` -- the user's message
 - `conversation_id: Uuid`
 - `extension_tools: Vec<String>` -- interface-provided tools (default empty)
 
-**`TurnResult`** -- agent's final answer:
+**`TurnResult`** -- Persona's final answer:
 
 - `conversation_id: Uuid`
 - `content: String`
@@ -148,7 +148,7 @@ if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
 - `success: bool`
 - `data: Option<Value>`
 
-**`AgentSpawn`** -- create a sub-agent:
+**`AgentSpawn`** -- create a Subagent Process:
 
 - `agent_id: String`
 - `task: String`
@@ -156,7 +156,7 @@ if let Some(msg) = bus.claim(topic::TURN_REQUEST, "orchestrator").await? {
 - `model: Option<String>`
 - `allowed_tools: Vec<String>` -- empty = all tools
 
-**`AgentReport`** -- sub-agent reports back:
+**`AgentReport`** -- Subagent Process reports back:
 
 - `status: AgentReportStatus` -- `Completed`, `Failed`, or `Cancelled`
 - `content: String`
@@ -168,10 +168,10 @@ Every message carries three categories of metadata alongside the payload:
 
 ### Identity -- who is involved
 
-| Field      | Type             | Purpose                                  |
-| ---------- | ---------------- | ---------------------------------------- |
-| `user_id`  | `Option<String>` | User who initiated the chain of work     |
-| `agent_id` | `Option<String>` | Agent that produced or should consume it |
+| Field      | Type             | Purpose                                    |
+| ---------- | ---------------- | ------------------------------------------ |
+| `user_id`  | `Option<String>` | User who initiated the chain of work       |
+| `agent_id` | `Option<String>` | Persona that produced or should consume it |
 
 ### Routing -- where it goes
 
@@ -241,7 +241,7 @@ Claim selectively using `ClaimFilter`:
 ```rust
 use assistant_core::ClaimFilter;
 
-// Only claim messages for a specific agent
+// Only claim messages for a specific Persona (field name remains `agent_id`)
 let filter = ClaimFilter::new().with_agent_id("research-agent");
 if let Some(msg) = bus.claim_filtered("turn.request", "worker-1", &filter).await? {
     // ...
@@ -312,7 +312,7 @@ tool call ordering (e.g. write a file then read it back in the same
 response).
 
 The bus still adds value through decoupling, crash recovery, observability,
-and the ability to run multiple conversations in parallel across agents.
+and the ability to run multiple conversations in parallel across Personas.
 
 ```rust
 use assistant_core::{topic, PublishRequest, ToolExecute};
@@ -334,15 +334,15 @@ for tool_call in tool_calls {
 }
 ```
 
-## Multi-Agent Delegation
+## Persona Delegation
 
-Agents can delegate work to sub-agents through the bus:
+Personas can delegate work to Subagent Processes through the bus:
 
 ```text
 User -> turn.request (agent_id=main, correlation_id=C1)
-  Main agent claims it, decides to delegate
+  Main Persona claims it, decides to delegate
   Main -> agent.spawn (agent_id=research, correlation_id=C1, causation_id=<turn_req_id>)
-    Research agent claims spawn, does work
+    Research Persona claims spawn, does work
     Research -> agent.report (correlation_id=C1, causation_id=<spawn_id>)
   Main claims report, synthesizes answer
   Main -> turn.result (correlation_id=C1)
@@ -393,14 +393,14 @@ CREATE TABLE bus_messages (
 
 ### Performance characteristics
 
-| Operation        | Complexity | Notes                                   |
-| ---------------- | ---------- | --------------------------------------- |
-| `publish`        | O(1)       | Single INSERT                           |
-| `claim`          | O(1)       | Indexed subquery + UPDATE               |
-| `claim_filtered` | O(1)       | Partial index on (topic, agent, status) |
-| `ack/nack/fail`  | O(1)       | UPDATE by primary key                   |
-| `reap_stale`     | O(stale)   | Partial index on (status, claimed_at)   |
-| `purge`          | O(purged)  | Scan on status + created_at             |
+| Operation        | Complexity | Notes                                      |
+| ---------------- | ---------- | ------------------------------------------ |
+| `publish`        | O(1)       | Single INSERT                              |
+| `claim`          | O(1)       | Indexed subquery + UPDATE                  |
+| `claim_filtered` | O(1)       | Partial index on (topic, agent_id, status) |
+| `ack/nack/fail`  | O(1)       | UPDATE by primary key                      |
+| `reap_stale`     | O(stale)   | Partial index on (status, claimed_at)      |
+| `purge`          | O(purged)  | Scan on status + created_at                |
 
 SQLite serialises writes. This is fine for tens of concurrent conversations.
 For hundreds+, enable the NATS backend via `[bus] kind = "nats"` (see below).

@@ -7,7 +7,15 @@ A minimalist, self-improving personal AI assistant written in Rust.
 - **Self-improving** — passively logs execution traces and proposes SKILL.md refinements for human review
 - **MCP server** — exposes skills via the [Model Context Protocol](https://modelcontextprotocol.io) so Claude Code and other tools can discover and invoke them
 - **Multi-interface** — single `assistant` binary runs orchestrator, workers, web UI, MCP, and chat interfaces via subcommands
-- **Ambient skills** — active interfaces register their capabilities (e.g. `slack-post`) into the skill executor so the agent can use them from any context
+- **Ambient skills** — active interfaces register their capabilities (e.g. `slack-post`) into the skill executor so the Persona can use them from any context
+
+## Domain model terms
+
+- **Persona** — long-lived assistant context with its own memory and workspace scope.
+- **Subagent Process** — ephemeral delegated task execution unit.
+- **A2A Profile** — Persona-attached external protocol contract (discovery + auth + interfaces).
+
+See [docs/glossary.md](docs/glossary.md) for canonical wording rules.
 
 ## Quick start
 
@@ -123,13 +131,13 @@ ollama pull qwen2.5:14b
 | `list-tasks`    | List all scheduled tasks with status and next run time     |
 | `cancel-task`   | Cancel a scheduled task by ID or name                      |
 
-**Sub-agents**
+**Subagent Processes**
 
-| Tool              | Description                                             |
-| ----------------- | ------------------------------------------------------- |
-| `agent-spawn`     | Spawn an isolated sub-agent to perform a delegated task |
-| `agent-status`    | Query the status of sub-agents                          |
-| `agent-terminate` | Cancel a running sub-agent by ID                        |
+| Tool              | Description                                                    |
+| ----------------- | -------------------------------------------------------------- |
+| `agent-spawn`     | Spawn an isolated Subagent Process to perform a delegated task |
+| `agent-status`    | Query the status of Subagent Processes                         |
+| `agent-terminate` | Cancel a running Subagent Process by ID                        |
 
 Interfaces may register additional **ambient tools** at runtime (e.g. `slack-post`,
 `slack-send-dm` when Slack is configured).
@@ -273,7 +281,7 @@ assistant/
 │   ├── skills/                         # Skill parsing, validation, embedded builtins
 │   ├── storage/                        # SQLite, SkillRegistry, trace store, memory store
 │   ├── bus-nats/                       # NATS JetStream MessageBus (optional, feature-gated)
-│   ├── runtime/                        # ReAct orchestrator, scheduler, sub-agents
+│   ├── runtime/                        # ReAct orchestrator, scheduler, Subagent Processes
 │   ├── tool-executor/                  # Builtin tool registry + skill installer
 │   ├── transcription/                  # Voice transcription providers (Whisper, Ollama, Deepgram)
 │   ├── mcp-server/                     # MCP stdio server library (used by `assistant mcp`)
@@ -455,6 +463,7 @@ See `crates/interface-signal/README.md` for setup and device linking details.
 | [Authentication](docs/authentication.md)      | Web UI token auth, cookie flow, and A2A security      |
 | [Message bus](docs/messaging.md)              | Durable topic-based message bus architecture          |
 | [Voice transcription](docs/transcription.md)  | Whisper, Ollama, and Deepgram transcription providers |
+| [Glossary](docs/glossary.md)                  | Canonical Persona/Subagent/A2A terminology            |
 
 ## License
 

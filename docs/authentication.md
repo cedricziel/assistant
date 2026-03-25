@@ -72,7 +72,7 @@ authenticated requests.
 ## Auto-hardening
 
 At startup, the web UI injects a `bearer_token` security scheme into the
-A2A agent card. This means the public agent card at
+Persona A2A Profile card. This means the public discovery card at
 `/.well-known/agent.json` advertises:
 
 ```json

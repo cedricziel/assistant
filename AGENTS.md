@@ -74,6 +74,12 @@ interface-cli -> runtime -> llm -> core
 - ADRs live in `docs/adr/`.
 - When making architectural changes, add or update an ADR in `docs/adr/`.
 
+## Terminology
+
+- Canonical domain terms are defined in `docs/glossary.md`.
+- Use `Persona`, `Subagent Process`, and `A2A Profile` in new docs and UX copy.
+- Avoid unqualified `agent` in architecture prose unless referring to a literal code identifier.
+
 ## Code Style
 
 ### Formatting
