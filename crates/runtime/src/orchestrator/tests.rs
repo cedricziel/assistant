@@ -2100,6 +2100,7 @@ async fn subagent_thinking_step_persisted_to_db() {
         parent_conversation_id: None,
         parent_agent_id: None,
     };
+    let anon_scope = format!("anonymous::{}", spawn.agent_id);
 
     let report = orch.run_subagent(spawn, 0).await.unwrap();
     assert_eq!(report.status, AgentReportStatus::Completed);
@@ -2115,7 +2116,9 @@ async fn subagent_thinking_step_persisted_to_db() {
         Uuid::parse_str(&record.conversation_id).expect("conversation_id should be a valid UUID");
 
     // Load persisted messages and verify the thinking step is present.
-    let conv_store = storage.conversation_store();
+    // Anonymous subagents (persona_bound: false) scope their conversation under
+    // "anonymous::<agent_id>", so we must use the matching store to find messages.
+    let conv_store = storage.conversation_store_for_agent(&anon_scope);
     let messages = conv_store.load_history(conv_id).await.unwrap();
     let thinking_msg = messages.iter().find(|m| m.content.contains("<think>"));
     assert!(
