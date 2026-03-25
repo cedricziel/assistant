@@ -392,7 +392,7 @@ impl Orchestrator {
 
         // 1-3. Set up conversation, load prior history, persist user message.
         let (conv_store, mut history, base_turn) = self
-            .prepare_history(user_message, conversation_id, attachments)
+            .prepare_history(user_message, conversation_id, attachments, &self.agent_id)
             .await?;
 
         // 4. Load global tool specs and merge with extensions.
@@ -659,7 +659,7 @@ impl Orchestrator {
 
         // 1-3. Set up conversation, load prior history, persist user message.
         let (conv_store, mut history, base_turn) = self
-            .prepare_history(user_message, conversation_id, Vec::new())
+            .prepare_history(user_message, conversation_id, Vec::new(), &self.agent_id)
             .await?;
 
         // 4. Load all registered tool specs.
@@ -854,8 +854,9 @@ impl Orchestrator {
         user_message: &str,
         conversation_id: Uuid,
         attachments: Vec<ContentBlock>,
+        agent_id: &str,
     ) -> Result<(ConversationStore, Vec<ChatHistoryMessage>, i64)> {
-        let conv_store = self.storage.conversation_store_for_agent(&self.agent_id);
+        let conv_store = self.storage.conversation_store_for_agent(agent_id);
         conv_store
             .create_conversation_with_id(conversation_id, None)
             .await?;

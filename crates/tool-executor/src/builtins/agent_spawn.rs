@@ -89,13 +89,16 @@ impl ToolHandler for AgentSpawnHandler {
             })
             .unwrap_or_default();
 
-        let agent_id = params
+        let explicit_agent_id = params
             .get("agent_id")
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(String::from)
-            .unwrap_or_else(|| format!("subagent-{}", uuid::Uuid::new_v4()));
+            .map(String::from);
+
+        let persona_bound = explicit_agent_id.is_some();
+        let agent_id =
+            explicit_agent_id.unwrap_or_else(|| format!("subagent-{}", uuid::Uuid::new_v4()));
 
         info!(
             agent_id = %agent_id,
@@ -111,6 +114,7 @@ impl ToolHandler for AgentSpawnHandler {
             system_prompt,
             model: None,
             allowed_tools,
+            persona_bound,
             parent_conversation_id: Some(ctx.conversation_id),
             parent_agent_id: Some(ctx.agent_id.clone()),
         };

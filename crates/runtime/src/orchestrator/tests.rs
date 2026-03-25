@@ -920,7 +920,7 @@ async fn prepare_history_with_attachments_emits_multimodal_user() {
     }];
 
     let (_conv_store, history, _turn) = orch
-        .prepare_history("look at this", conv_id, attachments)
+        .prepare_history("look at this", conv_id, attachments, &orch.agent_id)
         .await
         .unwrap();
 
@@ -950,7 +950,7 @@ async fn prepare_history_without_attachments_emits_plain_text() {
 
     let conv_id = Uuid::new_v4();
     let (_conv_store, history, _turn) = orch
-        .prepare_history("hello", conv_id, Vec::new())
+        .prepare_history("hello", conv_id, Vec::new(), &orch.agent_id)
         .await
         .unwrap();
 
@@ -1636,6 +1636,7 @@ async fn subagent_spawn_complete_round_trip() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        persona_bound: false,
         parent_conversation_id: None,
         parent_agent_id: None,
     };
@@ -1716,6 +1717,16 @@ async fn conversation_can_delegate_to_anonymous_subagent() {
     assert_eq!(records[0].parent_conversation_id, conv_id.to_string());
     assert_eq!(records[0].parent_agent_id.as_deref(), Some("default"));
 
+    let child_conv_id = Uuid::parse_str(&records[0].conversation_id).unwrap();
+    let anonymous_scope = format!("anonymous::{}", records[0].id);
+    let child_conv = storage
+        .conversation_store_for_agent(&anonymous_scope)
+        .get_conversation(child_conv_id)
+        .await
+        .unwrap()
+        .expect("anonymous subagent conversation should be scoped to isolated persona");
+    assert_eq!(child_conv.agent_id, anonymous_scope);
+
     let reqs = server.received_requests().await.unwrap();
     assert_eq!(
         reqs.len(),
@@ -1789,6 +1800,15 @@ async fn conversation_can_delegate_to_existing_agent_context() {
     assert_eq!(delegated[0].parent_conversation_id, conv_id.to_string());
     assert_eq!(delegated[0].parent_agent_id.as_deref(), Some("default"));
 
+    let child_conv_id = Uuid::parse_str(&delegated[0].conversation_id).unwrap();
+    let child_conv = storage
+        .conversation_store_for_agent("marketing")
+        .get_conversation(child_conv_id)
+        .await
+        .unwrap()
+        .expect("persona-bound subagent conversation should be scoped to target persona");
+    assert_eq!(child_conv.agent_id, "marketing");
+
     let marketing = storage
         .agent_store()
         .get("marketing")
@@ -1813,6 +1833,7 @@ async fn subagent_nesting_depth_limit_enforced() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        persona_bound: false,
         parent_conversation_id: None,
         parent_agent_id: None,
     };
@@ -1865,6 +1886,7 @@ async fn subagent_tool_filtering_restricts_tools() {
         model: None,
         // Only allow file-read — bash should be rejected.
         allowed_tools: vec!["file-read".into()],
+        persona_bound: false,
         parent_conversation_id: None,
         parent_agent_id: None,
     };
@@ -1922,6 +1944,7 @@ async fn subagent_cancellation_stops_loop() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        persona_bound: false,
         parent_conversation_id: None,
         parent_agent_id: None,
     };
@@ -1985,6 +2008,7 @@ async fn subagent_llm_error_records_failed_status() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        persona_bound: false,
         parent_conversation_id: None,
         parent_agent_id: None,
     };
@@ -2072,6 +2096,7 @@ async fn subagent_thinking_step_persisted_to_db() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        persona_bound: false,
         parent_conversation_id: None,
         parent_agent_id: None,
     };
@@ -2164,6 +2189,7 @@ async fn subagent_max_iterations_returns_failed_status() {
         system_prompt: None,
         model: None,
         allowed_tools: vec![],
+        persona_bound: false,
         parent_conversation_id: None,
         parent_agent_id: None,
     };
