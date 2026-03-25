@@ -1,7 +1,7 @@
 # Web UI
 
 The assistant ships an optional web UI for inspecting traces, logs,
-metrics, managing A2A agents, and configuring webhooks. It runs through
+metrics, managing Persona A2A Profiles, and configuring webhooks. It runs through
 the unified `assistant` binary (`assistant webui serve`) and reads from
 the same SQLite database the runtime writes to.
 
@@ -50,10 +50,10 @@ assistant webui serve --listen 0.0.0.0:8080 --no-secure-cookie --auth-token chan
 | `/logs`                  | Log viewer — filterable by severity, target, search, trace ID              |
 | `/log/{id}`              | Single log record detail                                                   |
 | `/analytics`             | Metrics dashboard — token usage, model comparison, tool stats, error rates |
-| `/agents`                | A2A agent management — list, create, edit, delete                          |
-| `/agents/new`            | Create a new agent card                                                    |
-| `/agents/{id}`           | Agent detail view                                                          |
-| `/agents/{id}/card.json` | Raw agent card JSON                                                        |
+| `/agents`                | A2A Profile management — list, create, edit, delete                        |
+| `/agents/new`            | Create a new A2A Profile card                                              |
+| `/agents/{id}`           | A2A Profile detail view                                                    |
+| `/agents/{id}/card.json` | Raw A2A Profile card JSON                                                  |
 | `/webhooks`              | Webhook management — list, create, toggle, rotate secrets                  |
 
 ## A2A protocol endpoints
@@ -61,16 +61,16 @@ assistant webui serve --listen 0.0.0.0:8080 --no-secure-cookie --auth-token chan
 The web UI also serves the [Agent-to-Agent protocol](https://google.github.io/A2A/)
 endpoints for machine-to-machine communication:
 
-| Route                              | Auth      | Description                         |
-| ---------------------------------- | --------- | ----------------------------------- |
-| `/.well-known/agent.json`          | Public    | Agent card discovery (per A2A spec) |
-| `/agent/authenticatedExtendedCard` | Protected | Extended agent card                 |
-| `/message/send`                    | Protected | Send a message (request/response)   |
-| `/message/stream`                  | Protected | Send a message (SSE streaming)      |
-| `/tasks`                           | Protected | List tasks                          |
-| `/tasks/{id}`                      | Protected | Get task                            |
-| `/tasks/{id}/cancel`               | Protected | Cancel task                         |
-| `/tasks/{id}/subscribe`            | Protected | Subscribe to task updates (SSE)     |
+| Route                              | Auth      | Description                               |
+| ---------------------------------- | --------- | ----------------------------------------- |
+| `/.well-known/agent.json`          | Public    | A2A Profile discovery card (per A2A spec) |
+| `/agent/authenticatedExtendedCard` | Protected | Extended A2A Profile card                 |
+| `/message/send`                    | Protected | Send a message (request/response)         |
+| `/message/stream`                  | Protected | Send a message (SSE streaming)            |
+| `/tasks`                           | Protected | List tasks                                |
+| `/tasks/{id}`                      | Protected | Get task                                  |
+| `/tasks/{id}/cancel`               | Protected | Cancel task                               |
+| `/tasks/{id}/subscribe`            | Protected | Subscribe to task updates (SSE)           |
 
 Protected endpoints require either a valid session cookie (browser) or
 `Authorization: Bearer <token>` header (API). See
@@ -79,8 +79,8 @@ Protected endpoints require either a valid session cookie (browser) or
 ## Auto-hardening
 
 When authentication is enabled (always), the web UI automatically
-injects a `bearer_token` security scheme into the A2A agent card. This
-means callers discovering the agent via `/.well-known/agent.json` will
+injects a `bearer_token` security scheme into the Persona A2A Profile card. This
+means callers discovering the profile via `/.well-known/agent.json` will
 see that Bearer authentication is required before making any API calls.
 
 ## Architecture
