@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.56](https://github.com/cedricziel/assistant/compare/v0.1.55...v0.1.56) (2026-03-25)
+
+
+### Features
+
+* **runtime:** split persona-bound and anonymous subagent execution scope ([#300](https://github.com/cedricziel/assistant/issues/300)) ([8edf21f](https://github.com/cedricziel/assistant/commit/8edf21fa7c4205649d74fb0cb319c77ff4966a3c))
+
+
+### Bug Fixes
+
+* **runtime:** attribute subagent telemetry to parent persona ([#299](https://github.com/cedricziel/assistant/issues/299)) ([fd7ce44](https://github.com/cedricziel/assistant/commit/fd7ce44c8f5f0a2101121f81394d782cd314539e))
+* **runtime:** persist subagent parent lineage from caller context ([#298](https://github.com/cedricziel/assistant/issues/298)) ([ad1ecf5](https://github.com/cedricziel/assistant/commit/ad1ecf57b2a8eb0fb9d259a5e551a7f803b46499))
+* **runtime:** scope thinking-step history load to anonymous subagent persona ([#306](https://github.com/cedricziel/assistant/issues/306)) ([9fc036e](https://github.com/cedricziel/assistant/commit/9fc036e385c70975b2edbd2f269a5e47cfb23d8c))
+* **storage:** decouple telemetry traces from conversations ([#281](https://github.com/cedricziel/assistant/issues/281)) ([c5b7e14](https://github.com/cedricziel/assistant/commit/c5b7e1418249dbdeb3f6ba71975b51559f32e820))
+
 ## [0.1.55](https://github.com/cedricziel/assistant/compare/v0.1.54...v0.1.55) (2026-03-24)
 
 

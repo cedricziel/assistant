@@ -1,6 +1,6 @@
 [package]
 name = "assistant-workflow"
-version = "0.1.55"
+version = "0.1.56"
 license.workspace = true
 edition.workspace = true
 description = "Workflow run engine and action executor abstractions"
