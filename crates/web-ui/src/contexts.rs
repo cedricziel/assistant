@@ -25,8 +25,8 @@ struct ContextQuery {
 }
 
 #[derive(Template)]
-#[template(path = "contexts/page.html")]
-struct ContextsPageTemplate {
+#[template(path = "personas/page.html")]
+struct PersonasPageTemplate {
     active_page: &'static str,
     rows: Vec<AgentRowView>,
     current_agent: String,
@@ -34,12 +34,12 @@ struct ContextsPageTemplate {
     show_updated: bool,
 }
 
-impl StaticUrls for ContextsPageTemplate {}
+impl StaticUrls for PersonasPageTemplate {}
 
 pub(crate) fn contexts_router() -> axum::Router<AppState> {
     axum::Router::new()
-        .route("/contexts", axum::routing::get(show_contexts))
-        .route("/contexts/{id}/use", axum::routing::post(use_context))
+        .route("/personas", axum::routing::get(show_contexts))
+        .route("/personas/{id}/use", axum::routing::post(use_context))
 }
 
 async fn show_contexts(
@@ -62,8 +62,8 @@ async fn show_contexts(
         })
         .collect();
 
-    let tmpl = ContextsPageTemplate {
-        active_page: "contexts",
+    let tmpl = PersonasPageTemplate {
+        active_page: "personas",
         rows,
         current_agent,
         default_agent,
@@ -91,7 +91,7 @@ async fn use_context(State(state): State<AppState>, Path(id): Path<String>) -> R
 
     *state.agent_id.write().await = id;
 
-    Redirect::to("/contexts?updated=1").into_response()
+    Redirect::to("/personas?updated=1").into_response()
 }
 
 async fn ensure_agent_dirs(id: &str) -> std::io::Result<()> {

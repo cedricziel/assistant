@@ -1,15 +1,15 @@
-{% extends "base.html" %} {% block title %}Contexts{% endblock %} {% block
+{% extends "base.html" %} {% block title %}Personas{% endblock %} {% block
 breadcrumb %}
 <span class="breadcrumb-page">Management</span>
 <span class="breadcrumb-sep">/</span>
-<span class="breadcrumb-current">Contexts</span>
+<span class="breadcrumb-current">Personas</span>
 {% endblock %} {% block content %}
 <div class="layout">
   <aside class="sidebar">
     <div class="sidebar-inner">
       <div class="brand">
         <p>assistant</p>
-        <h2>Contexts</h2>
+        <h2>Personas</h2>
       </div>
     </div>
   </aside>
@@ -18,15 +18,15 @@ breadcrumb %}
     <div class="panel">
       <div class="panel-head">
         <div>
-          <h2>Assistant Contexts</h2>
-          <p>Switch the active context for this web session.</p>
+          <h2>Assistant Personas</h2>
+          <p>Switch the active Persona for this web session.</p>
         </div>
         <span class="pill">{{ rows.len() }}</span>
       </div>
 
       {% if show_updated %}
       <p class="empty" style="margin-bottom: 1rem; color: var(--ok)">
-        Context switched for this live web session.
+        Persona switched for this live web session.
       </p>
       {% endif %}
 
@@ -64,7 +64,7 @@ breadcrumb %}
               {% else %}
               <form
                 method="POST"
-                action="/contexts/{{ row.id }}/use"
+                action="/personas/{{ row.id }}/use"
                 style="margin: 0"
               >
                 <button type="submit" class="action-btn">Switch</button>
