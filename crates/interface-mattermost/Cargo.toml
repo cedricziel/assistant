@@ -1,6 +1,6 @@
 [package]
 name = "assistant-interface-mattermost"
-version = "0.1.55"
+version = "0.1.56"
 edition.workspace = true
 license.workspace = true
 description = "Mattermost WebSocket interface for the AI assistant (library)"
