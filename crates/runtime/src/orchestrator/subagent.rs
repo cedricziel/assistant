@@ -82,6 +82,7 @@ impl SubagentRunner for Orchestrator {
 
         info!(
             agent_id = %spawn.agent_id,
+            parent_agent_id = %parent_agent_id,
             task = %spawn.task,
             depth = new_depth,
             conversation_id = %conversation_id,
@@ -89,7 +90,7 @@ impl SubagentRunner for Orchestrator {
         );
         self.metrics
             .agent_spawn_count
-            .add(1, &[KeyValue::new("agent.id", self.agent_id.clone())]);
+            .add(1, &[KeyValue::new("agent.id", parent_agent_id.clone())]);
 
         // Register a cancellation token for this agent.
         let cancel_token = CancellationToken::new();
@@ -206,7 +207,7 @@ impl SubagentRunner for Orchestrator {
                             .instrument(iteration_span.clone())
                             .await;
                         self.metrics
-                            .record_error(&self.agent_id, "llm_error", "run_subagent");
+                            .record_error(&parent_agent_id, "llm_error", "run_subagent");
                         let msg = format!("LLM error: {e}");
                         let _ = agent_store
                             .complete(
@@ -233,7 +234,7 @@ impl SubagentRunner for Orchestrator {
                     self.trace_content,
                     Some((
                         &self.metrics,
-                        &self.agent_id,
+                        &parent_agent_id,
                         self.llm.provider_name(),
                         llm_elapsed,
                     )),
@@ -403,7 +404,7 @@ impl SubagentRunner for Orchestrator {
             // Reached iteration limit.
             crate::history::persist_error_recovery(&conv_store, conversation_id).await;
             self.metrics
-                .record_error(&self.agent_id, "max_iterations", "run_subagent");
+                .record_error(&parent_agent_id, "max_iterations", "run_subagent");
             let msg = format!(
                 "Subagent '{}' reached max iterations ({}) without a final answer",
                 spawn.agent_id, self.max_iterations
@@ -444,7 +445,7 @@ impl SubagentRunner for Orchestrator {
         });
         if let Err(e) = webhook_dispatch::dispatch_event(
             self.storage.as_ref(),
-            &self.agent_id,
+            &parent_agent_id,
             assistant_core::topic::AGENT_REPORT,
             event_payload,
         )
