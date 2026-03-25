@@ -427,8 +427,8 @@ async fn run_with_args(args: Args) -> Result<()> {
     let _workflow_event_adapter =
         spawn_event_trigger_adapter(storage.clone(), bus.clone(), Duration::from_secs(2));
 
-    // -- Agent store (filesystem-backed) --
-    let agent_store = AgentStore::default_dir()?;
+    // -- Persona-scoped A2A profile store (filesystem-backed) --
+    let agent_store = AgentStore::for_persona(&selected_agent)?;
 
     // -- A2A protocol state --
     let base_url = format!("http://{}", args.listen);

@@ -1,11 +1,12 @@
-//! Filesystem-backed store for managing multiple local agent cards.
+//! Filesystem-backed store for managing Persona-scoped A2A profile cards.
 //!
-//! Each agent is persisted as a markdown file in `~/.assistant/agents/`.
+//! Each profile is persisted as a markdown file under
+//! `~/.assistant/agents/<persona-id>/a2a-profiles/`.
 //! The file uses YAML frontmatter for structured [`AgentCard`] fields and the
 //! markdown body as the agent description.
 //!
-//! File naming convention: `<slugified-name>.md` (e.g., `my-cool-agent.md`).
-//! The slug also serves as the agent ID.
+//! File naming convention: `<slugified-name>.md` (e.g., `my-cool-profile.md`).
+//! The slug also serves as the profile ID.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -85,12 +86,12 @@ impl AgentStore {
         Ok(Self { agents_dir })
     }
 
-    /// Creates a store using the default directory (`~/.assistant/agents/`).
-    pub fn default_dir() -> Result<Self> {
+    /// Creates a Persona-attached store for A2A profiles.
+    pub fn for_persona(persona_id: &str) -> Result<Self> {
         let base = dirs::home_dir()
             .map(|h| h.join(".assistant"))
             .unwrap_or_else(|| PathBuf::from(".assistant"));
-        Self::new(base.join("agents"))
+        Self::new(base.join("agents").join(persona_id).join("a2a-profiles"))
     }
 
     // -- CRUD operations --
