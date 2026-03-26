@@ -710,10 +710,21 @@ async fn on_push_event(
         }
 
         // The message passed the filter — if it contains a mention, mark the
-        // thread as active so subsequent replies are processed automatically.
+        // thread as active so subsequent replies are processed automatically,
+        // and persist the key so it survives service restarts.
         if is_mentioned {
             let mut set = active_threads.lock().await;
-            set.insert(thread_key);
+            if set.insert(thread_key.clone()) {
+                // Newly seen thread — persist it asynchronously.
+                let store = storage.slack_active_thread_store();
+                let (ch, ts) = thread_key.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = store.insert(&ch, &ts).await {
+                        warn!(error = %e, channel = %ch, thread_ts = %ts,
+                              "Failed to persist Slack active thread");
+                    }
+                });
+            }
         }
     }
 
@@ -1338,9 +1349,20 @@ impl SlackInterface {
         let conv_locks: Arc<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         // Threads the bot has been @-mentioned in — persists across reconnects
-        // so the bot keeps responding in threads it was invited to.
-        let active_threads: Arc<Mutex<HashSet<(String, String)>>> =
-            Arc::new(Mutex::new(HashSet::new()));
+        // and across service restarts by loading previously-stored threads from
+        // the database.
+        let active_threads: Arc<Mutex<HashSet<(String, String)>>> = {
+            let store = self.storage.slack_active_thread_store();
+            let initial = store.load_all().await.unwrap_or_else(|e| {
+                warn!(error = %e, "Failed to load active Slack threads from DB; starting empty");
+                Default::default()
+            });
+            info!(
+                count = initial.len(),
+                "Loaded persisted Slack active threads"
+            );
+            Arc::new(Mutex::new(initial))
+        };
 
         // ── Graceful shutdown ─────────────────────────────────────────────────
         // A watch channel delivers the shutdown signal across all select! points

@@ -8,6 +8,7 @@ pub mod personas;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
+pub mod slack_threads;
 pub mod traces;
 pub mod webhooks;
 pub mod workflows;
@@ -24,6 +25,7 @@ pub use personas::{PersonaRecord, PersonaStore};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
+pub use slack_threads::SlackActiveThreadStore;
 pub use traces::{RecordedSpan, TraceStats, TraceStore, TraceSummary};
 pub use webhooks::{WebhookRecord, WebhookStore};
 pub use workflows::{
@@ -139,6 +141,11 @@ impl StorageLayer {
     /// Convenience: build a [`WorkflowStore`] backed by this pool.
     pub fn workflow_store(&self) -> WorkflowStore {
         WorkflowStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`SlackActiveThreadStore`] backed by this pool.
+    pub fn slack_active_thread_store(&self) -> SlackActiveThreadStore {
+        SlackActiveThreadStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`WebhookStore`] scoped to a Persona.
@@ -284,6 +291,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "026_personas",
             include_str!("../../../migrations/026_personas.sql"),
+        ),
+        (
+            "027_slack_active_threads",
+            include_str!("../../../migrations/027_slack_active_threads.sql"),
         ),
     ];
 
