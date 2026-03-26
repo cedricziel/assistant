@@ -423,6 +423,22 @@ impl Orchestrator {
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Extension-tools loop iteration");
 
+            // Pre-call compaction: compact before sending to the LLM so we
+            // never exceed the context window on the call itself.  Use the
+            // token estimator as a fallback when we have no prior metadata.
+            {
+                let estimated = crate::compaction::estimate_tokens(&history);
+                if crate::compaction::should_compact(estimated, &self.compaction_config) {
+                    crate::compaction::maybe_compact(
+                        &mut history,
+                        &self.llm,
+                        &self.compaction_config,
+                        Some((&conv_store, conversation_id)),
+                    )
+                    .await;
+                }
+            }
+
             let ctx = ExecutionContext {
                 conversation_id,
                 agent_id: self.agent_id.clone(),
@@ -468,13 +484,16 @@ impl Orchestrator {
                 )),
             );
 
-            // Check whether we should compact the context window.
+            // Post-call compaction: use the accurate token count reported by
+            // the provider as a secondary signal to catch any cases the pre-call
+            // estimator missed.
             if let Some(tokens) = response.meta().input_tokens {
                 if crate::compaction::should_compact(tokens, &self.compaction_config) {
                     crate::compaction::maybe_compact(
                         &mut history,
                         &self.llm,
                         &self.compaction_config,
+                        Some((&conv_store, conversation_id)),
                     )
                     .await;
                 }
@@ -697,6 +716,20 @@ impl Orchestrator {
             let iteration_span = info_span!("turn_iteration", iteration);
             debug!(parent: &iteration_span, iteration, "Tool-calling loop iteration");
 
+            // Pre-call compaction using the token estimator.
+            {
+                let estimated = crate::compaction::estimate_tokens(&history);
+                if crate::compaction::should_compact(estimated, &self.compaction_config) {
+                    crate::compaction::maybe_compact(
+                        &mut history,
+                        &self.llm,
+                        &self.compaction_config,
+                        Some((&conv_store, conversation_id)),
+                    )
+                    .await;
+                }
+            }
+
             let ctx = ExecutionContext {
                 conversation_id,
                 agent_id: self.agent_id.clone(),
@@ -759,13 +792,14 @@ impl Orchestrator {
                 )),
             );
 
-            // Check whether we should compact the context window.
+            // Post-call compaction using the accurate provider-reported token count.
             if let Some(tokens) = response.meta().input_tokens {
                 if crate::compaction::should_compact(tokens, &self.compaction_config) {
                     crate::compaction::maybe_compact(
                         &mut history,
                         &self.llm,
                         &self.compaction_config,
+                        Some((&conv_store, conversation_id)),
                     )
                     .await;
                 }

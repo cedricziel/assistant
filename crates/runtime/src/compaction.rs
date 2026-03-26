@@ -7,16 +7,29 @@
 //!
 //! 1. Asks the LLM to produce a short summary of the conversation so far.
 //! 2. Replaces the in-memory `history` with a single summary turn followed
-//!    by the `keep_recent_turns` most recent messages.
+//!    by the `keep_recent_turns` most recent turns.
+//! 3. Persists the compacted representation back to storage so compaction
+//!    survives turn boundaries.
+//!
+//! If the old-turns transcript is larger than [`CHUNK_CHARS`], the history is
+//! summarised in chunks before being merged into a final summary, preventing
+//! the summary request itself from overflowing the context window.
 //!
 //! This mirrors OpenClaw's `contextWindow - reserveFloor(20k) - softThreshold(4k)`
 //! trigger logic.
 
 use std::sync::Arc;
 
-use assistant_core::CompactionConfig;
-use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider};
+use anyhow::Result;
+use assistant_core::{CompactionConfig, Message, MessageRole};
+use assistant_llm::{ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, ToolCallItem};
+use assistant_storage::conversations::ConversationStore;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
+
+/// Maximum characters to include in a single summarisation request.
+/// Transcripts larger than this are summarised in chunks first.
+const CHUNK_CHARS: usize = 12_000;
 
 /// Returns `true` when the reported `input_tokens` has crossed the soft
 /// compaction threshold defined by `cfg`.
@@ -31,11 +44,255 @@ pub fn should_compact(input_tokens: u64, cfg: &CompactionConfig) -> bool {
     input_tokens >= trigger
 }
 
+/// Estimate the number of tokens in `history` using a simple 4-chars-per-token
+/// heuristic.  This is used as a pre-call fallback when the provider has not
+/// yet returned token metadata.
+pub fn estimate_tokens(history: &[ChatHistoryMessage]) -> u64 {
+    let chars: usize = history.iter().map(|m| message_text(m).len()).sum();
+    (chars / 4) as u64
+}
+
+/// Find the message index at which to split history so that the tail contains
+/// at most `keep_turns` complete turns.
+///
+/// A "turn" begins at every user message (`Text { role: User }` or
+/// `MultimodalUser`).  Because one turn can expand into many
+/// `ChatHistoryMessage` entries (tool calls + results), splitting on raw
+/// message count would silently prune far more context than configured.
+fn find_split_for_turns(history: &[ChatHistoryMessage], keep_turns: usize) -> usize {
+    if keep_turns == 0 {
+        return history.len();
+    }
+    let mut turns_seen = 0usize;
+    for (i, msg) in history.iter().enumerate().rev() {
+        if is_user_turn_start(msg) {
+            turns_seen += 1;
+            if turns_seen == keep_turns {
+                return i;
+            }
+        }
+    }
+    // Fewer turns in history than keep_turns — nothing to compact.
+    history.len()
+}
+
+/// Returns `true` if `msg` marks the start of a new user turn.
+fn is_user_turn_start(msg: &ChatHistoryMessage) -> bool {
+    matches!(
+        msg,
+        ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            ..
+        } | ChatHistoryMessage::MultimodalUser { .. }
+    )
+}
+
+/// Extract the most meaningful text representation of a history message for
+/// use in a summarisation transcript.
+fn message_text(msg: &ChatHistoryMessage) -> String {
+    match msg {
+        ChatHistoryMessage::Text { content, .. } => content.clone(),
+        ChatHistoryMessage::MultimodalUser { content } => content
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Text(t) => Some(t.as_str()),
+                ContentBlock::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        ChatHistoryMessage::AssistantToolCalls(calls) => {
+            let summaries: Vec<String> = calls
+                .iter()
+                .map(|c: &ToolCallItem| {
+                    let args = serde_json::to_string(&c.params).unwrap_or_default();
+                    format!("{}({})", c.name, args)
+                })
+                .collect();
+            format!("[tool calls: {}]", summaries.join(", "))
+        }
+        ChatHistoryMessage::ToolResult { name, content } => {
+            format!("[tool result for {name}]: {content}")
+        }
+    }
+}
+
+/// Format a slice of messages into a labelled transcript string.
+fn build_transcript(messages: &[ChatHistoryMessage]) -> String {
+    messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| {
+            let role_label = match msg {
+                ChatHistoryMessage::Text { role, .. } => match role {
+                    ChatRole::User => "User",
+                    ChatRole::Assistant => "Assistant",
+                    ChatRole::System => "System",
+                    ChatRole::Tool => "Tool",
+                },
+                ChatHistoryMessage::MultimodalUser { .. } => "User",
+                ChatHistoryMessage::AssistantToolCalls(_) => "Assistant",
+                ChatHistoryMessage::ToolResult { .. } => "Tool",
+            };
+            format!("[Turn {i}] {role_label}: {}", message_text(msg))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Ask the LLM to summarise `transcript`.  Returns `None` on failure.
+async fn summarise(llm: &Arc<dyn LlmProvider>, transcript: &str) -> Option<String> {
+    let prompt = format!(
+        "Summarise the following conversation history concisely, \
+         preserving all important facts, decisions, and context. \
+         Output only the summary, no preamble.\n\n{transcript}"
+    );
+    match llm
+        .chat(
+            "You are a helpful assistant that summarises conversations.",
+            &[ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: prompt,
+            }],
+            &[],
+        )
+        .await
+    {
+        Ok(assistant_llm::LlmResponse::FinalAnswer(text, _)) => Some(text),
+        Ok(_) => {
+            warn!("Compaction summary returned unexpected response variant");
+            None
+        }
+        Err(e) => {
+            warn!(error = %e, "Compaction summary LLM call failed");
+            None
+        }
+    }
+}
+
+/// Summarise `messages` using chunked iterative summarisation when the
+/// transcript exceeds [`CHUNK_CHARS`].
+///
+/// Returns `None` if every LLM call fails.
+async fn summarise_messages(
+    llm: &Arc<dyn LlmProvider>,
+    messages: &[ChatHistoryMessage],
+) -> Option<String> {
+    let transcript = build_transcript(messages);
+
+    if transcript.len() <= CHUNK_CHARS {
+        return summarise(llm, &transcript).await;
+    }
+
+    // Split into char-bounded chunks and summarise each independently.
+    let chunks: Vec<&str> = transcript
+        .as_bytes()
+        .chunks(CHUNK_CHARS)
+        .map(|c| std::str::from_utf8(c).unwrap_or(""))
+        .collect();
+
+    let mut chunk_summaries: Vec<String> = Vec::with_capacity(chunks.len());
+    for chunk in &chunks {
+        match summarise(llm, chunk).await {
+            Some(s) => chunk_summaries.push(s),
+            None => {
+                warn!("Chunk summarisation failed; truncating transcript instead");
+                // Fall back to truncating: keep only the most recent CHUNK_CHARS.
+                let truncated = &transcript[transcript.len().saturating_sub(CHUNK_CHARS)..];
+                return summarise(llm, truncated).await;
+            }
+        }
+    }
+
+    // Merge chunk summaries into a final summary.
+    let merged = chunk_summaries.join("\n\n---\n\n");
+    if merged.len() <= CHUNK_CHARS {
+        summarise(llm, &merged).await
+    } else {
+        // Merge is still large; do one more round of summarisation on it.
+        summarise(llm, &merged[..CHUNK_CHARS]).await
+    }
+}
+
+/// Convert a `ChatHistoryMessage` back to a storable [`Message`].
+///
+/// Tool-calls JSON is re-serialised for `AssistantToolCalls`; the `skill_name`
+/// field is preserved for `ToolResult` messages.  Turn indices are assigned
+/// sequentially starting from `turn_offset`.
+fn chat_history_to_message(
+    msg: &ChatHistoryMessage,
+    conversation_id: Uuid,
+    turn: i64,
+) -> Option<Message> {
+    match msg {
+        ChatHistoryMessage::Text { role, content } => {
+            let r = match role {
+                ChatRole::User => MessageRole::User,
+                ChatRole::Assistant => MessageRole::Assistant,
+                ChatRole::System => return None, // system messages live in the prompt
+                ChatRole::Tool => MessageRole::Tool,
+            };
+            let mut m = Message::new(conversation_id, r, content.clone());
+            m.turn = turn;
+            Some(m)
+        }
+        ChatHistoryMessage::MultimodalUser { content } => {
+            let text = content
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text(t) => Some(t.as_str()),
+                    ContentBlock::Image { .. } => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let mut m = Message::new(conversation_id, MessageRole::User, text);
+            m.turn = turn;
+            Some(m)
+        }
+        ChatHistoryMessage::AssistantToolCalls(calls) => {
+            let json = serde_json::to_string(calls).ok()?;
+            let mut m = Message::new(conversation_id, MessageRole::Assistant, String::new());
+            m.tool_calls_json = Some(json);
+            m.turn = turn;
+            Some(m)
+        }
+        ChatHistoryMessage::ToolResult { name, content } => {
+            let mut m = Message::new(conversation_id, MessageRole::Tool, content.clone());
+            m.skill_name = Some(name.clone());
+            m.turn = turn;
+            Some(m)
+        }
+    }
+}
+
+/// Persist the compacted history back to storage so it survives turn
+/// boundaries.  All existing messages for the conversation are replaced with
+/// the compacted set.
+async fn persist_compacted(
+    conv_store: &ConversationStore,
+    conversation_id: Uuid,
+    compacted: &[ChatHistoryMessage],
+) -> Result<()> {
+    conv_store
+        .replace_history(
+            conversation_id,
+            &compacted
+                .iter()
+                .enumerate()
+                .filter_map(|(i, msg)| chat_history_to_message(msg, conversation_id, i as i64))
+                .collect::<Vec<_>>(),
+        )
+        .await
+}
+
 /// Compact the conversation history in-place.
 ///
 /// Produces a summary of the old turns via the LLM, then replaces the
 /// `history` slice with:
-///   `[summary turn, …keep_recent_turns most-recent messages]`
+///   `[summary turn, …keep_recent_turns most-recent turns]`
+///
+/// If `conv_store` and `conversation_id` are provided the compacted state is
+/// also written back to storage so that the next turn does not reload stale
+/// full history.
 ///
 /// Returns `true` if compaction was performed, `false` if there was nothing
 /// to compact or the summary request failed.
@@ -43,74 +300,29 @@ pub async fn maybe_compact(
     history: &mut Vec<ChatHistoryMessage>,
     llm: &Arc<dyn LlmProvider>,
     cfg: &CompactionConfig,
+    conv_store: Option<(&ConversationStore, Uuid)>,
 ) -> bool {
     let keep = cfg.keep_recent_turns;
 
-    if history.len() <= keep {
-        debug!("Skipping compaction: history shorter than keep_recent_turns");
+    let split_at = find_split_for_turns(history, keep);
+
+    if split_at == 0 || split_at >= history.len() {
+        debug!("Skipping compaction: not enough turns to compact");
         return false;
     }
 
-    let split_at = history.len().saturating_sub(keep);
     let old_turns = &history[..split_at];
 
-    // Build a compact transcript of the turns being summarised.
-    let transcript: String = old_turns
-        .iter()
-        .enumerate()
-        .map(|(i, msg)| {
-            let (role_label, content) = match msg {
-                ChatHistoryMessage::Text { role, content } => {
-                    let label = match role {
-                        ChatRole::User => "User",
-                        ChatRole::Assistant => "Assistant",
-                        ChatRole::System => "System",
-                        ChatRole::Tool => "Tool",
-                    };
-                    (label, content.as_str())
-                }
-                ChatHistoryMessage::MultimodalUser { .. } => ("User", "[multimodal message]"),
-                ChatHistoryMessage::AssistantToolCalls(_) => ("Assistant", "[tool call]"),
-                ChatHistoryMessage::ToolResult { .. } => ("Tool", "[tool result]"),
-            };
-            format!("[Turn {i}] {role_label}: {content}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let summary_prompt = format!(
-        "Summarise the following conversation history concisely, \
-         preserving all important facts, decisions, and context. \
-         Output only the summary, no preamble.\n\n{transcript}"
-    );
-
     info!(
-        old_turns = split_at,
-        keep_recent = keep,
+        old_messages = split_at,
+        keep_recent_turns = keep,
         "Compacting context window"
     );
 
-    // Ask the LLM for a summary (no tools, simple chat).
-    let summary = match llm
-        .chat(
-            "You are a helpful assistant that summarises conversations.",
-            &[ChatHistoryMessage::Text {
-                role: ChatRole::User,
-                content: summary_prompt,
-            }],
-            &[],
-        )
-        .await
-    {
-        Ok(response) => match response {
-            assistant_llm::LlmResponse::FinalAnswer(text, _) => text,
-            _ => {
-                warn!("Compaction summary returned unexpected response variant");
-                return false;
-            }
-        },
-        Err(e) => {
-            warn!(error = %e, "Compaction summary LLM call failed; skipping compaction");
+    let summary = match summarise_messages(llm, old_turns).await {
+        Some(s) => s,
+        None => {
+            warn!("All compaction summarisation attempts failed; skipping compaction");
             return false;
         }
     };
@@ -127,6 +339,14 @@ pub async fn maybe_compact(
         new_history_len = history.len(),
         "Context compaction complete"
     );
+
+    // Persist so the next turn does not reload the full history.
+    if let Some((store, conv_id)) = conv_store {
+        if let Err(e) = persist_compacted(store, conv_id, history).await {
+            warn!(error = %e, "Failed to persist compacted history; in-memory compaction still applies");
+        }
+    }
+
     true
 }
 
@@ -177,5 +397,75 @@ mod tests {
         // reserve + soft > window → trigger saturates to 0 → always compact
         let c = cfg(true, 1_000, 800, 500, 5);
         assert!(should_compact(0, &c));
+    }
+
+    #[test]
+    fn find_split_counts_turns_not_messages() {
+        // 2 turns, each with a user msg + tool call + tool result + assistant reply
+        let history = vec![
+            // turn 1
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "q1".into(),
+            },
+            ChatHistoryMessage::AssistantToolCalls(vec![]),
+            ChatHistoryMessage::ToolResult {
+                name: "t".into(),
+                content: "r".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "a1".into(),
+            },
+            // turn 2
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "q2".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "a2".into(),
+            },
+        ];
+
+        // keep 1 turn → split at the start of turn 2 (index 4)
+        assert_eq!(find_split_for_turns(&history, 1), 4);
+        // keep 2 turns → split at start of turn 1 (index 0) → nothing to compact
+        assert_eq!(find_split_for_turns(&history, 2), 0);
+    }
+
+    #[test]
+    fn message_text_extracts_multimodal() {
+        let msg = ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("hello".into()),
+                ContentBlock::Image {
+                    data: "base64data".into(),
+                    media_type: "image/png".into(),
+                },
+                ContentBlock::Text(" world".into()),
+            ],
+        };
+        assert_eq!(message_text(&msg), "hello  world");
+    }
+
+    #[test]
+    fn message_text_tool_result_uses_content() {
+        let msg = ChatHistoryMessage::ToolResult {
+            name: "bash".into(),
+            content: "exit code 0".into(),
+        };
+        assert!(message_text(&msg).contains("exit code 0"));
+        assert!(message_text(&msg).contains("bash"));
+    }
+
+    #[test]
+    fn estimate_tokens_rough() {
+        let history = vec![ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "a".repeat(400),
+        }];
+        // 400 chars / 4 = 100 tokens
+        assert_eq!(estimate_tokens(&history), 100);
     }
 }
