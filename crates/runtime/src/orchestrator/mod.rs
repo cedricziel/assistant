@@ -599,6 +599,12 @@ impl Orchestrator {
                     }
 
                     if turn_ended || replied {
+                        crate::conversation_indexer::spawn_index(
+                            conversation_id,
+                            self.agent_id.clone(),
+                            Arc::clone(&self.storage),
+                            Arc::clone(&self.llm),
+                        );
                         return Ok(TurnResult {
                             answer: String::new(),
                             attachments: turn_attachments,
@@ -754,6 +760,12 @@ impl Orchestrator {
                             .await?;
                     }
 
+                    crate::conversation_indexer::spawn_index(
+                        conversation_id,
+                        self.agent_id.clone(),
+                        Arc::clone(&self.storage),
+                        Arc::clone(&self.llm),
+                    );
                     return Ok(TurnResult {
                         answer: text,
                         attachments: turn_attachments,

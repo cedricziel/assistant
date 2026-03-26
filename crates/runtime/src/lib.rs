@@ -1,4 +1,5 @@
 pub mod bootstrap;
+pub(crate) mod conversation_indexer;
 pub(crate) mod history;
 pub mod memory_indexer;
 pub mod metrics;
