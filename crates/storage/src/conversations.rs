@@ -174,6 +174,31 @@ impl ConversationStore {
     }
 
     /// Delete a conversation and all its messages (cascade).
+    /// Replace all persisted messages for a conversation with the provided
+    /// set.  Existing messages are deleted first; the new messages are then
+    /// inserted in order.  The conversation record itself is kept intact.
+    ///
+    /// Used by context compaction to persist a shrunk history so subsequent
+    /// turns do not reload the full pre-compaction history from storage.
+    pub async fn replace_history(&self, conversation_id: Uuid, messages: &[Message]) -> Result<()> {
+        let conv_id_str = conversation_id.to_string();
+
+        // Verify the conversation belongs to this agent before mutating.
+        self.ensure_conversation_agent(conversation_id).await?;
+
+        sqlx::query("DELETE FROM messages WHERE conversation_id = ?1")
+            .bind(&conv_id_str)
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("deleting messages for conversation {conversation_id}"))?;
+
+        for msg in messages {
+            self.save_message(msg).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
         sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
