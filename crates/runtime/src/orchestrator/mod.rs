@@ -185,6 +185,8 @@ pub struct Orchestrator {
     pub(crate) metrics: crate::MetricsRecorder,
     /// Active assistant agent ID for memory/workspace conversation scoping.
     pub(crate) agent_id: String,
+    /// Context compaction configuration.
+    pub(crate) compaction_config: assistant_core::CompactionConfig,
 }
 
 impl Orchestrator {
@@ -214,6 +216,7 @@ impl Orchestrator {
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
+            compaction_config: config.compaction.clone(),
         }
     }
 
@@ -464,6 +467,18 @@ impl Orchestrator {
                     llm_elapsed,
                 )),
             );
+
+            // Check whether we should compact the context window.
+            if let Some(tokens) = response.meta().input_tokens {
+                if crate::compaction::should_compact(tokens, &self.compaction_config) {
+                    crate::compaction::maybe_compact(
+                        &mut history,
+                        &self.llm,
+                        &self.compaction_config,
+                    )
+                    .await;
+                }
+            }
 
             match response {
                 LlmResponse::FinalAnswer(text, _meta) => {
@@ -743,6 +758,18 @@ impl Orchestrator {
                     llm_elapsed,
                 )),
             );
+
+            // Check whether we should compact the context window.
+            if let Some(tokens) = response.meta().input_tokens {
+                if crate::compaction::should_compact(tokens, &self.compaction_config) {
+                    crate::compaction::maybe_compact(
+                        &mut history,
+                        &self.llm,
+                        &self.compaction_config,
+                    )
+                    .await;
+                }
+            }
 
             match response {
                 LlmResponse::FinalAnswer(text, _meta) => {

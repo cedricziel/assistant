@@ -120,6 +120,8 @@ pub struct AssistantConfig {
     #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(default)]
+    pub compaction: CompactionConfig,
+    #[serde(default)]
     pub agent: AgentConfig,
     /// Signal messenger interface configuration (optional).
     /// Populated from the `[signal]` section of `config.toml`.
@@ -850,6 +852,61 @@ impl Default for MemoryConfig {
             heartbeat_path: None,
             boot_path: None,
             indexing_interval_seconds: default_indexing_interval(),
+        }
+    }
+}
+
+/// Context compaction configuration.
+///
+/// When the accumulated token count in a conversation exceeds
+/// `context_window_tokens - reserve_floor_tokens - soft_threshold_tokens`,
+/// the orchestrator triggers a silent compaction turn: it writes a memory
+/// summary and drops old history, keeping only the most recent turns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionConfig {
+    /// Whether context compaction is enabled (default: true).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Estimated total context window in tokens (default: 200_000).
+    #[serde(default = "default_compaction_context_window")]
+    pub context_window_tokens: u64,
+    /// Tokens reserved for the assistant's output headroom (default: 20_000).
+    #[serde(default = "default_compaction_reserve_floor")]
+    pub reserve_floor_tokens: u64,
+    /// Soft threshold: trigger compaction this many tokens before the hard
+    /// limit (default: 4_000).
+    #[serde(default = "default_compaction_soft_threshold")]
+    pub soft_threshold_tokens: u64,
+    /// How many of the most recent turns to keep verbatim after compaction
+    /// (default: 10).
+    #[serde(default = "default_keep_recent_turns")]
+    pub keep_recent_turns: usize,
+}
+
+fn default_compaction_context_window() -> u64 {
+    200_000
+}
+
+fn default_compaction_reserve_floor() -> u64 {
+    20_000
+}
+
+fn default_compaction_soft_threshold() -> u64 {
+    4_000
+}
+
+fn default_keep_recent_turns() -> usize {
+    10
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            context_window_tokens: default_compaction_context_window(),
+            reserve_floor_tokens: default_compaction_reserve_floor(),
+            soft_threshold_tokens: default_compaction_soft_threshold(),
+            keep_recent_turns: default_keep_recent_turns(),
         }
     }
 }
