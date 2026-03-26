@@ -1231,6 +1231,15 @@ async fn main() -> Result<()> {
             info!("Registered ambient tool: {tool_name}");
         }
 
+        // Spawn a Slack-filtered turn worker so NATS turn requests are
+        // consumed when running in orchestrator mode.
+        let worker_orch = bs.orchestrator.clone();
+        tokio::spawn(async move {
+            worker_orch
+                .run_worker_filtered("slack-worker", Some("Slack"))
+                .await;
+        });
+
         // Spawn the Slack listener in the background.
         tokio::spawn(async move {
             if let Err(e) = iface.run().await {
@@ -1246,6 +1255,14 @@ async fn main() -> Result<()> {
         use assistant_interface_mattermost::MattermostInterface;
         let mm_cfg = bs.config.mattermost.clone().unwrap_or_default();
         let iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
+
+        let worker_orch = bs.orchestrator.clone();
+        tokio::spawn(async move {
+            worker_orch
+                .run_worker_filtered("mattermost-worker", Some("Mattermost"))
+                .await;
+        });
+
         tokio::spawn(async move {
             if let Err(e) = iface.run().await {
                 tracing::error!("Mattermost interface error: {e}");
@@ -1264,6 +1281,14 @@ async fn main() -> Result<()> {
         let shutdown_token = tokio_util::sync::CancellationToken::new();
         let iface =
             NextcloudInterface::new(nc_cfg, bs.orchestrator.clone()).with_shutdown(shutdown_token);
+
+        let worker_orch = bs.orchestrator.clone();
+        tokio::spawn(async move {
+            worker_orch
+                .run_worker_filtered("nextcloud-worker", Some("Nextcloud"))
+                .await;
+        });
+
         tokio::spawn(async move {
             if let Err(e) = iface.run().await {
                 tracing::error!("Nextcloud Talk interface error: {e}");
