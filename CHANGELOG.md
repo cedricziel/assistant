@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.57](https://github.com/cedricziel/assistant/compare/v0.1.56...v0.1.57) (2026-03-26)
+
+
+### Bug Fixes
+
+* **cli:** spawn interface workers in orchestrator run mode ([#307](https://github.com/cedricziel/assistant/issues/307)) ([1fe6301](https://github.com/cedricziel/assistant/commit/1fe6301ffd2a176a8967dc4f9038debdace08ffd))
+
 ## [0.1.56](https://github.com/cedricziel/assistant/compare/v0.1.55...v0.1.56) (2026-03-25)
 
 
