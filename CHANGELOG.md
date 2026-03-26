@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.58](https://github.com/cedricziel/assistant/compare/v0.1.57...v0.1.58) (2026-03-26)
+
+
+### Features
+
+* **runtime:** add context compaction with token-threshold history summarization ([#312](https://github.com/cedricziel/assistant/issues/312)) ([312790f](https://github.com/cedricziel/assistant/commit/312790f3afee13239313b7456590671842ecdbb1))
+* **runtime:** add context compaction with token-threshold history summarization ([#313](https://github.com/cedricziel/assistant/issues/313)) ([8dfde7e](https://github.com/cedricziel/assistant/commit/8dfde7eb4592edc18eba9c8aeb76f55c6ed35092))
+* **runtime:** index conversation history into memory_chunks after each turn ([#311](https://github.com/cedricziel/assistant/issues/311)) ([ee69a1d](https://github.com/cedricziel/assistant/commit/ee69a1da4c31161a3e698d45a103a76e01a2fcbd))
+* **tool-executor:** improve memory-search with query expansion, temporal decay, MMR, and multilingual stop words ([#309](https://github.com/cedricziel/assistant/issues/309)) ([57ceb80](https://github.com/cedricziel/assistant/commit/57ceb80132b7bfbfadb479b0906d7b3f709963bb))
+
 ## [0.1.57](https://github.com/cedricziel/assistant/compare/v0.1.56...v0.1.57) (2026-03-26)
 
 
