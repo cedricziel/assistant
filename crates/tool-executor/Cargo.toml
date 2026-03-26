@@ -26,6 +26,8 @@ chrono = { workspace = true }
 cron = { workspace = true }
 dirs = { workspace = true }
 uuid = { workspace = true }
+whatlang = { workspace = true }
+stop-words = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
