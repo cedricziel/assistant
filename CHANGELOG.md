@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.59](https://github.com/cedricziel/assistant/compare/v0.1.58...v0.1.59) (2026-03-26)
+
+
+### Bug Fixes
+
+* **runtime:** address compaction correctness issues from PR [#313](https://github.com/cedricziel/assistant/issues/313) review ([#314](https://github.com/cedricziel/assistant/issues/314)) ([eacf1c7](https://github.com/cedricziel/assistant/commit/eacf1c710188f90c97c74c1c40782b17a5655d04))
+
 ## [0.1.58](https://github.com/cedricziel/assistant/compare/v0.1.57...v0.1.58) (2026-03-26)
 
 
