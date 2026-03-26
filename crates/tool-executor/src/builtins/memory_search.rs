@@ -21,6 +21,7 @@ use assistant_llm::LlmProvider;
 use assistant_storage::StorageLayer;
 use async_trait::async_trait;
 use chrono::{Local, NaiveDate};
+use whatlang::Lang;
 
 const DEFAULT_LIMIT: i64 = 5;
 
@@ -39,107 +40,10 @@ const MMR_LAMBDA: f64 = 0.7;
 // Stop words for query expansion
 // ---------------------------------------------------------------------------
 
-const STOP_WORDS: &[&str] = &[
-    "a",
-    "an",
-    "the",
-    "and",
-    "or",
-    "but",
-    "in",
-    "on",
-    "at",
-    "to",
-    "for",
-    "of",
-    "with",
-    "by",
-    "from",
-    "is",
-    "was",
-    "are",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "will",
-    "would",
-    "could",
-    "should",
-    "may",
-    "might",
-    "shall",
-    "that",
-    "this",
-    "these",
-    "those",
-    "it",
-    "its",
-    "we",
-    "our",
-    "you",
-    "your",
-    "i",
-    "my",
-    "me",
-    "he",
-    "she",
-    "they",
-    "them",
-    "their",
-    "what",
-    "which",
-    "who",
-    "how",
-    "when",
-    "where",
-    "why",
-    "about",
-    "into",
-    "through",
-    "during",
-    "before",
-    "after",
-    "above",
-    "below",
-    "between",
-    "out",
-    "off",
-    "over",
-    "under",
-    "again",
-    "then",
-    "once",
-    "here",
-    "there",
-    "all",
-    "any",
-    "both",
-    "each",
-    "few",
-    "more",
-    "most",
-    "other",
-    "some",
-    "such",
-    "no",
-    "not",
-    "only",
-    "same",
-    "so",
-    "than",
-    "too",
-    "very",
-    "just",
+/// Memory-search–specific vague terms filtered regardless of language.
+const MEMORY_STOP_WORDS: &[&str] = &[
     "thing",
     "things",
-    "said",
     "discussed",
     "talked",
     "mentioned",
@@ -154,6 +58,64 @@ const STOP_WORDS: &[&str] = &[
     "ago",
     "back",
 ];
+
+/// Return the stop word set for the detected language of `text`.
+///
+/// Uses `whatlang` to identify the language, then fetches the per-language
+/// list from the `stop-words` crate.  Always also folds in English stop words
+/// (memory files are often English even when the query isn't) and the
+/// memory-specific vague terms above.
+fn stop_words_for(text: &str) -> HashSet<String> {
+    let lang_code = whatlang::detect_lang(text)
+        .and_then(whatlang_to_iso639_1)
+        .unwrap_or("en");
+
+    let mut words: HashSet<String> = stop_words::get(lang_code)
+        .iter()
+        .map(|w| w.to_lowercase())
+        .collect();
+
+    // Blend in English so queries mixing languages still filter common terms.
+    if lang_code != "en" {
+        for w in stop_words::get("en") {
+            words.insert(w.to_lowercase());
+        }
+    }
+
+    for w in MEMORY_STOP_WORDS {
+        words.insert(w.to_lowercase());
+    }
+
+    words
+}
+
+/// Map a `whatlang::Lang` to an ISO 639-1 code accepted by `stop-words`.
+///
+/// Only languages covered by the `stop-words` ISO feature set are listed;
+/// everything else returns `None` (caller falls back to English).
+fn whatlang_to_iso639_1(lang: Lang) -> Option<&'static str> {
+    match lang {
+        Lang::Ara => Some("ar"),
+        Lang::Dan => Some("da"),
+        Lang::Nld => Some("nl"),
+        Lang::Eng => Some("en"),
+        Lang::Fin => Some("fi"),
+        Lang::Fra => Some("fr"),
+        Lang::Deu => Some("de"),
+        Lang::Ell => Some("el"),
+        Lang::Hun => Some("hu"),
+        Lang::Ind => Some("id"),
+        Lang::Ita => Some("it"),
+        Lang::Nob => Some("no"),
+        Lang::Por => Some("pt"),
+        Lang::Ron => Some("ro"),
+        Lang::Rus => Some("ru"),
+        Lang::Spa => Some("es"),
+        Lang::Swe => Some("sv"),
+        Lang::Tur => Some("tr"),
+        _ => None,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -370,11 +332,12 @@ fn build_fts_query(query: &str) -> String {
     let sanitised = query.replace('"', " ");
     let quoted_phrase = format!("\"{}\"", sanitised.trim());
 
+    let stop = stop_words_for(query);
     let keywords: HashSet<String> = query
         .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
         .map(str::trim)
         .filter(|t| t.len() >= 3)
-        .filter(|t| !STOP_WORDS.contains(&t.to_lowercase().as_str()))
+        .filter(|t| !stop.contains(&t.to_lowercase()))
         .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
         .collect();
 
