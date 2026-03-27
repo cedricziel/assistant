@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.60](https://github.com/cedricziel/assistant/compare/v0.1.59...v0.1.60) (2026-03-27)
+
+
+### Bug Fixes
+
+* **slack:** persist active threads to SQLite so bot responds after restart ([#316](https://github.com/cedricziel/assistant/issues/316)) ([99ba80c](https://github.com/cedricziel/assistant/commit/99ba80cdc7ec80b94a785eb789b12475697a4e9d))
+
 ## [0.1.59](https://github.com/cedricziel/assistant/compare/v0.1.58...v0.1.59) (2026-03-26)
 
 
