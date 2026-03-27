@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.61](https://github.com/cedricziel/assistant/compare/v0.1.60...v0.1.61) (2026-03-27)
+
+
+### Bug Fixes
+
+* **cli:** spawn scheduler worker in single-interface modes ([3972b17](https://github.com/cedricziel/assistant/commit/3972b172ef323a52e8bcd8a55e3feb247837a2ca))
+
 ## [0.1.60](https://github.com/cedricziel/assistant/compare/v0.1.59...v0.1.60) (2026-03-27)
 
 
