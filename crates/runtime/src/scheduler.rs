@@ -222,7 +222,7 @@ pub(crate) async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         return Ok(());
     }
 
-    let raw = tokio::fs::read_to_string(heartbeat_path).await?;
+    let raw = tokio::fs::read_to_string(&heartbeat_path).await?;
     let prompt = strip_html_comments(&raw);
 
     if prompt.is_empty() {
@@ -295,7 +295,6 @@ mod tests {
     use assistant_storage::StorageLayer;
     use assistant_tool_executor::ToolExecutor;
     use chrono::{Duration, Timelike, Utc};
-    use tempfile::NamedTempFile;
     use wiremock::{
         matchers::{method, path},
         Mock, MockServer, ResponseTemplate,
@@ -495,22 +494,34 @@ mod tests {
 
     // -- run_heartbeat -------------------------------------------------------
 
-    #[tokio::test]
-    async fn heartbeat_skipped_when_file_missing() {
-        let server = MockServer::start().await;
+    /// Build an orchestrator whose agent_id maps to `agent_dir` so tests can
+    /// control the HEARTBEAT.md content without touching ~/.assistant.
+    ///
+    /// `heartbeat_path()` returns `agent_base_dir(agent_id).join("HEARTBEAT.md")`,
+    /// i.e. `~/.assistant/agents/{agent_id}/HEARTBEAT.md`.  We use a unique
+    /// agent_id (UUID) so different tests don't collide.
+    async fn build_with_agent_dir(
+        base_url: &str,
+    ) -> (
+        Arc<Orchestrator>,
+        Arc<StorageLayer>,
+        std::path::PathBuf,
+        String,
+    ) {
+        let agent_id = Uuid::new_v4().to_string();
+        let agent_dir = assistant_core::context::agent_base_dir(&agent_id);
+        std::fs::create_dir_all(&agent_dir).unwrap();
 
         let mut config = AssistantConfig::default();
         config.memory.enabled = false;
-        // Point heartbeat_path at a path that cannot exist.
-        config.memory.heartbeat_path =
-            Some("/tmp/assistant-test-no-such-heartbeat-file.md".to_string());
+        config.agent.id = agent_id.clone();
 
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
         let llm: Arc<dyn LlmProvider> = Arc::new(
             LlmClient::new(LlmClientConfig {
                 model: "test".to_string(),
-                base_url: server.uri(),
+                base_url: base_url.to_string(),
                 timeout_secs: 10,
                 retry_config: assistant_llm::RetryConfig::disabled(),
             })
@@ -531,11 +542,19 @@ mod tests {
             bus_arc,
             &config,
         ));
+        (orch, storage, agent_dir, agent_id)
+    }
+
+    #[tokio::test]
+    async fn heartbeat_skipped_when_file_missing() {
+        let server = MockServer::start().await;
+        // agent dir is created but we deliberately don't write HEARTBEAT.md
+        let (orch, storage, _agent_dir, _agent_id) = build_with_agent_dir(&server.uri()).await;
 
         run_heartbeat(&orch).await.unwrap();
 
-        let bus = storage.message_bus();
-        let msg = bus
+        let msg = storage
+            .message_bus()
             .claim(topic::TURN_REQUEST, "test-consumer")
             .await
             .unwrap();
@@ -548,42 +567,9 @@ mod tests {
     #[tokio::test]
     async fn heartbeat_skipped_when_file_empty_after_comment_strip() {
         let server = MockServer::start().await;
-        let (mut config, storage) = {
-            let mut c = AssistantConfig::default();
-            c.memory.enabled = false;
-            let s = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-            (c, s)
-        };
+        let (orch, storage, agent_dir, _agent_id) = build_with_agent_dir(&server.uri()).await;
 
-        let tmp = NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), "<!-- just a comment -->").unwrap();
-        config.memory.heartbeat_path = Some(tmp.path().to_string_lossy().into_owned());
-
-        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
-        let llm: Arc<dyn LlmProvider> = Arc::new(
-            LlmClient::new(LlmClientConfig {
-                model: "test".to_string(),
-                base_url: server.uri(),
-                timeout_secs: 10,
-                retry_config: assistant_llm::RetryConfig::disabled(),
-            })
-            .unwrap(),
-        );
-        let executor = Arc::new(ToolExecutor::new(
-            storage.clone(),
-            llm.clone(),
-            registry.clone(),
-            Arc::new(config.clone()),
-        ));
-        let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
-        let orch = Arc::new(Orchestrator::new(
-            llm,
-            storage.clone(),
-            executor,
-            registry,
-            bus,
-            &config,
-        ));
+        std::fs::write(agent_dir.join("HEARTBEAT.md"), "<!-- just a comment -->").unwrap();
 
         run_heartbeat(&orch).await.unwrap();
 
@@ -603,39 +589,9 @@ mod tests {
         let server = MockServer::start().await;
         mount_answer(&server, "done").await;
 
-        let mut config = AssistantConfig::default();
-        config.memory.enabled = false;
+        let (orch, storage, agent_dir, _agent_id) = build_with_agent_dir(&server.uri()).await;
 
-        let tmp = NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), "Check system health.").unwrap();
-        config.memory.heartbeat_path = Some(tmp.path().to_string_lossy().into_owned());
-
-        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
-        let llm: Arc<dyn LlmProvider> = Arc::new(
-            LlmClient::new(LlmClientConfig {
-                model: "test".to_string(),
-                base_url: server.uri(),
-                timeout_secs: 10,
-                retry_config: assistant_llm::RetryConfig::disabled(),
-            })
-            .unwrap(),
-        );
-        let executor = Arc::new(ToolExecutor::new(
-            storage.clone(),
-            llm.clone(),
-            registry.clone(),
-            Arc::new(config.clone()),
-        ));
-        let bus_arc: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
-        let orch = Arc::new(Orchestrator::new(
-            llm,
-            storage.clone(),
-            executor,
-            registry,
-            bus_arc,
-            &config,
-        ));
+        std::fs::write(agent_dir.join("HEARTBEAT.md"), "Check system health.").unwrap();
 
         run_heartbeat(&orch).await.unwrap();
 

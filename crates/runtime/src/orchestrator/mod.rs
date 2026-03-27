@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    strip_html_comments, Attachment, ExecutionContext, Interface, MemoryLoader, Message,
-    MessageBus, ToolHandler,
+    context::agent_base_dir, strip_html_comments, Attachment, ExecutionContext, Interface,
+    MemoryLoader, Message, MessageBus, ToolHandler,
 };
 use assistant_llm::{
     ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, ToolSpec,
@@ -231,9 +231,14 @@ impl Orchestrator {
         self
     }
 
-    /// Return the path to HEARTBEAT.md (used by the scheduler).
-    pub fn heartbeat_path(&self) -> &Path {
-        self.memory_loader.heartbeat_path()
+    /// Return the path to this persona's HEARTBEAT.md.
+    ///
+    /// Always derived from `agent_id` so it stays consistent even if the
+    /// `MemoryLoader` was constructed from a config that didn't explicitly set
+    /// `heartbeat_path` (e.g. in tests or when `apply_agent_context` wasn't
+    /// called).
+    pub fn heartbeat_path(&self) -> std::path::PathBuf {
+        agent_base_dir(&self.agent_id).join("HEARTBEAT.md")
     }
 
     /// Return the path to BOOT.md (per-session startup hook).
