@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.62](https://github.com/cedricziel/assistant/compare/v0.1.61...v0.1.62) (2026-03-27)
+
+
+### Bug Fixes
+
+* **cli/runtime:** scheduled tasks silent in orchestrator interface-filtered mode ([#319](https://github.com/cedricziel/assistant/issues/319)) ([d3dc567](https://github.com/cedricziel/assistant/commit/d3dc567c64271d4a815a52516e74b6308c099329))
+
 ## [0.1.61](https://github.com/cedricziel/assistant/compare/v0.1.60...v0.1.61) (2026-03-27)
 
 
