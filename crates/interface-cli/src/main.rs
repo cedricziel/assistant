@@ -1162,6 +1162,15 @@ async fn main() -> Result<()> {
                 .await;
         });
 
+        // Spawn a scheduler worker so scheduled tasks are consumed in
+        // Slack-only mode (the main unfiltered worker is not started here).
+        let sched_orch = bs.orchestrator.clone();
+        let _sched_worker = tokio::spawn(async move {
+            sched_orch
+                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
+                .await;
+        });
+
         info!("Starting Slack-only mode");
         return iface.run().await;
     }
@@ -1184,6 +1193,15 @@ async fn main() -> Result<()> {
                 .await;
         });
 
+        // Spawn a scheduler worker so scheduled tasks are consumed in
+        // Mattermost-only mode (the main unfiltered worker is not started here).
+        let sched_orch = bs.orchestrator.clone();
+        let _sched_worker = tokio::spawn(async move {
+            sched_orch
+                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
+                .await;
+        });
+
         info!("Starting Mattermost-only mode");
         return iface.run().await;
     }
@@ -1203,6 +1221,15 @@ async fn main() -> Result<()> {
         let _worker = tokio::spawn(async move {
             worker_orch
                 .run_worker_filtered("nextcloud-worker", Some("Nextcloud"))
+                .await;
+        });
+
+        // Spawn a scheduler worker so scheduled tasks are consumed in
+        // Nextcloud-only mode (the main unfiltered worker is not started here).
+        let sched_orch = bs.orchestrator.clone();
+        let _sched_worker = tokio::spawn(async move {
+            sched_orch
+                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
                 .await;
         });
 
