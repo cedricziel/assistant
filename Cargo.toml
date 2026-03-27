@@ -133,6 +133,7 @@ async-nats = "0.46"
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["nats"] }
 wiremock = "0.6"
+tempfile = "3"
 # LRU cache (bounded conversation map in Mattermost/Slack runners)
 lru = "0.16"
 # Slack / Mattermost interfaces
