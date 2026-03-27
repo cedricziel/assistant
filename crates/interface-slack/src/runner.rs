@@ -26,8 +26,11 @@
 //! [`ConversationStore`] before the orchestrator runs.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
+
+use lru::LruCache;
 
 use anyhow::Result;
 use assistant_core::{Interface, Message, MessageRole};
@@ -134,7 +137,7 @@ struct SlackCallbackState {
     /// be processed twice.  Entries are retained until the set exceeds 500
     /// items, at which point it is cleared (ts values are monotonically
     /// increasing, so an old entry will never match a new message).
-    processed_ts: Arc<Mutex<HashSet<String>>>,
+    processed_ts: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Unix timestamp (seconds) recorded at startup. Messages with a Slack `ts`
     /// older than this are stale catch-up events and are silently dropped.
     started_at: f64,
@@ -160,12 +163,15 @@ struct SlackCallbackState {
     /// messages and combines them into a single orchestrator turn.  This
     /// avoids N sequential turns when N messages arrive during one turn.
     pending_messages: Arc<Mutex<HashMap<Uuid, Vec<PendingMessage>>>>,
-    /// Set of `(channel_id, thread_ts)` pairs for threads where the bot has
-    /// been @-mentioned at least once.  In [`SlackListenMode::Mention`] thread
-    /// replies are only processed when the thread is in this set, ensuring the
-    /// bot stays silent in conversations it was never invited to.
-    /// Persists across WebSocket reconnects.
-    active_threads: Arc<Mutex<HashSet<(String, String)>>>,
+    /// LRU cache of `(channel_id, thread_ts)` pairs for threads where the bot
+    /// has been @-mentioned at least once.  In [`SlackListenMode::Mention`]
+    /// thread replies are only processed when the thread is in this cache,
+    /// ensuring the bot stays silent in conversations it was never invited to.
+    ///
+    /// On a cache miss the database is consulted so the bot keeps responding
+    /// after a restart without loading all rows up-front.  Capacity is bounded
+    /// to avoid unbounded memory growth.
+    active_threads: Arc<Mutex<LruCache<(String, String), ()>>>,
 }
 
 // ── History-message helpers ───────────────────────────────────────────────────
@@ -684,11 +690,30 @@ async fn on_push_event(
     {
         let is_reaction = matches!(incoming.kind, SlackIncomingKind::Reaction { .. });
         let thread_key = (channel_id.clone(), thread_ts.0.clone());
-        let is_active = {
-            let set = active_threads.lock().await;
-            set.contains(&thread_key)
-        };
         let is_mentioned = !bot_user_id.is_empty() && text.contains(&format!("<@{bot_user_id}>"));
+
+        // Check the LRU cache first; on a miss fall back to the DB so the bot
+        // keeps responding in old threads after a service restart.
+        let cache_hit = {
+            let mut cache = active_threads.lock().await;
+            cache.get(&thread_key).is_some()
+        };
+        let is_active = if cache_hit {
+            true
+        } else {
+            let store = storage.slack_active_thread_store();
+            match store.contains(&channel_id, &thread_ts.0).await {
+                Ok(true) => {
+                    active_threads.lock().await.put(thread_key.clone(), ());
+                    true
+                }
+                Ok(false) => false,
+                Err(e) => {
+                    warn!(error = %e, "Failed to check active thread in DB; treating as inactive");
+                    false
+                }
+            }
+        };
 
         if !should_process(
             &config.mode,
@@ -709,22 +734,18 @@ async fn on_push_event(
             return Ok(());
         }
 
-        // The message passed the filter — if it contains a mention, mark the
-        // thread as active so subsequent replies are processed automatically,
-        // and persist the key so it survives service restarts.
+        // The message passed the filter — if it contains a mention, populate
+        // the cache and persist to DB so subsequent replies and restarts work.
         if is_mentioned {
-            let mut set = active_threads.lock().await;
-            if set.insert(thread_key.clone()) {
-                // Newly seen thread — persist it asynchronously.
-                let store = storage.slack_active_thread_store();
-                let (ch, ts) = thread_key.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = store.insert(&ch, &ts).await {
-                        warn!(error = %e, channel = %ch, thread_ts = %ts,
-                              "Failed to persist Slack active thread");
-                    }
-                });
-            }
+            active_threads.lock().await.put(thread_key.clone(), ());
+            let store = storage.slack_active_thread_store();
+            let (ch, ts) = thread_key.clone();
+            tokio::spawn(async move {
+                if let Err(e) = store.upsert(&ch, &ts).await {
+                    warn!(error = %e, channel = %ch, thread_ts = %ts,
+                          "Failed to persist Slack active thread");
+                }
+            });
         }
     }
 
@@ -1343,26 +1364,18 @@ impl SlackInterface {
         let conversations = Arc::new(Mutex::new(HashMap::new()));
         // Dedup set persists across reconnects so a message delivered on one
         // connection is not reprocessed when the other connection reconnects.
-        let processed_ts: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let processed_ts: Arc<Mutex<std::collections::HashSet<String>>> =
+            Arc::new(Mutex::new(std::collections::HashSet::new()));
         // Per-conversation serialisation mutexes — persists across reconnects
         // so a turn in progress is not interrupted by a reconnect event.
         let conv_locks: Arc<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        // Threads the bot has been @-mentioned in — persists across reconnects
-        // and across service restarts by loading previously-stored threads from
-        // the database.
-        let active_threads: Arc<Mutex<HashSet<(String, String)>>> = {
-            let store = self.storage.slack_active_thread_store();
-            let initial = store.load_all().await.unwrap_or_else(|e| {
-                warn!(error = %e, "Failed to load active Slack threads from DB; starting empty");
-                Default::default()
-            });
-            info!(
-                count = initial.len(),
-                "Loaded persisted Slack active threads"
-            );
-            Arc::new(Mutex::new(initial))
-        };
+        // LRU cache of threads the bot has been @-mentioned in.  Bounded to
+        // avoid unbounded memory growth.  On a cache miss the database is
+        // consulted so the bot keeps responding in old threads after a restart.
+        let active_threads: Arc<Mutex<LruCache<(String, String), ()>>> = Arc::new(Mutex::new(
+            LruCache::new(NonZeroUsize::new(1_000).expect("capacity is non-zero")),
+        ));
 
         // ── Graceful shutdown ─────────────────────────────────────────────────
         // A watch channel delivers the shutdown signal across all select! points
