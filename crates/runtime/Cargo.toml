@@ -39,3 +39,4 @@ hex = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }
+tempfile = "3"

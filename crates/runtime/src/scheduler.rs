@@ -29,6 +29,10 @@ use crate::webhook_dispatch;
 /// How often the heartbeat prompt is run (30 minutes).
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
+/// `user_id` stamped on every bus message produced by the scheduler subsystem
+/// (both scheduled tasks and heartbeats).
+const SCHEDULER_USER_ID: &str = "scheduler";
+
 /// Spawn a background tokio task that:
 /// 1. Checks for due scheduled tasks every `poll_interval`.
 /// 2. Reads `HEARTBEAT.md` (from the configured memory path) as a prompt
@@ -65,7 +69,10 @@ pub fn spawn_scheduler(
 
 /// Dispatch due scheduled tasks by publishing [`TurnRequest`] messages to the
 /// bus.  The worker loop processes them asynchronously.
-async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> Result<()> {
+pub(crate) async fn run_due_tasks(
+    storage: &StorageLayer,
+    orchestrator: &Orchestrator,
+) -> Result<()> {
     let now = Utc::now();
     let task_store = storage.scheduled_task_store_for_agent(&orchestrator.agent_id);
     let due = task_store.due_tasks(now).await?;
@@ -109,7 +116,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
                     .with_agent_id(orchestrator.agent_id.clone())
                     .with_conversation_id(conversation_id)
                     .with_interface(format!("{:?}", Interface::Scheduler))
-                    .with_user_id("scheduler"),
+                    .with_user_id(SCHEDULER_USER_ID),
             )
             .await
         {
@@ -132,12 +139,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
             conversation_id,
             extension_tools: vec![],
             timestamp: Some(Utc::now()),
-            traceparent: None,
-        };
-
-        let turn_req = bus_messages::TurnRequest {
             traceparent: traceparent_from_context(&interface_cx),
-            ..turn_req
         };
 
         let mut produce_turn_span = crate::otel_spans::start_bus_span(
@@ -152,7 +154,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
                     .with_agent_id(orchestrator.agent_id.clone())
                     .with_conversation_id(conversation_id)
                     .with_interface(format!("{:?}", Interface::Scheduler))
-                    .with_user_id("scheduler"),
+                    .with_user_id(SCHEDULER_USER_ID),
             )
             .await
         {
@@ -202,7 +204,7 @@ async fn run_due_tasks(storage: &StorageLayer, orchestrator: &Orchestrator) -> R
 
 /// Compute the next occurrence after now for a cron expression.
 /// Accepts both 5-field (standard) and 7-field (with seconds) expressions.
-fn compute_next_run(cron_expr: &str) -> Option<chrono::DateTime<Utc>> {
+pub(crate) fn compute_next_run(cron_expr: &str) -> Option<chrono::DateTime<Utc>> {
     let schedule = Schedule::from_str(cron_expr)
         .or_else(|_| Schedule::from_str(&format!("0 {}", cron_expr)))
         .ok()?;
@@ -213,7 +215,7 @@ fn compute_next_run(cron_expr: &str) -> Option<chrono::DateTime<Utc>> {
 /// as a [`TurnRequest`] through the message bus.
 ///
 /// Does nothing (silently) if the file does not exist or is empty.
-async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
+pub(crate) async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
     let heartbeat_path = orchestrator.heartbeat_path();
 
     if !heartbeat_path.exists() {
@@ -230,22 +232,17 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
     info!("Dispatching heartbeat from {}", heartbeat_path.display());
 
     let conversation_id = Uuid::new_v4();
-    let turn_req = bus_messages::TurnRequest {
-        prompt,
-        conversation_id,
-        extension_tools: vec![],
-        timestamp: Some(Utc::now()),
-        traceparent: None,
-    };
-
     let interface_cx = start_interface_root_context(
         &Interface::Scheduler,
         "heartbeat.dispatch",
         Some(conversation_id),
     );
     let turn_req = bus_messages::TurnRequest {
+        prompt,
+        conversation_id,
+        extension_tools: vec![],
+        timestamp: Some(Utc::now()),
         traceparent: traceparent_from_context(&interface_cx),
-        ..turn_req
     };
 
     let mut produce_turn_span = crate::otel_spans::start_bus_span(
@@ -261,7 +258,7 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
                 .with_agent_id(orchestrator.agent_id.clone())
                 .with_conversation_id(conversation_id)
                 .with_interface(format!("{:?}", Interface::Scheduler))
-                .with_user_id("heartbeat"),
+                .with_user_id(SCHEDULER_USER_ID),
         )
         .await;
     match publish_result {
@@ -286,4 +283,385 @@ async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
     );
 
     Ok(())
+}
+
+// -- Tests ------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use assistant_core::{topic, AssistantConfig, MessageBus};
+    use assistant_storage::StorageLayer;
+    use assistant_tool_executor::ToolExecutor;
+    use chrono::{Duration, Timelike, Utc};
+    use tempfile::NamedTempFile;
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    use super::*;
+    use crate::orchestrator::Orchestrator;
+    use assistant_llm::{LlmClient, LlmClientConfig, LlmProvider};
+    use assistant_storage::registry::SkillRegistry;
+
+    // -- Helpers -------------------------------------------------------------
+
+    fn ollama_answer(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "model": "test",
+            "message": { "role": "assistant", "content": text },
+            "done": true
+        })
+    }
+
+    async fn mount_answer(server: &MockServer, text: &str) {
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer(text)))
+            .mount(server)
+            .await;
+    }
+
+    async fn build(base_url: &str) -> (Arc<Orchestrator>, Arc<StorageLayer>) {
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false;
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: base_url.to_string(),
+                timeout_secs: 10,
+                retry_config: assistant_llm::RetryConfig::disabled(),
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+        let orch = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor.clone(),
+            registry.clone(),
+            bus,
+            &config,
+        ));
+        executor.set_subagent_runner(orch.clone());
+        (orch, storage)
+    }
+
+    // -- compute_next_run ----------------------------------------------------
+
+    #[test]
+    fn next_run_seven_field_cron() {
+        // "0 0 9 * * *" — 7-field, fires at 09:00 every day
+        let next = compute_next_run("0 0 9 * * *");
+        assert!(next.is_some(), "should parse 7-field cron");
+        let next = next.unwrap();
+        assert!(next > Utc::now(), "next run must be in the future");
+        assert_eq!(next.time().hour(), 9, "should fire at 09:xx");
+    }
+
+    #[test]
+    fn next_run_five_field_cron() {
+        // "0 9 * * *" — standard 5-field, also fires at 09:00
+        let next = compute_next_run("0 9 * * *");
+        assert!(next.is_some(), "should parse 5-field cron");
+        let next = next.unwrap();
+        assert!(next > Utc::now(), "next run must be in the future");
+        assert_eq!(next.time().hour(), 9, "should fire at 09:xx");
+    }
+
+    #[test]
+    fn next_run_invalid_expr_returns_none() {
+        assert!(compute_next_run("not a cron").is_none());
+    }
+
+    // -- run_due_tasks -------------------------------------------------------
+
+    #[tokio::test]
+    async fn due_task_is_published_to_bus() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (orch, storage) = build(&server.uri()).await;
+
+        let store = storage.scheduled_task_store_for_agent(&orch.agent_id);
+        let past = Utc::now() - Duration::seconds(60);
+        store
+            .insert("test-task", "0 0 * * *", "say hello", false, Some(past))
+            .await
+            .unwrap();
+
+        run_due_tasks(&storage, &orch).await.unwrap();
+
+        let bus = storage.message_bus();
+        let msg = bus
+            .claim(topic::TURN_REQUEST, "test-consumer")
+            .await
+            .unwrap();
+        assert!(msg.is_some(), "turn.request should be on the bus");
+        let msg = msg.unwrap();
+        assert_eq!(
+            msg.interface.as_deref(),
+            Some("Scheduler"),
+            "interface must be Scheduler"
+        );
+        assert_eq!(
+            msg.user_id.as_deref(),
+            Some(SCHEDULER_USER_ID),
+            "user_id must be the scheduler constant"
+        );
+    }
+
+    #[tokio::test]
+    async fn once_task_is_disabled_after_dispatch() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (orch, storage) = build(&server.uri()).await;
+
+        let store = storage.scheduled_task_store_for_agent(&orch.agent_id);
+        let past = Utc::now() - Duration::seconds(60);
+        let id = store
+            .insert("once-task", "", "ping", true, Some(past))
+            .await
+            .unwrap();
+
+        run_due_tasks(&storage, &orch).await.unwrap();
+
+        let tasks = store.list_all().await.unwrap();
+        let task = tasks.iter().find(|t| t.id == id).unwrap();
+        assert!(
+            !task.enabled,
+            "one-shot task must be disabled after dispatch"
+        );
+        assert!(task.last_run.is_some(), "last_run must be recorded");
+    }
+
+    #[tokio::test]
+    async fn recurring_task_next_run_is_advanced() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (orch, storage) = build(&server.uri()).await;
+
+        let store = storage.scheduled_task_store_for_agent(&orch.agent_id);
+        let past = Utc::now() - Duration::seconds(60);
+        let id = store
+            .insert("cron-task", "0 0 9 * * *", "morning", false, Some(past))
+            .await
+            .unwrap();
+
+        run_due_tasks(&storage, &orch).await.unwrap();
+
+        let tasks = store.list_all().await.unwrap();
+        let task = tasks.iter().find(|t| t.id == id).unwrap();
+        assert!(task.enabled, "recurring task must stay enabled");
+        assert!(
+            task.next_run.map_or(false, |nr| nr > Utc::now()),
+            "next_run must be advanced into the future"
+        );
+    }
+
+    #[tokio::test]
+    async fn not_due_task_is_not_dispatched() {
+        let server = MockServer::start().await;
+        let (orch, storage) = build(&server.uri()).await;
+
+        let store = storage.scheduled_task_store_for_agent(&orch.agent_id);
+        let future = Utc::now() + Duration::hours(1);
+        store
+            .insert("future-task", "0 0 9 * * *", "later", false, Some(future))
+            .await
+            .unwrap();
+
+        run_due_tasks(&storage, &orch).await.unwrap();
+
+        let bus = storage.message_bus();
+        let msg = bus
+            .claim(topic::TURN_REQUEST, "test-consumer")
+            .await
+            .unwrap();
+        assert!(
+            msg.is_none(),
+            "no turn.request should be published for a future task"
+        );
+    }
+
+    // -- run_heartbeat -------------------------------------------------------
+
+    #[tokio::test]
+    async fn heartbeat_skipped_when_file_missing() {
+        let server = MockServer::start().await;
+
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false;
+        // Point heartbeat_path at a path that cannot exist.
+        config.memory.heartbeat_path =
+            Some("/tmp/assistant-test-no-such-heartbeat-file.md".to_string());
+
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: server.uri(),
+                timeout_secs: 10,
+                retry_config: assistant_llm::RetryConfig::disabled(),
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let bus_arc: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+        let orch = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor,
+            registry,
+            bus_arc,
+            &config,
+        ));
+
+        run_heartbeat(&orch).await.unwrap();
+
+        let bus = storage.message_bus();
+        let msg = bus
+            .claim(topic::TURN_REQUEST, "test-consumer")
+            .await
+            .unwrap();
+        assert!(
+            msg.is_none(),
+            "no message should be published when HEARTBEAT.md is absent"
+        );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_skipped_when_file_empty_after_comment_strip() {
+        let server = MockServer::start().await;
+        let (mut config, storage) = {
+            let mut c = AssistantConfig::default();
+            c.memory.enabled = false;
+            let s = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+            (c, s)
+        };
+
+        let tmp = NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "<!-- just a comment -->").unwrap();
+        config.memory.heartbeat_path = Some(tmp.path().to_string_lossy().into_owned());
+
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: server.uri(),
+                timeout_secs: 10,
+                retry_config: assistant_llm::RetryConfig::disabled(),
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+        let orch = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor,
+            registry,
+            bus,
+            &config,
+        ));
+
+        run_heartbeat(&orch).await.unwrap();
+
+        let msg = storage
+            .message_bus()
+            .claim(topic::TURN_REQUEST, "test-consumer")
+            .await
+            .unwrap();
+        assert!(
+            msg.is_none(),
+            "comment-only HEARTBEAT.md must produce no message"
+        );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_publishes_turn_request_with_scheduler_user_id() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false;
+
+        let tmp = NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "Check system health.").unwrap();
+        config.memory.heartbeat_path = Some(tmp.path().to_string_lossy().into_owned());
+
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: server.uri(),
+                timeout_secs: 10,
+                retry_config: assistant_llm::RetryConfig::disabled(),
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let bus_arc: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+        let orch = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor,
+            registry,
+            bus_arc,
+            &config,
+        ));
+
+        run_heartbeat(&orch).await.unwrap();
+
+        let msg = storage
+            .message_bus()
+            .claim(topic::TURN_REQUEST, "test-consumer")
+            .await
+            .unwrap();
+        assert!(
+            msg.is_some(),
+            "HEARTBEAT.md with content must publish a turn.request"
+        );
+        let msg = msg.unwrap();
+        assert_eq!(
+            msg.interface.as_deref(),
+            Some("Scheduler"),
+            "heartbeat must use Scheduler interface"
+        );
+        assert_eq!(
+            msg.user_id.as_deref(),
+            Some(SCHEDULER_USER_ID),
+            "heartbeat must use SCHEDULER_USER_ID constant"
+        );
+
+        // Verify the prompt text was preserved
+        let payload: bus_messages::TurnRequest = serde_json::from_value(msg.payload).unwrap();
+        assert_eq!(payload.prompt.trim(), "Check system health.");
+    }
 }
