@@ -1,21 +1,18 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: [unversioned template] → 1.0.0
-Modified principles: n/a (initial population from template)
+Version change: 1.0.0 → 1.1.0
+Modified principles: none renamed
 Added sections:
-  - Core Principles (7 principles)
-  - Code Style Standards
-  - Development Workflow
-  - Governance
-Removed sections: n/a (template placeholders replaced)
+  - VIII. Dual-Mode Parity (NON-NEGOTIABLE) — new principle
+Removed sections: none
 Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ Constitution Check section already present; no structural change needed
-  - .specify/templates/spec-template.md ✅ No constitution-gated mandatory sections added
-  - .specify/templates/tasks-template.md ✅ Task categories align with principles; no change needed
-  - .specify/templates/commands/ ✅ No command files present; nothing to update
+  - .specify/templates/plan-template.md ✅ Constitution Check section present; no structural change needed
+  - .specify/templates/spec-template.md ✅ No new mandatory sections required
+  - .specify/templates/tasks-template.md ✅ Dual-mode testing note covered by principle; no template change needed
+  - .specify/templates/commands/ ✅ No command files present
 Deferred items:
-  - RATIFICATION_DATE set to 2026-03-27 (first time constitution was populated; original project start date unknown)
+  - RATIFICATION_DATE remains 2026-03-27 (first population date; original project start unknown)
 -->
 
 # assistant Constitution
@@ -108,6 +105,27 @@ ADRs (`docs/adr/`) MUST be created or updated for every architectural decision.
 **Rationale**: Enforced by pre-commit hooks (`make install-hooks`). Zero-warning policy keeps
 the signal-to-noise ratio high in compiler output.
 
+### VIII. Dual-Mode Parity (NON-NEGOTIABLE)
+
+The system MUST remain fully functional in both run modes:
+
+- **Single-binary mode** — all components run in one process via `assistant orchestrator run`.
+  The in-process scheduler, message bus, and interfaces all start together.
+- **Distributed mode** — components run as separate processes connected via an external message
+  bus (e.g., NATS JetStream). Workers are started with `assistant worker`; the orchestrator
+  runs with `--no-repl` or a subset of `--interfaces`.
+
+Every user-facing capability MUST work correctly in both modes.
+It is NEVER acceptable to ship a change that works in one mode but fails in the other.
+New features MUST be designed and tested against both modes before merging.
+CI MUST include at minimum a smoke path for each mode; a passing single-binary test does NOT
+imply distributed-mode correctness.
+
+**Rationale**: Users run the assistant both as a lightweight single-process install and as a
+horizontally-scaled distributed system. Treating either mode as second-class will silently
+break production deployments. The `MessageBus` abstraction (in-process vs. NATS) exists
+precisely to keep both modes first-class — this principle enforces that intent.
+
 ## Code Style Standards
 
 The following constraints apply workspace-wide:
@@ -136,6 +154,9 @@ The following constraints apply workspace-wide:
 - **Adding a builtin tool**: Follow the 5-step checklist in `AGENTS.md` — handler struct →
   `ToolHandler` impl → export from `mod.rs` → register in `ToolExecutor::register_builtins()`
   → optional `skills/<name>/SKILL.md`.
+- **Dual-mode testing**: When adding or modifying runtime behaviour, verify the change works
+  under both `assistant orchestrator run` (single-binary) and with `assistant worker` +
+  external bus (distributed). Document which modes were tested in the PR description.
 - **Architectural changes**: MUST be accompanied by a new or updated ADR in `docs/adr/`.
 - **CI gates**: GitHub Actions runs check, test, lint, and format on every push to `main` and
   on every PR. The `signal` feature is linted separately. Integration tests run with
@@ -164,4 +185,4 @@ violations MUST be documented in `Complexity Tracking` sections of the feature p
 Runtime development guidance lives in `AGENTS.md`; this constitution governs the _why_,
 `AGENTS.md` governs the _how_.
 
-**Version**: 1.0.0 | **Ratified**: 2026-03-27 | **Last Amended**: 2026-03-27
+**Version**: 1.1.0 | **Ratified**: 2026-03-27 | **Last Amended**: 2026-03-27
