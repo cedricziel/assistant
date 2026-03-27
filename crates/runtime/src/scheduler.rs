@@ -494,20 +494,30 @@ mod tests {
 
     // -- run_heartbeat -------------------------------------------------------
 
+    /// RAII guard that removes the agent directory when dropped.
+    struct AgentDirGuard(std::path::PathBuf);
+    impl Drop for AgentDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    impl std::ops::Deref for AgentDirGuard {
+        type Target = std::path::Path;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
     /// Build an orchestrator whose agent_id maps to `agent_dir` so tests can
     /// control the HEARTBEAT.md content without touching ~/.assistant.
     ///
     /// `heartbeat_path()` returns `agent_base_dir(agent_id).join("HEARTBEAT.md")`,
     /// i.e. `~/.assistant/agents/{agent_id}/HEARTBEAT.md`.  We use a unique
-    /// agent_id (UUID) so different tests don't collide.
+    /// agent_id (UUID) so different tests don't collide.  The returned
+    /// `AgentDirGuard` removes the directory automatically when dropped.
     async fn build_with_agent_dir(
         base_url: &str,
-    ) -> (
-        Arc<Orchestrator>,
-        Arc<StorageLayer>,
-        std::path::PathBuf,
-        String,
-    ) {
+    ) -> (Arc<Orchestrator>, Arc<StorageLayer>, AgentDirGuard, String) {
         let agent_id = Uuid::new_v4().to_string();
         let agent_dir = assistant_core::context::agent_base_dir(&agent_id);
         std::fs::create_dir_all(&agent_dir).unwrap();
@@ -542,7 +552,7 @@ mod tests {
             bus_arc,
             &config,
         ));
-        (orch, storage, agent_dir, agent_id)
+        (orch, storage, AgentDirGuard(agent_dir), agent_id)
     }
 
     #[tokio::test]
