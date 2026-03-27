@@ -1344,6 +1344,19 @@ async fn main() -> Result<()> {
         warn!("Signal interface requires --no-repl in unified orchestrator mode; skipping startup");
     }
 
+    // Spawn a scheduler worker when running in interface-filtered orchestrator
+    // mode. The main unfiltered worker is suppressed in this mode (to avoid
+    // double-consuming Slack/Mattermost/etc. turns), so scheduled tasks would
+    // never be consumed without a dedicated Scheduler worker.
+    if orchestrator_interface_filtered {
+        let sched_orch = bs.orchestrator.clone();
+        tokio::spawn(async move {
+            sched_orch
+                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
+                .await;
+        });
+    }
+
     if orchestrator_no_repl {
         info!("Orchestrator running without REPL; waiting for shutdown signal");
         tokio::signal::ctrl_c().await?;
