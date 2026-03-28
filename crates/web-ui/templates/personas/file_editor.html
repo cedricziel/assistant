@@ -1,0 +1,111 @@
+{% extends "base.html" %} {% block title %}{% if is_new %}Create{% else %}Edit{%
+endif %} {{ display_name }}{% endblock %} {% block breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/personas" class="breadcrumb-page">Personas</a>
+<span class="breadcrumb-sep">/</span>
+<a href="/personas/{{ persona_id }}" class="breadcrumb-page"
+  >{{ persona_name }}</a
+>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">{{ display_name }}</span>
+{% endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>{{ persona_name }}</p>
+        <h2>{{ display_name }}</h2>
+      </div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>
+            {% if is_new %}Create{% else %}Edit{% endif %}: {{ display_name }}
+          </h2>
+          <p class="muted">{{ filename }}</p>
+        </div>
+        <a href="/personas/{{ persona_id }}" class="action-btn secondary"
+          >&larr; Back</a
+        >
+      </div>
+
+      {% if show_saved %}
+      <p class="empty" style="margin-bottom: 1rem; color: var(--ok)">
+        File saved successfully.
+      </p>
+      {% endif %} {% match error_msg %} {% when Some with (msg) %}
+      <p class="empty" style="margin-bottom: 1rem; color: var(--danger)">
+        Error: {{ msg }}
+      </p>
+      {% when None %} {% endmatch %}
+
+      <form
+        method="POST"
+        action="/personas/{{ persona_id }}/files/{{ filename }}"
+        data-controller="dirty-guard"
+        data-action="submit->dirty-guard#clearDirty"
+      >
+        <div style="display: flex; flex-direction: column; gap: 0.75rem">
+          <textarea
+            name="content"
+            rows="24"
+            style="
+              font-family: var(--font-mono, monospace);
+              resize: vertical;
+              width: 100%;
+              padding: 0.75rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+            "
+            data-action="input->dirty-guard#markDirty"
+          >
+{{ content }}</textarea
+          >
+          <div style="display: flex; gap: 0.5rem">
+            <button type="submit" class="action-btn">
+              {% if is_new %}Create File{% else %}Save Changes{% endif %}
+            </button>
+            <a href="/personas/{{ persona_id }}" class="action-btn secondary"
+              >Cancel</a
+            >
+          </div>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+<script type="module">
+  import { Application, Controller } from "@hotwired/stimulus";
+  class DirtyGuardController extends Controller {
+    connect() {
+      this._dirty = false;
+      window.addEventListener(
+        "beforeunload",
+        (this._onUnload = (e) => {
+          if (this._dirty) {
+            e.preventDefault();
+            e.returnValue = "";
+          }
+        }),
+      );
+    }
+    disconnect() {
+      window.removeEventListener("beforeunload", this._onUnload);
+    }
+    markDirty() {
+      this._dirty = true;
+    }
+    clearDirty() {
+      this._dirty = false;
+    }
+  }
+  const app = Application.start();
+  app.register("dirty-guard", DirtyGuardController);
+</script>
+{% endblock %}

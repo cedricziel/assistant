@@ -132,6 +132,43 @@ impl PersonaStore {
 
         row.map(row_to_record).transpose()
     }
+
+    pub async fn create(&self, id: &str, name: &str) -> Result<PersonaRecord> {
+        sqlx::query("INSERT INTO personas (id, name, is_default) VALUES (?1, ?2, 0)")
+            .bind(id)
+            .bind(name)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE") {
+                    anyhow::anyhow!(
+                        "persona with id '{}' already exists (UNIQUE constraint)",
+                        id
+                    )
+                } else {
+                    anyhow::anyhow!("failed to create persona '{}': {}", id, e)
+                }
+            })?;
+
+        self.get(id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("persona '{}' missing after create", id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::StorageLayer;
+
+    #[tokio::test]
+    async fn create_returns_error_on_duplicate_id() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.create("foo", "Foo").await.unwrap();
+        let result = store.create("foo", "Foo Again").await;
+        assert!(result.is_err(), "expected Err on duplicate id, got Ok");
+    }
 }
 
 fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
