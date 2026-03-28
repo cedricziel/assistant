@@ -22,6 +22,7 @@ breadcrumb %}
           <p>Switch the active Persona for this web session.</p>
         </div>
         <span class="pill">{{ rows.len() }}</span>
+        <a href="/personas/new" class="action-btn">New Persona</a>
       </div>
 
       {% if show_updated %}
@@ -47,8 +48,16 @@ breadcrumb %}
         <tbody>
           {% for row in rows %}
           <tr>
-            <td><span class="trace-id">{{ row.id }}</span></td>
-            <td><span class="primary">{{ row.name }}</span></td>
+            <td>
+              <a href="/personas/{{ row.id }}"
+                ><span class="trace-id">{{ row.id }}</span></a
+              >
+            </td>
+            <td>
+              <a href="/personas/{{ row.id }}"
+                ><span class="primary">{{ row.name }}</span></a
+              >
+            </td>
             <td>
               {% if row.is_current %}
               <span class="hdr-badge ok">running</span>
