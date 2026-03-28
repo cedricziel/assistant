@@ -38,6 +38,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::config::{MatrixConfig, MatrixConfigExt};
+use crate::tools::build_matrix_tools;
 
 // ── MatrixInterface ───────────────────────────────────────────────────────────
 
@@ -305,6 +306,14 @@ impl MatrixInterface {
                         id
                     }
                 };
+
+                // Register per-turn extension tools so the worker dispatches
+                // to run_turn_with_tools.  The LLM calls `matrix-reply` to
+                // post its response back into this room.
+                let extensions = build_matrix_tools(room.clone());
+                orchestrator
+                    .register_extensions(conversation_id, extensions, vec![])
+                    .await;
 
                 let turn_result = orchestrator
                     .submit_turn(&text, conversation_id, Interface::Matrix, None)
