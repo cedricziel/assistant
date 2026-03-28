@@ -63,7 +63,7 @@ crates/
 │       ├── lib.rs                      # pub mod config, runner, tools; pub use
 │       ├── config.rs                   # MatrixConfigExt trait (resolved_homeserver_url, resolved_access_token)
 │       ├── runner.rs                   # MatrixInterface struct, event handler, reconnect loop
-│       └── tools.rs                   # build_matrix_tools() — matrix-post ambient tool
+│       └── tools.rs                   # build_matrix_tools() — matrix-reply extension tool
 └── interface-cli/
     ├── Cargo.toml                      # ADD feature: matrix = ["dep:assistant-interface-matrix"]
     │                                   # ADD optional dep: assistant-interface-matrix

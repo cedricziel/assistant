@@ -10,7 +10,7 @@
 
 - `ruma` — low-level Matrix protocol types only; no client state machine; rejected as too much boilerplate
 - Raw HTTP/WebSocket — would require reimplementing sync, pagination, and retry; rejected
-- `matrix-sdk` at a pinned version — chosen; latest stable release (0.7.x series as of early 2026)
+- `matrix-sdk` at a pinned version — chosen; latest stable release (0.10.x series as of early 2026)
 
 ## Decision 2: Authentication Strategy
 

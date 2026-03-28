@@ -83,7 +83,7 @@ assistant orchestrator run --interfaces matrix
 
 The bot logs in, starts the sync loop, and is ready once you see:
 
-```
+```text
 INFO assistant_interface_matrix::runner: Matrix bot ready bot_user_id=@assistant:example.com
 ```
 

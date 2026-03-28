@@ -41,7 +41,7 @@ Held in an `Arc<Mutex<LruCache<String, Uuid>>>` within `MatrixInterface`.
 
 In `crates/core/src/types.rs`, add:
 
-```
+```rust
 Interface::Matrix
 ```
 
@@ -49,7 +49,7 @@ This variant is used when calling `Orchestrator::submit_turn` and in `run_worker
 
 ## State Transitions
 
-```
+```text
 Bot starts
   └─> Login / RestoreSession
         └─> Sync loop running

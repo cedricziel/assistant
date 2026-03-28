@@ -67,7 +67,7 @@ interface-cli -> runtime -> llm -> core
                     |-> storage -> core
                     |-> bus-nats -> core  (optional, feature = "nats")
                     |-> tool-executor -> core, storage, llm
-                    '-> mcp-server, interface-slack, interface-mattermost, interface-nextcloud (optional features)
+                    '-> mcp-server, interface-slack, interface-mattermost, interface-matrix, interface-nextcloud (optional features)
 ```
 
 ## Architecture Decisions
