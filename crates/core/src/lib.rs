@@ -26,7 +26,7 @@ pub use subagent::SubagentRunner;
 pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
     AgentConfig, AssistantConfig, BusConfig, BusKind, CompactionConfig, EmbeddingConfig,
-    EmbeddingProviderKind, ExecutionContext, Interface, LlmConfig, LlmProviderKind,
+    EmbeddingProviderKind, ExecutionContext, Interface, LlmConfig, LlmProviderKind, MatrixConfig,
     MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig, McpTrustLevel, MemoryConfig,
     Message, MessageRole, MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, NextcloudConfig,
     OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation, OpenAIWebSearchOptions, SignalConfig,

@@ -17,9 +17,9 @@
 
 **Purpose**: Scaffold the new crate and add workspace-level dependencies before any user story work begins.
 
-- [ ] T001 Create `crates/interface-matrix/Cargo.toml` with `[package]`, `[lib]`, `[dependencies]`, and `[dev-dependencies]` sections matching workspace conventions (name = `assistant-interface-matrix`)
-- [ ] T002 [P] Add `matrix-sdk` (with `tokio-handle` and `sqlite` features) to `[workspace.dependencies]` in root `Cargo.toml`
-- [ ] T003 [P] Write ADR at `docs/adr/adr-0002-matrix-interface.md` documenting the choice of `matrix-sdk`, access-token auth, and room-ID conversation keying
+- [x] T001 Create `crates/interface-matrix/Cargo.toml` with `[package]`, `[lib]`, `[dependencies]`, and `[dev-dependencies]` sections matching workspace conventions (name = `assistant-interface-matrix`)
+- [x] T002 [P] Add `matrix-sdk` (with `tokio-handle` and `sqlite` features) to `[workspace.dependencies]` in root `Cargo.toml`
+- [x] T003 [P] Write ADR at `docs/adr/adr-0002-matrix-interface.md` documenting the choice of `matrix-sdk`, access-token auth, and room-ID conversation keying
 
 ---
 
@@ -29,11 +29,11 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 Add `MatrixConfig` struct to `crates/core/src/types.rs` with fields: `homeserver_url`, `username`, `password`, `access_token`, `device_id`, `state_store_path`, `allowed_rooms`, `allowed_users` (all matching the schema in `specs/002-matrix-interface/data-model.md`)
-- [ ] T005 Add `Matrix` variant to the `Interface` enum in `crates/core/src/types.rs`
-- [ ] T006 Add `pub matrix: Option<MatrixConfig>` field to `AssistantConfig` in `crates/core/src/types.rs` (with `/// Populated from the [matrix] section of config.toml` doc comment)
-- [ ] T007 Export `MatrixConfig` from `crates/core/src/lib.rs` (add to the existing re-export list)
-- [ ] T008 Create placeholder stub `crates/interface-matrix/src/lib.rs` declaring `pub mod config; pub mod runner; pub mod tools;` and the three empty source files so `cargo check --workspace` passes
+- [x] T004 Add `MatrixConfig` struct to `crates/core/src/types.rs` with fields: `homeserver_url`, `username`, `password`, `access_token`, `device_id`, `state_store_path`, `allowed_rooms`, `allowed_users` (all matching the schema in `specs/002-matrix-interface/data-model.md`)
+- [x] T005 Add `Matrix` variant to the `Interface` enum in `crates/core/src/types.rs`
+- [x] T006 Add `pub matrix: Option<MatrixConfig>` field to `AssistantConfig` in `crates/core/src/types.rs` (with `/// Populated from the [matrix] section of config.toml` doc comment)
+- [x] T007 Export `MatrixConfig` from `crates/core/src/lib.rs` (add to the existing re-export list)
+- [x] T008 Create placeholder stub `crates/interface-matrix/src/lib.rs` declaring `pub mod config; pub mod runner; pub mod tools;` and the three empty source files so `cargo check --workspace` passes
 
 **Checkpoint**: `cargo check --workspace` must compile cleanly before proceeding.
 
@@ -47,19 +47,19 @@
 
 ### Implementation for User Story 1
 
-- [ ] T009 [P] [US1] Implement `MatrixConfigExt` trait in `crates/interface-matrix/src/config.rs` with `resolved_homeserver_url()`, `resolved_username()`, `resolved_access_token()`, `resolved_password()`, `resolved_state_store_path()` (env var fallbacks: `MATRIX_HOMESERVER_URL`, `MATRIX_USERNAME`, `MATRIX_ACCESS_TOKEN`, `MATRIX_PASSWORD`)
-- [ ] T010 [P] [US1] Add unit tests for `MatrixConfigExt` in `crates/interface-matrix/src/config.rs`: explicit values used verbatim, env var fallback, TOML round-trip, `AssistantConfig` with `[matrix]` section, without section is `None`
-- [ ] T011 [US1] Implement `MatrixInterface` struct with `pub fn new(config: MatrixConfig, orchestrator: Arc<Orchestrator>) -> Self` in `crates/interface-matrix/src/runner.rs`
-- [ ] T012 [US1] Implement `MatrixInterface::run()` in `crates/interface-matrix/src/runner.rs`: build `matrix_sdk::Client` from `homeserver_url`, login via `access_token` or `password` (error if neither present), fetch bot `user_id` via `client.user_id()`, initialise `LruCache<String, Uuid>` (cap 10 000), register room message event handler, call `client.sync(SyncSettings::default())` in a loop with exponential backoff (1 s → 60 s cap), graceful shutdown on SIGINT/SIGTERM
-- [ ] T013 [US1] Implement the `OriginalSyncRoomMessageEvent` handler closure in `crates/interface-matrix/src/runner.rs`: extract `room_id`, `sender`, `body` text; skip if `sender == bot_user_id`; skip if `allowed_rooms` non-empty and room not listed; skip if `allowed_users` non-empty and sender not listed; resolve or create `conversation_id` from LRU map; call `orchestrator.submit_turn(&text, conversation_id, Interface::Matrix, None)` and send reply via `room.send()`; on orchestrator error send a user-visible error message
-- [ ] T014 [P] [US1] Add unit tests for allowlist logic in `crates/interface-matrix/src/runner.rs`: empty `allowed_rooms` accepts all; non-empty blocks unknown room; empty `allowed_users` accepts all; non-empty passes known user
-- [ ] T015 [P] [US1] Implement `build_matrix_tools()` stub returning `Vec<Arc<dyn ToolHandler>>` in `crates/interface-matrix/src/tools.rs` (empty for v1; mirrors `build_mattermost_tools` signature)
-- [ ] T016 [US1] Wire public exports in `crates/interface-matrix/src/lib.rs`: `pub use assistant_core::MatrixConfig; pub use runner::MatrixInterface;`
-- [ ] T017 [US1] Add `matrix = ["dep:assistant-interface-matrix"]` feature and `assistant-interface-matrix = { path = "../interface-matrix", optional = true }` dependency to `crates/interface-cli/Cargo.toml`; add `matrix` to the `default` features list
-- [ ] T018 [US1] Add `Matrix` variant to the `Command` enum in `crates/interface-cli/src/main.rs` (with `#[cfg(feature = "matrix")]` guard, doc string, and `about` text matching Mattermost style)
-- [ ] T019 [US1] Add matrix-only mode handler in `crates/interface-cli/src/main.rs`: `#[cfg(feature = "matrix")] if let Some(Command::Matrix) = &cli.command { ... }` — load config, construct `MatrixInterface`, spawn `matrix-worker` filtered worker, spawn scheduler worker, call `iface.run().await` (mirrors the Mattermost pattern at line 1180)
-- [ ] T020 [US1] Add `run-matrix` target to `Makefile`: `cargo run -p assistant-cli --features matrix -- orchestrator run --interfaces matrix --no-repl` (mirrors `run-mattermost`)
-- [ ] T021 [US1] Run `cargo test -p assistant-interface-matrix` and fix any failing tests
+- [x] T009 [P] [US1] Implement `MatrixConfigExt` trait in `crates/interface-matrix/src/config.rs` with `resolved_homeserver_url()`, `resolved_username()`, `resolved_access_token()`, `resolved_password()`, `resolved_state_store_path()` (env var fallbacks: `MATRIX_HOMESERVER_URL`, `MATRIX_USERNAME`, `MATRIX_ACCESS_TOKEN`, `MATRIX_PASSWORD`)
+- [x] T010 [P] [US1] Add unit tests for `MatrixConfigExt` in `crates/interface-matrix/src/config.rs`: explicit values used verbatim, env var fallback, TOML round-trip, `AssistantConfig` with `[matrix]` section, without section is `None`
+- [x] T011 [US1] Implement `MatrixInterface` struct with `pub fn new(config: MatrixConfig, orchestrator: Arc<Orchestrator>) -> Self` in `crates/interface-matrix/src/runner.rs`
+- [x] T012 [US1] Implement `MatrixInterface::run()` in `crates/interface-matrix/src/runner.rs`: build `matrix_sdk::Client` from `homeserver_url`, login via `access_token` or `password` (error if neither present), fetch bot `user_id` via `client.user_id()`, initialise `LruCache<String, Uuid>` (cap 10 000), register room message event handler, call `client.sync(SyncSettings::default())` in a loop with exponential backoff (1 s → 60 s cap), graceful shutdown on SIGINT/SIGTERM
+- [x] T013 [US1] Implement the `OriginalSyncRoomMessageEvent` handler closure in `crates/interface-matrix/src/runner.rs`: extract `room_id`, `sender`, `body` text; skip if `sender == bot_user_id`; skip if `allowed_rooms` non-empty and room not listed; skip if `allowed_users` non-empty and sender not listed; resolve or create `conversation_id` from LRU map; call `orchestrator.submit_turn(&text, conversation_id, Interface::Matrix, None)` and send reply via `room.send()`; on orchestrator error send a user-visible error message
+- [x] T014 [P] [US1] Add unit tests for allowlist logic in `crates/interface-matrix/src/runner.rs`: empty `allowed_rooms` accepts all; non-empty blocks unknown room; empty `allowed_users` accepts all; non-empty passes known user
+- [x] T015 [P] [US1] Implement `build_matrix_tools()` stub returning `Vec<Arc<dyn ToolHandler>>` in `crates/interface-matrix/src/tools.rs` (empty for v1; mirrors `build_mattermost_tools` signature)
+- [x] T016 [US1] Wire public exports in `crates/interface-matrix/src/lib.rs`: `pub use assistant_core::MatrixConfig; pub use runner::MatrixInterface;`
+- [x] T017 [US1] Add `matrix = ["dep:assistant-interface-matrix"]` feature and `assistant-interface-matrix = { path = "../interface-matrix", optional = true }` dependency to `crates/interface-cli/Cargo.toml`; add `matrix` to the `default` features list
+- [x] T018 [US1] Add `Matrix` variant to the `Command` enum in `crates/interface-cli/src/main.rs` (with `#[cfg(feature = "matrix")]` guard, doc string, and `about` text matching Mattermost style)
+- [x] T019 [US1] Add matrix-only mode handler in `crates/interface-cli/src/main.rs`: `#[cfg(feature = "matrix")] if let Some(Command::Matrix) = &cli.command { ... }` — load config, construct `MatrixInterface`, spawn `matrix-worker` filtered worker, spawn scheduler worker, call `iface.run().await` (mirrors the Mattermost pattern at line 1180)
+- [x] T020 [US1] Add `run-matrix` target to `Makefile`: `cargo run -p assistant-cli --features matrix -- orchestrator run --interfaces matrix --no-repl` (mirrors `run-mattermost`)
+- [x] T021 [US1] Run `cargo test -p assistant-interface-matrix` and fix any failing tests — 13 tests pass
 
 **Checkpoint**: `make run-matrix` starts, connects to a homeserver, and replies to a message in a room.
 
@@ -73,9 +73,9 @@
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US2] Implement `StrippedRoomMemberEvent` handler in `crates/interface-matrix/src/runner.rs` to auto-accept room invitations: when the bot is invited (`membership == Invited && state_key == bot_user_id`) call `room.join()`, log success or failure; this enables both DM invites and group room invites at runtime
-- [ ] T023 [P] [US2] Add unit test confirming conversation LRU map keys are isolated by `room_id`: insert two distinct room IDs, verify each maps to a different `Uuid`, verify a repeated room ID returns the same `Uuid`
-- [ ] T024 [US2] Run `cargo test -p assistant-interface-matrix` after T022–T023 and fix any failing tests
+- [x] T022 [US2] Implement `StrippedRoomMemberEvent` handler in `crates/interface-matrix/src/runner.rs` to auto-accept room invitations: when the bot is invited (`membership == Invited && state_key == bot_user_id`) call `room.join()`, log success or failure; this enables both DM invites and group room invites at runtime
+- [x] T023 [P] [US2] Add unit test confirming conversation LRU map keys are isolated by `room_id`: insert two distinct room IDs, verify each maps to a different `Uuid`, verify a repeated room ID returns the same `Uuid`
+- [x] T024 [US2] Run `cargo test -p assistant-interface-matrix` after T022–T023 and fix any failing tests
 
 **Checkpoint**: Bot auto-accepts DM invites and maintains a conversation context per DM room isolated from group rooms.
 
@@ -89,9 +89,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T025 [US3] Add background Matrix startup to the multi-interface orchestrator mode in `crates/interface-cli/src/main.rs`: `#[cfg(feature = "matrix")] if bs.config.matrix.is_some() && interface_selected(&orchestrator_interfaces, "matrix") { ... }` — spawn `matrix-worker` filtered worker and background `iface.run()` task (mirrors the Mattermost block at line 1278)
-- [ ] T026 [P] [US3] Add `matrix` to the `--interfaces` selection text/documentation in `crates/interface-cli/src/main.rs` (help text for `--interfaces` flag already lists `slack`, `mattermost`, etc.)
-- [ ] T027 [US3] Run `cargo test --workspace` after T025–T026 and fix any failing tests
+- [x] T025 [US3] Add background Matrix startup to the multi-interface orchestrator mode in `crates/interface-cli/src/main.rs`: `#[cfg(feature = "matrix")] if bs.config.matrix.is_some() && interface_selected(&orchestrator_interfaces, "matrix") { ... }` — spawn `matrix-worker` filtered worker and background `iface.run()` task (mirrors the Mattermost block at line 1278)
+- [x] T026 [P] [US3] Add `matrix` to the `--interfaces` selection text/documentation in `crates/interface-cli/src/main.rs` (help text for `--interfaces` flag already lists `slack`, `mattermost`, etc.)
+- [x] T027 [US3] Run `cargo test --workspace` after T025–T026 and fix any failing tests
 
 **Checkpoint**: `assistant orchestrator run --interfaces matrix,slack` starts both interfaces; each handles messages independently with no context leakage.
 
@@ -101,12 +101,12 @@
 
 **Purpose**: Code quality, documentation, and final verification across all user stories.
 
-- [ ] T028 [P] Update `AGENTS.md` workspace table to include `assistant-interface-matrix | crates/interface-matrix | Matrix bot interface`
-- [ ] T029 [P] Add `run-matrix` to the `run` targets list at the top of `Makefile` `.PHONY` declaration
-- [ ] T030 Run `make lint` (`cargo clippy --workspace -- -D warnings`) and fix all warnings
-- [ ] T031 Run `make format` (`cargo fmt --all`) and fix any formatting issues
-- [ ] T032 Run `cargo machete --with-metadata` and remove any unused dependencies
-- [ ] T033 Validate `specs/002-matrix-interface/quickstart.md` steps against the finished implementation; update any paths or commands that changed
+- [x] T028 [P] Update `AGENTS.md` workspace table to include `assistant-interface-matrix | crates/interface-matrix | Matrix bot interface`
+- [x] T029 [P] Add `run-matrix` to the `run` targets list at the top of `Makefile` `.PHONY` declaration
+- [x] T030 Run `make lint` (`cargo clippy --workspace -- -D warnings`) and fix all warnings — zero warnings
+- [x] T031 Run `make format` (`cargo fmt --all`) and fix any formatting issues — clean
+- [x] T032 Run `cargo machete --with-metadata` and remove any unused dependencies — clean
+- [x] T033 Validate `specs/002-matrix-interface/quickstart.md` steps against the finished implementation; update any paths or commands that changed
 
 ---
 

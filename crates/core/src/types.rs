@@ -100,6 +100,8 @@ pub enum Interface {
     Web,
     /// Background scheduled tasks and heartbeats — non-interactive.
     Scheduler,
+    /// Matrix messaging interface.
+    Matrix,
 }
 
 /// Top-level assistant configuration
@@ -135,6 +137,9 @@ pub struct AssistantConfig {
     /// Nextcloud Talk interface configuration (optional).
     /// Populated from the `[nextcloud]` section of `config.toml`.
     pub nextcloud: Option<NextcloudConfig>,
+    /// Matrix interface configuration (optional).
+    /// Populated from the `[matrix]` section of `config.toml`.
+    pub matrix: Option<MatrixConfig>,
     /// Audio transcription configuration (optional).
     /// Populated from the `[transcription]` section of `config.toml`.
     #[serde(default)]
@@ -221,6 +226,33 @@ pub struct MattermostConfig {
     #[serde(default)]
     pub allowed_channels: Vec<String>,
     /// If non-empty, only dispatch messages from these Mattermost user IDs.
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+}
+
+/// Configuration for the Matrix interface.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MatrixConfig {
+    /// Base URL of the Matrix homeserver (e.g. `"https://matrix.example.com"`).
+    pub homeserver_url: Option<String>,
+    /// Full Matrix user ID of the bot account (e.g. `"@assistant:example.com"`).
+    pub username: Option<String>,
+    /// Bot account password (used for initial login; session persisted to disk).
+    /// Prefer `access_token` for production deployments.
+    pub password: Option<String>,
+    /// Pre-issued Matrix access token (skips password login on every start).
+    pub access_token: Option<String>,
+    /// Device ID for session restoration. Auto-generated on first login if omitted.
+    pub device_id: Option<String>,
+    /// Path for the matrix-sdk SQLite state store.
+    /// Defaults to `~/.assistant/matrix-state/` at runtime.
+    pub state_store_path: Option<String>,
+    /// If non-empty, only dispatch messages from these Matrix room IDs.
+    /// An empty list accepts all rooms.
+    #[serde(default)]
+    pub allowed_rooms: Vec<String>,
+    /// If non-empty, only dispatch messages from these Matrix user IDs.
+    /// An empty list accepts all users.
     #[serde(default)]
     pub allowed_users: Vec<String>,
 }
