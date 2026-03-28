@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.63](https://github.com/cedricziel/assistant/compare/v0.1.62...v0.1.63) (2026-03-28)
+
+
+### Features
+
+* **interface-matrix:** add Matrix messaging interface ([#325](https://github.com/cedricziel/assistant/issues/325)) ([57198ca](https://github.com/cedricziel/assistant/commit/57198ca24041b8957fafc43532116d3c57326c7a))
+* **web-ui:** persona file editor UI ([#323](https://github.com/cedricziel/assistant/issues/323)) ([f718966](https://github.com/cedricziel/assistant/commit/f718966b1fe3c27a960a43f6f420904ace0e963c))
+
 ## [0.1.62](https://github.com/cedricziel/assistant/compare/v0.1.61...v0.1.62) (2026-03-27)
 
 
