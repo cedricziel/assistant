@@ -26,6 +26,7 @@ members = [
     "crates/interface-signal",
     "crates/interface-slack",
     "crates/interface-mattermost",
+    "crates/interface-matrix",
     "crates/interface-nextcloud",
     "crates/transcription",
     "crates/integration-tests",
@@ -136,6 +137,8 @@ wiremock = "0.6"
 tempfile = "3"
 # LRU cache (bounded conversation map in Mattermost/Slack runners)
 lru = "0.16"
+# Matrix interface
+matrix-sdk = { version = "0.10", features = ["sqlite", "rustls-tls"], default-features = false }
 # Slack / Mattermost interfaces
 slack-morphism = { version = "2", features = ["hyper"] }
 # Force rustls TLS on the same tokio-tungstenite major/minor used by

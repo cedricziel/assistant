@@ -137,6 +137,7 @@ pub(crate) fn parse_interface(s: &str) -> Interface {
         "slack" => Interface::Slack,
         "mattermost" => Interface::Mattermost,
         "nextcloud" => Interface::Nextcloud,
+        "matrix" => Interface::Matrix,
         "web" => Interface::Web,
         "scheduler" => Interface::Scheduler,
         _ => Interface::Cli,

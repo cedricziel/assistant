@@ -80,6 +80,12 @@ enum Command {
     /// The bot receives messages via webhooks from the Nextcloud Talk server.
     #[cfg(feature = "nextcloud")]
     Nextcloud,
+    /// Run only the Matrix bot interface (no interactive REPL).
+    ///
+    /// Requires homeserver_url and credentials configured in ~/.assistant/config.toml.
+    #[cfg(feature = "matrix")]
+    #[command(about = "Start the Matrix bot (requires [matrix] in config.toml)")]
+    Matrix,
     /// Manage Persona contexts.
     Persona {
         #[command(subcommand)]
@@ -92,7 +98,7 @@ enum Command {
     },
     /// Run only a turn worker process.
     Worker {
-        /// Interface filter (e.g. slack, mattermost, nextcloud, web, signal, any).
+        /// Interface filter (e.g. slack, mattermost, matrix, nextcloud, web, signal, any).
         #[arg(long, default_value = "any")]
         interface: String,
         /// Worker ID shown in logs and claim ownership.
@@ -116,7 +122,7 @@ enum Command {
 enum OrchestratorCommand {
     /// Start orchestrator runtime.
     Run {
-        /// Optional comma-separated interface list (slack,mattermost,nextcloud,signal).
+        /// Optional comma-separated interface list (slack,mattermost,matrix,nextcloud,signal).
         #[arg(long)]
         interfaces: Option<String>,
         /// Run without interactive REPL.
@@ -1237,6 +1243,33 @@ async fn main() -> Result<()> {
         return iface.run().await;
     }
 
+    // 9c. Matrix-only mode.
+    #[cfg(feature = "matrix")]
+    if let Some(Command::Matrix) = &cli.command {
+        use assistant_interface_matrix::MatrixInterface;
+        let matrix_cfg = bs.config.matrix.clone().context(
+            "Matrix is not configured. Add a [matrix] section to ~/.assistant/config.toml",
+        )?;
+        let iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
+
+        let worker_orch = bs.orchestrator.clone();
+        let _worker = tokio::spawn(async move {
+            worker_orch
+                .run_worker_filtered("matrix-worker", Some("Matrix"))
+                .await;
+        });
+
+        let sched_orch = bs.orchestrator.clone();
+        let _sched_worker = tokio::spawn(async move {
+            sched_orch
+                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
+                .await;
+        });
+
+        info!("Starting Matrix-only mode");
+        return iface.run().await;
+    }
+
     // 10. Default mode: interactive REPL + background interfaces.
     //
     //     Register ambient tools from configured interfaces first, then spawn
@@ -1293,6 +1326,27 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             if let Err(e) = iface.run().await {
                 tracing::error!("Mattermost interface error: {e}");
+            }
+        });
+    }
+
+    // 10b-ii. Matrix — start in background if configured.
+    #[cfg(feature = "matrix")]
+    if bs.config.matrix.is_some() && interface_selected(&orchestrator_interfaces, "matrix") {
+        use assistant_interface_matrix::MatrixInterface;
+        let matrix_cfg = bs.config.matrix.clone().unwrap_or_default();
+        let iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
+
+        let worker_orch = bs.orchestrator.clone();
+        tokio::spawn(async move {
+            worker_orch
+                .run_worker_filtered("matrix-worker", Some("Matrix"))
+                .await;
+        });
+
+        tokio::spawn(async move {
+            if let Err(e) = iface.run().await {
+                tracing::error!("Matrix interface error: {e}");
             }
         });
     }

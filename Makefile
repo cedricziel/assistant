@@ -1,4 +1,4 @@
-.PHONY: all build test lint lint-signal format clean check install-hooks vendor run run-mcp run-slack run-mattermost run-nextcloud run-signal run-webui run-worker build-signal
+.PHONY: all build test lint lint-signal format clean check install-hooks vendor run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal
 
 all: build
 
@@ -50,6 +50,10 @@ run-slack:
 # Run only the Mattermost interface (no interactive REPL)
 run-mattermost:
 	cargo run -p assistant-cli --features mattermost -- orchestrator run --interfaces mattermost --no-repl
+
+# Run only the Matrix interface (no interactive REPL)
+run-matrix:
+	cargo run -p assistant-cli --features matrix -- orchestrator run --interfaces matrix --no-repl
 
 # Run only the Nextcloud Talk interface (no interactive REPL)
 run-nextcloud:

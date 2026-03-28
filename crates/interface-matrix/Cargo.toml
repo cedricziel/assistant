@@ -1,0 +1,28 @@
+[package]
+name = "assistant-interface-matrix"
+version = "0.1.62"
+edition.workspace = true
+license.workspace = true
+description = "Matrix interface for the AI assistant (library)"
+
+[lib]
+name = "assistant_interface_matrix"
+path = "src/lib.rs"
+
+[dependencies]
+assistant-core = { path = "../core" }
+assistant-runtime = { path = "../runtime" }
+chrono = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+lru = { workspace = true }
+matrix-sdk = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }

@@ -20,7 +20,7 @@ cargo test -p assistant-runtime test_name
 cargo test -p assistant-tool-executor test_name -- --nocapture
 ```
 
-Run targets: `make run` (orchestrator), `make run-mcp` (MCP stdio), `make run-slack`, `make run-mattermost`, `make run-nextcloud`, `make run-signal`, `make run-webui`, `make run-worker`.
+Run targets: `make run` (orchestrator), `make run-mcp` (MCP stdio), `make run-slack`, `make run-mattermost`, `make run-matrix`, `make run-nextcloud`, `make run-signal`, `make run-webui`, `make run-worker`.
 
 **Always run `make lint` and `make format` before committing.** Pre-commit hooks
 enforce `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo machete --with-metadata`.
@@ -50,6 +50,7 @@ Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 | `assistant-cli`                  | `crates/interface-cli`                 | Unified binary: REPL + subcommands                                     |
 | `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot library                                                      |
 | `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot library                                                 |
+| `assistant-interface-matrix`     | `crates/interface-matrix`              | Matrix bot interface                                                   |
 | `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot                                             |
 | `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface stub (feature-gated)                                  |
 | `assistant-web-ui`               | `crates/web-ui`                        | Web UI/A2A server implementation (invoked via `assistant webui serve`) |
@@ -66,7 +67,7 @@ interface-cli -> runtime -> llm -> core
                     |-> storage -> core
                     |-> bus-nats -> core  (optional, feature = "nats")
                     |-> tool-executor -> core, storage, llm
-                    '-> mcp-server, interface-slack, interface-mattermost, interface-nextcloud (optional features)
+                    '-> mcp-server, interface-slack, interface-mattermost, interface-matrix, interface-nextcloud (optional features)
 ```
 
 ## Architecture Decisions
