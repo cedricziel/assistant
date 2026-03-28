@@ -1,0 +1,98 @@
+{% extends "base.html" %} {% block title %}New Persona{% endblock %} {% block
+breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/personas" class="breadcrumb-page">Personas</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">New Persona</span>
+{% endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>New Persona</h2>
+      </div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Create New Persona</h2>
+          <p>Personas define distinct assistant identities.</p>
+        </div>
+        <a href="/personas" class="action-btn secondary">&larr; Back</a>
+      </div>
+
+      {% match error_msg %} {% when Some with (msg) %}
+      <p class="empty" style="margin-bottom: 1rem; color: var(--danger)">
+        {{ msg }}
+      </p>
+      {% when None %} {% endmatch %}
+
+      <form
+        method="POST"
+        action="/personas"
+        style="
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+          max-width: 480px;
+        "
+      >
+        <div>
+          <label for="persona-id" style="display: block; margin-bottom: 0.25rem"
+            >ID
+            <span class="trace-id"
+              >(letters, numbers, - and _ only)</span
+            ></label
+          >
+          <input
+            id="persona-id"
+            type="text"
+            name="id"
+            required
+            placeholder="work"
+            pattern="[A-Za-z0-9_-]+"
+            title="Letters, numbers, hyphens and underscores only"
+            style="
+              width: 100%;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+            "
+          />
+        </div>
+        <div>
+          <label
+            for="persona-name"
+            style="display: block; margin-bottom: 0.25rem"
+            >Name</label
+          >
+          <input
+            id="persona-name"
+            type="text"
+            name="name"
+            required
+            placeholder="Work Assistant"
+            style="
+              width: 100%;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+            "
+          />
+        </div>
+        <div>
+          <button type="submit" class="action-btn">Create Persona</button>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %}
