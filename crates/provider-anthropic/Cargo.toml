@@ -11,7 +11,6 @@ assistant-llm        = { path = "../llm" }
 async-trait          = { workspace = true }
 anyhow               = { workspace = true }
 tokio                = { workspace = true }
-reqwest              = { workspace = true }
 reqwest-middleware    = { workspace = true }
 serde_json           = { workspace = true }
 tracing              = { workspace = true }

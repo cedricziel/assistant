@@ -30,7 +30,7 @@
 
 - List of all skills: name, source_type, description, enabled
 - Each row links to `/skills/:name` (view) and `/skills/:name/edit` (edit)
-- Delete button triggers HTMX `DELETE /skills/:name/delete` with confirm dialog
+- Delete button triggers `POST /skills/:name/delete` with confirm dialog
 - "New Skill" button links to `/skills/new`
 
 ---
@@ -166,7 +166,7 @@ description=Updated+description&body=---\nname: ...
 
 ---
 
-### DELETE `/personas/:id/skills/:skill`
+### POST `/personas/:id/skills/:skill/remove`
 
-**Success**: HTMX response removes/updates the skill row
+**Success**: Redirect to `GET /personas/:id/skills`
 **Error**: 404 if persona not found
