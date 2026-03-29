@@ -46,14 +46,18 @@ impl Drop for OtelGuard {
 ///   tracing event → bridge → BatchLogProcessor → SqliteLogExporter
 ///     → sqlx INSERT INTO logs → sqlx emits tracing event → bridge → ∞
 ///
-/// Application targets pass through at DEBUG and above.
+/// Application targets pass through at INFO and above.
+/// Noisy third-party crates (async_nats, h2, hyper_util) are suppressed below WARN.
 pub(crate) fn otel_log_bridge_filter() -> Targets {
     Targets::new()
-        .with_default(tracing::Level::DEBUG)
+        .with_default(tracing::Level::INFO)
         .with_target("sqlx", tracing::Level::ERROR)
         .with_target("sqlx::query", tracing::metadata::LevelFilter::OFF)
         .with_target("sqlx_core", tracing::metadata::LevelFilter::OFF)
         .with_target("sqlx_sqlite", tracing::metadata::LevelFilter::OFF)
+        .with_target("async_nats", tracing::Level::WARN)
+        .with_target("h2", tracing::metadata::LevelFilter::OFF)
+        .with_target("hyper_util", tracing::metadata::LevelFilter::OFF)
 }
 
 /// Install tracing subscribers and OpenTelemetry exporters.
@@ -307,7 +311,7 @@ mod tests {
         );
     }
 
-    /// Application targets must pass through at DEBUG and above.
+    /// Application targets must pass through at INFO and above.
     #[test]
     fn filter_passes_application_targets() {
         let filter = otel_log_bridge_filter();
@@ -320,8 +324,8 @@ mod tests {
             "assistant_llm::client",
         ] {
             assert!(
-                filter.would_enable(target, &tracing::Level::DEBUG),
-                "{target} DEBUG must pass"
+                !filter.would_enable(target, &tracing::Level::DEBUG),
+                "{target} DEBUG must be blocked"
             );
             assert!(
                 filter.would_enable(target, &tracing::Level::INFO),
@@ -338,15 +342,44 @@ mod tests {
         }
     }
 
-    /// TRACE-level events from application targets are not forwarded (the
-    /// default is DEBUG).
+    /// TRACE and DEBUG events from application targets are not forwarded (the
+    /// default is INFO).
     #[test]
     fn filter_blocks_trace_level_for_app() {
         let filter = otel_log_bridge_filter();
 
         assert!(
             !filter.would_enable("assistant_runtime", &tracing::Level::TRACE),
-            "TRACE should not pass (default is DEBUG)"
+            "TRACE should not pass (default is INFO)"
         );
+    }
+
+    /// async_nats must be silenced below WARN — it's the primary log volume offender.
+    #[test]
+    fn filter_blocks_async_nats_below_warn() {
+        let filter = otel_log_bridge_filter();
+
+        assert!(!filter.would_enable("async_nats", &tracing::Level::TRACE));
+        assert!(!filter.would_enable("async_nats", &tracing::Level::DEBUG));
+        assert!(!filter.would_enable("async_nats", &tracing::Level::INFO));
+        assert!(filter.would_enable("async_nats", &tracing::Level::WARN));
+        assert!(filter.would_enable("async_nats", &tracing::Level::ERROR));
+    }
+
+    /// h2 and hyper_util must be fully silenced.
+    #[test]
+    fn filter_blocks_http_internals() {
+        let filter = otel_log_bridge_filter();
+
+        for target in &["h2", "hyper_util"] {
+            assert!(
+                !filter.would_enable(target, &tracing::Level::WARN),
+                "{target} WARN must be blocked"
+            );
+            assert!(
+                !filter.would_enable(target, &tracing::Level::ERROR),
+                "{target} ERROR must be blocked"
+            );
+        }
     }
 }
