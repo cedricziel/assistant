@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.64](https://github.com/cedricziel/assistant/compare/v0.1.63...v0.1.64) (2026-03-29)
+
+
+### Features
+
+* **observability:** UI improvements for diagnosing silent failures ([#327](https://github.com/cedricziel/assistant/issues/327)) ([7428621](https://github.com/cedricziel/assistant/commit/74286216e7e9dc07431b6a8a5946ffb0f7d8269c))
+
 ## [0.1.63](https://github.com/cedricziel/assistant/compare/v0.1.62...v0.1.63) (2026-03-28)
 
 
