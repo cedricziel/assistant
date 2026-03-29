@@ -1,6 +1,8 @@
 @AGENTS.md
 
 ## Active Technologies
+- Rust 2021 edition, workspace resolver 2 + `tar 0.4`, `flate2 1`, `sha2 0.10`, `hex 0.4` (new); `serde`, `serde_json`, `tokio`, `anyhow`, `tracing`, `chrono` (existing workspace deps) (004-backup-restore)
+- SQLite at `~/.assistant/assistant.db` (WAL-checkpointed before copy); no new tables (004-backup-restore)
 
 - Rust 2021 edition, workspace resolver 2 + `sqlx` (SQLite, hand-rolled migrations), `axum` (HTTP), `askama` (003-skill-management)
 - SQLite — `~/.assistant/assistant.db`; skills also written to `~/.assistant/skills/<name>/SKILL.md` (003-skill-management)
