@@ -1,6 +1,8 @@
 @AGENTS.md
 
 ## Active Technologies
+- Rust 2021 edition, workspace resolver 2 + `sqlx` (SQLite, hand-rolled migrations), `axum` (HTTP), `askama` (003-skill-management)
+- SQLite — `~/.assistant/assistant.db`; skills also written to `~/.assistant/skills/<name>/SKILL.md` (003-skill-management)
 
 - Rust 2021 edition, workspace resolver 2 + `axum` (HTTP), `askama` (templates), `sqlx` + SQLite (storage), (003-observability-ui-improvements)
 - SQLite — `distributed_traces` + `logs` tables managed via schema migrations (003-observability-ui-improvements)
