@@ -248,11 +248,13 @@ impl TraceStore {
              FROM distributed_traces dt \
              INNER JOIN conversations c ON c.id = dt.conversation_id \
              WHERE c.agent_id = ?1 \
-               AND (?4 IS NULL OR dt.start_time >= ?4) \
-               AND (?5 IS NULL OR dt.start_time <= ?5) \
-               AND (?6 IS NULL OR json_extract(dt.attributes, '$.interface') = ?6) \
              GROUP BY dt.trace_id \
-             HAVING (?2 IS NULL) OR SUM(CASE WHEN dt.tool_name = ?2 THEN 1 ELSE 0 END) > 0 \
+             HAVING ((?2 IS NULL) OR SUM(CASE WHEN dt.tool_name = ?2 THEN 1 ELSE 0 END) > 0) \
+               AND (?4 IS NULL OR MIN(CASE WHEN dt.parent_span_id IS NULL THEN dt.start_time ELSE NULL END) >= ?4) \
+               AND (?5 IS NULL OR MAX(CASE WHEN dt.parent_span_id IS NULL THEN dt.start_time ELSE NULL END) <= ?5) \
+               AND (?6 IS NULL OR MAX(CASE WHEN dt.parent_span_id IS NULL THEN json_extract(dt.attributes, '$.interface') ELSE NULL END) = ?6) \
+               AND (?7 IS NULL OR MAX(dt.conversation_id) = ?7) \
+               AND (?8 IS NULL OR (?8 = 'error' AND SUM(CASE WHEN dt.tool_status = 'error' THEN 1 ELSE 0 END) > 0) OR (?8 IN ('ok', 'success') AND SUM(CASE WHEN dt.tool_status = 'error' THEN 1 ELSE 0 END) = 0)) \
              ORDER BY trace_start DESC \
              LIMIT ?3",
         )
@@ -262,6 +264,8 @@ impl TraceStore {
         .bind(filter.since)
         .bind(filter.until)
         .bind(filter.interface.as_deref())
+        .bind(filter.conversation.as_ref().map(|u| u.to_string()))
+        .bind(filter.status.as_deref())
         .fetch_all(&self.pool)
         .await?;
 

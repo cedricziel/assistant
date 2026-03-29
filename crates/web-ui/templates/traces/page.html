@@ -139,6 +139,8 @@ breadcrumb %}
           <input type="hidden" name="since" value="{{ selected_since }}" />
           {% endif %} {% if !selected_until.is_empty() %}
           <input type="hidden" name="until" value="{{ selected_until }}" />
+          {% endif %} {% if let Some(dur) = min_duration_ms %}
+          <input type="hidden" name="min_duration_ms" value="{{ dur }}" />
           {% endif %}
           <input
             type="hidden"
@@ -179,6 +181,12 @@ breadcrumb %}
           <input type="hidden" name="status" value="{{ status }}" />
           {% endif %} {% if let Some(iface) = selected_interface %}
           <input type="hidden" name="interface" value="{{ iface }}" />
+          {% endif %} {% if let Some(dur) = min_duration_ms %}
+          <input type="hidden" name="min_duration_ms" value="{{ dur }}" />
+          {% endif %} {% if !selected_since.is_empty() %}
+          <input type="hidden" name="since" value="{{ selected_since }}" />
+          {% endif %} {% if !selected_until.is_empty() %}
+          <input type="hidden" name="until" value="{{ selected_until }}" />
           {% endif %}
           <input
             type="hidden"
@@ -206,6 +214,8 @@ breadcrumb %}
           <input type="hidden" name="interface" value="{{ iface }}" />
           {% endif %} {% if let Some(conv) = selected_conversation %}
           <input type="hidden" name="conversation" value="{{ conv }}" />
+          {% endif %} {% if let Some(dur) = min_duration_ms %}
+          <input type="hidden" name="min_duration_ms" value="{{ dur }}" />
           {% endif %}
           <input
             type="hidden"

@@ -178,7 +178,6 @@ async fn show_dashboard(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    let status_filter = status_value.as_ref().map(|s| s.to_lowercase());
 
     let conversation_value = query
         .conversation
@@ -220,7 +219,11 @@ async fn show_dashboard(
         interface: interface_value.clone(),
         since,
         until,
-        ..TraceFilter::default()
+        conversation: conversation_value
+            .as_deref()
+            .and_then(|s| uuid::Uuid::parse_str(s).ok()),
+        status: status_value.clone(),
+        min_duration_ms,
     };
 
     let all_traces = store
@@ -242,24 +245,6 @@ async fn show_dashboard(
     let interface_facets = build_interface_facets(interface_value.as_deref());
 
     let mut traces = all_traces;
-
-    if let Some(filter) = status_filter.as_deref() {
-        traces.retain(|trace| match filter {
-            "ok" | "success" => trace.error_count == 0,
-            "error" | "fail" => trace.error_count > 0,
-            _ => true,
-        });
-    }
-
-    if let Some(filter) = conversation_value.as_ref() {
-        traces.retain(|trace| {
-            trace
-                .conversation_id
-                .as_ref()
-                .map(|id| id.to_string() == *filter)
-                .unwrap_or(false)
-        });
-    }
 
     if let Some(min_ms) = min_duration_ms {
         traces.retain(|trace| {

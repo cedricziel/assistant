@@ -91,6 +91,7 @@ pub(crate) enum DispatchOutcome {
 /// Interfaces (Slack, Mattermost) register their per-turn tools and
 /// attachments before publishing a `TurnRequest` to the bus.  The worker
 /// removes the registration when processing the request.
+#[derive(Clone)]
 pub(crate) struct ExtensionRegistration {
     pub(crate) tools: Vec<Arc<dyn ToolHandler>>,
     pub(crate) attachments: Vec<ContentBlock>,
@@ -474,6 +475,9 @@ impl Orchestrator {
                     crate::history::persist_error_recovery(&conv_store, conversation_id).await;
                     self.metrics
                         .record_error(&self.agent_id, "llm_error", "run_turn_with_tools");
+                    turn_cx.span().set_status(OtelStatus::Error {
+                        description: std::borrow::Cow::Owned(e.to_string()),
+                    });
                     return Err(e);
                 }
             };
@@ -676,6 +680,12 @@ impl Orchestrator {
         crate::history::persist_error_recovery(&conv_store, conversation_id).await;
         self.metrics
             .record_error(&self.agent_id, "max_iterations", "run_turn_with_tools");
+        turn_cx.span().set_status(OtelStatus::Error {
+            description: std::borrow::Cow::Owned(format!(
+                "Max iterations ({}) reached without a final answer",
+                self.max_iterations
+            )),
+        });
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations

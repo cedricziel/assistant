@@ -108,6 +108,11 @@ pub struct BusMessage {
     pub created_at: DateTime<Utc>,
     pub claimed_at: Option<DateTime<Utc>>,
     pub claimed_by: Option<String>,
+
+    /// How many times this message has been delivered (1 = first delivery).
+    ///
+    /// Set by NATS JetStream from message metadata; SQLite bus always returns 1.
+    pub delivery_count: u32,
 }
 
 // -- Publish Request (builder) ----------------------------------------------
@@ -315,6 +320,17 @@ pub trait MessageBus: Send + Sync {
     /// Negative acknowledge — releases the message back to
     /// [`MessageStatus::Pending`] so another worker can retry it.
     async fn nack(&self, message_id: Uuid) -> Result<()>;
+
+    /// Negative acknowledge with an explicit redelivery delay.
+    ///
+    /// The backend will wait at least `delay` before making the message
+    /// available again.  NATS JetStream implements this via
+    /// `AckKind::Nak(Some(delay))`; the SQLite bus falls back to an
+    /// immediate [`nack`](MessageBus::nack).
+    async fn nack_delayed(&self, message_id: Uuid, delay: Duration) -> Result<()> {
+        let _ = delay;
+        self.nack(message_id).await
+    }
 
     /// Mark a message as permanently [`MessageStatus::Failed`].
     async fn fail(&self, message_id: Uuid) -> Result<()>;

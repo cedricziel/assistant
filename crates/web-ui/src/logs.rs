@@ -209,8 +209,16 @@ async fn show_logs(
         .map_err(internal_error)?;
 
     let severity_options = build_severity_options(&stats, severity_label);
-    let target_facets =
-        build_target_facets(&targets, target_filter, severity_label, search, trace_id);
+    let target_facets = build_target_facets(
+        &targets,
+        target_filter,
+        severity_label,
+        search,
+        trace_id,
+        &conversation_str,
+        &since_str,
+        &until_str,
+    );
     let log_rows: Vec<LogRowView> = logs.iter().map(log_to_row_view).collect();
     let shown_count = log_rows.len();
 
@@ -386,12 +394,16 @@ fn build_severity_options(stats: &LogStats, selected: Option<&str>) -> Vec<Sever
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_target_facets(
     targets: &[String],
     selected_target: Option<&str>,
     severity: Option<&str>,
     search: Option<&str>,
     trace_id: Option<&str>,
+    conversation: &str,
+    since: &str,
+    until: &str,
 ) -> Vec<TargetFacetView> {
     targets
         .iter()
@@ -409,6 +421,15 @@ fn build_target_facets(
             }
             if let Some(tid) = trace_id {
                 params.push(format!("trace_id={}", url_encode(tid)));
+            }
+            if !conversation.is_empty() {
+                params.push(format!("conversation={}", url_encode(conversation)));
+            }
+            if !since.is_empty() {
+                params.push(format!("since={}", url_encode(since)));
+            }
+            if !until.is_empty() {
+                params.push(format!("until={}", url_encode(until)));
             }
             let url = format!("/logs?{}", params.join("&"));
             TargetFacetView {

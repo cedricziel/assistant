@@ -235,7 +235,7 @@ No backend changes needed — `/logs?conversation=<uuid>` is wired in Task 5.
 Tasks 1–3 are independent of each other and can be done in any order.
 Tasks 4–6 depend on the corresponding storage task:
 
-```
+```text
 Task 1  (runtime)    → no deps
 Task 2  (storage)    → no deps
 Task 3  (storage)    → no deps

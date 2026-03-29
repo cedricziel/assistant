@@ -93,6 +93,12 @@ breadcrumb %}
           <input type="hidden" name="target" value="{{ target }}" />
           {% endif %} {% if let Some(tid) = trace_id_filter %}
           <input type="hidden" name="trace_id" value="{{ tid }}" />
+          {% endif %} {% if let Some(search) = search_query %}
+          <input type="hidden" name="search" value="{{ search }}" />
+          {% endif %} {% if !selected_since.is_empty() %}
+          <input type="hidden" name="since" value="{{ selected_since }}" />
+          {% endif %} {% if !selected_until.is_empty() %}
+          <input type="hidden" name="until" value="{{ selected_until }}" />
           {% endif %}
           <input
             type="text"
@@ -117,6 +123,10 @@ breadcrumb %}
             name="conversation"
             value="{{ selected_conversation }}"
           />
+          {% endif %} {% if let Some(tid) = trace_id_filter %}
+          <input type="hidden" name="trace_id" value="{{ tid }}" />
+          {% endif %} {% if let Some(search) = search_query %}
+          <input type="hidden" name="search" value="{{ search }}" />
           {% endif %}
           <label class="filter-label">From</label>
           <input

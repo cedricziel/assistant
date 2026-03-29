@@ -135,7 +135,7 @@ description: "Task list for Observability UI Improvements"
 
 ### Story Dependencies
 
-```
+```text
 T001-T004  (Setup + Foundation)  → no deps; start immediately
 T005-T006  (US1 — Runtime fix)   → depends on T004; no deps on US2 or US3
 T007-T013  (US2 — Replied+Iface) → depends on T004; no deps on US1 or US3
@@ -145,7 +145,7 @@ T022-T024  (Polish)              → depends on all stories complete
 
 ### Within US2
 
-```
+```text
 T007 (TraceSummary fields) ──┐
 T008 (TraceFilter struct)  ──┤→ T009 (query update) → T010 (call site) → T012 (view model) → T013 (template)
 T011 (storage tests)         │ [parallel with T009 once T007+T008 done]
@@ -153,7 +153,7 @@ T011 (storage tests)         │ [parallel with T009 once T007+T008 done]
 
 ### Within US3
 
-```
+```text
 T014 (logs storage) → T015 (call site update) → T019 (logs web-ui) → T020 (logs template)
 T016 (storage tests)  [parallel with T015]
 T017 (traces web-ui) → T018 (traces template)  [parallel with T019 once T014 done]
