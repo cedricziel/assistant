@@ -262,8 +262,9 @@ pub async fn delete_skill(
     match state.registry.delete_user_skill(&name).await {
         Ok(()) => Redirect::to("/skills").into_response(),
         Err(e) => {
-            if e.to_string().contains("Cannot delete builtin") {
-                return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+            let msg = e.to_string();
+            if msg.contains("Cannot delete builtin") || msg.contains("project-scoped") {
+                return (StatusCode::FORBIDDEN, msg).into_response();
             }
             warn!("Failed to delete skill '{}': {}", name, e);
             internal_error(e).into_response()
@@ -345,7 +346,7 @@ pub async fn generate_skill(
             // return name/description/body separately.  On parse failure we
             // return the raw answer as the body so the user can still see it.
             let raw = turn_result.answer;
-            let tmp_dir = std::path::PathBuf::from("/tmp");
+            let tmp_dir = std::env::temp_dir();
             let (name, description, body) =
                 match parse_skill_content(&raw, &tmp_dir, SkillSource::User) {
                     Ok(def) => (def.name, def.description, def.body.trim_start().to_string()),

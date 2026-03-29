@@ -31,7 +31,7 @@ use assistant_runtime::{
 };
 use assistant_skills::SkillSource;
 use assistant_storage::{
-    registry::SkillRegistry, PersonaSkillAccessStore, RefinementStatus, StorageLayer,
+    registry::SkillRegistry, PersonaSkillAccessStore, PersonaStore, RefinementStatus, StorageLayer,
 };
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 
@@ -728,6 +728,10 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
             persona_id,
             skill_name,
         } => {
+            let persona_store = PersonaStore::new(storage.pool.clone());
+            if persona_store.get(persona_id).await?.is_none() {
+                anyhow::bail!("Persona '{}' not found", persona_id);
+            }
             let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
             let mode = access_store.get_mode(persona_id).await?;
             if mode == "all" {
@@ -747,6 +751,10 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
             persona_id,
             skill_name,
         } => {
+            let persona_store = PersonaStore::new(storage.pool.clone());
+            if persona_store.get(persona_id).await?.is_none() {
+                anyhow::bail!("Persona '{}' not found", persona_id);
+            }
             let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
             access_store.remove_skill(persona_id, skill_name).await?;
             println!(
@@ -759,9 +767,26 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_skill(db_path: &Path, command: &SkillCommand) -> Result<()> {
+async fn cmd_skill(db_path: &Path, config: &AssistantConfig, command: &SkillCommand) -> Result<()> {
     let storage = StorageLayer::new(db_path).await?;
     let registry = SkillRegistry::new(storage.pool.clone()).await?;
+
+    // Load builtin and on-disk skills so commands like `list`, `show`, and
+    // `create` (duplicate check) see the full registry — not just SQLite rows.
+    registry
+        .load_embedded()
+        .await
+        .context("Failed to load embedded skills")?;
+    let project_root = std::env::current_dir().ok();
+    let dirs_to_scan = assistant_runtime::bootstrap::skill_dirs(config, project_root.as_deref());
+    let dirs_ref: Vec<(&Path, SkillSource)> = dirs_to_scan
+        .iter()
+        .map(|(p, s)| (p.as_path(), s.clone()))
+        .collect();
+    registry
+        .load_from_dirs(&dirs_ref)
+        .await
+        .context("Failed to load skills from directories")?;
 
     match command {
         SkillCommand::List { persona } => {
@@ -1177,7 +1202,7 @@ async fn main() -> Result<()> {
     if let Some(Command::Skill { command }) = &cli.command {
         // Generate needs the full Orchestrator — handled after bootstrap.
         if !matches!(command, SkillCommand::Generate { .. }) {
-            return cmd_skill(&db_path, command).await;
+            return cmd_skill(&db_path, &config, command).await;
         }
     }
 

@@ -217,16 +217,20 @@ impl SkillRegistry {
             .await
             .with_context(|| format!("Failed to write {}", skill_md_tmp.display()))?;
 
-        // Upsert to DB.  On failure clean up the temp file and propagate.
-        if let Err(e) = self.register(def.clone()).await {
+        // Atomically rename into place before touching the DB so the
+        // on-disk state is consistent even if the SQLite write fails.
+        if let Err(e) = tokio::fs::rename(&skill_md_tmp, &skill_md).await {
             let _ = tokio::fs::remove_file(&skill_md_tmp).await;
-            return Err(e).with_context(|| format!("Failed to upsert skill '{}' to SQLite", name));
+            return Err(e)
+                .with_context(|| format!("Failed to rename temp file to {}", skill_md.display()));
         }
 
-        // Atomically rename into place.
-        tokio::fs::rename(&skill_md_tmp, &skill_md)
-            .await
-            .with_context(|| format!("Failed to rename temp file to {}", skill_md.display()))?;
+        // Upsert to DB/cache.  On failure remove the SKILL.md we just wrote
+        // so the disk stays consistent with the registry.
+        if let Err(e) = self.register(def.clone()).await {
+            let _ = tokio::fs::remove_dir_all(&skill_dir).await;
+            return Err(e).with_context(|| format!("Failed to upsert skill '{}' to SQLite", name));
+        }
 
         info!("Created user skill '{}' at {}", name, skill_dir.display());
         Ok(def)
@@ -270,16 +274,19 @@ impl SkillRegistry {
             .await
             .with_context(|| format!("Failed to write {}", skill_md_tmp.display()))?;
 
-        // Upsert to DB.  On failure clean up the temp file and propagate.
-        if let Err(e) = self.register(updated).await {
+        // Atomically rename into place before touching the DB so the
+        // on-disk state is consistent even if the SQLite write fails.
+        if let Err(e) = tokio::fs::rename(&skill_md_tmp, &skill_md).await {
             let _ = tokio::fs::remove_file(&skill_md_tmp).await;
-            return Err(e).with_context(|| format!("Failed to upsert skill '{}' to SQLite", name));
+            return Err(e)
+                .with_context(|| format!("Failed to rename temp file to {}", skill_md.display()));
         }
 
-        // Atomically rename into place.
-        tokio::fs::rename(&skill_md_tmp, &skill_md)
+        // Upsert to DB/cache.  If this fails the disk already has the new
+        // content; the next startup scan will re-sync the DB automatically.
+        self.register(updated)
             .await
-            .with_context(|| format!("Failed to rename temp file to {}", skill_md.display()))?;
+            .with_context(|| format!("Failed to upsert skill '{}' to SQLite", name))?;
 
         info!("Updated user skill '{}'", name);
         Ok(())
@@ -307,22 +314,23 @@ impl SkillRegistry {
         }
 
         let dir = existing.dir.clone();
-        self.remove(name).await?;
 
+        // Remove from disk first.  If the DB step fails afterwards the
+        // directory is already gone so there is no ghost resurrection on the
+        // next startup scan.
         match tokio::fs::remove_dir_all(&dir).await {
             Ok(()) => info!("Deleted skill directory {}", dir.display()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 warn!("Skill directory already gone: {}", dir.display());
             }
             Err(e) => {
-                // Propagate: the skill was removed from DB/cache but the
-                // directory remains.  Without the directory removal the skill
-                // will resurrect on the next startup scan.
                 return Err(e).with_context(|| {
                     format!("Failed to remove skill directory {}", dir.display())
                 });
             }
         }
+
+        self.remove(name).await?;
         Ok(())
     }
 

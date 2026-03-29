@@ -468,7 +468,9 @@ test.describe("Authenticated pages", () => {
     // Navigate to the default persona's skill access page
     // First find a persona id by going to contexts page
     await navigateAndSettle(page, "/contexts");
-    const firstPersonaLink = page.locator('a[href*="/personas/"]').first();
+    const firstPersonaLink = page
+      .locator('a[href*="/personas/"]:not([href="/personas/new"])')
+      .first();
     const personaHref = await firstPersonaLink.getAttribute("href");
     if (!personaHref) {
       // No personas yet — skip screenshot, just verify no crash
