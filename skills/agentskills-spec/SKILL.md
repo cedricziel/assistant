@@ -26,7 +26,7 @@ name: <kebab-case-name>
 description: <human-readable description>
 license: <SPDX license identifier>
 compatibility: <optional version or platform constraint>
-allowed-tools: <space-separated list of tool names>
+allowed-tools: <space-separated kebab-case tool IDs (e.g. file-read web-fetch bash)>
 metadata:
   key: value
 ---
@@ -42,7 +42,7 @@ metadata:
 | `description`   | Yes      | Non-empty; max 1024 chars                                                                |
 | `license`       | No       | SPDX identifier (e.g. MIT, Apache-2.0)                                                   |
 | `compatibility` | No       | Max 500 chars; version constraint or platform note                                       |
-| `allowed-tools` | No       | Space-separated tool names (e.g. `Bash jq`)                                              |
+| `allowed-tools` | No       | Space-separated kebab-case tool IDs (e.g. `file-read web-fetch bash`)                    |
 | `metadata`      | No       | Arbitrary key/value map for custom attributes                                            |
 
 ### Body
@@ -67,7 +67,7 @@ metadata:
 name: git-commit
 description: Teaches the agent to write semantic git commit messages following the Conventional Commits specification.
 license: MIT
-allowed-tools: Bash
+allowed-tools: bash file-read
 ---
 
 ## Conventional Commits

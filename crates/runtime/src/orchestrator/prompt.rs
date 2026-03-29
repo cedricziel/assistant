@@ -31,7 +31,7 @@ impl Orchestrator {
                 tracing::warn!(
                     persona = %self.agent_id,
                     error = %e,
-                    "Failed to filter skills by persona; falling back to full list"
+                    "Failed to filter skills by persona; returning empty list"
                 );
                 vec![]
             });

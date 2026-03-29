@@ -81,7 +81,7 @@
 - [x] T031 [US2] Add `Command::Skill { command: SkillCommand }` top-level variant and `enum SkillCommand`
 - [x] T032 [US2] Implement `SkillCommand::List` handler
 - [x] T033 [US2] Implement `SkillCommand::Show` handler
-- [x] T034 [US2] Implement `SkillCommand::Create` handler (requires --body-file)
+- [x] T034 [US2] Implement `SkillCommand::Create` handler (`--body-file` optional; opens `$EDITOR` when omitted)
 - [x] T035 [US2] Implement `SkillCommand::Delete` handler with [y/N] prompt
 - [x] T036 [US2] Add `PersonaCommand::SkillMode/SkillAdd/SkillRemove` variants
 - [x] T037 [US2] Implement `PersonaCommand::SkillMode` handler

@@ -580,6 +580,16 @@ async fn add_skill(
         return (StatusCode::BAD_REQUEST, "Invalid agent ID".to_string()).into_response();
     }
 
+    // Verify the persona exists before touching skill access state.
+    let persona_store = PersonaStore::new(state.pool.clone());
+    match persona_store.get(&id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, format!("Persona '{}' not found", id)).into_response()
+        }
+        Err(e) => return internal_error(e).into_response(),
+    }
+
     let access_store = PersonaSkillAccessStore::new(state.pool.clone());
 
     // Validate mode is not "all" before adding.

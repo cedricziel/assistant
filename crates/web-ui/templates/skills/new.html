@@ -55,8 +55,8 @@ breadcrumb %}
             required
             value="{{ name }}"
             placeholder="my-skill"
-            pattern="[a-z0-9][a-z0-9-]*"
-            title="Lowercase letters, numbers, and hyphens only"
+            pattern="[a-z0-9]+(-[a-z0-9]+)*"
+            title="Lowercase letters and digits, separated by single hyphens (no leading, trailing, or consecutive hyphens)"
             style="
               width: 100%;
               padding: 0.5rem;
@@ -137,6 +137,11 @@ breadcrumb %}
           Describe what the skill should do and the assistant will draft a
           SKILL.md body.
         </p>
+        <label
+          for="gen-description"
+          style="display: block; margin-bottom: 0.25rem; font-size: 0.9rem"
+          >Describe the skill goal</label
+        >
         <div
           style="
             display: flex;

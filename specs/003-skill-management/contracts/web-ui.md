@@ -5,20 +5,20 @@
 
 ## Route Table
 
-| Method | Path                          | Handler                    | Description                       |
-| ------ | ----------------------------- | -------------------------- | --------------------------------- |
-| GET    | `/skills`                     | `skills::list`             | List all skills                   |
-| GET    | `/skills/new`                 | `skills::new_form`         | New skill form                    |
-| POST   | `/skills`                     | `skills::create`           | Create skill                      |
-| GET    | `/skills/:name`               | `skills::show`             | Skill detail                      |
-| GET    | `/skills/:name/edit`          | `skills::edit_form`        | Edit skill form                   |
-| POST   | `/skills/:name`               | `skills::update`           | Update skill (HTMX `_method=PUT`) |
-| POST   | `/skills/:name/delete`        | `skills::delete`           | Delete skill (HTMX confirm)       |
-| POST   | `/skills/generate`            | `skills::generate`         | AI generation                     |
-| GET    | `/personas/:id/skills`        | `personas::skill_access`   | Persona skill access page         |
-| POST   | `/personas/:id/skills/mode`   | `personas::set_skill_mode` | Set access mode                   |
-| POST   | `/personas/:id/skills/add`    | `personas::add_skill`      | Add to persona list               |
-| DELETE | `/personas/:id/skills/:skill` | `personas::remove_skill`   | Remove from persona list          |
+| Method | Path                                 | Handler                    | Description                       |
+| ------ | ------------------------------------ | -------------------------- | --------------------------------- |
+| GET    | `/skills`                            | `skills::list`             | List all skills                   |
+| GET    | `/skills/new`                        | `skills::new_form`         | New skill form                    |
+| POST   | `/skills`                            | `skills::create`           | Create skill                      |
+| GET    | `/skills/:name`                      | `skills::show`             | Skill detail                      |
+| GET    | `/skills/:name/edit`                 | `skills::edit_form`        | Edit skill form                   |
+| POST   | `/skills/:name`                      | `skills::update`           | Update skill (HTMX `_method=PUT`) |
+| POST   | `/skills/:name/delete`               | `skills::delete`           | Delete skill (HTMX confirm)       |
+| POST   | `/skills/generate`                   | `skills::generate`         | AI generation                     |
+| GET    | `/personas/:id/skills`               | `personas::skill_access`   | Persona skill access page         |
+| POST   | `/personas/:id/skills/mode`          | `personas::set_skill_mode` | Set access mode                   |
+| POST   | `/personas/:id/skills/add`           | `personas::add_skill`      | Add to persona list               |
+| POST   | `/personas/:id/skills/:skill/remove` | `personas::remove_skill`   | Remove from persona list          |
 
 ## Request / Response Contracts
 
