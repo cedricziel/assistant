@@ -312,11 +312,22 @@ pub async fn generate_skill(
             .into_response();
     }
 
+    // Embed the agentskills-spec body directly so generation works correctly
+    // even when the active persona's skill list would otherwise filter it out.
+    let spec_body = state
+        .registry
+        .get("agentskills-spec")
+        .await
+        .map(|s| s.body)
+        .unwrap_or_default();
+
     let prompt = format!(
-        "Using the agentskills-spec builtin skill as your authoritative specification, \
-         generate a complete and valid SKILL.md for the following description:\n\n{}\n\n\
+        "You are generating a SKILL.md file.  Use the following authoritative \
+         specification as your reference:\n\n<agentskills-spec>\n{spec}\n</agentskills-spec>\n\n\
+         Generate a complete and valid SKILL.md for the following description:\n\n{desc}\n\n\
          Output ONLY the raw SKILL.md content — no explanation, no markdown fences.",
-        req.description.trim()
+        spec = spec_body,
+        desc = req.description.trim()
     );
 
     let conversation_id = Uuid::new_v4();

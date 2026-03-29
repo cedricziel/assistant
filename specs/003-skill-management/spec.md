@@ -84,7 +84,7 @@ A user requests the agent to generate a skill for them by describing what they w
 
 1. **Given** the web UI skills creation page, **When** the user clicks "Generate with AI" and provides a plain-language description, **Then** the agent returns a SKILL.md draft pre-populated in the editor with valid frontmatter and body
 2. **Given** the CLI, **When** the user runs `assistant skill generate "Teach the agent how to write git commit messages"`, **Then** the generated SKILL.md content is printed; the user can pipe or redirect it for review
-3. **Given** a generated skill draft displayed to the user, **When** the user saves it, **Then** it is stored as a new user-scoped or persona-scoped skill
+3. **Given** a generated skill draft displayed to the user, **When** the user saves it, **Then** it is stored as a new user-scoped skill in the shared registry (persona-specific access is configured separately via allow/deny lists)
 4. **Given** the generation agent, **When** it produces a skill, **Then** the output complies with agentskills.io spec structure (valid frontmatter fields: name, description, license, compatibility, allowed-tools)
 
 ---
@@ -126,7 +126,7 @@ A user requests the agent to generate a skill for them by describing what they w
 - **FR-013**: The CLI MUST provide `assistant skill generate "<description>"` that prints a generated SKILL.md draft to stdout
 - **FR-014**: The AI generation action MUST produce output conforming to agentskills.io spec structure (valid frontmatter with at minimum `name` and `description` fields)
 - **FR-015**: Skill names MUST be validated as kebab-case (lowercase letters, digits, hyphens; max 64 characters) and the system MUST reject non-conforming names with a descriptive error
-- **FR-016**: The system MUST prevent duplicate skill names within the same scope (global or per-persona)
+- **FR-016**: The system MUST prevent duplicate skill names globally across the shared registry
 
 ### Key Entities
 
@@ -159,4 +159,4 @@ A user requests the agent to generate a skill for them by describing what they w
 - All writes to user/installed skills persist to both `~/.assistant/skills/<name>/SKILL.md` on disk and the SQLite registry atomically; the two stores are kept in lockstep
 - Importing or bulk-uploading skill directories is out of scope for v1
 - The `project`-source skill type (read from `<project>/.assistant/skills/`) remains filesystem-only and is not manageable via UI/CLI in v1
-- If a persona is deleted, its scoped skills are promoted to global scope with a warning, preserving skill content
+- If a persona is deleted, its skill access rules (mode and list) are removed; skills in the shared registry are unaffected

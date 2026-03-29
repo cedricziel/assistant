@@ -1288,11 +1288,22 @@ async fn main() -> Result<()> {
         let worker_orch = bs.orchestrator.clone();
         let _worker = tokio::spawn(async move { worker_orch.run_worker("generate-worker").await });
 
+        // Embed the agentskills-spec body directly so generation works correctly
+        // even when the active persona's skill list would otherwise filter it out.
+        let spec_body = bs
+            .registry
+            .get("agentskills-spec")
+            .await
+            .map(|s| s.body)
+            .unwrap_or_default();
+
         let prompt = format!(
-            "Using the agentskills-spec builtin skill as your authoritative specification, \
-             generate a complete and valid SKILL.md for the following description:\n\n{}\n\n\
+            "You are generating a SKILL.md file.  Use the following authoritative \
+             specification as your reference:\n\n<agentskills-spec>\n{spec}\n</agentskills-spec>\n\n\
+             Generate a complete and valid SKILL.md for the following description:\n\n{desc}\n\n\
              Output ONLY the raw SKILL.md content — no explanation, no markdown fences.",
-            description
+            spec = spec_body,
+            desc = description
         );
 
         let result = bs
