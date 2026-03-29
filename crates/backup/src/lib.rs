@@ -437,21 +437,21 @@ impl RestoreEngine {
         }
 
         // Extract
-        let warnings = extract_tar_gz(&opts.archive_path, &opts.install_dir, &manifest)
-            .context("extracting archive")?;
+        let (warnings, restored_count) =
+            extract_tar_gz(&opts.archive_path, &opts.install_dir, &manifest)
+                .context("extracting archive")?;
 
         for w in &warnings {
             warn!("{}", w);
         }
 
-        let count = manifest.entries.len();
         info!(
             "restore complete: {} files restored to {:?}",
-            count, opts.install_dir
+            restored_count, opts.install_dir
         );
 
         Ok(RestoreResult {
-            restored_count: count,
+            restored_count,
             warnings,
             manifest,
         })

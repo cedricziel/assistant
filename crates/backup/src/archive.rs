@@ -106,12 +106,15 @@ pub fn read_tar_gz_manifest(archive_path: &Path) -> Result<BackupManifest> {
 /// Each entry is verified against the corresponding `ManifestEntry` checksum.
 /// Entries with `..` path components are skipped with a warning (path-traversal guard).
 ///
-/// Returns a list of non-fatal warning strings.
+/// Returns `(warnings, written_count)` where `warnings` is a list of non-fatal
+/// messages for skipped entries and `written_count` is the number of files
+/// actually written to disk (may be less than `manifest.entries.len()` when
+/// entries are skipped by the path-traversal guard).
 pub fn extract_tar_gz(
     archive_path: &Path,
     install_dir: &Path,
     manifest: &BackupManifest,
-) -> Result<Vec<String>> {
+) -> Result<(Vec<String>, usize)> {
     let file = std::fs::File::open(archive_path)
         .with_context(|| format!("opening archive {:?}", archive_path))?;
     let gz = GzDecoder::new(file);
@@ -210,7 +213,7 @@ pub fn extract_tar_gz(
         debug!("restored {:?}", dest);
     }
 
-    Ok(warnings)
+    Ok((warnings, to_write.len()))
 }
 
 /// Build a minimal in-memory `.tar.gz` archive for testing.
@@ -326,11 +329,16 @@ mod tests {
             }],
         };
 
-        let warnings = extract_tar_gz(&archive_path, install_dir.path(), &manifest).unwrap();
+        let (warnings, written) =
+            extract_tar_gz(&archive_path, install_dir.path(), &manifest).unwrap();
         assert!(
             warnings.iter().any(|w| w.contains("unsafe path")),
             "expected path-traversal warning, got: {:?}",
             warnings
+        );
+        assert_eq!(
+            written, 0,
+            "no files should be written when entry is skipped"
         );
         // Nothing must have been written inside install_dir either
         assert_eq!(
