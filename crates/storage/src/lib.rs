@@ -4,6 +4,7 @@ pub mod logs;
 pub mod memory_chunks;
 pub mod message_bus;
 pub mod metrics;
+pub mod persona_skill_access;
 pub mod personas;
 pub mod refinements;
 pub mod registry;
@@ -21,6 +22,7 @@ pub use message_bus::SqliteMessageBus;
 pub use metrics::{
     MetricsStore, MetricsSummary, ModelTokenUsage, ResourceRecord, TimeSeriesPoint, ToolUsageStats,
 };
+pub use persona_skill_access::PersonaSkillAccessStore;
 pub use personas::{PersonaRecord, PersonaStore};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
@@ -116,6 +118,11 @@ impl StorageLayer {
     /// Convenience: build an [`AgentStore`] backed by this pool.
     pub fn agent_store(&self) -> AgentStore {
         AgentStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`PersonaSkillAccessStore`] backed by this pool.
+    pub fn persona_skill_access_store(&self) -> PersonaSkillAccessStore {
+        PersonaSkillAccessStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`SqliteMessageBus`] backed by this pool.
@@ -295,6 +302,14 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "027_slack_active_threads",
             include_str!("../../../migrations/027_slack_active_threads.sql"),
+        ),
+        (
+            "028_skill_body",
+            include_str!("../../../migrations/028_skill_body.sql"),
+        ),
+        (
+            "029_persona_skill_access",
+            include_str!("../../../migrations/029_persona_skill_access.sql"),
         ),
     ];
 

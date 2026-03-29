@@ -1,6 +1,7 @@
 @AGENTS.md
 
 ## Active Technologies
+
 - Rust 2021 edition, workspace resolver 2 + `sqlx` (SQLite, hand-rolled migrations), `axum` (HTTP), `askama` (003-skill-management)
 - SQLite — `~/.assistant/assistant.db`; skills also written to `~/.assistant/skills/<name>/SKILL.md` (003-skill-management)
 
@@ -14,5 +15,6 @@
 
 ## Recent Changes
 
+- 003-skill-management: `SkillRegistry` gains `create_user_skill`, `update_user_skill`, `delete_user_skill`, `list_for_persona`. New `PersonaSkillAccessStore` manages per-persona access modes (all/whitelist/blacklist) and skill lists. Migrations 028 (body_text column) and 029 (persona_skill_access). Web UI at `/skills` with full CRUD. CLI `assistant skill list/show/create/delete` and `assistant persona skill-mode/skill-add/skill-remove`. Orchestrator filters skills by persona access mode.
 - 002-matrix-interface: Added Rust 2021 edition (workspace edition) + `matrix-sdk` (Matrix client SDK for Rust), `tokio` (async runtime), `anyhow` (error handling), `tracing` (structured logging), `lru` (bounded conversation cache), `uuid` (conversation IDs), `serde` + `toml` (configuration)
 - 002-persona-editor-ui: Added Rust 2021 edition + Axum (HTTP server), Askama (server-side templates), tokio::fs (async file I/O), sqlx + SQLite (PersonaStore), HTMX + Stimulus.js (frontend interactivity)

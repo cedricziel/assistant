@@ -7,6 +7,8 @@ pub struct PersonaRecord {
     pub id: String,
     pub name: String,
     pub is_default: bool,
+    /// Skill access mode: "all", "whitelist", or "blacklist". Defaults to "all".
+    pub skill_access_mode: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -70,7 +72,7 @@ impl PersonaStore {
 
     pub async fn list(&self) -> Result<Vec<PersonaRecord>> {
         let rows = sqlx::query(
-            "SELECT id, name, is_default, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, created_at, updated_at
              FROM personas
              ORDER BY is_default DESC, id ASC",
         )
@@ -122,7 +124,7 @@ impl PersonaStore {
 
     pub async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
         let row = sqlx::query(
-            "SELECT id, name, is_default, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, created_at, updated_at
              FROM personas
              WHERE id = ?1",
         )
@@ -176,6 +178,9 @@ fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
         id: row.get("id"),
         name: row.get("name"),
         is_default: row.get::<i64, _>("is_default") != 0,
+        skill_access_mode: row
+            .try_get("skill_access_mode")
+            .unwrap_or_else(|_| "all".to_string()),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })

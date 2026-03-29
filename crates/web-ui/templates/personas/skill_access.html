@@ -1,0 +1,27 @@
+{% extends "base.html" %} {% block title %}Skill Access — {{ persona_name }}{%
+endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Skill Access</h2>
+      </div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Skill Access: <span class="trace-id">{{ persona_id }}</span></h2>
+          <p>Configure which skills are available to this persona.</p>
+        </div>
+        <a href="/personas/{{ persona_id }}" class="action-btn secondary"
+          >&larr; Back</a
+        >
+      </div>
+      <p class="empty">Skill access control — coming soon (Phase 5).</p>
+    </div>
+  </main>
+</div>
+{% endblock %}

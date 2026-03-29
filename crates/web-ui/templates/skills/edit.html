@@ -1,0 +1,124 @@
+{% extends "base.html" %} {% block title %}Edit {{ name }}{% endblock %} {%
+block breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/skills" class="breadcrumb-page">Skills</a>
+<span class="breadcrumb-sep">/</span>
+<a href="/skills/{{ name }}" class="breadcrumb-page">{{ name }}</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Edit</span>
+{% endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Edit Skill</h2>
+      </div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Edit <span class="trace-id">{{ name }}</span></h2>
+          <p>Update the skill description and body.</p>
+        </div>
+        <a href="/skills/{{ name }}" class="action-btn secondary"
+          >&larr; Back</a
+        >
+      </div>
+
+      {% match error %} {% when Some with (msg) %}
+      <p class="empty" style="margin-bottom: 1rem; color: var(--danger)">
+        {{ msg }}
+      </p>
+      {% when None %} {% endmatch %}
+
+      <form
+        method="POST"
+        action="/skills/{{ name }}/edit"
+        style="
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+          max-width: 640px;
+        "
+      >
+        <div>
+          <label style="display: block; margin-bottom: 0.25rem">
+            Name <span class="trace-id">(read-only)</span>
+          </label>
+          <input
+            type="text"
+            value="{{ name }}"
+            disabled
+            style="
+              width: 100%;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: var(--muted);
+              opacity: 0.7;
+            "
+          />
+        </div>
+        <div>
+          <label
+            for="skill-description"
+            style="display: block; margin-bottom: 0.25rem"
+            >Description</label
+          >
+          <input
+            id="skill-description"
+            type="text"
+            name="description"
+            required
+            value="{{ description }}"
+            style="
+              width: 100%;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+            "
+          />
+        </div>
+        <div>
+          <label
+            for="skill-body"
+            style="display: block; margin-bottom: 0.25rem"
+          >
+            Body
+            <span class="trace-id"
+              >(instructions injected into system prompt)</span
+            >
+          </label>
+          <textarea
+            id="skill-body"
+            name="body"
+            rows="12"
+            style="
+              width: 100%;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+              font-family: monospace;
+              resize: vertical;
+            "
+          >
+{{ body }}</textarea
+          >
+        </div>
+        <div>
+          <button type="submit" class="action-btn">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %}

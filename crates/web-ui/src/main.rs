@@ -6,6 +6,7 @@ pub mod common;
 mod contexts;
 mod logs;
 mod pwa;
+mod skills;
 pub(crate) mod static_assets;
 mod traces;
 mod webhooks;
@@ -115,6 +116,7 @@ struct Args {
 pub(crate) struct AppState {
     pub(crate) pool: SqlitePool,
     pub(crate) agent_id: Arc<RwLock<String>>,
+    pub(crate) registry: Arc<SkillRegistry>,
     pub(crate) trace_limit: i64,
     pub(crate) log_limit: i64,
     pub(crate) bus_kind: BusKind,
@@ -234,24 +236,6 @@ async fn run_with_args(args: Args) -> Result<()> {
     }
     personas.ensure_exists(&selected_agent).await?;
 
-    let state = AppState {
-        pool: storage.pool.clone(),
-        agent_id: Arc::new(RwLock::new(selected_agent.clone())),
-        trace_limit: args.trace_limit,
-        log_limit: args.log_limit,
-        bus_kind: config.bus.kind.clone(),
-        nats_url: config
-            .bus
-            .nats_url
-            .clone()
-            .or_else(|| std::env::var("NATS_URL").ok()),
-        nats_token: config
-            .bus
-            .token
-            .clone()
-            .or_else(|| std::env::var("NATS_TOKEN").ok()),
-    };
-
     // -- Build the full orchestrator chain -----------------------------------
     //
     // The web UI MUST route chat messages through the Orchestrator so the
@@ -300,6 +284,25 @@ async fn run_with_args(args: Args) -> Result<()> {
         .context("Failed to load skills from directories")?;
 
     let registry = Arc::new(registry);
+
+    let state = AppState {
+        pool: storage.pool.clone(),
+        agent_id: Arc::new(RwLock::new(selected_agent.clone())),
+        registry: registry.clone(),
+        trace_limit: args.trace_limit,
+        log_limit: args.log_limit,
+        bus_kind: config.bus.kind.clone(),
+        nats_url: config
+            .bus
+            .nats_url
+            .clone()
+            .or_else(|| std::env::var("NATS_URL").ok()),
+        nats_token: config
+            .bus
+            .token
+            .clone()
+            .or_else(|| std::env::var("NATS_TOKEN").ok()),
+    };
 
     // 2. LLM provider
     let llm: Arc<dyn LlmProvider> = match config.llm.provider {
@@ -463,6 +466,10 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
+    let skills_pages_state = skills::pages::SkillsPagesState {
+        registry: state.registry.clone(),
+    };
+
     let chat_state =
         chat::ChatState::new(storage.pool.clone(), orchestrator, selected_agent.clone());
 
@@ -498,6 +505,8 @@ async fn run_with_args(args: Args) -> Result<()> {
         .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
         // Workflow graph management pages + JSON API.
         .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
+        // Skill management pages.
+        .merge(skills::skills_router().with_state(skills_pages_state))
         // Chat interface.
         .merge(chat::chat_router().with_state(chat_state))
         .route_layer(axum::middleware::from_fn(

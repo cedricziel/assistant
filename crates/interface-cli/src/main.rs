@@ -30,7 +30,9 @@ use assistant_runtime::{
     start_conversation_context, Orchestrator,
 };
 use assistant_skills::SkillSource;
-use assistant_storage::{registry::SkillRegistry, RefinementStatus, StorageLayer};
+use assistant_storage::{
+    registry::SkillRegistry, PersonaSkillAccessStore, RefinementStatus, StorageLayer,
+};
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 
 #[cfg(feature = "signal")]
@@ -90,6 +92,11 @@ enum Command {
     Persona {
         #[command(subcommand)]
         command: PersonaCommand,
+    },
+    /// Manage assistant skills (list, show, create, delete).
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommand,
     },
     /// Run orchestrator-managed interfaces and optional REPL.
     Orchestrator {
@@ -168,6 +175,62 @@ enum PersonaCommand {
     Use {
         /// Persona ID to mark as default.
         id: String,
+    },
+    /// Set the skill access mode for a persona (all, whitelist, blacklist).
+    SkillMode {
+        /// Persona ID.
+        persona_id: String,
+        /// Access mode: all | whitelist | blacklist.
+        mode: String,
+    },
+    /// Add a skill to a persona's whitelist/blacklist.
+    SkillAdd {
+        /// Persona ID.
+        persona_id: String,
+        /// Skill name to add.
+        skill_name: String,
+    },
+    /// Remove a skill from a persona's whitelist/blacklist.
+    SkillRemove {
+        /// Persona ID.
+        persona_id: String,
+        /// Skill name to remove.
+        skill_name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillCommand {
+    /// List all registered skills.
+    List {
+        /// Filter by persona skill access (shows only skills visible to this persona).
+        #[arg(long)]
+        persona: Option<String>,
+    },
+    /// Show full details of a skill.
+    Show {
+        /// Skill name.
+        name: String,
+    },
+    /// Create a new user skill.
+    Create {
+        /// Skill name (kebab-case, e.g. my-skill).
+        #[arg(long)]
+        name: String,
+        /// Short description.
+        #[arg(long)]
+        description: String,
+        /// Path to a file containing the skill body. Required (no editor fallback yet).
+        #[arg(long)]
+        body_file: PathBuf,
+    },
+    /// Delete a user or installed skill.
+    Delete {
+        /// Skill name.
+        name: String,
+        /// Skip the confirmation prompt.
+        #[arg(short, long)]
+        yes: bool,
     },
 }
 
@@ -637,6 +700,121 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
             tokio::fs::create_dir_all(&workspace).await?;
             println!("Default Persona set to '{}'.", id);
         }
+        PersonaCommand::SkillMode { persona_id, mode } => {
+            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
+            access_store.set_mode(persona_id, mode).await?;
+            println!(
+                "Persona '{}' skill access mode set to '{}'.",
+                persona_id, mode
+            );
+        }
+        PersonaCommand::SkillAdd {
+            persona_id,
+            skill_name,
+        } => {
+            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
+            let mode = access_store.get_mode(persona_id).await?;
+            if mode == "all" {
+                eprintln!(
+                    "Persona '{}' is in 'all' mode — use `skill-mode` to set whitelist or blacklist first.",
+                    persona_id
+                );
+                std::process::exit(1);
+            }
+            access_store.add_skill(persona_id, skill_name).await?;
+            println!(
+                "Skill '{}' added to persona '{}' {} list.",
+                skill_name, persona_id, mode
+            );
+        }
+        PersonaCommand::SkillRemove {
+            persona_id,
+            skill_name,
+        } => {
+            let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
+            access_store.remove_skill(persona_id, skill_name).await?;
+            println!(
+                "Skill '{}' removed from persona '{}' list.",
+                skill_name, persona_id
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_skill(db_path: &Path, command: &SkillCommand) -> Result<()> {
+    let storage = StorageLayer::new(db_path).await?;
+    let registry = SkillRegistry::new(storage.pool.clone()).await?;
+
+    match command {
+        SkillCommand::List { persona } => {
+            let skills = if let Some(persona_id) = persona {
+                registry.list_for_persona(persona_id, &storage.pool).await?
+            } else {
+                registry.list().await
+            };
+
+            if skills.is_empty() {
+                println!("No skills registered.");
+                return Ok(());
+            }
+
+            println!("{:<30} {:<12} DESCRIPTION", "NAME", "SOURCE");
+            println!("{}", "-".repeat(80));
+            for s in skills {
+                let source = match s.source {
+                    SkillSource::Builtin => "builtin",
+                    SkillSource::User => "user",
+                    SkillSource::Project => "project",
+                    SkillSource::Installed => "installed",
+                };
+                println!("{:<30} {:<12} {}", s.name, source, s.description);
+            }
+        }
+        SkillCommand::Show { name } => {
+            let skill = registry
+                .get(name)
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Skill '{}' not found", name))?;
+
+            println!("name: {}", skill.name);
+            println!("description: {}", skill.description);
+            if let Some(license) = &skill.license {
+                println!("license: {}", license);
+            }
+            println!("source: {}", skill.source);
+            println!("dir: {}", skill.dir.display());
+            println!();
+            println!("{}", skill.body);
+        }
+        SkillCommand::Create {
+            name,
+            description,
+            body_file,
+        } => {
+            let body = tokio::fs::read_to_string(body_file)
+                .await
+                .with_context(|| format!("Failed to read body file {}", body_file.display()))?;
+
+            let def = registry.create_user_skill(name, description, &body).await?;
+            println!("Skill '{}' created at {}.", def.name, def.dir.display());
+        }
+        SkillCommand::Delete { name, yes } => {
+            if !*yes {
+                print!("Delete skill '{}'? [y/N] ", name);
+                io::stdout().flush().ok();
+                let mut buf = String::new();
+                if io::stdin().read_line(&mut buf).is_err()
+                    || !matches!(buf.trim().to_lowercase().as_str(), "y" | "yes")
+                {
+                    println!("Aborted.");
+                    return Ok(());
+                }
+            }
+            registry.delete_user_skill(name).await?;
+            println!("Skill '{}' deleted.", name);
+        }
     }
 
     Ok(())
@@ -972,6 +1150,10 @@ async fn main() -> Result<()> {
 
     if let Some(Command::Persona { command }) = &cli.command {
         return cmd_persona(&db_path, command).await;
+    }
+
+    if let Some(Command::Skill { command }) = &cli.command {
+        return cmd_skill(&db_path, command).await;
     }
 
     if let Some(Command::Webui { command }) = &cli.command {

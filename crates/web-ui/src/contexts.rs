@@ -463,10 +463,15 @@ mod tests {
     use super::use_context;
     use crate::AppState;
 
-    fn test_state(pool: sqlx::SqlitePool) -> AppState {
+    async fn test_state(pool: sqlx::SqlitePool) -> AppState {
+        use assistant_storage::registry::SkillRegistry;
+        let registry = SkillRegistry::new(pool.clone())
+            .await
+            .expect("test registry");
         AppState {
             pool,
             agent_id: Arc::new(RwLock::new("default".to_string())),
+            registry: Arc::new(registry),
             trace_limit: 10,
             log_limit: 10,
             bus_kind: BusKind::Sqlite,
@@ -478,7 +483,7 @@ mod tests {
     #[tokio::test]
     async fn use_context_updates_runtime_agent_without_changing_default() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let state = test_state(storage.pool.clone());
+        let state = test_state(storage.pool.clone()).await;
 
         let agents = PersonaStore::new(storage.pool.clone());
         agents.ensure_default().await.unwrap();
@@ -505,7 +510,7 @@ mod tests {
     #[tokio::test]
     async fn use_context_rejects_invalid_agent_id() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        let state = test_state(storage.pool.clone());
+        let state = test_state(storage.pool.clone()).await;
 
         let response = use_context(
             State(state.clone()),
