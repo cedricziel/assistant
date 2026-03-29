@@ -99,15 +99,12 @@
 **Independent Test**: Set persona "default" to blacklist mode, add `agentskills-spec` to its list, run the agent with `--persona default`, confirm `agentskills-spec` skill is not referenced in context.
 
 - [x] T040 [US3] Wire `list_for_persona()` into the Orchestrator's skill-loading path in `crates/runtime`
-- [ ] T041 [P] [US3] Add persona skill access routes to web UI: define `PersonaSkillPagesState`, `persona_skill_router()` in a new section of `crates/web-ui/src/main.rs` (or in an extended `personas` module); wire into `protected_routes`
-- [ ] T042 [P] [US3] Implement `skill_access` page handler in `crates/web-ui/src/` (personas module or new file):
-  - Load persona record (id, name, skill_access_mode)
-  - Load all skills + persona skill list
-  - Render `templates/personas/skill_access.html`
-- [ ] T043 [US3] Implement `set_skill_mode` handler — POST `/personas/:id/skills/mode`; calls `persona_skill_access_store.set_mode()`; redirects with flash warning if switching whitelist↔blacklist with existing entries
-- [ ] T044 [US3] Implement `add_skill` handler — POST `/personas/:id/skills/add`; validates mode is not `all`; calls `persona_skill_access_store.add_skill()`; returns HTMX partial updating skill row
-- [ ] T045 [US3] Implement `remove_skill` handler — DELETE `/personas/:id/skills/:skill`; calls `persona_skill_access_store.remove_skill()`; returns HTMX response removing/updating row
-- [ ] T046 [US3] Complete `templates/personas/skill_access.html` — mode radio/select (all/whitelist/blacklist), table of all skills with add/remove buttons per row, mode-change form with HTMX, warn banner when switching modes with existing list
+- [x] T041 [P] [US3] Add persona skill access routes to web UI in `crates/web-ui/src/contexts.rs`; wired into `contexts_router()`
+- [x] T042 [P] [US3] Implement `skill_access` page handler in `crates/web-ui/src/contexts.rs`
+- [x] T043 [US3] Implement `set_skill_mode` handler — POST `/personas/{id}/skills/mode`
+- [x] T044 [US3] Implement `add_skill` handler — POST `/personas/{id}/skills/add`; validates mode != all
+- [x] T045 [US3] Implement `remove_skill` handler — POST `/personas/{id}/skills/{skill}/remove`
+- [x] T046 [US3] Complete `templates/personas/skill_access.html` — mode radio buttons, skills table with add/remove, warn banners
 
 **Checkpoint**: Persona in blacklist mode with one skill listed — that skill is absent from agent context when that persona is active. Web UI access page loads and mode/list changes persist.
 
@@ -119,24 +116,11 @@
 
 **Independent Test**: Run `assistant skill generate "Teach the agent to write ADR documents"` — output is a valid SKILL.md string with frontmatter. In web UI new-skill form, click "Generate with AI", fill description, confirm body textarea is populated.
 
-- [x] T047 [US4] Write `skills/agentskills-spec/SKILL.md` with full agentskills.io specification content:
-  - Frontmatter: `name: agentskills-spec`, `description: ...`, `license: MIT`
-  - Body: complete SKILL.md spec (frontmatter fields, validation rules, body conventions, examples)
-  - This is the knowledge injected into the AI when generating skill drafts
-- [ ] T048 [US4] Implement `SkillCommand::Generate` handler in `crates/interface-cli/src/main.rs`:
-  - Build a prompt: "Using the agentskills-spec builtin, generate a valid SKILL.md for: <description>"
-  - Submit to Orchestrator (same pattern as other CLI turns)
-  - Print result to stdout; exit 1 on error
-- [ ] T049 [US4] Implement `POST /skills/generate` handler in `crates/web-ui/src/skills/pages.rs`:
-  - Accept JSON body `{ "description": "..." }`
-  - Submit to Orchestrator with generation prompt
-  - Return JSON `{ "body": "<generated SKILL.md content>" }` or `{ "error": "..." }`
-  - Timeout at 30s → 504
-- [ ] T050 [US4] Add "Generate with AI" button to `templates/skills/new.html`:
-  - Text input for description
-  - HTMX `hx-post="/skills/generate"` that swaps generated content into the `body` textarea on success
-  - Show spinner while loading; show error message inline on failure
-- [ ] T051 [US4] Add same "Generate with AI" section to `templates/skills/edit.html`
+- [x] T047 [US4] Write `skills/agentskills-spec/SKILL.md` with full agentskills.io specification content
+- [x] T048 [US4] Implement `SkillCommand::Generate` handler in `crates/interface-cli/src/main.rs`
+- [x] T049 [US4] Implement `POST /skills/generate` handler in `crates/web-ui/src/skills/pages.rs` (30s timeout → 504)
+- [x] T050 [US4] Add "Generate with AI" section to `templates/skills/new.html` with fetch + textarea swap
+- [x] T051 [US4] Add "Regenerate Body with AI" section to `templates/skills/edit.html`
 
 **Checkpoint**: `assistant skill generate "..."` prints a valid SKILL.md. Web UI generate button populates the body textarea. Generated SKILL.md passes `parse_skill_content()` validation.
 

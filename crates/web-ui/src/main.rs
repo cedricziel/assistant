@@ -468,6 +468,7 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let skills_pages_state = skills::pages::SkillsPagesState {
         registry: state.registry.clone(),
+        orchestrator: orchestrator.clone(),
     };
 
     let chat_state =

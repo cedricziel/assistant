@@ -22,6 +22,9 @@ endblock %} {% block breadcrumb %}
           <h2>{{ persona_name }}</h2>
           <p><span class="trace-id">{{ persona_id }}</span></p>
         </div>
+        <a href="/personas/{{ persona_id }}/skills" class="action-btn secondary"
+          >Skill Access</a
+        >
         <a href="/personas" class="action-btn secondary">&larr; Back</a>
       </div>
       <table class="trace-table">

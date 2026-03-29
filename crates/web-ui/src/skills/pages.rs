@@ -5,11 +5,14 @@
 use std::sync::Arc;
 
 use askama::Template;
+use assistant_core::Interface;
+use assistant_runtime::Orchestrator;
 use axum::extract::{Form, Path, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Redirect, Response};
-use serde::Deserialize;
+use axum::response::{IntoResponse, Json, Redirect, Response};
+use serde::{Deserialize, Serialize};
 use tracing::warn;
+use uuid::Uuid;
 
 use assistant_skills::SkillSource;
 use assistant_storage::registry::SkillRegistry;
@@ -22,6 +25,7 @@ use crate::common::{internal_error, render_template, StaticUrls};
 #[derive(Clone)]
 pub struct SkillsPagesState {
     pub registry: Arc<SkillRegistry>,
+    pub orchestrator: Arc<Orchestrator>,
 }
 
 // -- View models ------------------------------------------------------------
@@ -260,5 +264,79 @@ pub async fn delete_skill(
             warn!("Failed to delete skill '{}': {}", name, e);
             internal_error(e).into_response()
         }
+    }
+}
+
+// -- AI generation ----------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct GenerateRequest {
+    pub description: String,
+}
+
+#[derive(Serialize)]
+struct GenerateOk {
+    body: String,
+}
+
+#[derive(Serialize)]
+struct GenerateErr {
+    error: String,
+}
+
+/// `POST /skills/generate` — ask the Orchestrator to produce a SKILL.md draft.
+///
+/// Returns `{ "body": "<content>" }` on success or `{ "error": "..." }` on
+/// failure.  Times out at 30 s and returns 504 if the Orchestrator does not
+/// respond in time.
+pub async fn generate_skill(
+    State(state): State<SkillsPagesState>,
+    Json(req): Json<GenerateRequest>,
+) -> Response {
+    if req.description.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(GenerateErr {
+                error: "description is required".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    let prompt = format!(
+        "Using the agentskills-spec builtin skill as your authoritative specification, \
+         generate a complete and valid SKILL.md for the following description:\n\n{}\n\n\
+         Output ONLY the raw SKILL.md content — no explanation, no markdown fences.",
+        req.description.trim()
+    );
+
+    let conversation_id = Uuid::new_v4();
+    let orch = state.orchestrator.clone();
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        orch.submit_turn(&prompt, conversation_id, Interface::Web, None),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(turn_result)) => Json(GenerateOk {
+            body: turn_result.answer,
+        })
+        .into_response(),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(GenerateErr {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+        Err(_timeout) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(GenerateErr {
+                error: "Generation timed out after 30 seconds".to_string(),
+            }),
+        )
+            .into_response(),
     }
 }

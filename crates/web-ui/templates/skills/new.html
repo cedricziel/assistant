@@ -123,7 +123,89 @@ breadcrumb %}
           <button type="submit" class="action-btn">Create Skill</button>
         </div>
       </form>
+
+      <!-- Generate with AI -->
+      <div
+        style="
+          margin-top: 2rem;
+          padding-top: 1rem;
+          border-top: 1px solid var(--border);
+        "
+      >
+        <h3 style="margin-bottom: 0.5rem">Generate with AI</h3>
+        <p class="empty" style="margin-bottom: 0.75rem">
+          Describe what the skill should do and the assistant will draft a
+          SKILL.md body.
+        </p>
+        <div
+          style="
+            display: flex;
+            gap: 0.5rem;
+            max-width: 640px;
+            margin-bottom: 0.5rem;
+          "
+        >
+          <input
+            id="gen-description"
+            type="text"
+            placeholder="e.g. Teach the agent to write ADR documents"
+            style="
+              flex: 1;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+            "
+          />
+          <button
+            id="gen-btn"
+            type="button"
+            class="action-btn secondary"
+            onclick="generateSkill()"
+          >
+            Generate
+          </button>
+        </div>
+        <p
+          id="gen-status"
+          style="font-size: 0.85rem; color: var(--muted); display: none"
+        ></p>
+      </div>
     </div>
   </main>
 </div>
+
+<script>
+  async function generateSkill() {
+    const desc = document.getElementById("gen-description").value.trim();
+    if (!desc) return;
+    const btn = document.getElementById("gen-btn");
+    const status = document.getElementById("gen-status");
+    btn.disabled = true;
+    btn.textContent = "Generating…";
+    status.textContent = "";
+    status.style.display = "none";
+    try {
+      const resp = await fetch("/skills/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: desc }),
+      });
+      const data = await resp.json();
+      if (resp.ok && data.body) {
+        document.getElementById("skill-body").value = data.body;
+      } else {
+        status.textContent = data.error || "Generation failed.";
+        status.style.display = "block";
+      }
+    } catch (e) {
+      status.textContent = "Network error: " + e.message;
+      status.style.display = "block";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Generate";
+    }
+  }
+</script>
 {% endblock %}

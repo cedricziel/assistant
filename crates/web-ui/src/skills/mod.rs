@@ -12,6 +12,7 @@ pub fn skills_router() -> Router<SkillsPagesState> {
     Router::new()
         .route("/skills", get(pages::list_skills).post(pages::create_skill))
         .route("/skills/new", get(pages::new_skill_form))
+        .route("/skills/generate", post(pages::generate_skill))
         .route("/skills/{name}", get(pages::show_skill))
         .route(
             "/skills/{name}/edit",

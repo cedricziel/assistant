@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use askama::Template;
 use assistant_core::{default_workspace_dir, validate_agent_id};
-use assistant_storage::PersonaStore;
+use assistant_storage::{PersonaSkillAccessStore, PersonaStore};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
@@ -153,6 +153,39 @@ struct CreatePersonaForm {
     name: String,
 }
 
+// -- Persona skill access ----------------------------------------------------
+
+struct PersonaSkillRowView {
+    name: String,
+    description: String,
+    source_label: String,
+    in_list: bool,
+}
+
+#[derive(Template)]
+#[template(path = "personas/skill_access.html")]
+struct PersonaSkillAccessTemplate {
+    active_page: &'static str,
+    persona_id: String,
+    persona_name: String,
+    /// Current access mode: "all", "whitelist", or "blacklist".
+    mode: String,
+    has_list_entries: bool,
+    rows: Vec<PersonaSkillRowView>,
+}
+
+impl StaticUrls for PersonaSkillAccessTemplate {}
+
+#[derive(Deserialize)]
+struct SetModeForm {
+    mode: String,
+}
+
+#[derive(Deserialize)]
+struct AddSkillForm {
+    skill_name: String,
+}
+
 // -- Router ------------------------------------------------------------------
 
 pub(crate) fn contexts_router() -> axum::Router<AppState> {
@@ -165,6 +198,19 @@ pub(crate) fn contexts_router() -> axum::Router<AppState> {
         .route(
             "/personas/{id}/files/{filename}",
             axum::routing::get(show_file_editor).post(save_file),
+        )
+        .route(
+            "/personas/{id}/skills",
+            axum::routing::get(show_skill_access),
+        )
+        .route(
+            "/personas/{id}/skills/mode",
+            axum::routing::post(set_skill_mode),
+        )
+        .route("/personas/{id}/skills/add", axum::routing::post(add_skill))
+        .route(
+            "/personas/{id}/skills/{skill}/remove",
+            axum::routing::post(remove_skill),
         )
 }
 
@@ -439,6 +485,130 @@ async fn use_context(State(state): State<AppState>, Path(id): Path<String>) -> R
     *state.agent_id.write().await = id;
 
     Redirect::to("/personas?updated=1").into_response()
+}
+
+async fn show_skill_access(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, (StatusCode, String)> {
+    if !validate_agent_id(&id) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid agent ID".to_string()));
+    }
+
+    let store = PersonaStore::new(state.pool.clone());
+    let persona = store
+        .get(&id)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Persona '{}' not found", id)))?;
+
+    let access_store = PersonaSkillAccessStore::new(state.pool.clone());
+    let mode = access_store.get_mode(&id).await.map_err(internal_error)?;
+    let skill_list = access_store
+        .list_skill_names(&id)
+        .await
+        .map_err(internal_error)?;
+    let has_list_entries = !skill_list.is_empty();
+
+    let all_skills = state.registry.list().await;
+    let rows = all_skills
+        .into_iter()
+        .map(|s| {
+            let in_list = skill_list.contains(&s.name);
+            PersonaSkillRowView {
+                source_label: match s.source {
+                    assistant_skills::SkillSource::Builtin => "builtin".to_string(),
+                    assistant_skills::SkillSource::User => "user".to_string(),
+                    assistant_skills::SkillSource::Project => "project".to_string(),
+                    assistant_skills::SkillSource::Installed => "installed".to_string(),
+                },
+                name: s.name,
+                description: s.description,
+                in_list,
+            }
+        })
+        .collect();
+
+    let tmpl = PersonaSkillAccessTemplate {
+        active_page: "personas",
+        persona_id: persona.id,
+        persona_name: persona.name,
+        mode,
+        has_list_entries,
+        rows,
+    };
+
+    Ok(render_template(tmpl))
+}
+
+async fn set_skill_mode(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    axum::Form(form): axum::Form<SetModeForm>,
+) -> Response {
+    if !validate_agent_id(&id) {
+        return (StatusCode::BAD_REQUEST, "Invalid agent ID".to_string()).into_response();
+    }
+
+    let access_store = PersonaSkillAccessStore::new(state.pool.clone());
+    if let Err(e) = access_store.set_mode(&id, &form.mode).await {
+        return Redirect::to(&format!(
+            "/personas/{}/skills?error={}",
+            id,
+            url_encode(&e.to_string())
+        ))
+        .into_response();
+    }
+
+    Redirect::to(&format!("/personas/{}/skills", id)).into_response()
+}
+
+async fn add_skill(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    axum::Form(form): axum::Form<AddSkillForm>,
+) -> Response {
+    if !validate_agent_id(&id) {
+        return (StatusCode::BAD_REQUEST, "Invalid agent ID".to_string()).into_response();
+    }
+
+    let access_store = PersonaSkillAccessStore::new(state.pool.clone());
+
+    // Validate mode is not "all" before adding.
+    let mode = match access_store.get_mode(&id).await {
+        Ok(m) => m,
+        Err(e) => return internal_error(e).into_response(),
+    };
+    if mode == "all" {
+        return Redirect::to(&format!(
+            "/personas/{}/skills?error={}",
+            id,
+            url_encode("Cannot add skills to list when mode is 'all'")
+        ))
+        .into_response();
+    }
+
+    if let Err(e) = access_store.add_skill(&id, &form.skill_name).await {
+        return internal_error(e).into_response();
+    }
+
+    Redirect::to(&format!("/personas/{}/skills", id)).into_response()
+}
+
+async fn remove_skill(
+    State(state): State<AppState>,
+    Path((id, skill)): Path<(String, String)>,
+) -> Response {
+    if !validate_agent_id(&id) {
+        return (StatusCode::BAD_REQUEST, "Invalid agent ID".to_string()).into_response();
+    }
+
+    let access_store = PersonaSkillAccessStore::new(state.pool.clone());
+    if let Err(e) = access_store.remove_skill(&id, &skill).await {
+        return internal_error(e).into_response();
+    }
+
+    Redirect::to(&format!("/personas/{}/skills", id)).into_response()
 }
 
 async fn ensure_agent_dirs(id: &str) -> std::io::Result<()> {

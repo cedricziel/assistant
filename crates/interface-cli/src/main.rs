@@ -232,6 +232,15 @@ enum SkillCommand {
         #[arg(short, long)]
         yes: bool,
     },
+    /// Generate a SKILL.md draft using the AI assistant.
+    ///
+    /// Submits a prompt to the Orchestrator asking it to produce a valid
+    /// SKILL.md for the given description, using the `agentskills-spec`
+    /// builtin as the authoritative specification.
+    Generate {
+        /// Natural-language description of what the skill should do.
+        description: String,
+    },
 }
 
 // ── CLI confirmation callback ─────────────────────────────────────────────────
@@ -815,6 +824,12 @@ async fn cmd_skill(db_path: &Path, command: &SkillCommand) -> Result<()> {
             registry.delete_user_skill(name).await?;
             println!("Skill '{}' deleted.", name);
         }
+        // Handled after bootstrap in main() — should not be reached here.
+        SkillCommand::Generate { .. } => {
+            anyhow::bail!(
+                "Generate requires a running Orchestrator — this code path should not be reached"
+            );
+        }
     }
 
     Ok(())
@@ -1153,7 +1168,10 @@ async fn main() -> Result<()> {
     }
 
     if let Some(Command::Skill { command }) = &cli.command {
-        return cmd_skill(&db_path, command).await;
+        // Generate needs the full Orchestrator — handled after bootstrap.
+        if !matches!(command, SkillCommand::Generate { .. }) {
+            return cmd_skill(&db_path, command).await;
+        }
     }
 
     if let Some(Command::Webui { command }) = &cli.command {
@@ -1251,7 +1269,34 @@ async fn main() -> Result<()> {
 
     let bs = bootstrap(&home, confirmation_cb, storage.clone(), config).await?;
 
-    // 5a. Worker-only mode.
+    // 5a. Skill generate — one-shot turn, print result, exit.
+    if let Some(Command::Skill {
+        command: SkillCommand::Generate { description },
+    }) = &cli.command
+    {
+        let conversation_id = Uuid::new_v4();
+        let _conv_cx = start_conversation_context(conversation_id, &Interface::Cli);
+
+        // Spawn the worker so the turn can be processed.
+        let worker_orch = bs.orchestrator.clone();
+        let _worker = tokio::spawn(async move { worker_orch.run_worker("generate-worker").await });
+
+        let prompt = format!(
+            "Using the agentskills-spec builtin skill as your authoritative specification, \
+             generate a complete and valid SKILL.md for the following description:\n\n{}\n\n\
+             Output ONLY the raw SKILL.md content — no explanation, no markdown fences.",
+            description
+        );
+
+        let result = bs
+            .orchestrator
+            .submit_turn(&prompt, conversation_id, Interface::Cli, None)
+            .await?;
+        println!("{}", result.answer);
+        return Ok(());
+    }
+
+    // 5b. Worker-only mode.
     if let Some(Command::Worker { interface, id }) = &cli.command {
         let iface_filter = normalize_worker_interface(interface);
         info!(worker_id = %id, interface = ?iface_filter, "Starting worker-only mode");
