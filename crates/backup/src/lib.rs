@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{bail, Context, Result};
+use async_trait::async_trait;
 use chrono::Utc;
 use tracing::{info, warn};
 
@@ -35,48 +36,61 @@ use crate::paths::{
 
 /// Filesystem abstraction used by [`BackupEngine`] and [`RestoreEngine`].
 ///
-/// `RealFs` delegates to `std::fs`; `FakeFs` uses an in-memory map.
+/// `RealFs` delegates to `tokio::fs`; `FakeFs` uses an in-memory map.
+/// The `async_trait` macro is used because async fns in traits require it
+/// (per project conventions in AGENTS.md).
+#[async_trait]
 pub trait BackupFs: Send + Sync {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>>;
-    fn write_file(&self, path: &Path, data: &[u8]) -> Result<()>;
-    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>>;
-    fn file_exists(&self, path: &Path) -> bool;
-    fn file_size(&self, path: &Path) -> Result<u64>;
+    async fn read_file(&self, path: &Path) -> Result<Vec<u8>>;
+    async fn write_file(&self, path: &Path, data: &[u8]) -> Result<()>;
+    async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>>;
+    async fn file_exists(&self, path: &Path) -> bool;
+    async fn file_size(&self, path: &Path) -> Result<u64>;
 }
 
 // -- RealFs --
 
-/// Production [`BackupFs`] implementation backed by `std::fs`.
+/// Production [`BackupFs`] implementation backed by `tokio::fs`.
 #[derive(Default)]
 pub struct RealFs;
 
+#[async_trait]
 impl BackupFs for RealFs {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
-        std::fs::read(path).with_context(|| format!("reading {:?}", path))
+    async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
+        tokio::fs::read(path)
+            .await
+            .with_context(|| format!("reading {:?}", path))
     }
 
-    fn write_file(&self, path: &Path, data: &[u8]) -> Result<()> {
+    async fn write_file(&self, path: &Path, data: &[u8]) -> Result<()> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            tokio::fs::create_dir_all(parent)
+                .await
                 .with_context(|| format!("creating dir {:?}", parent))?;
         }
-        std::fs::write(path, data).with_context(|| format!("writing {:?}", path))
+        tokio::fs::write(path, data)
+            .await
+            .with_context(|| format!("writing {:?}", path))
     }
 
-    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>> {
+    async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>> {
+        let mut rd = tokio::fs::read_dir(path)
+            .await
+            .with_context(|| format!("listing {:?}", path))?;
         let mut entries = Vec::new();
-        for e in std::fs::read_dir(path).with_context(|| format!("listing {:?}", path))? {
-            entries.push(e?.path());
+        while let Some(e) = rd.next_entry().await? {
+            entries.push(e.path());
         }
         Ok(entries)
     }
 
-    fn file_exists(&self, path: &Path) -> bool {
-        path.exists()
+    async fn file_exists(&self, path: &Path) -> bool {
+        tokio::fs::metadata(path).await.is_ok()
     }
 
-    fn file_size(&self, path: &Path) -> Result<u64> {
-        Ok(std::fs::metadata(path)
+    async fn file_size(&self, path: &Path) -> Result<u64> {
+        Ok(tokio::fs::metadata(path)
+            .await
             .with_context(|| format!("stat {:?}", path))?
             .len())
     }
@@ -101,8 +115,9 @@ impl FakeFs {
     }
 }
 
+#[async_trait]
 impl BackupFs for FakeFs {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
+    async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
         self.files
             .read()
             .unwrap()
@@ -111,7 +126,7 @@ impl BackupFs for FakeFs {
             .with_context(|| format!("FakeFs: file not found: {:?}", path))
     }
 
-    fn write_file(&self, path: &Path, data: &[u8]) -> Result<()> {
+    async fn write_file(&self, path: &Path, data: &[u8]) -> Result<()> {
         self.files
             .write()
             .unwrap()
@@ -119,7 +134,7 @@ impl BackupFs for FakeFs {
         Ok(())
     }
 
-    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>> {
+    async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let guard = self.files.read().unwrap();
         let entries: Vec<PathBuf> = guard
             .keys()
@@ -129,11 +144,11 @@ impl BackupFs for FakeFs {
         Ok(entries)
     }
 
-    fn file_exists(&self, path: &Path) -> bool {
+    async fn file_exists(&self, path: &Path) -> bool {
         self.files.read().unwrap().contains_key(path)
     }
 
-    fn file_size(&self, path: &Path) -> Result<u64> {
+    async fn file_size(&self, path: &Path) -> Result<u64> {
         self.files
             .read()
             .unwrap()
@@ -228,17 +243,41 @@ pub struct BackupInfo {
 // -- BackupEngine --
 
 /// Creates `.tar.gz` backups of the assistant installation.
-pub struct BackupEngine;
+pub struct BackupEngine {
+    fs: Arc<dyn BackupFs>,
+}
 
 impl BackupEngine {
+    /// Create with the production (`tokio::fs`) filesystem.
     pub fn new() -> Self {
-        Self
+        Self {
+            fs: Arc::new(RealFs),
+        }
+    }
+
+    /// Create with a custom filesystem implementation (e.g. [`FakeFs`] for tests).
+    pub fn with_fs(fs: Arc<dyn BackupFs>) -> Self {
+        Self { fs }
     }
 
     /// Run the backup operation.
     pub async fn run(&self, opts: BackupOptions) -> Result<BackupResult> {
         info!("starting backup of {:?}", opts.install_dir);
         let start = std::time::Instant::now();
+
+        // Guard: reject output paths that target files inside the live installation
+        // (other than the dedicated backups/ subdirectory) to prevent overwriting
+        // source files with the archive being created.
+        if opts.output_path.starts_with(&opts.install_dir) {
+            let backups_subdir = opts.install_dir.join("backups");
+            if !opts.output_path.starts_with(&backups_subdir) {
+                bail!(
+                    "output path {:?} is inside the installation directory but not \
+                     under backups/ — this would overwrite a source file",
+                    opts.output_path
+                );
+            }
+        }
 
         // Ensure output parent directory exists
         if let Some(parent) = opts.output_path.parent() {
@@ -251,7 +290,7 @@ impl BackupEngine {
             .db_path
             .clone()
             .unwrap_or_else(|| opts.install_dir.join("assistant.db"));
-        if db_path.exists() {
+        if self.fs.file_exists(&db_path).await {
             if let Err(e) = checkpoint_sqlite(&db_path).await {
                 warn!("WAL checkpoint failed (continuing): {}", e);
             }
@@ -266,8 +305,11 @@ impl BackupEngine {
         let mut manifest_entries: Vec<ManifestEntry> = Vec::new();
 
         for abs_path in &file_paths {
-            let data =
-                std::fs::read(abs_path).with_context(|| format!("reading {:?}", abs_path))?;
+            let data = self
+                .fs
+                .read_file(abs_path)
+                .await
+                .with_context(|| format!("reading {:?}", abs_path))?;
 
             // archive_path is relative to install_dir.
             // Files outside install_dir (e.g. a db at a custom path) are placed
@@ -339,11 +381,21 @@ impl Default for BackupEngine {
 // -- RestoreEngine --
 
 /// Restores an assistant installation from a `.tar.gz` backup archive.
-pub struct RestoreEngine;
+pub struct RestoreEngine {
+    fs: Arc<dyn BackupFs>,
+}
 
 impl RestoreEngine {
+    /// Create with the production (`tokio::fs`) filesystem.
     pub fn new() -> Self {
-        Self
+        Self {
+            fs: Arc::new(RealFs),
+        }
+    }
+
+    /// Create with a custom filesystem implementation (e.g. [`FakeFs`] for tests).
+    pub fn with_fs(fs: Arc<dyn BackupFs>) -> Self {
+        Self { fs }
     }
 
     /// Run the restore operation.
@@ -351,7 +403,7 @@ impl RestoreEngine {
         info!("starting restore from {:?}", opts.archive_path);
 
         // Validate archive exists
-        if !opts.archive_path.exists() {
+        if !self.fs.file_exists(&opts.archive_path).await {
             bail!("archive not found: {:?}", opts.archive_path);
         }
 
@@ -370,9 +422,12 @@ impl RestoreEngine {
 
         // Interactive confirmation unless --force
         if !opts.force {
-            let non_empty = opts.install_dir.exists()
-                && std::fs::read_dir(&opts.install_dir)
-                    .map(|mut d| d.next().is_some())
+            let non_empty = self.fs.file_exists(&opts.install_dir).await
+                && self
+                    .fs
+                    .list_dir(&opts.install_dir)
+                    .await
+                    .map(|entries| !entries.is_empty())
                     .unwrap_or(false);
 
             if non_empty {

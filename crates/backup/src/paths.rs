@@ -125,11 +125,13 @@ fn collect_dir_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 pub async fn checkpoint_sqlite(db_path: &Path) -> Result<()> {
     use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
     use sqlx::{ConnectOptions, Connection};
-    use std::str::FromStr;
 
-    let url = format!("sqlite://{}?mode=ro", db_path.display());
-    let opts = SqliteConnectOptions::from_str(&url)
-        .with_context(|| format!("parsing SQLite URL for {:?}", db_path))?
+    // Use SqliteConnectOptions::new().filename() rather than constructing a
+    // "sqlite://" URL to avoid issues with Windows paths containing backslashes
+    // that sqlx's URL parser cannot handle reliably.
+    let opts = SqliteConnectOptions::new()
+        .filename(db_path)
+        .read_only(true)
         .journal_mode(SqliteJournalMode::Wal);
 
     let mut conn = opts

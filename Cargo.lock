@@ -305,6 +305,7 @@ name = "assistant-backup"
 version = "0.1.64"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "dirs",
  "flate2",

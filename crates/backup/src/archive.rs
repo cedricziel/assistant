@@ -119,6 +119,11 @@ pub fn extract_tar_gz(
 
     let mut warnings: Vec<String> = Vec::new();
 
+    // Phase 1 — verify every entry without touching the live install tree.
+    // All file data is collected in `to_write`; the live tree is not modified
+    // until every checksum has passed.
+    let mut to_write: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+
     for entry in tar.entries().context("reading tar entries")? {
         let mut entry = entry.context("reading tar entry")?;
         let archive_path_str = entry
@@ -132,7 +137,7 @@ pub fn extract_tar_gz(
             continue;
         }
 
-        // Path-traversal guard
+        // Path-traversal guard (first-line: raw entry path)
         if archive_path_str.contains("..") {
             let msg = format!("skipped entry with unsafe path: {}", archive_path_str);
             warnings.push(msg);
@@ -145,12 +150,12 @@ pub fn extract_tar_gz(
             .iter()
             .find(|e| e.archive_path == archive_path_str);
 
-        // Read content
+        // Read content into memory
         let mut data = Vec::new();
         entry.read_to_end(&mut data).context("reading entry data")?;
 
-        // Verify checksum
         if let Some(me) = manifest_entry {
+            // Verify checksum before accepting this entry
             let actual = sha256_hex(&data);
             if actual != me.sha256 {
                 bail!(
@@ -161,8 +166,7 @@ pub fn extract_tar_gz(
                 );
             }
 
-            // Restore to the original install_path if it is under install_dir,
-            // otherwise restore relative to install_dir using archive_path.
+            // Resolve destination
             let dest = if me
                 .install_path
                 .starts_with(install_dir.to_string_lossy().as_ref())
@@ -184,12 +188,7 @@ pub fn extract_tar_gz(
                 continue;
             }
 
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("creating directory {:?}", parent))?;
-            }
-            std::fs::write(&dest, &data).with_context(|| format!("writing {:?}", dest))?;
-            debug!("restored {:?}", dest);
+            to_write.push((dest, data));
         } else {
             // Entry not declared in manifest.json — treat as corruption and abort.
             bail!(
@@ -197,6 +196,18 @@ pub fn extract_tar_gz(
                 archive_path_str
             );
         }
+    }
+
+    // Phase 2 — all entries verified; now write to the live install tree.
+    // If any write fails here the install tree may be partially updated, but
+    // all content integrity has already been confirmed.
+    for (dest, data) in &to_write {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating directory {:?}", parent))?;
+        }
+        std::fs::write(dest, data).with_context(|| format!("writing {:?}", dest))?;
+        debug!("restored {:?}", dest);
     }
 
     Ok(warnings)
