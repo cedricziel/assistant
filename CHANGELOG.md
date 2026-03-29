@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.66](https://github.com/cedricziel/assistant/compare/v0.1.65...v0.1.66) (2026-03-29)
+
+
+### Bug Fixes
+
+* **runtime:** raise OTel log bridge filter from DEBUG to INFO, suppress async_nats/h2/hyper_util ([f47e810](https://github.com/cedricziel/assistant/commit/f47e8102dc2db32ed75bab9a991f751153a68b23))
+
 ## [0.1.65](https://github.com/cedricziel/assistant/compare/v0.1.64...v0.1.65) (2026-03-29)
 
 
