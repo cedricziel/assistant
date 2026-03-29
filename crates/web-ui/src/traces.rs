@@ -736,7 +736,13 @@ fn parse_datetime_local(s: &str) -> Option<DateTime<Utc>> {
     if s.is_empty() {
         return None;
     }
-    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M")
+    // Accept RFC3339 (e.g. `?since=2026-03-27T07:00:00Z`) as well as the
+    // HTML `datetime-local` format emitted by the sidebar inputs.
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.to_utc());
+    }
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
         .ok()
         .map(|ndt| ndt.and_utc())
 }
