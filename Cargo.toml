@@ -34,6 +34,7 @@ members = [
     "crates/a2a-json-schema",
     "crates/opentelemetry-exporter-sqlite",
     "crates/bus-nats",
+    "crates/backup",
 ]
 default-members = [
     "crates/interface-cli",
@@ -117,6 +118,10 @@ glob = "0.3"
 jsonschema = "0.45"
 # SHA-256 hashing for memory chunk change detection
 sha2 = "0.10"
+# tar archive creation/extraction
+tar = "0.4"
+# gzip compression
+flate2 = { version = "1", default-features = false, features = ["zlib"] }
 # Natural language processing for memory search
 whatlang = "0.18"
 stop-words = "0.10"

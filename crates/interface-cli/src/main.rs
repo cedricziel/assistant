@@ -1,3 +1,5 @@
+mod cmd_backup;
+
 use std::collections::HashSet;
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
@@ -123,6 +125,10 @@ enum Command {
         #[command(subcommand)]
         command: SignalCommand,
     },
+    /// Back up the assistant installation to a .tar.gz archive.
+    Backup(cmd_backup::BackupArgs),
+    /// Restore the assistant installation from a backup archive.
+    Restore(cmd_backup::RestoreArgs),
 }
 
 #[derive(Subcommand)]
@@ -1204,6 +1210,14 @@ async fn main() -> Result<()> {
         if !matches!(command, SkillCommand::Generate { .. }) {
             return cmd_skill(&db_path, &config, command).await;
         }
+    }
+
+    if let Some(Command::Backup(args)) = &cli.command {
+        return cmd_backup::cmd_backup(args).await;
+    }
+
+    if let Some(Command::Restore(args)) = &cli.command {
+        return cmd_backup::cmd_restore(args).await;
     }
 
     if let Some(Command::Webui { command }) = &cli.command {
