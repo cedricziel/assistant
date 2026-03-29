@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.67](https://github.com/cedricziel/assistant/compare/v0.1.66...v0.1.67) (2026-03-29)
+
+
+### Features
+
+* **backup:** add backup and restore CLI subcommands ([#330](https://github.com/cedricziel/assistant/issues/330)) ([dec47de](https://github.com/cedricziel/assistant/commit/dec47de1a1289c34b8bf10b747a088e35a87a2fc))
+
 ## [0.1.66](https://github.com/cedricziel/assistant/compare/v0.1.65...v0.1.66) (2026-03-29)
 
 
