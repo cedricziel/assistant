@@ -887,6 +887,176 @@ mod tests {
         );
     }
 
+    /// A trace with a root span (interface=Slack) plus two child tool spans must
+    /// report span_count=3 after an interface filter — proving the HAVING-clause
+    /// fix does not pre-filter child spans before aggregation.
+    #[tokio::test]
+    async fn test_interface_filter_preserves_span_count() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("span-count-test")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let store = storage.trace_store();
+
+        // Build a single trace: root span + 2 child tool spans
+        let trace_id = Uuid::new_v4().to_string();
+        let root_id = Uuid::new_v4().to_string();
+        let child1_id = Uuid::new_v4().to_string();
+        let child2_id = Uuid::new_v4().to_string();
+
+        // Root span — carries the interface attribute
+        sqlx::query(
+            "INSERT INTO distributed_traces \
+                (span_id, trace_id, parent_span_id, name, conversation_id, turn, tool_name, \
+                 tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, attributes) \
+             VALUES (?1, ?2, NULL, 'turn', ?3, 0, NULL, 'ok', NULL, NULL, 100, ?4, ?5, ?6)",
+        )
+        .bind(&root_id)
+        .bind(&trace_id)
+        .bind(conv_id.to_string())
+        .bind(Utc::now())
+        .bind(Utc::now() + chrono::Duration::milliseconds(100))
+        .bind(json!({"interface": "Slack"}).to_string())
+        .execute(&storage.pool)
+        .await
+        .unwrap();
+
+        // Two child tool spans — no interface attribute
+        for cid in [&child1_id, &child2_id] {
+            sqlx::query(
+                "INSERT INTO distributed_traces \
+                    (span_id, trace_id, parent_span_id, name, conversation_id, turn, tool_name, \
+                     tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, attributes) \
+                 VALUES (?1, ?2, ?3, 'tool', ?4, 0, 'list-tasks', 'ok', '[]', NULL, 20, ?5, ?6, ?7)",
+            )
+            .bind(cid)
+            .bind(&trace_id)
+            .bind(&root_id)
+            .bind(conv_id.to_string())
+            .bind(Utc::now())
+            .bind(Utc::now() + chrono::Duration::milliseconds(20))
+            .bind("{}")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        }
+
+        let filter = TraceFilter {
+            interface: Some("Slack".to_string()),
+            ..TraceFilter::default()
+        };
+        let results = store
+            .list_recent_traces_for_agent(10, &filter, "default")
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1, "should return the Slack trace");
+        assert_eq!(
+            results[0].span_count, 3,
+            "span_count must include root + both child spans, not just the root"
+        );
+    }
+
+    /// Conversation filter applied via SQL should scope traces to the given
+    /// conversation UUID and not rely on a post-query retain().
+    #[tokio::test]
+    async fn test_conversation_filter_scopes_traces() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.trace_store();
+
+        // Two separate conversations
+        let conv_a = Uuid::new_v4();
+        let conv_b = Uuid::new_v4();
+        for (cid, title) in [(&conv_a, "conv-a"), (&conv_b, "conv-b")] {
+            sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+                .bind(cid.to_string())
+                .bind(title)
+                .execute(&storage.pool)
+                .await
+                .unwrap();
+        }
+
+        // One trace per conversation
+        insert_span(&storage.pool, conv_a, "bash", "ok", Some("ok"), None, 50).await;
+        insert_span(
+            &storage.pool,
+            conv_b,
+            "web-fetch",
+            "ok",
+            Some("200"),
+            None,
+            30,
+        )
+        .await;
+
+        // Filter by conv_a
+        let filter = TraceFilter {
+            conversation: Some(conv_a),
+            ..TraceFilter::default()
+        };
+        let results = store
+            .list_recent_traces_for_agent(10, &filter, "default")
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1, "should return only conv_a traces");
+        assert_eq!(
+            results[0].conversation_id,
+            Some(conv_a),
+            "returned trace must belong to conv_a"
+        );
+    }
+
+    /// Status filter `"error"` applied via SQL should return only traces that
+    /// contain at least one span with `tool_status = 'error'`.
+    #[tokio::test]
+    async fn test_status_filter_error_returns_only_error_traces() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.trace_store();
+
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("status-filter-test")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        // One successful trace, one error trace
+        insert_span(&storage.pool, conv_id, "bash", "ok", Some("ok"), None, 50).await;
+        insert_span(
+            &storage.pool,
+            conv_id,
+            "bash",
+            "error",
+            None,
+            Some("permission denied"),
+            30,
+        )
+        .await;
+
+        let filter = TraceFilter {
+            status: Some("error".to_string()),
+            ..TraceFilter::default()
+        };
+        let results = store
+            .list_recent_traces_for_agent(10, &filter, "default")
+            .await
+            .unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "status=error should return only error traces"
+        );
+        assert!(
+            results[0].error_count > 0,
+            "returned trace must have error_count > 0"
+        );
+    }
+
     #[tokio::test]
     async fn test_interface_filter_scopes_results() {
         let storage = StorageLayer::new_in_memory().await.unwrap();

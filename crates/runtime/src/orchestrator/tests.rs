@@ -2287,3 +2287,71 @@ async fn failed_turn_propagates_error() {
         "expected run_turn to return Err on LLM failure"
     );
 }
+
+/// `run_turn_with_tools` uses `run_turn_with_tools_impl` which has its own
+/// LLM call site.  Verify that an HTTP-500 from the LLM propagates as `Err`
+/// through the extension-tool path (separate from `run_turn_core`).
+#[tokio::test]
+async fn failed_turn_with_tools_llm_error_propagates() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
+        .mount(&server)
+        .await;
+
+    let (orch, _) = build(&server.uri()).await;
+
+    let result = orch
+        .run_turn_with_tools(
+            "test",
+            Uuid::new_v4(),
+            Interface::Slack,
+            vec![],
+            None,
+            vec![],
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "run_turn_with_tools must return Err on LLM HTTP-500"
+    );
+}
+
+/// `run_turn_with_tools` must return `Err` when the LLM loops forever
+/// (always returns tool calls, never a final answer).
+#[tokio::test]
+async fn failed_turn_with_tools_max_iterations_returns_error() {
+    let server = MockServer::start().await;
+    // LLM never produces a final answer — always returns a tool call.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["unknown-tool"])),
+        )
+        .mount(&server)
+        .await;
+
+    let mut config = AssistantConfig::default();
+    config.memory.enabled = false;
+    config.llm.max_iterations = 2;
+    let (orch, _) = build_with_config(&server.uri(), config).await;
+
+    let result = orch
+        .run_turn_with_tools(
+            "loop forever",
+            Uuid::new_v4(),
+            Interface::Cli,
+            vec![],
+            None,
+            vec![],
+        )
+        .await;
+    match result {
+        Ok(_) => panic!("should fail when max iterations reached"),
+        Err(e) => assert!(
+            e.to_string().contains("Max iterations"),
+            "error should mention max iterations: {e}"
+        ),
+    }
+}
