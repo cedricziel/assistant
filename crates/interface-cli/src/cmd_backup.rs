@@ -97,7 +97,7 @@ async fn cmd_backup_list(dir: Option<&std::path::Path>) -> Result<()> {
         .map(|d| d.to_path_buf())
         .unwrap_or_else(default_backups_dir);
 
-    let infos = list_backups(&backup_dir)?;
+    let infos = list_backups(&backup_dir).await?;
 
     if infos.is_empty() {
         println!("No backups found in {}", backup_dir.display());

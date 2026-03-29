@@ -281,7 +281,8 @@ impl BackupEngine {
 
         // Ensure output parent directory exists
         if let Some(parent) = opts.output_path.parent() {
-            std::fs::create_dir_all(parent)
+            tokio::fs::create_dir_all(parent)
+                .await
                 .with_context(|| format!("creating output directory {:?}", parent))?;
         }
 
@@ -488,23 +489,23 @@ fn confirm_restore(manifest: &BackupManifest, install_dir: &Path) -> Result<()> 
 /// List backup archives found in `backup_dir`.
 ///
 /// Unreadable or malformed archives are skipped with a logged warning.
-pub fn list_backups(backup_dir: &Path) -> Result<Vec<BackupInfo>> {
-    if !backup_dir.exists() {
+pub async fn list_backups(backup_dir: &Path) -> Result<Vec<BackupInfo>> {
+    if tokio::fs::metadata(backup_dir).await.is_err() {
         return Ok(vec![]);
     }
 
     let mut infos: Vec<BackupInfo> = Vec::new();
+    let mut rd = tokio::fs::read_dir(backup_dir)
+        .await
+        .with_context(|| format!("listing {:?}", backup_dir))?;
 
-    for entry in
-        std::fs::read_dir(backup_dir).with_context(|| format!("listing {:?}", backup_dir))?
-    {
-        let entry = entry?;
+    while let Some(entry) = rd.next_entry().await? {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("gz") {
             continue;
         }
 
-        let archive_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let archive_size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
 
         match read_tar_gz_manifest(&path) {
             Ok(manifest) => {
@@ -656,15 +657,15 @@ mod tests {
 
     // ── list_backups tests ─────────────────────────────────────────────────────
 
-    #[test]
-    fn test_list_backups_empty() {
+    #[tokio::test]
+    async fn test_list_backups_empty() {
         let dir = TempDir::new().unwrap();
-        let result = list_backups(dir.path()).unwrap();
+        let result = list_backups(dir.path()).await.unwrap();
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn test_list_backups_returns_metadata() {
+    #[tokio::test]
+    async fn test_list_backups_returns_metadata() {
         let dir = TempDir::new().unwrap();
 
         let archive1 = make_test_archive(&[("config.toml", b"a")]);
@@ -673,7 +674,7 @@ mod tests {
         std::fs::write(dir.path().join("backup1.tar.gz"), &archive1).unwrap();
         std::fs::write(dir.path().join("backup2.tar.gz"), &archive2).unwrap();
 
-        let mut infos = list_backups(dir.path()).unwrap();
+        let mut infos = list_backups(dir.path()).await.unwrap();
         infos.sort_by_key(|i| i.path.file_name().unwrap().to_owned());
 
         assert_eq!(infos.len(), 2);
@@ -681,9 +682,9 @@ mod tests {
         assert_eq!(infos[1].entry_count, 2);
     }
 
-    #[test]
-    fn test_list_backups_nonexistent_dir() {
-        let result = list_backups(Path::new("/tmp/does-not-exist-xyz-assistant-test"));
+    #[tokio::test]
+    async fn test_list_backups_nonexistent_dir() {
+        let result = list_backups(Path::new("/tmp/does-not-exist-xyz-assistant-test")).await;
         assert!(result.unwrap().is_empty());
     }
 }
