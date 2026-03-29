@@ -51,7 +51,7 @@ breadcrumb %}
               {% endif %}
             </td>
             <td>
-              {% if !row.is_builtin %}
+              {% if !row.is_builtin && !row.is_project %}
               <a
                 href="/skills/{{ row.name }}/edit"
                 class="action-btn secondary"

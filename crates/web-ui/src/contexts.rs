@@ -171,10 +171,16 @@ struct PersonaSkillAccessTemplate {
     /// Current access mode: "all", "whitelist", or "blacklist".
     mode: String,
     has_list_entries: bool,
+    error_msg: Option<String>,
     rows: Vec<PersonaSkillRowView>,
 }
 
 impl StaticUrls for PersonaSkillAccessTemplate {}
+
+#[derive(Deserialize)]
+struct SkillAccessQuery {
+    error: Option<String>,
+}
 
 #[derive(Deserialize)]
 struct SetModeForm {
@@ -490,6 +496,7 @@ async fn use_context(State(state): State<AppState>, Path(id): Path<String>) -> R
 async fn show_skill_access(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<SkillAccessQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     if !validate_agent_id(&id) {
         return Err((StatusCode::BAD_REQUEST, "Invalid agent ID".to_string()));
@@ -535,6 +542,7 @@ async fn show_skill_access(
         persona_name: persona.name,
         mode,
         has_list_entries,
+        error_msg: query.error,
         rows,
     };
 

@@ -32,7 +32,20 @@ endblock %} {% block breadcrumb %}
         >
       </div>
 
-      {% if has_list_entries && mode == "all" %}
+      {% match error_msg %} {% when Some with (msg) %}
+      <div
+        class="empty"
+        style="
+          margin-bottom: 1rem;
+          padding: 0.75rem 1rem;
+          background: var(--danger, #b00020);
+          color: #fff;
+          border-radius: 4px;
+        "
+      >
+        &#9888; {{ msg }}
+      </div>
+      {% when None %} {% endmatch %} {% if has_list_entries && mode == "all" %}
       <div
         class="empty"
         style="
@@ -162,6 +175,12 @@ endblock %} {% block breadcrumb %}
                   Remove
                 </button>
               </form>
+              {% elif mode == "all" %}
+              <span
+                class="badge muted"
+                title="Switch to whitelist or blacklist mode to manage the list"
+                >—</span
+              >
               {% else %}
               <form
                 method="POST"

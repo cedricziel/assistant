@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
-use assistant_skills::SkillSource;
+use assistant_skills::{parse_skill_content, SkillSource};
 use assistant_storage::registry::SkillRegistry;
 
 use crate::common::{internal_error, render_template, StaticUrls};
@@ -36,6 +36,7 @@ struct SkillRowView {
     description: String,
     source_label: String,
     is_builtin: bool,
+    is_project: bool,
 }
 
 /// Full skill detail for show/edit pages.
@@ -114,6 +115,7 @@ pub async fn list_skills(State(state): State<SkillsPagesState>) -> Response {
         .into_iter()
         .map(|s| SkillRowView {
             is_builtin: matches!(s.source, SkillSource::Builtin),
+            is_project: matches!(s.source, SkillSource::Project),
             source_label: source_label(&s.source),
             name: s.name,
             description: s.description,
@@ -184,7 +186,7 @@ pub async fn create_skill(
             error: Some(e.to_string()),
             name: form.name,
             description: form.description,
-            body: form.body,
+            body: form.body.trim_start().to_string(),
         }),
     }
 }
@@ -213,7 +215,9 @@ pub async fn edit_skill_form(
         error: None,
         name: skill.name,
         description: skill.description,
-        body: skill.body,
+        // Trim leading whitespace so the HTML formatter's newline before
+        // `{{ body }}` inside the <textarea> doesn't corrupt the saved value.
+        body: skill.body.trim_start().to_string(),
     })
 }
 
@@ -276,6 +280,11 @@ pub struct GenerateRequest {
 
 #[derive(Serialize)]
 struct GenerateOk {
+    /// Parsed skill name from generated frontmatter (empty string if unparseable).
+    name: String,
+    /// Parsed description from generated frontmatter.
+    description: String,
+    /// Body-only content (everything after the frontmatter `---`).
     body: String,
 }
 
@@ -320,10 +329,24 @@ pub async fn generate_skill(
     .await;
 
     match result {
-        Ok(Ok(turn_result)) => Json(GenerateOk {
-            body: turn_result.answer,
-        })
-        .into_response(),
+        Ok(Ok(turn_result)) => {
+            // Attempt to parse the LLM output as a valid SKILL.md so we can
+            // return name/description/body separately.  On parse failure we
+            // return the raw answer as the body so the user can still see it.
+            let raw = turn_result.answer;
+            let tmp_dir = std::path::PathBuf::from("/tmp");
+            let (name, description, body) =
+                match parse_skill_content(&raw, &tmp_dir, SkillSource::User) {
+                    Ok(def) => (def.name, def.description, def.body.trim_start().to_string()),
+                    Err(_) => (String::new(), String::new(), raw.trim_start().to_string()),
+                };
+            Json(GenerateOk {
+                name,
+                description,
+                body,
+            })
+            .into_response()
+        }
         Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(GenerateErr {

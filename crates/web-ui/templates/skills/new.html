@@ -195,6 +195,12 @@ breadcrumb %}
       const data = await resp.json();
       if (resp.ok && data.body) {
         document.getElementById("skill-body").value = data.body;
+        if (data.name) {
+          document.getElementById("skill-name").value = data.name;
+        }
+        if (data.description) {
+          document.getElementById("skill-description").value = data.description;
+        }
       } else {
         status.textContent = data.error || "Generation failed.";
         status.style.display = "block";

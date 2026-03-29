@@ -8,6 +8,41 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+// -- Helpers -----------------------------------------------------------------
+
+/// Validate that a user-supplied skill name is a safe single path segment.
+///
+/// Allows `[a-z0-9][a-z0-9-]*`, max 64 chars.  Rejects `..`, absolute paths,
+/// path separators, and anything that could escape the skills directory.
+fn validate_skill_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("Skill name must not be empty");
+    }
+    if name.len() > 64 {
+        anyhow::bail!("Skill name must be 64 characters or fewer");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        anyhow::bail!(
+            "Skill name must contain only lowercase letters, digits, and hyphens (got '{}')",
+            name
+        );
+    }
+    if name.starts_with('-') || name.ends_with('-') {
+        anyhow::bail!("Skill name must not start or end with a hyphen");
+    }
+    Ok(())
+}
+
+/// Wrap a string in YAML single-quoted style, escaping any embedded single
+/// quotes by doubling them.  This prevents newlines, colons, or `---`
+/// sequences in user input from corrupting the frontmatter.
+fn yaml_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
 /// In-memory + SQLite-backed registry of all known skills.
 pub struct SkillRegistry {
     pool: SqlitePool,
@@ -139,12 +174,19 @@ impl SkillRegistry {
     ///
     /// Writes `~/.assistant/skills/<name>/SKILL.md` with the given frontmatter
     /// and body, then upserts to the in-memory cache and SQLite.
+    ///
+    /// The write is atomic from the caller's perspective: the SKILL.md file is
+    /// written to a `.tmp` sibling first, then renamed into place only after the
+    /// SQLite upsert succeeds.  If the upsert fails the temp file is cleaned up
+    /// and the on-disk state is left unchanged.
     pub async fn create_user_skill(
         &self,
         name: &str,
         description: &str,
         body: &str,
     ) -> Result<SkillDef> {
+        validate_skill_name(name)?;
+
         // Reject duplicate names.
         if self.get(name).await.is_some() {
             anyhow::bail!("Skill '{}' already exists", name);
@@ -159,25 +201,41 @@ impl SkillRegistry {
 
         let content = format!(
             "---\nname: {}\ndescription: {}\n---\n\n{}",
-            name, description, body
+            name,
+            yaml_quote(description),
+            body
         );
         let skill_md = skill_dir.join("SKILL.md");
-        tokio::fs::write(&skill_md, &content)
-            .await
-            .with_context(|| format!("Failed to write {}", skill_md.display()))?;
+        let skill_md_tmp = skill_dir.join("SKILL.md.tmp");
 
+        // Parse before touching the DB so we catch format errors early.
         let def = parse_skill_content(&content, &skill_dir, SkillSource::User)
             .with_context(|| format!("Failed to parse generated SKILL.md for '{}'", name))?;
 
-        self.register(def.clone()).await?;
+        // Write to temp file first.
+        tokio::fs::write(&skill_md_tmp, &content)
+            .await
+            .with_context(|| format!("Failed to write {}", skill_md_tmp.display()))?;
+
+        // Upsert to DB.  On failure clean up the temp file and propagate.
+        if let Err(e) = self.register(def.clone()).await {
+            let _ = tokio::fs::remove_file(&skill_md_tmp).await;
+            return Err(e).with_context(|| format!("Failed to upsert skill '{}' to SQLite", name));
+        }
+
+        // Atomically rename into place.
+        tokio::fs::rename(&skill_md_tmp, &skill_md)
+            .await
+            .with_context(|| format!("Failed to rename temp file to {}", skill_md.display()))?;
+
         info!("Created user skill '{}' at {}", name, skill_dir.display());
         Ok(def)
     }
 
     /// Update the description and body of an existing user or installed skill.
     ///
-    /// Writes the updated `SKILL.md` to disk, then upserts to cache and SQLite.
-    /// Rejects builtin and project-source skills.
+    /// Writes the updated `SKILL.md` to disk atomically (temp file then rename),
+    /// then upserts to cache and SQLite.  Rejects builtin and project-source skills.
     pub async fn update_user_skill(&self, name: &str, description: &str, body: &str) -> Result<()> {
         let existing = self
             .get(name)
@@ -196,17 +254,33 @@ impl SkillRegistry {
 
         let content = format!(
             "---\nname: {}\ndescription: {}\n---\n\n{}",
-            name, description, body
+            name,
+            yaml_quote(description),
+            body
         );
         let skill_md = existing.dir.join("SKILL.md");
-        tokio::fs::write(&skill_md, &content)
-            .await
-            .with_context(|| format!("Failed to write {}", skill_md.display()))?;
+        let skill_md_tmp = existing.dir.join("SKILL.md.tmp");
 
+        // Parse before touching the DB so we catch format errors early.
         let updated = parse_skill_content(&content, &existing.dir, existing.source)
             .with_context(|| format!("Failed to parse updated SKILL.md for '{}'", name))?;
 
-        self.register(updated).await?;
+        // Write to temp file first.
+        tokio::fs::write(&skill_md_tmp, &content)
+            .await
+            .with_context(|| format!("Failed to write {}", skill_md_tmp.display()))?;
+
+        // Upsert to DB.  On failure clean up the temp file and propagate.
+        if let Err(e) = self.register(updated).await {
+            let _ = tokio::fs::remove_file(&skill_md_tmp).await;
+            return Err(e).with_context(|| format!("Failed to upsert skill '{}' to SQLite", name));
+        }
+
+        // Atomically rename into place.
+        tokio::fs::rename(&skill_md_tmp, &skill_md)
+            .await
+            .with_context(|| format!("Failed to rename temp file to {}", skill_md.display()))?;
+
         info!("Updated user skill '{}'", name);
         Ok(())
     }
@@ -222,8 +296,14 @@ impl SkillRegistry {
             .await
             .ok_or_else(|| anyhow::anyhow!("Skill '{}' not found", name))?;
 
-        if matches!(existing.source, SkillSource::Builtin) {
-            anyhow::bail!("Cannot delete builtin skill '{}'", name);
+        match existing.source {
+            SkillSource::Builtin => {
+                anyhow::bail!("Cannot delete builtin skill '{}'", name);
+            }
+            SkillSource::Project => {
+                anyhow::bail!("Cannot delete project-scoped skill '{}' via the UI", name);
+            }
+            _ => {}
         }
 
         let dir = existing.dir.clone();
@@ -235,7 +315,12 @@ impl SkillRegistry {
                 warn!("Skill directory already gone: {}", dir.display());
             }
             Err(e) => {
-                warn!("Failed to remove skill directory {}: {}", dir.display(), e);
+                // Propagate: the skill was removed from DB/cache but the
+                // directory remains.  Without the directory removal the skill
+                // will resurrect on the next startup scan.
+                return Err(e).with_context(|| {
+                    format!("Failed to remove skill directory {}", dir.display())
+                });
             }
         }
         Ok(())
@@ -268,11 +353,12 @@ impl SkillRegistry {
         let mode = match mode {
             Some((m,)) => m,
             None => {
-                warn!(
-                    persona_id = %persona_id,
-                    "Persona not found when filtering skills — returning all skills"
+                // Fail closed: an unknown persona_id must not silently bypass
+                // whitelist/blacklist enforcement by granting full access.
+                anyhow::bail!(
+                    "Persona '{}' not found — cannot determine skill access mode",
+                    persona_id
                 );
-                return Ok(all);
             }
         };
 
@@ -514,22 +600,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_for_persona_unknown_persona_returns_all() {
+    async fn list_for_persona_unknown_persona_returns_error() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let registry = SkillRegistry::new(storage.pool.clone()).await.unwrap();
         registry.register(make_skill("alpha")).await.unwrap();
         registry.register(make_skill("beta")).await.unwrap();
 
-        // No persona inserted — should fall back to returning everything.
-        let skills = registry
+        // No persona inserted — must fail closed rather than granting full access.
+        let result = registry
             .list_for_persona("no-such-persona", &storage.pool)
-            .await
-            .unwrap();
-        assert_eq!(
-            skills.len(),
-            2,
-            "unknown persona must fall back to full list"
-        );
+            .await;
+        assert!(result.is_err(), "unknown persona must return an error");
     }
 
     #[tokio::test]
@@ -705,5 +786,72 @@ mod tests {
 
         let result = registry.delete_user_skill("builtin-del").await;
         assert!(result.is_err(), "deleting a builtin must be rejected");
+    }
+
+    #[tokio::test]
+    async fn delete_user_skill_rejects_project() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let registry = SkillRegistry::new(storage.pool.clone()).await.unwrap();
+        let mut project_skill = make_skill("project-del");
+        project_skill.source = SkillSource::Project;
+        registry.register(project_skill).await.unwrap();
+
+        let result = registry.delete_user_skill("project-del").await;
+        assert!(result.is_err(), "deleting a project skill must be rejected");
+        assert!(
+            result.unwrap_err().to_string().contains("project-scoped"),
+            "error should mention project-scoped"
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_skill_name_rejects_path_traversal() {
+        assert!(
+            validate_skill_name("../etc/passwd").is_err(),
+            "path traversal must be rejected"
+        );
+        assert!(
+            validate_skill_name("../../secret").is_err(),
+            "nested path traversal must be rejected"
+        );
+        assert!(
+            validate_skill_name("/absolute/path").is_err(),
+            "absolute path must be rejected"
+        );
+        assert!(
+            validate_skill_name("sub/dir").is_err(),
+            "path with separator must be rejected"
+        );
+        assert!(
+            validate_skill_name("UPPERCASE").is_err(),
+            "uppercase must be rejected"
+        );
+        assert!(validate_skill_name("valid-name").is_ok());
+        assert!(validate_skill_name("my-skill-123").is_ok());
+    }
+
+    #[tokio::test]
+    async fn validate_skill_name_rejects_empty_and_long() {
+        assert!(
+            validate_skill_name("").is_err(),
+            "empty name must be rejected"
+        );
+        assert!(
+            validate_skill_name(&"a".repeat(65)).is_err(),
+            "name >64 chars must be rejected"
+        );
+        assert!(
+            validate_skill_name(&"a".repeat(64)).is_ok(),
+            "64-char name is valid"
+        );
+    }
+
+    #[test]
+    fn yaml_quote_escapes_special_chars() {
+        assert_eq!(yaml_quote("plain"), "'plain'");
+        assert_eq!(yaml_quote("it's a test"), "'it''s a test'");
+        assert_eq!(yaml_quote("key: value\nnewline"), "'key: value\nnewline'");
+        assert_eq!(yaml_quote("---"), "'---'");
+        assert_eq!(yaml_quote(""), "''");
     }
 }

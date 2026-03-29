@@ -711,6 +711,13 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
         }
         PersonaCommand::SkillMode { persona_id, mode } => {
             let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
+            if access_store.has_skill_list_entries(persona_id).await? {
+                eprintln!(
+                    "Warning: persona '{}' has existing skill list entries. \
+                     Changing mode will reinterpret them as {} rules.",
+                    persona_id, mode
+                );
+            }
             access_store.set_mode(persona_id, mode).await?;
             println!(
                 "Persona '{}' skill access mode set to '{}'.",
