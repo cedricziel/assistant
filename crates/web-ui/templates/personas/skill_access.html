@@ -1,0 +1,208 @@
+{% extends "base.html" %} {% block title %}Skill Access — {{ persona_name }}{%
+endblock %} {% block breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/personas" class="breadcrumb-page">Personas</a>
+<span class="breadcrumb-sep">/</span>
+<a href="/personas/{{ persona_id }}" class="breadcrumb-page"
+  >{{ persona_name }}</a
+>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">Skill Access</span>
+{% endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>Skill Access</h2>
+      </div>
+    </div>
+  </aside>
+  <main class="main">
+    <!-- Mode selector panel -->
+    <div class="panel" style="margin-bottom: 1rem">
+      <div class="panel-head">
+        <div>
+          <h2>Skill Access: <span class="trace-id">{{ persona_id }}</span></h2>
+          <p>Control which skills are available when this persona is active.</p>
+        </div>
+        <a href="/personas/{{ persona_id }}" class="action-btn secondary"
+          >&larr; Back</a
+        >
+      </div>
+
+      {% match error_msg %} {% when Some with (msg) %}
+      <div
+        class="empty"
+        style="
+          margin-bottom: 1rem;
+          padding: 0.75rem 1rem;
+          background: var(--danger, #b00020);
+          color: #fff;
+          border-radius: 4px;
+        "
+      >
+        &#9888; {{ msg }}
+      </div>
+      {% when None %} {% endmatch %} {% if has_list_entries && mode == "all" %}
+      <div
+        class="empty"
+        style="
+          margin-bottom: 1rem;
+          padding: 0.75rem 1rem;
+          background: var(--warn, #7a5c00);
+          color: #fff;
+          border-radius: 4px;
+        "
+      >
+        &#9888; This persona has a skill list but mode is
+        <strong>all</strong> &mdash; the list is currently ignored. Switch to
+        whitelist or blacklist to activate it.
+      </div>
+      {% endif %} {% if has_list_entries && mode != "all" %}
+      <div
+        class="empty"
+        style="
+          margin-bottom: 1rem;
+          padding: 0.75rem 1rem;
+          background: var(--warn, #7a5c00);
+          color: #fff;
+          border-radius: 4px;
+        "
+      >
+        &#9888; Switching modes will keep the existing skill list. Skills in the
+        list will be interpreted differently under the new mode.
+      </div>
+      {% endif %}
+
+      <form method="POST" action="/personas/{{ persona_id }}/skills/mode">
+        <fieldset style="border: none; padding: 0; margin: 0 0 1rem 0">
+          <legend
+            style="font-weight: 600; margin-bottom: 0.5rem; display: block"
+          >
+            Access Mode
+          </legend>
+          <label style="margin-right: 1.5rem; cursor: pointer">
+            {% if mode == "all" %}
+            <input type="radio" name="mode" value="all" checked />
+            {% else %}
+            <input type="radio" name="mode" value="all" />
+            {% endif %}
+            <strong>all</strong> &mdash; every skill is available (default)
+          </label>
+          <label style="margin-right: 1.5rem; cursor: pointer">
+            {% if mode == "whitelist" %}
+            <input type="radio" name="mode" value="whitelist" checked />
+            {% else %}
+            <input type="radio" name="mode" value="whitelist" />
+            {% endif %}
+            <strong>whitelist</strong> &mdash; only listed skills are available
+          </label>
+          <label style="cursor: pointer">
+            {% if mode == "blacklist" %}
+            <input type="radio" name="mode" value="blacklist" checked />
+            {% else %}
+            <input type="radio" name="mode" value="blacklist" />
+            {% endif %}
+            <strong>blacklist</strong> &mdash; all skills except listed are
+            available
+          </label>
+        </fieldset>
+        <button type="submit" class="action-btn">Save Mode</button>
+      </form>
+    </div>
+
+    <!-- Skills table -->
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Skills</h2>
+          <p>
+            {% if mode == "whitelist" %} Only skills marked
+            <strong>in list</strong> will be available to this persona. {% elif
+            mode == "blacklist" %} Skills marked <strong>in list</strong> will
+            be <em>excluded</em> from this persona. {% else %} All skills are
+            available. Add skills to the list to use whitelist/blacklist
+            filtering. {% endif %}
+          </p>
+        </div>
+      </div>
+
+      <table class="trace-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Source</th>
+            <th>List Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>
+              <a href="/skills/{{ row.name }}"
+                ><span class="trace-id">{{ row.name }}</span></a
+              >
+            </td>
+            <td>{{ row.description }}</td>
+            <td><span class="badge muted">{{ row.source_label }}</span></td>
+            <td>
+              {% if row.in_list %}
+              <span class="hdr-badge ok">in list</span>
+              {% else %}
+              <span class="badge muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.in_list %}
+              <form
+                method="POST"
+                action="/personas/{{ persona_id }}/skills/{{ row.name }}/remove"
+                style="display: inline"
+              >
+                <button
+                  type="submit"
+                  class="action-btn"
+                  style="
+                    font-size: 0.8rem;
+                    padding: 0.2rem 0.6rem;
+                    background: var(--danger);
+                  "
+                >
+                  Remove
+                </button>
+              </form>
+              {% elif mode == "all" %}
+              <span
+                class="badge muted"
+                title="Switch to whitelist or blacklist mode to manage the list"
+                >—</span
+              >
+              {% else %}
+              <form
+                method="POST"
+                action="/personas/{{ persona_id }}/skills/add"
+                style="display: inline"
+              >
+                <input type="hidden" name="skill_name" value="{{ row.name }}" />
+                <button
+                  type="submit"
+                  class="action-btn secondary"
+                  style="font-size: 0.8rem; padding: 0.2rem 0.6rem"
+                >
+                  Add
+                </button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+{% endblock %}

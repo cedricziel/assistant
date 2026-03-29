@@ -73,7 +73,10 @@ async function createAgent(page: Page): Promise<string> {
 
   const suffix = Date.now();
   await page.fill('input[name="name"]', `E2E Agent ${suffix}`);
-  await page.fill('textarea[name="description"]', "Agent created by visual regression test");
+  await page.fill(
+    'textarea[name="description"]',
+    "Agent created by visual regression test",
+  );
   await page.fill('input[name="version"]', "1.0.0");
 
   await page.locator("form.entity-form button[type='submit']").click();
@@ -85,6 +88,23 @@ async function createAgent(page: Page): Promise<string> {
     throw new Error(`failed to parse agent id from ${pathname}`);
   }
   return id;
+}
+
+/** Create a user skill through the UI and return its name. */
+async function createSkill(
+  page: Page,
+  suffix: string = String(Date.now()),
+): Promise<string> {
+  await navigateAndSettle(page, "/skills/new");
+
+  const name = `e2e-skill-${suffix}`;
+  await page.fill('input[name="name"]', name);
+  await page.fill('input[name="description"]', "E2E test skill");
+  await page.fill('textarea[name="body"]', "When asked, do the e2e thing.");
+
+  await page.locator('form button[type="submit"]').click();
+  await page.waitForURL(/\/skills\/[^/]+$/);
+  return name;
 }
 
 /** Create a webhook through the UI and return its id. */
@@ -108,7 +128,10 @@ async function createWebhook(page: Page): Promise<string> {
 }
 
 /** Queue a workflow run and return the run id. */
-async function queueWorkflowRun(page: Page, workflowId: string): Promise<string> {
+async function queueWorkflowRun(
+  page: Page,
+  workflowId: string,
+): Promise<string> {
   const payload = (await page.evaluate(async (id) => {
     const response = await fetch(`/api/workflows/${id}/test-run`, {
       method: "POST",
@@ -137,7 +160,10 @@ async function queueWorkflowRun(page: Page, workflowId: string): Promise<string>
     body: { run_id?: string } | null;
   };
 
-  expect(payload.ok, `workflow test-run request failed (${payload.status})`).toBeTruthy();
+  expect(
+    payload.ok,
+    `workflow test-run request failed (${payload.status})`,
+  ).toBeTruthy();
   const runId = payload.body?.run_id;
   if (!runId) {
     throw new Error("failed to parse workflow run id from test-run response");
@@ -375,6 +401,91 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("skills list page (empty state)", async ({ page }) => {
+    await navigateAndSettle(page, "/skills");
+    await expect(page).toHaveScreenshot("skills-empty.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+  });
+
+  test("skill create form", async ({ page }) => {
+    await navigateAndSettle(page, "/skills/new");
+    await expect(page).toHaveScreenshot("skill-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+  });
+
+  test("skill detail and edit screens", async ({ page }) => {
+    const skillName = await createSkill(page);
+
+    await navigateAndSettle(page, `/skills/${skillName}`);
+    await expect(page).toHaveScreenshot("skill-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+
+    await navigateAndSettle(page, `/skills/${skillName}/edit`);
+    await expect(page).toHaveScreenshot("skill-edit.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+  });
+
+  test("skill CRUD flow", async ({ page }) => {
+    const suffix = String(Date.now());
+    const name = `e2e-skill-${suffix}`;
+
+    // Create
+    await navigateAndSettle(page, "/skills/new");
+    await page.fill('input[name="name"]', name);
+    await page.fill('input[name="description"]', "CRUD flow test skill");
+    await page.fill('textarea[name="body"]', "When asked, do the crud thing.");
+    await page.locator('form button[type="submit"]').click();
+    await page.waitForURL(/\/skills\/[^/]+$/);
+    expect(new URL(page.url()).pathname).toContain(name);
+
+    // Edit
+    await navigateAndSettle(page, `/skills/${name}/edit`);
+    await page.fill('input[name="description"]', "Updated description");
+    await page.locator('form button[type="submit"]').click();
+    await page.waitForURL(/\/skills\/[^/]+$/);
+
+    // Verify updated description visible on detail page
+    await navigateAndSettle(page, `/skills/${name}`);
+    const bodyText = await page.textContent("body");
+    expect(bodyText).toContain("Updated description");
+
+    // Delete
+    await page.locator('form[action*="/delete"] button[type="submit"]').click();
+    await page.waitForURL("/skills");
+    const listText = await page.textContent("body");
+    expect(listText).not.toContain(name);
+  });
+
+  test("persona skill access page", async ({ page }) => {
+    // Navigate to the default persona's skill access page
+    // First find a persona id by going to contexts page
+    await navigateAndSettle(page, "/contexts");
+    const firstPersonaLink = page
+      .locator('a[href*="/personas/"]:not([href="/personas/new"])')
+      .first();
+    const personaHref = await firstPersonaLink.getAttribute("href");
+    if (!personaHref) {
+      // No personas yet — skip screenshot, just verify no crash
+      return;
+    }
+    const personaId = personaHref.split("/personas/")[1]?.split("/")[0];
+    if (!personaId) return;
+
+    await navigateAndSettle(page, `/personas/${personaId}/skills`);
+    await expect(page).toHaveScreenshot("persona-skill-access.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO,
+    });
+  });
+
   test("responsive navigation switches by breakpoint", async ({ page }) => {
     await navigateAndSettle(page, "/chat");
     const viewport = page.viewportSize();
@@ -406,7 +517,9 @@ test.describe("Authenticated pages", () => {
     expect(iconRailVisible).toBeTruthy();
   });
 
-  test("mobile more tab points to active management section", async ({ page }) => {
+  test("mobile more tab points to active management section", async ({
+    page,
+  }) => {
     const cases: Array<{ path: string; expectedHref: string }> = [
       { path: "/agents", expectedHref: "/agents" },
       { path: "/workflows", expectedHref: "/workflows" },
@@ -444,6 +557,8 @@ test.describe("Authenticated pages", () => {
       "/workflows",
       "/workflows/new",
       "/contexts",
+      "/skills",
+      "/skills/new",
     ];
 
     for (const route of routes) {

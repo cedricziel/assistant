@@ -1,0 +1,223 @@
+{% extends "base.html" %} {% block title %}New Skill{% endblock %} {% block
+breadcrumb %}
+<span class="breadcrumb-page">Management</span>
+<span class="breadcrumb-sep">/</span>
+<a href="/skills" class="breadcrumb-page">Skills</a>
+<span class="breadcrumb-sep">/</span>
+<span class="breadcrumb-current">New Skill</span>
+{% endblock %} {% block content %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <p>assistant</p>
+        <h2>New Skill</h2>
+      </div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Create New Skill</h2>
+          <p>Define a new skill for the assistant.</p>
+        </div>
+        <a href="/skills" class="action-btn secondary">&larr; Back</a>
+      </div>
+
+      {% match error %} {% when Some with (msg) %}
+      <p class="empty" style="margin-bottom: 1rem; color: var(--danger)">
+        {{ msg }}
+      </p>
+      {% when None %} {% endmatch %}
+
+      <form
+        method="POST"
+        action="/skills"
+        style="
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+          max-width: 640px;
+        "
+      >
+        <div>
+          <label
+            for="skill-name"
+            style="display: block; margin-bottom: 0.25rem"
+          >
+            Name <span class="trace-id">(kebab-case, e.g. my-skill)</span>
+          </label>
+          <input
+            id="skill-name"
+            type="text"
+            name="name"
+            required
+            value="{{ name }}"
+            placeholder="my-skill"
+            pattern="[a-z0-9]+(-[a-z0-9]+)*"
+            maxlength="64"
+            title="Lowercase letters and digits, separated by single hyphens (no leading, trailing, or consecutive hyphens); max 64 characters"
+            style="
+              width: 100%;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+            "
+          />
+        </div>
+        <div>
+          <label
+            for="skill-description"
+            style="display: block; margin-bottom: 0.25rem"
+            >Description</label
+          >
+          <input
+            id="skill-description"
+            type="text"
+            name="description"
+            required
+            value="{{ description }}"
+            placeholder="Short description of what this skill does"
+            style="
+              width: 100%;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+            "
+          />
+        </div>
+        <div>
+          <label
+            for="skill-body"
+            style="display: block; margin-bottom: 0.25rem"
+          >
+            Body
+            <span class="trace-id"
+              >(instructions injected into system prompt)</span
+            >
+          </label>
+          <textarea
+            id="skill-body"
+            name="body"
+            rows="12"
+            placeholder="Enter skill instructions here..."
+            style="
+              width: 100%;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+              font-family: monospace;
+              resize: vertical;
+            "
+          >
+{{ body }}</textarea
+          >
+        </div>
+        <div>
+          <button type="submit" class="action-btn">Create Skill</button>
+        </div>
+      </form>
+
+      <!-- Generate with AI -->
+      <div
+        style="
+          margin-top: 2rem;
+          padding-top: 1rem;
+          border-top: 1px solid var(--border);
+        "
+      >
+        <h3 style="margin-bottom: 0.5rem">Generate with AI</h3>
+        <p class="empty" style="margin-bottom: 0.75rem">
+          Describe what the skill should do and the assistant will draft a
+          SKILL.md body.
+        </p>
+        <label
+          for="gen-description"
+          style="display: block; margin-bottom: 0.25rem; font-size: 0.9rem"
+          >Describe the skill goal</label
+        >
+        <div
+          style="
+            display: flex;
+            gap: 0.5rem;
+            max-width: 640px;
+            margin-bottom: 0.5rem;
+          "
+        >
+          <input
+            id="gen-description"
+            type="text"
+            placeholder="e.g. Teach the agent to write ADR documents"
+            style="
+              flex: 1;
+              padding: 0.5rem;
+              background: var(--surface-2);
+              border: 1px solid var(--border);
+              border-radius: 4px;
+              color: inherit;
+            "
+          />
+          <button
+            id="gen-btn"
+            type="button"
+            class="action-btn secondary"
+            onclick="generateSkill()"
+          >
+            Generate
+          </button>
+        </div>
+        <p
+          id="gen-status"
+          style="font-size: 0.85rem; color: var(--muted); display: none"
+        ></p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  async function generateSkill() {
+    const desc = document.getElementById("gen-description").value.trim();
+    if (!desc) return;
+    const btn = document.getElementById("gen-btn");
+    const status = document.getElementById("gen-status");
+    btn.disabled = true;
+    btn.textContent = "Generating…";
+    status.textContent = "";
+    status.style.display = "none";
+    try {
+      const resp = await fetch("/skills/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: desc }),
+      });
+      const data = await resp.json();
+      if (resp.ok && data.body) {
+        document.getElementById("skill-body").value = data.body;
+        if (data.name) {
+          document.getElementById("skill-name").value = data.name;
+        }
+        if (data.description) {
+          document.getElementById("skill-description").value = data.description;
+        }
+      } else {
+        status.textContent = data.error || "Generation failed.";
+        status.style.display = "block";
+      }
+    } catch (e) {
+      status.textContent = "Network error: " + e.message;
+      status.style.display = "block";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Generate";
+    }
+  }
+</script>
+{% endblock %}

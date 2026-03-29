@@ -20,8 +20,21 @@ impl Orchestrator {
     }
 
     /// Render the available skills as an XML block for the system prompt.
+    ///
+    /// Skills are filtered by the active persona's access mode (all/whitelist/blacklist).
     async fn available_skills_xml(&self) -> Option<String> {
-        let skills = self.registry.list().await;
+        let skills = self
+            .registry
+            .list_for_persona(&self.agent_id, &self.storage.pool)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    persona = %self.agent_id,
+                    error = %e,
+                    "Failed to filter skills by persona; returning empty list"
+                );
+                vec![]
+            });
         if skills.is_empty() {
             return None;
         }

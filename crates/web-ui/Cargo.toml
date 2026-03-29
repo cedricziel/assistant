@@ -39,7 +39,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tokio-stream = "0.1"
 tower-http = { version = "0.6", features = ["trace", "cors"] }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 sqlx = { workspace = true, features = ["sqlite", "runtime-tokio", "macros"] }
 uuid = { workspace = true }
