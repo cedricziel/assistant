@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.65](https://github.com/cedricziel/assistant/compare/v0.1.64...v0.1.65) (2026-03-29)
+
+
+### Features
+
+* **003-skill-management:** skill CRUD, persona access control, and AI generation ([#326](https://github.com/cedricziel/assistant/issues/326)) ([fa9d40a](https://github.com/cedricziel/assistant/commit/fa9d40af4b24c816b22f332704b0f50e9ccce447))
+
 ## [0.1.64](https://github.com/cedricziel/assistant/compare/v0.1.63...v0.1.64) (2026-03-29)
 
 
