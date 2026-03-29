@@ -1,6 +1,6 @@
 [package]
 name = "assistant"
-version = "0.1.65"
+version = "0.1.66"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -47,7 +47,7 @@ default-members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.65"
+version = "0.1.66"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cedricziel/assistant"
