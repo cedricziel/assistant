@@ -179,6 +179,11 @@ impl Orchestrator {
                     let ext = self.extension_registrations.write().await.remove(&conv_id);
                     let token_sink = self.token_sinks.write().await.remove(&conv_id);
 
+                    // Keep a clone of extension registrations so we can
+                    // re-register them if this turn fails transiently and
+                    // needs to be nacked for NATS redelivery.
+                    let ext_for_retry = ext.clone();
+
                     // Dispatch to the appropriate processing method.
                     let result: Result<TurnResult> = if let Some(reg) = ext {
                         // Extension-tool turn (Slack, Mattermost).
@@ -333,9 +338,39 @@ impl Orchestrator {
                                 "Turn failed in worker"
                             );
 
-                            // Publish a failure TurnResult so submit_turn
-                            // callers get an immediate error instead of
-                            // waiting until timeout.
+                            // Transient LLM errors (429 rate-limit, overload,
+                            // etc.) are retried silently via NATS redelivery
+                            // with exponential backoff — no error published to
+                            // the caller.
+                            if is_transient_turn_error(&e) {
+                                let delay = transient_nack_delay(msg.delivery_count);
+                                warn!(
+                                    error = %e,
+                                    conversation_id = %conv_id,
+                                    worker_id,
+                                    delivery = msg.delivery_count,
+                                    delay_secs = delay.as_secs(),
+                                    "Transient turn error — nacking for redelivery"
+                                );
+                                // Re-register extension tools so the
+                                // redelivered message dispatches correctly.
+                                if let Some(reg) = ext_for_retry {
+                                    self.extension_registrations
+                                        .write()
+                                        .await
+                                        .insert(conv_id, reg);
+                                }
+                                let _ = self.bus.nack_delayed(msg.id, delay).await;
+                                bus_consume_cx
+                                    .span()
+                                    .set_attribute(KeyValue::new("bus.status", "transient_retry"));
+                                bus_consume_cx.span().end();
+                                continue;
+                            }
+
+                            // Permanent error — publish a failure TurnResult so
+                            // submit_turn callers get an immediate error instead
+                            // of waiting until timeout.
                             let err_result = bus_messages::TurnResult {
                                 conversation_id: conv_id,
                                 content: format!("Turn failed: {e}"),
@@ -673,4 +708,35 @@ impl Orchestrator {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
+}
+
+// -- Transient error helpers --------------------------------------------------
+
+/// Returns `true` if the turn error is transient (rate-limit / overload) and
+/// the message should be nacked for redelivery rather than permanently failed.
+fn is_transient_turn_error(e: &anyhow::Error) -> bool {
+    use assistant_llm::retry::is_transient_error_message;
+    is_transient_error_message(&e.to_string())
+}
+
+/// Exponential backoff delay for NATS redelivery based on how many times the
+/// message has already been delivered.
+///
+/// | delivery | delay  |
+/// |----------|--------|
+/// | 1        | 30 s   |
+/// | 2        | 60 s   |
+/// | 3        | 120 s  |
+/// | 4+       | 240 s  |
+///
+/// The cap of 240 s is chosen to stay well below the consumer `ack_wait`
+/// (300 s), preventing NATS from redelivering before we explicitly nack.
+fn transient_nack_delay(delivery_count: u32) -> Duration {
+    let secs = match delivery_count {
+        1 => 30,
+        2 => 60,
+        3 => 120,
+        _ => 240,
+    };
+    Duration::from_secs(secs)
 }

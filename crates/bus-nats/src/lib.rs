@@ -392,6 +392,22 @@ impl MessageBus for NatsMessageBus {
         Ok(())
     }
 
+    async fn nack_delayed(&self, message_id: Uuid, delay: Duration) -> Result<()> {
+        let msg = self
+            .inflight
+            .write()
+            .await
+            .remove(&message_id)
+            .ok_or_else(|| anyhow::anyhow!("no inflight NATS message for id {message_id}"))?;
+
+        msg.ack_with(AckKind::Nak(Some(delay)))
+            .await
+            .map_err(|e| anyhow::anyhow!("NATS nak (delayed) failed: {e}"))?;
+
+        debug!(id = %message_id, delay_secs = delay.as_secs(), "nacked bus message via NATS with delay");
+        Ok(())
+    }
+
     async fn fail(&self, message_id: Uuid) -> Result<()> {
         let msg = self
             .inflight
@@ -540,6 +556,12 @@ fn parse_nats_message(msg: &async_nats::jetstream::Message, worker_id: &str) -> 
 
     let batch_id = header_str(headers, H_BATCH_ID).and_then(|s| Uuid::parse_str(s).ok());
 
+    let delivery_count = msg
+        .info()
+        .ok()
+        .map(|info| info.delivered.max(1) as u32)
+        .unwrap_or(1);
+
     Ok(BusMessage {
         id,
         topic,
@@ -556,6 +578,7 @@ fn parse_nats_message(msg: &async_nats::jetstream::Message, worker_id: &str) -> 
         created_at,
         claimed_at: Some(Utc::now()),
         claimed_by: Some(worker_id.to_string()),
+        delivery_count,
     })
 }
 

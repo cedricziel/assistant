@@ -62,6 +62,11 @@
       <span class="hdr-badge error">ERR</span>
       {% else %}
       <span class="hdr-badge ok">OK</span>
+      {% endif %} {% if let Some(conv) = conversation_id %}
+      <span class="hdr-sep">|</span>
+      <a class="btn-secondary" href="/logs?conversation={{ conv }}">
+        View conversation logs &rarr;
+      </a>
       {% endif %}
     </div>
 

@@ -78,6 +78,7 @@ impl LogStore {
     }
 
     /// Return recent logs scoped to a specific assistant agent.
+    #[allow(clippy::too_many_arguments)]
     pub async fn list_recent_for_agent(
         &self,
         limit: i64,
@@ -85,6 +86,9 @@ impl LogStore {
         target_filter: Option<&str>,
         search: Option<&str>,
         trace_id: Option<&str>,
+        conversation_id: Option<&str>,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
         agent_id: &str,
     ) -> Result<Vec<RecordedLog>> {
         let rows = sqlx::query(
@@ -96,20 +100,26 @@ impl LogStore {
                AND (?2 IS NULL OR l.target = ?2) \
                AND (?3 IS NULL OR l.body LIKE '%' || ?3 || '%') \
                AND (?4 IS NULL OR l.trace_id = ?4) \
+               AND (?7 IS NULL OR l.timestamp >= ?7) \
+               AND (?8 IS NULL OR l.timestamp <= ?8) \
                AND EXISTS ( \
                    SELECT 1 \
-                   FROM distributed_traces dt \
-                   INNER JOIN conversations c ON c.id = dt.conversation_id \
-                   WHERE dt.trace_id = l.trace_id AND c.agent_id = ?5 \
+                   FROM distributed_traces dt2 \
+                   INNER JOIN conversations c ON c.id = dt2.conversation_id \
+                   WHERE dt2.trace_id = l.trace_id AND c.agent_id = ?5 \
+                     AND (?6 IS NULL OR dt2.conversation_id = ?6) \
                ) \
              ORDER BY l.timestamp DESC \
-             LIMIT ?6",
+             LIMIT ?9",
         )
         .bind(min_severity)
         .bind(target_filter)
         .bind(search)
         .bind(trace_id)
         .bind(agent_id)
+        .bind(conversation_id)
+        .bind(since)
+        .bind(until)
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
@@ -411,5 +421,178 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+    }
+
+    /// Insert a minimal span row linking a trace_id to a conversation.
+    async fn insert_trace_for_conv(pool: &SqlitePool, trace_id: &str, conversation_id: &str) {
+        let span_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO distributed_traces \
+                (span_id, trace_id, parent_span_id, name, conversation_id, turn, \
+                 tool_status, duration_ms, start_time, end_time, attributes) \
+             VALUES (?1, ?2, NULL, 'turn', ?3, 0, 'ok', 10, ?4, ?4, '{}')",
+        )
+        .bind(&span_id)
+        .bind(trace_id)
+        .bind(conversation_id)
+        .bind(now)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_conversation_filter_scopes_logs() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let pool = &storage.pool;
+
+        let conv_a = uuid::Uuid::new_v4();
+        let conv_b = uuid::Uuid::new_v4();
+
+        // Create two conversations
+        for (id, title) in [(&conv_a, "conv-a"), (&conv_b, "conv-b")] {
+            sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+                .bind(id.to_string())
+                .bind(title)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+
+        let trace_a = uuid::Uuid::new_v4().to_string();
+        let trace_b = uuid::Uuid::new_v4().to_string();
+        insert_trace_for_conv(pool, &trace_a, &conv_a.to_string()).await;
+        insert_trace_for_conv(pool, &trace_b, &conv_b.to_string()).await;
+
+        let store = storage.log_store();
+        insert_log(
+            pool,
+            "la1",
+            9,
+            "INFO",
+            "log in conv A",
+            Some(&trace_a),
+            None,
+        )
+        .await;
+        insert_log(
+            pool,
+            "la2",
+            9,
+            "INFO",
+            "another log A",
+            Some(&trace_a),
+            None,
+        )
+        .await;
+        insert_log(
+            pool,
+            "lb1",
+            9,
+            "INFO",
+            "log in conv B",
+            Some(&trace_b),
+            None,
+        )
+        .await;
+
+        // Filter to conv_a only
+        let logs_a = store
+            .list_recent_for_agent(
+                100,
+                None,
+                None,
+                None,
+                None,
+                Some(&conv_a.to_string()),
+                None,
+                None,
+                "default",
+            )
+            .await
+            .unwrap();
+        assert_eq!(logs_a.len(), 2, "should return 2 logs for conv_a");
+
+        // Filter to conv_b only
+        let logs_b = store
+            .list_recent_for_agent(
+                100,
+                None,
+                None,
+                None,
+                None,
+                Some(&conv_b.to_string()),
+                None,
+                None,
+                "default",
+            )
+            .await
+            .unwrap();
+        assert_eq!(logs_b.len(), 1, "should return 1 log for conv_b");
+        assert_eq!(logs_b[0].body.as_deref(), Some("log in conv B"));
+    }
+
+    #[tokio::test]
+    async fn test_since_until_filter() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let pool = &storage.pool;
+
+        let conv_id = uuid::Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("time-test")
+            .execute(pool)
+            .await
+            .unwrap();
+        let trace_id = uuid::Uuid::new_v4().to_string();
+        insert_trace_for_conv(pool, &trace_id, &conv_id.to_string()).await;
+
+        let store = storage.log_store();
+
+        // Insert log with current timestamp and verify no-filter returns it
+        insert_log(pool, "t1", 9, "INFO", "recent log", Some(&trace_id), None).await;
+
+        let all = store
+            .list_recent_for_agent(100, None, None, None, None, None, None, None, "default")
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 1, "should return the log with no time filter");
+
+        // since = far future → should return nothing
+        let future = Utc::now() + chrono::Duration::hours(1);
+        let empty = store
+            .list_recent_for_agent(
+                100,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(future),
+                None,
+                "default",
+            )
+            .await
+            .unwrap();
+        assert!(empty.is_empty(), "since=future should return no logs");
+
+        // until = far past → should return nothing
+        let past = Utc::now() - chrono::Duration::hours(1);
+        let empty2 = store
+            .list_recent_for_agent(
+                100,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(past),
+                "default",
+            )
+            .await
+            .unwrap();
+        assert!(empty2.is_empty(), "until=past should return no logs");
     }
 }

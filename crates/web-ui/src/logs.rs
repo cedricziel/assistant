@@ -9,6 +9,7 @@ use axum::{
     http::StatusCode,
     response::Response,
 };
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 
 use crate::common::{active_agent_id, internal_error, render_template, url_encode, StaticUrls};
@@ -22,6 +23,9 @@ struct LogQuery {
     target: Option<String>,
     search: Option<String>,
     trace_id: Option<String>,
+    conversation: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
 }
 
 // -- View models -------------------------------------------------------------
@@ -74,6 +78,9 @@ struct LogsPageTemplate {
     search_query: Option<String>,
     search_value: String,
     trace_id_filter: Option<String>,
+    selected_conversation: String,
+    selected_since: String,
+    selected_until: String,
     shown_count: usize,
     // Content
     logs: Vec<LogRowView>,
@@ -146,6 +153,37 @@ async fn show_logs(
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
+    let conversation_str = query
+        .conversation
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string();
+    let conversation_id = if conversation_str.is_empty() {
+        None
+    } else {
+        Some(conversation_str.as_str())
+    };
+
+    let since_str = query
+        .since
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string();
+    let until_str = query
+        .until
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string();
+
+    let since = parse_datetime_local(&since_str);
+    let until = parse_datetime_local(&until_str);
+
     let logs = store
         .list_recent_for_agent(
             state.log_limit,
@@ -153,6 +191,9 @@ async fn show_logs(
             target_filter,
             search,
             trace_id,
+            conversation_id,
+            since,
+            until,
             &agent_id,
         )
         .await
@@ -168,8 +209,16 @@ async fn show_logs(
         .map_err(internal_error)?;
 
     let severity_options = build_severity_options(&stats, severity_label);
-    let target_facets =
-        build_target_facets(&targets, target_filter, severity_label, search, trace_id);
+    let target_facets = build_target_facets(
+        &targets,
+        target_filter,
+        severity_label,
+        search,
+        trace_id,
+        &conversation_str,
+        &since_str,
+        &until_str,
+    );
     let log_rows: Vec<LogRowView> = logs.iter().map(log_to_row_view).collect();
     let shown_count = log_rows.len();
 
@@ -182,11 +231,30 @@ async fn show_logs(
         search_query: search.map(|s| s.to_string()),
         search_value: search.unwrap_or("").to_string(),
         trace_id_filter: trace_id.map(|s| s.to_string()),
+        selected_conversation: conversation_str,
+        selected_since: since_str,
+        selected_until: until_str,
         shown_count,
         logs: log_rows,
     };
 
     Ok(render_template(tmpl))
+}
+
+/// Parse a `datetime-local` string (`%Y-%m-%dT%H:%M`) to `DateTime<Utc>`.
+fn parse_datetime_local(s: &str) -> Option<DateTime<Utc>> {
+    if s.is_empty() {
+        return None;
+    }
+    // Accept RFC3339 (e.g. `?since=2026-03-27T07:00:00Z`) as well as the
+    // HTML `datetime-local` format emitted by the sidebar inputs.
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.to_utc());
+    }
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+        .ok()
+        .map(|ndt| ndt.and_utc())
 }
 
 async fn show_log_detail(
@@ -332,12 +400,16 @@ fn build_severity_options(stats: &LogStats, selected: Option<&str>) -> Vec<Sever
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_target_facets(
     targets: &[String],
     selected_target: Option<&str>,
     severity: Option<&str>,
     search: Option<&str>,
     trace_id: Option<&str>,
+    conversation: &str,
+    since: &str,
+    until: &str,
 ) -> Vec<TargetFacetView> {
     targets
         .iter()
@@ -355,6 +427,15 @@ fn build_target_facets(
             }
             if let Some(tid) = trace_id {
                 params.push(format!("trace_id={}", url_encode(tid)));
+            }
+            if !conversation.is_empty() {
+                params.push(format!("conversation={}", url_encode(conversation)));
+            }
+            if !since.is_empty() {
+                params.push(format!("since={}", url_encode(since)));
+            }
+            if !until.is_empty() {
+                params.push(format!("until={}", url_encode(until)));
             }
             let url = format!("/logs?{}", params.join("&"));
             TargetFacetView {

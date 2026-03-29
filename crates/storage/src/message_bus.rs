@@ -288,6 +288,7 @@ fn parse_row(r: sqlx::sqlite::SqliteRow) -> Result<BusMessage> {
         created_at: r.get("created_at"),
         claimed_at: r.get("claimed_at"),
         claimed_by: r.get("claimed_by"),
+        delivery_count: 1,
     })
 }
 
