@@ -17,7 +17,7 @@ use assistant_storage::{conversations::ConversationStore, SkillRegistry, Storage
 use assistant_tool_executor::ToolExecutor;
 use opentelemetry::{
     global,
-    trace::{Span as _, TraceContextExt, Tracer as _},
+    trace::{Span as _, Status as OtelStatus, TraceContextExt, Tracer as _},
     Context as OtelContext, KeyValue,
 };
 use tokio::sync::mpsc;
@@ -782,6 +782,9 @@ impl Orchestrator {
                     };
                     self.metrics
                         .record_error(&self.agent_id, "llm_error", label);
+                    turn_cx.span().set_status(OtelStatus::Error {
+                        description: std::borrow::Cow::Owned(e.to_string()),
+                    });
                     return Err(e);
                 }
             };
@@ -920,6 +923,12 @@ impl Orchestrator {
         };
         self.metrics
             .record_error(&self.agent_id, "max_iterations", label);
+        turn_cx.span().set_status(OtelStatus::Error {
+            description: std::borrow::Cow::Owned(format!(
+                "Max iterations ({}) reached without a final answer",
+                self.max_iterations
+            )),
+        });
         anyhow::bail!(
             "Max iterations ({}) reached without a final answer",
             self.max_iterations

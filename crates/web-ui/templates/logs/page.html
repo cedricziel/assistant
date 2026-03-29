@@ -84,6 +84,56 @@ breadcrumb %}
         </form>
       </div>
 
+      <div class="facet-group">
+        <h3>Conversation</h3>
+        <form method="get" action="/logs" class="min-dur-row">
+          {% if let Some(sev) = selected_severity %} {% if !sev.is_empty() %}
+          <input type="hidden" name="severity" value="{{ sev }}" />
+          {% endif %} {% endif %} {% if let Some(target) = selected_target %}
+          <input type="hidden" name="target" value="{{ target }}" />
+          {% endif %} {% if let Some(tid) = trace_id_filter %}
+          <input type="hidden" name="trace_id" value="{{ tid }}" />
+          {% endif %}
+          <input
+            type="text"
+            name="conversation"
+            value="{{ selected_conversation }}"
+            placeholder="paste UUID…"
+          />
+          <button type="submit">Go</button>
+        </form>
+      </div>
+
+      <div class="facet-group">
+        <h3>Time Range</h3>
+        <form method="get" action="/logs">
+          {% if let Some(sev) = selected_severity %} {% if !sev.is_empty() %}
+          <input type="hidden" name="severity" value="{{ sev }}" />
+          {% endif %} {% endif %} {% if let Some(target) = selected_target %}
+          <input type="hidden" name="target" value="{{ target }}" />
+          {% endif %} {% if !selected_conversation.is_empty() %}
+          <input
+            type="hidden"
+            name="conversation"
+            value="{{ selected_conversation }}"
+          />
+          {% endif %}
+          <label class="filter-label">From</label>
+          <input
+            type="datetime-local"
+            name="since"
+            value="{{ selected_since }}"
+          />
+          <label class="filter-label">To</label>
+          <input
+            type="datetime-local"
+            name="until"
+            value="{{ selected_until }}"
+          />
+          <button type="submit">Apply</button>
+        </form>
+      </div>
+
       <div class="facet-footer">
         <span class="trace-count">Showing {{ shown_count }} log records</span>
         <a href="/logs">Reset filters</a>

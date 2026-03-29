@@ -36,6 +36,31 @@ pub struct TraceSummary {
     pub tool_names: Vec<String>,
     pub root_span_name: Option<String>,
     pub root_service_name: Option<String>,
+    /// Originating interface extracted from root span attributes (e.g. `"Slack"`, `"Cli"`).
+    pub interface: Option<String>,
+    /// Whether a reply/slack-post tool was called during this trace.
+    pub has_reply: bool,
+}
+
+/// Filter parameters for [`TraceStore::list_recent_traces_for_agent`].
+///
+/// All fields are optional; `None` means "no restriction on this dimension".
+#[derive(Debug, Default)]
+pub struct TraceFilter {
+    /// Only include traces containing this tool name.
+    pub skill: Option<String>,
+    /// `"ok"` or `"error"` — applied in the caller after fetching.
+    pub status: Option<String>,
+    /// Restrict to a specific conversation UUID — applied in the caller after fetching.
+    pub conversation: Option<Uuid>,
+    /// Minimum trace duration in milliseconds — applied in the caller after fetching.
+    pub min_duration_ms: Option<i64>,
+    /// Filter by originating interface attribute.
+    pub interface: Option<String>,
+    /// Earliest span start time to include.
+    pub since: Option<DateTime<Utc>>,
+    /// Latest span start time to include.
+    pub until: Option<DateTime<Utc>>,
 }
 
 /// A persisted OpenTelemetry span row enriched with tool metadata.
@@ -192,6 +217,8 @@ impl TraceStore {
                     tool_names,
                     root_span_name,
                     root_service_name,
+                    interface: None,
+                    has_reply: false,
                 })
             })
             .collect()
@@ -201,7 +228,7 @@ impl TraceStore {
     pub async fn list_recent_traces_for_agent(
         &self,
         limit: i64,
-        skill_filter: Option<&str>,
+        filter: &TraceFilter,
         agent_id: &str,
     ) -> Result<Vec<TraceSummary>> {
         let rows = sqlx::query(
@@ -215,18 +242,26 @@ impl TraceStore {
                 SUM(CASE WHEN dt.tool_status = 'error' THEN 1 ELSE 0 END) AS error_count, \
                 GROUP_CONCAT(DISTINCT CASE WHEN dt.tool_name IS NULL THEN '' ELSE dt.tool_name END) AS tool_names, \
                 MAX(CASE WHEN dt.parent_span_id IS NULL THEN dt.name ELSE NULL END) AS root_span_name, \
-                MAX(CASE WHEN dt.parent_span_id IS NULL THEN dt.service_name ELSE NULL END) AS root_service_name \
+                MAX(CASE WHEN dt.parent_span_id IS NULL THEN dt.service_name ELSE NULL END) AS root_service_name, \
+                MAX(CASE WHEN dt.parent_span_id IS NULL THEN json_extract(dt.attributes, '$.interface') ELSE NULL END) AS interface, \
+                SUM(CASE WHEN dt.tool_name IN ('reply', 'slack-post') THEN 1 ELSE 0 END) > 0 AS has_reply \
              FROM distributed_traces dt \
              INNER JOIN conversations c ON c.id = dt.conversation_id \
              WHERE c.agent_id = ?1 \
+               AND (?4 IS NULL OR dt.start_time >= ?4) \
+               AND (?5 IS NULL OR dt.start_time <= ?5) \
+               AND (?6 IS NULL OR json_extract(dt.attributes, '$.interface') = ?6) \
              GROUP BY dt.trace_id \
              HAVING (?2 IS NULL) OR SUM(CASE WHEN dt.tool_name = ?2 THEN 1 ELSE 0 END) > 0 \
              ORDER BY trace_start DESC \
              LIMIT ?3",
         )
         .bind(agent_id)
-        .bind(skill_filter)
+        .bind(filter.skill.as_deref())
         .bind(limit)
+        .bind(filter.since)
+        .bind(filter.until)
+        .bind(filter.interface.as_deref())
         .fetch_all(&self.pool)
         .await?;
 
@@ -266,6 +301,8 @@ impl TraceStore {
                         }
                     })
                     .collect();
+                let interface = row.try_get::<Option<String>, _>("interface").ok().flatten();
+                let has_reply: bool = row.try_get::<i64, _>("has_reply").unwrap_or(0) != 0;
                 Ok(TraceSummary {
                     trace_id: row.get("trace_id"),
                     conversation_id,
@@ -277,6 +314,8 @@ impl TraceStore {
                     tool_names,
                     root_span_name,
                     root_service_name,
+                    interface,
+                    has_reply,
                 })
             })
             .collect()
@@ -707,5 +746,186 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+    }
+
+    /// Insert a root span (no parent) with a custom attributes JSON blob.
+    async fn insert_root_span_with_attrs(
+        pool: &SqlitePool,
+        conversation_id: Uuid,
+        tool_name: &str,
+        attrs: serde_json::Value,
+    ) {
+        let span_id = Uuid::new_v4().to_string();
+        let trace_id = Uuid::new_v4().to_string();
+        let start = Utc::now();
+        let end = start + chrono::Duration::milliseconds(10);
+
+        sqlx::query(
+            "INSERT INTO distributed_traces \
+                (span_id, trace_id, parent_span_id, name, conversation_id, turn, tool_name, \
+                 tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, attributes) \
+             VALUES (?1, ?2, NULL, 'turn', ?3, 0, ?4, 'ok', NULL, NULL, 10, ?5, ?6, ?7)",
+        )
+        .bind(span_id)
+        .bind(trace_id)
+        .bind(conversation_id.to_string())
+        .bind(tool_name)
+        .bind(start)
+        .bind(end)
+        .bind(attrs.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_has_reply_true_when_reply_tool_called() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("reply-test")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let store = storage.trace_store();
+
+        // Insert a span with tool_name = 'reply'
+        insert_span(
+            &storage.pool,
+            conv_id,
+            "reply",
+            "ok",
+            Some("sent"),
+            None,
+            50,
+        )
+        .await;
+
+        let filter = TraceFilter::default();
+        let summaries = store
+            .list_recent_traces_for_agent(10, &filter, "default")
+            .await
+            .unwrap();
+        assert_eq!(summaries.len(), 1, "expected one trace summary");
+        assert!(
+            summaries[0].has_reply,
+            "has_reply should be true when reply tool was called"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_has_reply_false_when_no_reply_tool() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("no-reply-test")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let store = storage.trace_store();
+
+        // Insert only a non-reply tool span
+        insert_span(
+            &storage.pool,
+            conv_id,
+            "list-tasks",
+            "ok",
+            Some("[]"),
+            None,
+            80,
+        )
+        .await;
+
+        let filter = TraceFilter::default();
+        let summaries = store
+            .list_recent_traces_for_agent(10, &filter, "default")
+            .await
+            .unwrap();
+        assert_eq!(summaries.len(), 1, "expected one trace summary");
+        assert!(
+            !summaries[0].has_reply,
+            "has_reply should be false when no reply tool was called"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_interface_extracted_from_root_span_attributes() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("iface-test")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let store = storage.trace_store();
+
+        // Insert a root span (parent_span_id IS NULL) with interface in attributes
+        let attrs =
+            serde_json::json!({ "interface": "Slack", "conversation_id": conv_id.to_string() });
+        insert_root_span_with_attrs(&storage.pool, conv_id, "turn", attrs).await;
+
+        let filter = TraceFilter::default();
+        let summaries = store
+            .list_recent_traces_for_agent(10, &filter, "default")
+            .await
+            .unwrap();
+        assert_eq!(summaries.len(), 1, "expected one trace summary");
+        assert_eq!(
+            summaries[0].interface.as_deref(),
+            Some("Slack"),
+            "interface should be extracted from root span JSON attributes"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_interface_filter_scopes_results() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("iface-filter")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let store = storage.trace_store();
+
+        // Slack root span
+        insert_root_span_with_attrs(
+            &storage.pool,
+            conv_id,
+            "turn",
+            serde_json::json!({ "interface": "Slack" }),
+        )
+        .await;
+        // Cli root span
+        insert_root_span_with_attrs(
+            &storage.pool,
+            conv_id,
+            "turn",
+            serde_json::json!({ "interface": "Cli" }),
+        )
+        .await;
+
+        let filter = TraceFilter {
+            interface: Some("Slack".to_string()),
+            ..TraceFilter::default()
+        };
+        let slack_only = store
+            .list_recent_traces_for_agent(10, &filter, "default")
+            .await
+            .unwrap();
+        assert_eq!(
+            slack_only.len(),
+            1,
+            "interface filter should return only Slack traces"
+        );
+        assert_eq!(slack_only[0].interface.as_deref(), Some("Slack"));
     }
 }

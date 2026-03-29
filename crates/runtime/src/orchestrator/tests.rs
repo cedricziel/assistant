@@ -2266,3 +2266,24 @@ async fn submit_turn_without_worker_times_out() {
         "submit_turn should fail/timeout when worker is not running"
     );
 }
+
+#[tokio::test]
+async fn failed_turn_propagates_error() {
+    // Verifies that when the LLM returns an error, run_turn propagates Err.
+    // The error path is also where we set OtelStatus::Error on the turn span.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
+        .mount(&server)
+        .await;
+
+    let (orch, _storage) = build(&server.uri()).await;
+    let conv_id = Uuid::new_v4();
+
+    let result = orch.run_turn("test", conv_id, Interface::Cli, None).await;
+    assert!(
+        result.is_err(),
+        "expected run_turn to return Err on LLM failure"
+    );
+}

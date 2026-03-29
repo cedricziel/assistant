@@ -26,7 +26,7 @@ pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
 pub use slack_threads::SlackActiveThreadStore;
-pub use traces::{RecordedSpan, TraceStats, TraceStore, TraceSummary};
+pub use traces::{RecordedSpan, TraceFilter, TraceStats, TraceStore, TraceSummary};
 pub use webhooks::{WebhookRecord, WebhookStore};
 pub use workflows::{
     WorkflowEdge, WorkflowEdgeCondition, WorkflowExecutionLimits, WorkflowGraph, WorkflowNode,

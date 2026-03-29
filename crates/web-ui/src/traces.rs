@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use askama::Template;
-use assistant_storage::{RecordedSpan, TraceStore, TraceSummary};
+use assistant_storage::{RecordedSpan, TraceFilter, TraceStore, TraceSummary};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -13,7 +13,7 @@ use axum::{
     routing::get,
     Router,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 
 use crate::common::{
@@ -30,6 +30,9 @@ struct TraceQuery {
     conversation: Option<String>,
     min_duration_ms: Option<i64>,
     group_by: Option<String>,
+    interface: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
 }
 
 // -- View models -------------------------------------------------------------
@@ -73,6 +76,15 @@ struct TraceRowView {
     duration: String,
     span_count: i64,
     is_error: bool,
+    has_reply: bool,
+    interface: Option<String>,
+}
+
+/// An interface facet option in the sidebar.
+struct InterfaceFacetView {
+    value: &'static str,
+    label: &'static str,
+    checked: bool,
 }
 
 /// A span row in the waterfall chart.
@@ -98,9 +110,13 @@ struct TracesPageTemplate {
     // Sidebar
     skill_facets: Vec<SkillFacetView>,
     status_options: Vec<StatusOptionView>,
+    interface_facets: Vec<InterfaceFacetView>,
     selected_skill: Option<String>,
     selected_status: Option<String>,
     selected_conversation: Option<String>,
+    selected_interface: Option<String>,
+    selected_since: String,
+    selected_until: String,
     min_duration_ms: Option<i64>,
     min_duration_str: String,
     selected_group_by: String,
@@ -127,6 +143,7 @@ struct TraceDetailTemplate {
     has_errors: bool,
     waterfall_rows: Vec<WaterfallRowView>,
     time_ticks: Vec<String>,
+    conversation_id: Option<String>,
 }
 
 impl StaticUrls for TraceDetailTemplate {}
@@ -170,11 +187,44 @@ async fn show_dashboard(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
+    let interface_value = query
+        .interface
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let since_str = query
+        .since
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string();
+    let until_str = query
+        .until
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string();
+
+    let since = parse_datetime_local(&since_str);
+    let until = parse_datetime_local(&until_str);
+
     let min_duration_ms = query.min_duration_ms;
     let selected_group_by = normalize_group_by(query.group_by.as_deref()).to_string();
 
+    let trace_filter = TraceFilter {
+        skill: skill_filter.map(|s| s.to_string()),
+        interface: interface_value.clone(),
+        since,
+        until,
+        ..TraceFilter::default()
+    };
+
     let all_traces = store
-        .list_recent_traces_for_agent(state.trace_limit, None, &agent_id)
+        .list_recent_traces_for_agent(state.trace_limit, &trace_filter, &agent_id)
         .await
         .map_err(internal_error)?;
     let total_count = all_traces.len();
@@ -189,17 +239,9 @@ async fn show_dashboard(
         Some(selected_group_by.as_str()),
     );
     let status_options = build_status_options(status_value.as_deref());
+    let interface_facets = build_interface_facets(interface_value.as_deref());
 
     let mut traces = all_traces;
-
-    if let Some(filter) = skill_filter {
-        traces.retain(|trace| {
-            trace
-                .tool_names
-                .iter()
-                .any(|tool| tool.eq_ignore_ascii_case(filter))
-        });
-    }
 
     if let Some(filter) = status_filter.as_deref() {
         traces.retain(|trace| match filter {
@@ -237,9 +279,13 @@ async fn show_dashboard(
         active_page: "traces",
         skill_facets,
         status_options,
+        interface_facets,
         selected_skill: skill_filter.map(|s| s.to_string()),
         selected_status: status_value,
         selected_conversation: conversation_value,
+        selected_interface: interface_value,
+        selected_since: since_str,
+        selected_until: until_str,
         min_duration_ms,
         min_duration_str: min_duration_ms.map(|d| d.to_string()).unwrap_or_default(),
         selected_group_by,
@@ -302,6 +348,12 @@ async fn show_trace_detail(
     let time_ticks = build_time_ticks(total_duration_ms);
     let waterfall_rows = build_waterfall_rows(start, end, &spans);
 
+    let conversation_id = spans
+        .iter()
+        .find(|s| s.parent_span_id.is_none())
+        .and_then(|s| s.conversation_id)
+        .map(|id| id.to_string());
+
     let tmpl = TraceDetailTemplate {
         active_page: "traces",
         short_id,
@@ -311,6 +363,7 @@ async fn show_trace_detail(
         has_errors: error_spans > 0,
         waterfall_rows,
         time_ticks,
+        conversation_id,
     };
 
     Ok(render_template(tmpl))
@@ -341,6 +394,8 @@ fn trace_to_row_view(trace: &TraceSummary) -> TraceRowView {
         duration: format_duration(elapsed_ms),
         span_count: trace.span_count,
         is_error: trace.error_count > 0,
+        has_reply: trace.has_reply,
+        interface: trace.interface.clone(),
     }
 }
 
@@ -663,6 +718,42 @@ fn build_skill_facets(traces: &[TraceSummary]) -> Vec<(String, usize)> {
         .collect();
     facets.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     facets
+}
+
+fn build_interface_facets(selected: Option<&str>) -> Vec<InterfaceFacetView> {
+    let options: &[(&str, &str)] = &[
+        ("", "All"),
+        ("Slack", "Slack"),
+        ("Scheduler", "Scheduler"),
+        ("Cli", "CLI"),
+    ];
+    options
+        .iter()
+        .map(|(value, label)| {
+            let checked = if value.is_empty() {
+                selected.is_none() || selected == Some("")
+            } else {
+                selected
+                    .map(|s| s.eq_ignore_ascii_case(value))
+                    .unwrap_or(false)
+            };
+            InterfaceFacetView {
+                value,
+                label,
+                checked,
+            }
+        })
+        .collect()
+}
+
+/// Parse a `datetime-local` string (`%Y-%m-%dT%H:%M`) to `DateTime<Utc>`.
+fn parse_datetime_local(s: &str) -> Option<DateTime<Utc>> {
+    if s.is_empty() {
+        return None;
+    }
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M")
+        .ok()
+        .map(|ndt| ndt.and_utc())
 }
 
 fn build_query_url(

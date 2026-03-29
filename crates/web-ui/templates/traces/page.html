@@ -127,6 +127,108 @@ breadcrumb %}
       </div>
 
       <div class="facet-group">
+        <h3>Interface</h3>
+        <form method="get">
+          {% if let Some(skill) = selected_skill %}
+          <input type="hidden" name="skill" value="{{ skill }}" />
+          {% endif %} {% if let Some(conv) = selected_conversation %}
+          <input type="hidden" name="conversation" value="{{ conv }}" />
+          {% endif %} {% if let Some(status) = selected_status %}
+          <input type="hidden" name="status" value="{{ status }}" />
+          {% endif %} {% if !selected_since.is_empty() %}
+          <input type="hidden" name="since" value="{{ selected_since }}" />
+          {% endif %} {% if !selected_until.is_empty() %}
+          <input type="hidden" name="until" value="{{ selected_until }}" />
+          {% endif %}
+          <input
+            type="hidden"
+            name="group_by"
+            value="{{ selected_group_by }}"
+          />
+          {% for opt in interface_facets %}
+          <label class="radio-label">
+            <input
+              type="radio"
+              name="interface"
+              value="{{ opt.value }}"
+              hx-get="/traces"
+              hx-include="closest form"
+              hx-target="body"
+              hx-push-url="true"
+              hx-trigger="change"
+              {%
+              if
+              opt.checked
+              %}
+              checked{%
+              endif
+              %}
+            />
+            {{ opt.label }}
+          </label>
+          {% endfor %}
+        </form>
+      </div>
+
+      <div class="facet-group">
+        <h3>Conversation</h3>
+        <form method="get" class="min-dur-row">
+          {% if let Some(skill) = selected_skill %}
+          <input type="hidden" name="skill" value="{{ skill }}" />
+          {% endif %} {% if let Some(status) = selected_status %}
+          <input type="hidden" name="status" value="{{ status }}" />
+          {% endif %} {% if let Some(iface) = selected_interface %}
+          <input type="hidden" name="interface" value="{{ iface }}" />
+          {% endif %}
+          <input
+            type="hidden"
+            name="group_by"
+            value="{{ selected_group_by }}"
+          />
+          <input
+            type="text"
+            name="conversation"
+            value="{% if let Some(conv) = selected_conversation %}{{ conv }}{% endif %}"
+            placeholder="paste UUID…"
+          />
+          <button type="submit">Go</button>
+        </form>
+      </div>
+
+      <div class="facet-group">
+        <h3>Time Range</h3>
+        <form method="get">
+          {% if let Some(skill) = selected_skill %}
+          <input type="hidden" name="skill" value="{{ skill }}" />
+          {% endif %} {% if let Some(status) = selected_status %}
+          <input type="hidden" name="status" value="{{ status }}" />
+          {% endif %} {% if let Some(iface) = selected_interface %}
+          <input type="hidden" name="interface" value="{{ iface }}" />
+          {% endif %} {% if let Some(conv) = selected_conversation %}
+          <input type="hidden" name="conversation" value="{{ conv }}" />
+          {% endif %}
+          <input
+            type="hidden"
+            name="group_by"
+            value="{{ selected_group_by }}"
+          />
+          <label class="filter-label">From</label>
+          <input
+            type="datetime-local"
+            name="since"
+            value="{{ selected_since }}"
+          />
+          <label class="filter-label">To</label>
+          <input
+            type="datetime-local"
+            name="until"
+            value="{{ selected_until }}"
+          />
+          <button type="submit">Apply</button>
+        </form>
+      </div>
+
+      <div class="facet-group">
         <h3>Min Duration</h3>
         <form method="get" class="min-dur-row">
           {% if let Some(skill) = selected_skill %}
@@ -244,6 +346,7 @@ breadcrumb %}
             <th>Duration</th>
             <th>Spans</th>
             <th>Status</th>
+            <th>Replied</th>
           </tr>
         </thead>
         <tbody>
@@ -275,6 +378,22 @@ breadcrumb %}
               <span class="status-err">&#x2717;</span>
               {% else %}
               <span class="status-ok">&#x2713;</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if t.has_reply %}
+              <span class="status-ok" title="Reply sent">&#x2713;</span>
+              {% else if let Some(iface) = t.interface %} {% if iface == "Slack"
+              %}
+              <span
+                class="status-warn"
+                title="No reply (Slack — silent failure?)"
+                >&ndash;</span
+              >
+              {% else %}
+              <span class="muted" title="No reply">&#x2013;</span>
+              {% endif %} {% else %}
+              <span class="muted" title="No reply">&#x2013;</span>
               {% endif %}
             </td>
           </tr>
