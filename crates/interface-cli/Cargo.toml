@@ -45,6 +45,7 @@ assistant-mcp-server = { path = "../mcp-server", optional = true }
 assistant-bus-nats = { path = "../bus-nats", optional = true }
 assistant-mcp-client = { path = "../mcp-client" }
 assistant-transcription = { path = "../transcription" }
+assistant-backup = { path = "../backup" }
 # CancellationToken for background Nextcloud shutdown
 tokio-util = { workspace = true }
 chrono = { workspace = true }
