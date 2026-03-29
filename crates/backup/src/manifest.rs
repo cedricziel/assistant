@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_manifest_empty_entries_serializes() {
         let manifest = BackupManifest {
-            version: 1,
+            version: MANIFEST_VERSION,
             app_version: "0.1.0".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
             install_dir: "/tmp".into(),

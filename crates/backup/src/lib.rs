@@ -269,12 +269,21 @@ impl BackupEngine {
             let data =
                 std::fs::read(abs_path).with_context(|| format!("reading {:?}", abs_path))?;
 
-            // archive_path is relative to install_dir
-            let rel = abs_path
-                .strip_prefix(&opts.install_dir)
-                .unwrap_or(abs_path)
-                .to_string_lossy()
-                .to_string();
+            // archive_path is relative to install_dir.
+            // Files outside install_dir (e.g. a db at a custom path) are placed
+            // under an "external/" prefix so the archive entry is always relative
+            // and the restore dest-escape guard never triggers on them.
+            let rel = match abs_path.strip_prefix(&opts.install_dir) {
+                Ok(r) => r.to_string_lossy().to_string(),
+                Err(_) => format!(
+                    "external/{}",
+                    abs_path
+                        .components()
+                        .filter(|c| matches!(c, std::path::Component::Normal(_)))
+                        .collect::<std::path::PathBuf>()
+                        .to_string_lossy()
+                ),
+            };
 
             let sha = sha256_hex(&data);
             manifest_entries.push(ManifestEntry {

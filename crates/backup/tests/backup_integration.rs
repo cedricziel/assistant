@@ -42,7 +42,11 @@ async fn test_backup_round_trip_tempdir() {
 
     // Manifest must be readable from the archive
     let manifest = read_tar_gz_manifest(&output_path).unwrap();
-    assert_eq!(manifest.entries.len(), 4);
+    assert_eq!(
+        manifest.entries.len(),
+        4,
+        "manifest should list all 4 seeded files"
+    );
 
     let archive_paths: Vec<&str> = manifest
         .entries
@@ -77,7 +81,10 @@ async fn test_restore_round_trip() {
     };
 
     let restore_result = RestoreEngine::new().run(restore_opts).await.unwrap();
-    assert_eq!(restore_result.restored_count, backup_result.entry_count);
+    assert_eq!(
+        restore_result.restored_count, backup_result.entry_count,
+        "restored file count must match backup entry count"
+    );
     assert!(restore_result.warnings.is_empty());
 
     // Spot-check file content is byte-identical
@@ -124,5 +131,9 @@ async fn test_restore_corrupted_archive_fails() {
     assert!(result.is_err(), "corrupted archive must fail restore");
 
     // install_dir must be untouched
-    assert_eq!(std::fs::read_dir(install_dir.path()).unwrap().count(), 0);
+    assert_eq!(
+        std::fs::read_dir(install_dir.path()).unwrap().count(),
+        0,
+        "install_dir must remain empty after a failed restore"
+    );
 }

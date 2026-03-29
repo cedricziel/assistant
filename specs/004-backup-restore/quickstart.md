@@ -17,7 +17,7 @@ cargo build -p assistant-backup
 
 # Build the CLI (includes backup subcommands)
 cargo build -p assistant-cli
-```
+```text
 
 ## Running Tests
 
@@ -30,7 +30,7 @@ cargo test -p assistant-backup -- --nocapture
 
 # Single test
 cargo test -p assistant-backup test_backup_round_trip
-```
+```text
 
 ## Manual Smoke Test
 
@@ -52,11 +52,11 @@ cargo run -p assistant-cli -- restore /tmp/my-backup.tar.gz --force
 
 # Inspect archive contents manually
 tar tf /tmp/my-backup.tar.gz
-```
+```text
 
 ## New Crate Location
 
-```
+```text
 crates/backup/
 ├── Cargo.toml         # package name: assistant-backup
 └── src/
@@ -65,7 +65,7 @@ crates/backup/
     ├── archive.rs     # tar.gz creation/extraction helpers
     ├── checksum.rs    # SHA-256 helpers
     └── paths.rs       # Installation directory discovery
-```
+```text
 
 ## Adding to Workspace
 
@@ -84,7 +84,7 @@ tar = "0.4"
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
 sha2 = "0.10"
 hex = "0.4"
-```
+```text
 
 ## Key Types
 
@@ -106,4 +106,4 @@ let result = engine.run(RestoreOptions {
     install_dir: PathBuf::from("/home/user/.assistant"),
     force: true,
 }).await?;
-```
+```text

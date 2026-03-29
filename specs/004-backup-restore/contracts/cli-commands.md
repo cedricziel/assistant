@@ -12,10 +12,10 @@ Creates a `.tar.gz` archive of the full installation.
 
 ### Synopsis
 
-```
+```text
 assistant backup [OPTIONS]
 assistant backup list
-```
+```text
 
 ### Subcommands
 
@@ -42,12 +42,12 @@ assistant backup list
 
 ### Stdout (success)
 
-```
+```text
 Backup created: /home/user/.assistant/backups/assistant-backup-20260329-143022.tar.gz
   Size:    42.3 MB
   Files:   183
   Created: 2026-03-29T14:30:22Z
-```
+```text
 
 ### Stderr (failure)
 
@@ -61,9 +61,9 @@ Restores an installation from a `.tar.gz` backup archive.
 
 ### Synopsis
 
-```
+```text
 assistant restore <PATH> [OPTIONS]
-```
+```text
 
 ### Arguments
 
@@ -91,28 +91,28 @@ assistant restore <PATH> [OPTIONS]
 
 ### Interactive confirmation (when `--force` not set and install dir non-empty)
 
-```
+```text
 WARNING: This will overwrite your existing installation at /home/user/.assistant/
   Backup created: 2026-03-29T14:30:22Z
   Files:          183
   App version:    0.1.63
 
 Proceed? [y/N]:
-```
+```text
 
 ### Stdout (success)
 
-```
+```text
 Restore complete: 183 files restored to /home/user/.assistant/
-```
+```text
 
 ### Stderr (warnings)
 
 Non-fatal issues emitted to stderr, one per line:
 
-```
+```text
 warning: skipped entry with unsafe path: ../../../etc/passwd
-```
+```text
 
 ---
 
@@ -122,9 +122,9 @@ Lists backup archives found in the default backup directory.
 
 ### Synopsis
 
-```
+```text
 assistant backup list [OPTIONS]
-```
+```text
 
 ### Options
 
@@ -134,21 +134,21 @@ assistant backup list [OPTIONS]
 
 ### Stdout (archives present)
 
-```
+```text
 Backups in /home/user/.assistant/backups/
 
   assistant-backup-20260329-143022.tar.gz   42.3 MB   2026-03-29T14:30:22Z   183 files
   assistant-backup-20260328-090011.tar.gz   41.9 MB   2026-03-28T09:00:11Z   181 files
 
 2 backup(s) found.
-```
+```text
 
 ### Stdout (no archives)
 
-```
+```text
 No backups found in /home/user/.assistant/backups/
 Run 'assistant backup' to create one.
-```
+```text
 
 ### Exit codes
 
@@ -183,7 +183,7 @@ Embedded as `manifest.json` (first entry) in every backup archive.
     }
   ]
 }
-```
+```text
 
 **Schema constraints**:
 

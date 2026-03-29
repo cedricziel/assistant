@@ -70,7 +70,7 @@ A `--persona <id>` filter (P3) is deferred to a future iteration.
 
 ## Decision 5: Manifest Format
 
-**Decision**: `manifest.json` embedded as the first entry in the archive. Structure: a JSON object with top-level fields `version`, `created_at` (RFC 3339), `app_version`, and an `entries` array (each entry: `path`, `size_bytes`, `sha256`).
+**Decision**: `manifest.json` embedded as the first entry in the archive. Structure: a JSON object with top-level fields `version`, `created_at` (RFC 3339), `app_version`, `install_dir`, and an `entries` array (each entry: `archive_path` — path inside the archive, `install_path` — intended extraction path, `size_bytes`, `sha256`).
 
 **Rationale**: `serde_json` is already a workspace dependency. A machine-readable manifest enables: (a) integrity verification without full extraction; (b) version-mismatch detection (FR-011); (c) `backup list` display of per-archive metadata without extracting archives. Placing the manifest first in the archive allows streaming verification.
 

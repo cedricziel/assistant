@@ -191,13 +191,11 @@ pub fn extract_tar_gz(
             std::fs::write(&dest, &data).with_context(|| format!("writing {:?}", dest))?;
             debug!("restored {:?}", dest);
         } else {
-            // Entry not in manifest — restore relative to install_dir
-            let dest = install_dir.join(&archive_path_str);
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("creating directory {:?}", parent))?;
-            }
-            std::fs::write(&dest, &data).with_context(|| format!("writing {:?}", dest))?;
+            // Entry not declared in manifest.json — treat as corruption and abort.
+            bail!(
+                "archive entry '{}' is not declared in manifest.json",
+                archive_path_str
+            );
         }
     }
 

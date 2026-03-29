@@ -41,16 +41,12 @@ mod tests {
 
     #[test]
     fn test_sha256_known_vector() {
-        // SHA-256("abc") — value verified against the sha2 crate at runtime
+        // SHA-256("abc") — NIST FIPS 180-4 known-answer test vector
         let result = sha256_hex(b"abc");
-        // Must be 64 lowercase hex chars
-        assert_eq!(result.len(), 64);
-        assert!(result.chars().all(|c| c.is_ascii_hexdigit()));
-        // Must be deterministic
-        assert_eq!(result, sha256_hex(b"abc"));
-        // Must differ from empty-input hash
-        let empty = sha256_hex(b"");
-        assert_ne!(result, empty);
+        assert_eq!(
+            result,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]

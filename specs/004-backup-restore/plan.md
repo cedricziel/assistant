@@ -48,7 +48,7 @@ specs/004-backup-restore/
 ├── quickstart.md        # Phase 1 output
 ├── contracts/
 │   └── cli-commands.md  # CLI command contracts + manifest JSON schema
-└── tasks.md             # Phase 2 output (/speckit.tasks — NOT yet created)
+└── tasks.md             # Phase 2 output
 ```
 
 ### Source Code

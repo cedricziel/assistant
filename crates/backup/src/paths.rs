@@ -47,14 +47,20 @@ pub fn discover_files(install_dir: &Path, db_path: Option<&Path>) -> Result<Vec<
     if db.exists() {
         files.push(db.clone());
     }
-    // WAL and SHM files alongside the main db
-    let wal = db.with_extension("db-wal");
-    if wal.exists() {
-        files.push(wal);
-    }
-    let shm = db.with_extension("db-shm");
-    if shm.exists() {
-        files.push(shm);
+    // WAL and SHM files alongside the main db.
+    // Use with_file_name to append the suffix rather than with_extension, which
+    // would replace the extension (e.g. "assistant.sqlite" → "assistant.db-wal"
+    // instead of the correct "assistant.sqlite-wal").
+    if let Some(name) = db.file_name() {
+        let name = name.to_string_lossy();
+        let wal = db.with_file_name(format!("{}-wal", name));
+        if wal.exists() {
+            files.push(wal);
+        }
+        let shm = db.with_file_name(format!("{}-shm", name));
+        if shm.exists() {
+            files.push(shm);
+        }
     }
 
     // agents/ directory tree
@@ -89,10 +95,17 @@ pub fn discover_files(install_dir: &Path, db_path: Option<&Path>) -> Result<Vec<
     Ok(files)
 }
 
-/// Recursively collect all regular files under `dir`.
+/// Recursively collect all regular files under `dir` in deterministic order.
+///
+/// Entries are sorted by path before recursing so archives are byte-reproducible
+/// across different OS directory-enumeration orders.
 fn collect_dir_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(dir).with_context(|| format!("reading directory {:?}", dir))? {
-        let entry = entry?;
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading directory {:?}", dir))?
+        .collect::<Result<_, _>>()?;
+    entries.sort_by_key(|e| e.path());
+
+    for entry in entries {
         let path = entry.path();
         let meta = entry.metadata()?;
         if meta.is_dir() {
