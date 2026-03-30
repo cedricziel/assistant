@@ -14,6 +14,7 @@ use crate::types::StringList;
 /// This is a discriminated union based on the OpenAPI 3.2 Security Scheme
 /// Object.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SecurityScheme {
     /// API key-based authentication.
@@ -39,6 +40,7 @@ pub struct SecurityScheme {
 
 /// Defines a security scheme using an API key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ApiKeySecurityScheme {
     /// An optional description for the security scheme.
@@ -54,6 +56,7 @@ pub struct ApiKeySecurityScheme {
 
 /// Defines a security scheme using HTTP authentication.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HttpAuthSecurityScheme {
     /// An optional description for the security scheme.
@@ -70,6 +73,7 @@ pub struct HttpAuthSecurityScheme {
 
 /// Defines a security scheme using OAuth 2.0.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct OAuth2SecurityScheme {
     /// An optional description for the security scheme.
@@ -86,6 +90,7 @@ pub struct OAuth2SecurityScheme {
 
 /// Defines a security scheme using OpenID Connect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct OpenIdConnectSecurityScheme {
     /// An optional description for the security scheme.
@@ -98,6 +103,7 @@ pub struct OpenIdConnectSecurityScheme {
 
 /// Defines a security scheme using mTLS authentication.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MutualTlsSecurityScheme {
     /// An optional description for the security scheme.
@@ -107,6 +113,7 @@ pub struct MutualTlsSecurityScheme {
 
 /// Configuration for supported OAuth 2.0 flows.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthFlows {
     /// Configuration for the OAuth Authorization Code flow.
@@ -132,6 +139,7 @@ pub struct OAuthFlows {
 
 /// OAuth 2.0 Authorization Code flow configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationCodeOAuthFlow {
     /// The authorization URL.
@@ -154,6 +162,7 @@ pub struct AuthorizationCodeOAuthFlow {
 
 /// OAuth 2.0 Client Credentials flow configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCredentialsOAuthFlow {
     /// The token URL.
@@ -169,6 +178,7 @@ pub struct ClientCredentialsOAuthFlow {
 
 /// Deprecated: Use Authorization Code + PKCE instead.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ImplicitOAuthFlow {
     /// The authorization URL.
@@ -186,6 +196,7 @@ pub struct ImplicitOAuthFlow {
 
 /// Deprecated: Use Authorization Code + PKCE or Device Code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PasswordOAuthFlow {
     /// The token URL.
@@ -203,6 +214,7 @@ pub struct PasswordOAuthFlow {
 
 /// OAuth 2.0 Device Code flow configuration (RFC 8628).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceCodeOAuthFlow {
     /// The device authorization endpoint URL.
@@ -221,6 +233,7 @@ pub struct DeviceCodeOAuthFlow {
 
 /// Defines the security requirements for an agent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SecurityRequirement {
     /// A map of security schemes to the required scopes.

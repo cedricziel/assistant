@@ -5,6 +5,7 @@ mod chat;
 pub mod common;
 mod contexts;
 mod logs;
+mod openapi;
 mod pwa;
 mod skills;
 pub(crate) mod static_assets;
@@ -53,6 +54,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
+use utoipa::OpenApi as _;
+use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
 
 use auth::AuthConfig;
@@ -480,6 +483,8 @@ async fn run_with_args(args: Args) -> Result<()> {
         .route("/ready", get(ready))
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
+        // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
+        .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))
         // Public workflow webhook trigger ingress.
         .merge(workflows::workflow_public_router().with_state(workflow_pages_state.clone()))
         // A2A agent card is public per spec — callers need it to discover auth.
