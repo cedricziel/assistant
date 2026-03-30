@@ -1,6 +1,7 @@
 mod a2a;
 mod analytics;
 pub mod auth;
+pub(crate) mod backends;
 mod chat;
 pub mod common;
 mod contexts;
@@ -23,7 +24,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use assistant_core::{
     apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
-    validate_agent_id, BusKind, Interface, LlmProviderKind, MessageBus,
+    validate_agent_id, BusKind, Interface, LlmProviderKind, MessageBus, OtelExporter,
 };
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
@@ -46,6 +47,10 @@ use axum::{
     response::Redirect,
     routing::{get, post},
     Extension, Router,
+};
+use backends::{
+    IcebergLogBackend, IcebergTraceBackend, LogBackend, SqliteLogBackend, SqliteTraceBackend,
+    TraceBackend,
 };
 use clap::Parser;
 use serde_json::json;
@@ -125,6 +130,8 @@ pub(crate) struct AppState {
     pub(crate) bus_kind: BusKind,
     pub(crate) nats_url: Option<String>,
     pub(crate) nats_token: Option<String>,
+    pub(crate) trace_backend: Arc<dyn TraceBackend>,
+    pub(crate) log_backend: Arc<dyn LogBackend>,
 }
 
 struct OrchestratorTurnClient {
@@ -288,6 +295,21 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let registry = Arc::new(registry);
 
+    let (trace_backend, log_backend): (Arc<dyn TraceBackend>, Arc<dyn LogBackend>) =
+        match config.observability.exporter {
+            OtelExporter::Iceberg => {
+                let iceberg_cfg = config.observability.iceberg.clone();
+                (
+                    Arc::new(IcebergTraceBackend::new(iceberg_cfg.clone())),
+                    Arc::new(IcebergLogBackend::new(iceberg_cfg)),
+                )
+            }
+            _ => (
+                Arc::new(SqliteTraceBackend::new(storage.pool.clone())),
+                Arc::new(SqliteLogBackend::new(storage.pool.clone())),
+            ),
+        };
+
     let state = AppState {
         pool: storage.pool.clone(),
         agent_id: Arc::new(RwLock::new(selected_agent.clone())),
@@ -305,6 +327,8 @@ async fn run_with_args(args: Args) -> Result<()> {
             .token
             .clone()
             .or_else(|| std::env::var("NATS_TOKEN").ok()),
+        trace_backend,
+        log_backend,
     };
 
     // 2. LLM provider

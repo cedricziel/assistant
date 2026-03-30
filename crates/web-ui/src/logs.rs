@@ -3,7 +3,7 @@
 //! All HTML is rendered via Askama templates under `templates/logs/`.
 
 use askama::Template;
-use assistant_storage::{LogStats, LogStore, RecordedLog};
+use assistant_storage::{LogStats, RecordedLog};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -126,7 +126,6 @@ async fn show_logs(
     Query(query): Query<LogQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let agent_id = active_agent_id(&state.agent_id).await;
-    let store = LogStore::new(state.pool.clone());
 
     let severity_label = query
         .severity
@@ -184,8 +183,9 @@ async fn show_logs(
     let since = parse_datetime_local(&since_str);
     let until = parse_datetime_local(&until_str);
 
-    let logs = store
-        .list_recent_for_agent(
+    let logs = state
+        .log_backend
+        .list_recent_logs(
             state.log_limit,
             min_severity,
             target_filter,
@@ -199,12 +199,14 @@ async fn show_logs(
         .await
         .map_err(internal_error)?;
 
-    let stats = store
-        .stats_for_agent(&agent_id)
+    let stats = state
+        .log_backend
+        .log_stats(&agent_id)
         .await
         .map_err(internal_error)?;
-    let targets = store
-        .list_targets_for_agent(&agent_id)
+    let targets = state
+        .log_backend
+        .list_targets(&agent_id)
         .await
         .map_err(internal_error)?;
 
@@ -262,9 +264,9 @@ async fn show_log_detail(
     Path(log_id): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
     let agent_id = active_agent_id(&state.agent_id).await;
-    let store = LogStore::new(state.pool.clone());
-    let log = store
-        .get_log_for_agent(&log_id, &agent_id)
+    let log = state
+        .log_backend
+        .get_log(&log_id, &agent_id)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Log {} not found", log_id)))?;
