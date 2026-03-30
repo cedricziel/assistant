@@ -1,6 +1,6 @@
 [package]
 name = "assistant-provider-openai"
-version = "0.1.68"
+version = "0.1.69"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

@@ -493,11 +493,11 @@ checksum = "5f093eed78becd229346bf859eec0aa4dd7ddde0757287b2b4107a1f09c80002"
 
 [[package]]
 name = "assistant"
-version = "0.1.68"
+version = "0.1.69"
 
 [[package]]
 name = "assistant-a2a-json-schema"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "chrono",
  "serde",
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-backup"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -527,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-bus-nats"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-cli"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-backup",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-core"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -601,7 +601,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-integration-tests"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-matrix"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-mattermost"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-nextcloud"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-signal"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-bus-nats",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interface-slack"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-llm"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-client"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-server"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-anthropic"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-moonshot"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-ollama"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -833,7 +833,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-provider-openai"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-runtime"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-skills"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "gray_matter",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-storage"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-tool-executor"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-transcription"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -967,7 +967,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-web-ui"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "askama",
@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-workflow"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -1032,7 +1032,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-workflow-http"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "assistant-workflow",
@@ -5212,7 +5212,7 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-exporter-iceberg"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -5236,7 +5236,7 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-exporter-sqlite"
-version = "0.1.68"
+version = "0.1.69"
 dependencies = [
  "chrono",
  "opentelemetry",
