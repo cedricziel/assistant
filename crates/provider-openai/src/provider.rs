@@ -462,6 +462,7 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                     content: async_openai::types::responses::EasyInputContent::Text(
                         content.clone(),
                     ),
+                    phase: None,
                 }));
             }
 
@@ -489,6 +490,7 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                     r#type: MessageType::Message,
                     role: Role::User,
                     content: async_openai::types::responses::EasyInputContent::ContentList(parts),
+                    phase: None,
                 }));
             }
 
@@ -507,6 +509,7 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
                         name: call.name.clone(),
                         id: None,
                         status: Some(OutputStatus::Completed),
+                        namespace: None,
                     })));
                 }
             }
@@ -570,6 +573,7 @@ fn tool_spec_to_responses(tool: &ToolSpec) -> Tool {
         description: Some(tool.description.clone()),
         parameters: Some(tool.normalized_params_schema()),
         strict: Some(false),
+        defer_loading: None,
     })
 }
 
@@ -602,6 +606,7 @@ fn build_web_search_tool(cfg: &OpenAIWebSearchConfig) -> Tool {
         filters: None,
         user_location,
         search_context_size,
+        search_content_types: None,
     })
 }
 
@@ -978,6 +983,7 @@ mod tests {
                 name: "tool-a".to_string(),
                 id: None,
                 status: Some(OutputStatus::Completed),
+                namespace: None,
             })),
             InputItem::Item(Item::FunctionCallOutput(FunctionCallOutputItemParam {
                 call_id: "call_1".to_string(),
@@ -991,6 +997,7 @@ mod tests {
                 name: "tool-b".to_string(),
                 id: None,
                 status: Some(OutputStatus::Completed),
+                namespace: None,
             })),
         ];
         // call_1 is matched, call_2 is unmatched → should return call_2
