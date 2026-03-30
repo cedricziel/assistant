@@ -74,6 +74,16 @@ pub trait StaticUrls {
     fn agent_form_js_url(&self) -> &'static str {
         crate::static_assets::agent_form_js_url()
     }
+
+    /// Fingerprinted URL for the conversation-list Stimulus controller.
+    fn conversation_list_controller_js_url(&self) -> &'static str {
+        crate::static_assets::conversation_list_controller_js_url()
+    }
+
+    /// Fingerprinted URL for the message-panel Stimulus controller.
+    fn message_panel_controller_js_url(&self) -> &'static str {
+        crate::static_assets::message_panel_controller_js_url()
+    }
 }
 
 /// HTML-escape a string to prevent XSS.

@@ -1,5 +1,6 @@
 mod a2a;
 mod analytics;
+pub mod api;
 pub mod auth;
 mod chat;
 pub mod common;
@@ -474,8 +475,9 @@ async fn run_with_args(args: Args) -> Result<()> {
         orchestrator: orchestrator.clone(),
     };
 
-    let chat_state =
-        chat::ChatState::new(storage.pool.clone(), orchestrator, selected_agent.clone());
+    let chat_state = chat::ChatState::new(selected_agent.clone());
+
+    let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, selected_agent.clone());
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
@@ -515,6 +517,8 @@ async fn run_with_args(args: Args) -> Result<()> {
         .merge(skills::skills_router().with_state(skills_pages_state))
         // Chat interface.
         .merge(chat::chat_router().with_state(chat_state))
+        // Conversation REST API.
+        .merge(api::api_router().with_state(api_state))
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,
         ))

@@ -37,6 +37,10 @@ use utoipa::{
 };
 
 use crate::a2a::handlers;
+use crate::api::{
+    ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
+    SendMessageRequest as ApiSendMessageRequest, UpdateConversationRequest,
+};
 
 /// API error response body (JSON-RPC style used by A2A handlers).
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -90,6 +94,12 @@ impl Modify for BearerTokenSecurityAddon {
     ),
     modifiers(&BearerTokenSecurityAddon),
     paths(
+        crate::api::list_conversations,
+        crate::api::create_conversation,
+        crate::api::get_conversation,
+        crate::api::delete_conversation,
+        crate::api::update_conversation,
+        crate::api::send_message,
         handlers::get_agent_card_well_known,
         handlers::get_extended_agent_card,
         handlers::send_message,
@@ -157,11 +167,20 @@ impl Modify for BearerTokenSecurityAddon {
             ImplicitOAuthFlow,
             PasswordOAuthFlow,
             DeviceCodeOAuthFlow,
-            // Local handler types
+            // Conversation API types
+            ConversationSummary,
+            ConversationDetail,
+            MessageSummary,
+            CreateConversationRequest,
+            UpdateConversationRequest,
+            ApiSendMessageRequest,
+        // Local handler types
             ApiErrorResponse,
         )
     ),
     tags(
+        (name = "conversations",
+         description = "Conversation management — list, create, fetch, update, delete, and send messages"),
         (name = "agent-card",
          description = "Agent discovery — retrieve the A2A agent manifest"),
         (name = "messages",
