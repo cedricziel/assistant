@@ -1,8 +1,10 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use assistant_core::{ObservabilityConfig, OtelExporter};
 use opentelemetry::{global, KeyValue};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_exporter_iceberg::build_exporters;
 use opentelemetry_exporter_sqlite::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry_sdk::{
     logs::{BatchLogProcessor, SdkLoggerProvider},
@@ -84,19 +86,31 @@ pub(crate) fn otel_log_bridge_filter() -> Targets {
 /// [`otel_log_bridge_filter`]) that suppresses all `sqlx` targets. Without
 /// this, the log exporter's own INSERT queries would emit tracing events that
 /// get captured by the bridge, creating a feedback loop.
-pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Option<OtelGuard>> {
+pub async fn init_tracing(
+    pool: SqlitePool,
+    observability: &ObservabilityConfig,
+) -> Result<Option<OtelGuard>> {
     let fmt_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
 
     // -- Shared resource (used by traces, logs, and metrics) --
     let resource = build_resource();
 
+    let enable_sqlite = matches!(
+        observability.exporter,
+        OtelExporter::Sqlite | OtelExporter::Both
+    );
+    let enable_iceberg = matches!(
+        observability.exporter,
+        OtelExporter::Iceberg | OtelExporter::Both
+    );
+
     // Detect whether the user wants OTLP export by checking for any of the
     // standard `OTEL_EXPORTER_OTLP_*` env vars.  We intentionally do NOT
     // read the endpoint value ourselves — the crate resolves per-signal
     // overrides, timeouts, headers, and compression internally.
     let enable_otlp = otlp_env_is_set();
-    let need_otel = enable_sqlite_export || enable_otlp;
+    let need_otel = enable_sqlite || enable_iceberg || enable_otlp;
 
     if enable_otlp {
         info!("OTLP export enabled — the opentelemetry-otlp crate will read endpoint, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars");
@@ -110,7 +124,7 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
     let mut trace_provider_builder = SdkTracerProvider::builder().with_resource(resource.clone());
     let mut have_trace_exporter = false;
 
-    if enable_sqlite_export {
+    if enable_sqlite {
         let sqlite_exporter = SqliteSpanExporter::new(pool.clone());
         let processor = BatchSpanProcessor::builder(sqlite_exporter).build();
         trace_provider_builder = trace_provider_builder.with_span_processor(processor);
@@ -134,10 +148,10 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
     let mut meter_provider: Option<SdkMeterProvider> = None;
 
     if need_otel {
-        // Logs — attach SQLite and/or OTLP processors to the same provider.
+        // Logs — attach SQLite, Iceberg, and/or OTLP processors to the same provider.
         let mut log_builder = SdkLoggerProvider::builder().with_resource(resource.clone());
 
-        if enable_sqlite_export {
+        if enable_sqlite {
             let sqlite_log_exporter = SqliteLogExporter::new(pool.clone());
             let processor = BatchLogProcessor::builder(sqlite_log_exporter).build();
             log_builder = log_builder.with_log_processor(processor);
@@ -150,17 +164,10 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
             log_builder = log_builder.with_batch_exporter(otlp_log_exporter);
         }
 
-        let log_prov = log_builder.build();
-
-        // Bridge tracing events → OTel log records with the anti-stampede filter.
-        let otel_filter = otel_log_bridge_filter();
-        let otel_log_layer = OpenTelemetryTracingBridge::new(&log_prov).with_filter(otel_filter);
-        logger_provider = Some(log_prov);
-
-        // Metrics — attach SQLite and/or OTLP readers to the same provider.
+        // Metrics — attach SQLite, Iceberg, and/or OTLP readers to the same provider.
         let mut meter_builder = SdkMeterProvider::builder().with_resource(resource);
 
-        if enable_sqlite_export {
+        if enable_sqlite {
             let sqlite_metric_exporter = SqliteMetricExporter::new(pool);
             let reader = PeriodicReader::builder(sqlite_metric_exporter)
                 .with_interval(Duration::from_secs(60))
@@ -177,6 +184,35 @@ pub fn init_tracing(pool: SqlitePool, enable_sqlite_export: bool) -> Result<Opti
                 .build();
             meter_builder = meter_builder.with_reader(reader);
         }
+
+        // Iceberg exporters for all three signals — must be added before building providers.
+        if enable_iceberg {
+            match build_exporters(observability.iceberg.clone()).await {
+                Ok((iceberg_span_exp, iceberg_log_exp, iceberg_metric_exp)) => {
+                    let proc = BatchSpanProcessor::builder(iceberg_span_exp).build();
+                    trace_provider_builder = trace_provider_builder.with_span_processor(proc);
+                    have_trace_exporter = true;
+
+                    let proc = BatchLogProcessor::builder(iceberg_log_exp).build();
+                    log_builder = log_builder.with_log_processor(proc);
+
+                    let reader = PeriodicReader::builder(iceberg_metric_exp)
+                        .with_interval(Duration::from_secs(60))
+                        .build();
+                    meter_builder = meter_builder.with_reader(reader);
+                }
+                Err(e) => {
+                    tracing::warn!("Iceberg exporter failed to initialise, skipping: {e:#}");
+                }
+            }
+        }
+
+        let log_prov = log_builder.build();
+
+        // Bridge tracing events → OTel log records with the anti-stampede filter.
+        let otel_filter = otel_log_bridge_filter();
+        let otel_log_layer = OpenTelemetryTracingBridge::new(&log_prov).with_filter(otel_filter);
+        logger_provider = Some(log_prov);
 
         let meter_prov = meter_builder.build();
         global::set_meter_provider(meter_prov.clone());

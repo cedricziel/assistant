@@ -1,0 +1,36 @@
+[package]
+name = "opentelemetry-exporter-iceberg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Apache Iceberg exporter for OpenTelemetry spans, logs, and metrics"
+
+[dependencies]
+# Apache Iceberg
+iceberg.workspace = true
+iceberg-catalog-rest.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+parquet.workspace = true
+# OpenTelemetry
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+# Serialization / error handling
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+# Logging
+tracing = { workspace = true }
+# IDs / time
+uuid = { workspace = true }
+chrono = { workspace = true }
+# Path utilities
+dirs = { workspace = true }
+# Internal
+assistant-core = { path = "../core" }

@@ -33,6 +33,7 @@ members = [
     "crates/web-ui",
     "crates/a2a-json-schema",
     "crates/opentelemetry-exporter-sqlite",
+    "crates/opentelemetry-exporter-iceberg",
     "crates/bus-nats",
     "crates/backup",
 ]
@@ -150,8 +151,15 @@ slack-morphism = { version = "2", features = ["hyper"] }
 # slack-morphism so wss:// support is actually enabled in the Slack client.
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 mattermost_api = "0.8"
+# Apache Iceberg
+iceberg = "0.9"
+iceberg-catalog-rest = "0.9"
+arrow-array = "57.1"
+arrow-schema = "57.1"
+parquet = "57.1"
 # Internal crates
 opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
+opentelemetry-exporter-iceberg = { path = "crates/opentelemetry-exporter-iceberg" }
 core = { path = "crates/core" }
 skills = { path = "crates/skills" }
 llm = { path = "crates/llm" }

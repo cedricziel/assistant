@@ -212,7 +212,7 @@ impl Orchestrator {
             max_iterations: config.llm.max_iterations,
             confirmation_callback: None,
             memory_loader,
-            trace_content: config.mirror.trace_content,
+            trace_content: config.observability.trace_content,
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
