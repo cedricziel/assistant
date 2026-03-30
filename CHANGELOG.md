@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.68](https://github.com/cedricziel/assistant/compare/v0.1.67...v0.1.68) (2026-03-30)
+
+
+### Features
+
+* **observability:** add Apache Iceberg exporter for OTel spans, logs, and metrics ([#338](https://github.com/cedricziel/assistant/issues/338)) ([cc15760](https://github.com/cedricziel/assistant/commit/cc157603db3650365fae8e29682555fb73e5bd4f))
+
+
+### Bug Fixes
+
+* correct opentelemetry-exporter-iceberg version ([8a1d483](https://github.com/cedricziel/assistant/commit/8a1d4832c6800e540f9a77047dedbf9ac97e34c8))
+
 ## [0.1.67](https://github.com/cedricziel/assistant/compare/v0.1.66...v0.1.67) (2026-03-29)
 
 
