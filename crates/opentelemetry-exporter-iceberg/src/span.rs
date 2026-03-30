@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use arrow_array::{ArrayRef, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray};
-use arrow_schema::{DataType, Field, Schema as ArrowSchema, TimeUnit};
+use arrow_schema::Schema as ArrowSchema;
 use assistant_core::IcebergConfig;
 use iceberg::spec::DataFileFormat;
 use iceberg::transaction::ApplyTransactionAction;
@@ -102,7 +102,10 @@ impl IcebergSpanExporter {
         let resource_attrs = self.resource_attributes.read().ok().and_then(|g| g.clone());
         let service_name = self.service_name.read().ok().and_then(|g| g.clone());
 
-        let arrow_schema = arrow_schema();
+        let iceberg_schema =
+            spans_schema().map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
+        let arrow_schema = iceberg::arrow::schema_to_arrow_schema(&iceberg_schema)
+            .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
         let record_batch = spans_to_record_batch(
             &arrow_schema,
             batch,
@@ -188,36 +191,6 @@ impl SpanExporter for IcebergSpanExporter {
             *guard = Some(json);
         }
     }
-}
-
-// -- Arrow schema (must match spans_schema field order) ------------------
-
-fn arrow_schema() -> ArrowSchema {
-    ArrowSchema::new(vec![
-        Field::new("trace_id", DataType::Utf8, false),
-        Field::new("span_id", DataType::Utf8, false),
-        Field::new("parent_span_id", DataType::Utf8, true),
-        Field::new("name", DataType::Utf8, false),
-        Field::new(
-            "start_time",
-            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-            false,
-        ),
-        Field::new(
-            "end_time",
-            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-            true,
-        ),
-        Field::new("duration_ms", DataType::Int64, true),
-        Field::new("service_name", DataType::Utf8, true),
-        Field::new("conversation_id", DataType::Utf8, true),
-        Field::new("tool_name", DataType::Utf8, true),
-        Field::new("tool_status", DataType::Utf8, true),
-        Field::new("input_tokens", DataType::Int64, true),
-        Field::new("output_tokens", DataType::Int64, true),
-        Field::new("attributes", DataType::Utf8, true),
-        Field::new("resource_attributes", DataType::Utf8, true),
-    ])
 }
 
 fn spans_to_record_batch(
