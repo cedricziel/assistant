@@ -7,7 +7,7 @@ use anyhow::Result;
 use arrow_array::{
     ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
 };
-use arrow_schema::{DataType, Field, Schema as ArrowSchema, TimeUnit};
+use arrow_schema::Schema as ArrowSchema;
 use assistant_core::IcebergConfig;
 use iceberg::spec::DataFileFormat;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
@@ -107,7 +107,10 @@ impl IcebergMetricExporter {
             return Ok(());
         }
 
-        let arrow_schema = arrow_schema();
+        let iceberg_schema =
+            metrics_schema().map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
+        let arrow_schema = iceberg::arrow::schema_to_arrow_schema(&iceberg_schema)
+            .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
         let record_batch = rows_to_record_batch(&arrow_schema, rows, resource_attrs_str.as_deref())
             .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 
@@ -471,39 +474,6 @@ fn make_scalar_row(
         service_name: None,
         scope_name,
     }
-}
-
-// -- Arrow schema (must match metrics_schema field order) ----------------
-
-fn arrow_schema() -> ArrowSchema {
-    ArrowSchema::new(vec![
-        Field::new("id", DataType::Utf8, false),
-        Field::new(
-            "recorded_at",
-            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-            false,
-        ),
-        Field::new("metric_name", DataType::Utf8, false),
-        Field::new("metric_kind", DataType::Utf8, false),
-        Field::new("unit", DataType::Utf8, true),
-        Field::new("value", DataType::Float64, true),
-        Field::new("count", DataType::Int64, true),
-        Field::new("sum", DataType::Float64, true),
-        Field::new("min", DataType::Float64, true),
-        Field::new("max", DataType::Float64, true),
-        Field::new("bounds", DataType::Utf8, true),
-        Field::new("bucket_counts", DataType::Utf8, true),
-        Field::new("attributes", DataType::Utf8, true),
-        Field::new("model", DataType::Utf8, true),
-        Field::new("provider", DataType::Utf8, true),
-        Field::new("operation", DataType::Utf8, true),
-        Field::new("skill", DataType::Utf8, true),
-        Field::new("interface", DataType::Utf8, true),
-        Field::new("agent_id", DataType::Utf8, true),
-        Field::new("service_name", DataType::Utf8, true),
-        Field::new("scope_name", DataType::Utf8, true),
-        Field::new("resource_attributes", DataType::Utf8, true),
-    ])
 }
 
 fn rows_to_record_batch(
