@@ -970,6 +970,7 @@ name = "assistant-web-ui"
 version = "0.1.70"
 dependencies = [
  "anyhow",
+ "arrow-array",
  "askama",
  "assistant-a2a-json-schema",
  "assistant-bus-nats",
@@ -996,6 +997,8 @@ dependencies = [
  "hex",
  "hmac",
  "http-body-util",
+ "iceberg",
+ "parquet",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
