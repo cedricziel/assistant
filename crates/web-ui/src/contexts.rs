@@ -653,11 +653,14 @@ mod tests {
 
     async fn test_state(pool: sqlx::SqlitePool) -> AppState {
         use assistant_storage::registry::SkillRegistry;
+
+        use crate::backends::sqlite::{SqliteLogBackend, SqliteTraceBackend};
+
         let registry = SkillRegistry::new(pool.clone())
             .await
             .expect("test registry");
         AppState {
-            pool,
+            pool: pool.clone(),
             agent_id: Arc::new(RwLock::new("default".to_string())),
             registry: Arc::new(registry),
             trace_limit: 10,
@@ -665,6 +668,8 @@ mod tests {
             bus_kind: BusKind::Sqlite,
             nats_url: None,
             nats_token: None,
+            trace_backend: Arc::new(SqliteTraceBackend::new(pool.clone())),
+            log_backend: Arc::new(SqliteLogBackend::new(pool)),
         }
     }
 
