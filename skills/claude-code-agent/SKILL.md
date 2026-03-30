@@ -5,10 +5,10 @@ description: >
   Use this when the user wants to execute code, edit files, run shell commands,
   build projects, analyse repositories, or do any agentic work on the device —
   especially multi-step tasks that benefit from Claude Code's tool-use loop.
-  Supports fire-and-forget async jobs (tmux-based, non-blocking) as well as
-  quick blocking one-shot tasks and follow-up questions in the same session.
+  Supports fire-and-forget async jobs (non-blocking, via the native process tool)
+  as well as quick blocking one-shot tasks and follow-up questions in the same session.
 license: MIT
-compatibility: "Requires: claude CLI (claude --version), tmux"
+compatibility: "Requires: claude CLI (claude --version)"
 ---
 
 # Claude Code Agent Skill
@@ -54,111 +54,105 @@ Parse the JSON result:
 
 ## Mode B — Async (long-running tasks, non-blocking)
 
-Async mode always uses `--dangerously-skip-permissions` because there is no TTY
-for interactive prompts inside a detached tmux session. The `skip_permissions`
-parameter is only relevant for blocking mode (Mode A).
+Async mode always uses `--dangerously-skip-permissions` because the process runs
+without a TTY and cannot respond to interactive permission prompts. The
+`skip_permissions` parameter is only relevant for blocking mode (Mode A).
 
-### Step 1: Start the agent
+Uses the native `process` tool — no tmux required.
 
-Write the prompt to a file and pass it via stdin — this avoids all shell
-escaping/injection issues with multi-line or quote-heavy prompts:
+### Step 1: Write the prompt to a temp file
+
+Use the `bash` tool to write the prompt safely (avoids all shell escaping/injection
+issues with multi-line or quote-heavy prompts):
 
 ```bash
-SESSION="cca-$(date +%s)"
-OUTFILE="/tmp/${SESSION}.json"
-PROMPT_FILE="/tmp/${SESSION}.prompt"
-WORKDIR="${workdir:-$HOME}"
-
-mkdir -p /tmp/cca-sessions
-echo "$SESSION" > /tmp/cca-sessions/latest
-
-# Write prompt to file — no escaping needed, handles any content safely
+PROMPT_FILE="/tmp/cca-$(date +%s).prompt"
 cat > "$PROMPT_FILE" << 'PROMPT_EOF'
 ${prompt}
 PROMPT_EOF
-
-# Build script — prompt fed via stdin to avoid argument length limits
-cat > "/tmp/${SESSION}.sh" << SCRIPT_EOF
-#!/usr/bin/env bash
-cd $(printf '%q' "$WORKDIR")
-cat $(printf '%q' "$PROMPT_FILE") | claude \\
-  --print \\
-  --output-format json \\
-  --model "${model:-sonnet}" \\
-  --max-budget-usd "${budget_usd:-2.0}" \\
-  --dangerously-skip-permissions \\
-  ${session_id:+--resume "${session_id}"} \\
-  ${worktree:+-w "${worktree}"} \\
-  --allowedTools "Bash,Edit,Read,Write,Glob,Grep,LS,Task,TodoRead,TodoWrite,WebFetch,WebSearch" \\
-  > $(printf '%q' "$OUTFILE") 2>&1
-echo '___CLAUDE_DONE___'
-SCRIPT_EOF
-chmod +x "/tmp/${SESSION}.sh"
-
-tmux new-session -d -s "$SESSION" -x 220 -y 50
-tmux send-keys -t "$SESSION" "bash /tmp/${SESSION}.sh" Enter
-
-echo "✅ Agent started async"
-echo "tmux_session: $SESSION"
-echo "output_file:  $OUTFILE"
+echo "$PROMPT_FILE"
 ```
 
-→ Report `tmux_session` and `output_file` to the user immediately. Do NOT wait.
+### Step 2: Start the agent
 
-### Step 2: Poll for completion
+Use `process action:start` — returns a `session_id` immediately:
+
+```
+process action:start
+  command: "cat \"$PROMPT_FILE\" | claude --print --output-format json --model ${model:-sonnet} --max-budget-usd ${budget_usd:-2.0} --dangerously-skip-permissions ${session_id:+--resume \"$session_id\"} ${worktree:+-w \"$worktree\"} --allowedTools \"Bash,Edit,Read,Write,Glob,Grep,LS,Task,TodoRead,TodoWrite,WebFetch,WebSearch\""
+  workdir: "${workdir:-$HOME}"
+```
+
+→ Save the returned `session_id`. Report it to the user immediately. Do NOT wait.
+
+### Step 3: Poll for completion
 
 When the user asks for a status update (or after a reasonable wait), check:
 
-```bash
-SESSION="${tmux_session}"
-OUTFILE="/tmp/${SESSION}.json"
-
-if tmux capture-pane -t "$SESSION" -p -S -5 2>/dev/null | grep -q "___CLAUDE_DONE___"; then
-  echo "✅ Done"
-  cat "$OUTFILE"
-else
-  echo "⏳ Still running..."
-  tmux capture-pane -t "$SESSION" -p -S -15
-fi
+```
+process action:poll
+  session_id: "<session_id from step 2>"
 ```
 
-Parse `$OUTFILE` as JSON once done (same fields as blocking mode).
+- `running: true` → still working, check again later
+- `running: false` + `exit_code: 0` → done successfully → proceed to step 4
+- `running: false` + `exit_code: <non-zero>` → failed → fetch logs and report error
 
-### Step 3: Cleanup (after reading results)
+### Step 4: Retrieve output
+
+```
+process action:log
+  session_id: "<session_id>"
+  lines: 500
+```
+
+Parse the `stdout` field as JSON (same fields as blocking mode):
+
+- `result` — final text answer / summary
+- `session_id` — save this to resume the Claude session later
+- `is_error` / `stop_reason` — detect failures
+- `total_cost_usd` — report cost to the user
+
+If `is_error` is true, also check `stderr` from the log output for diagnostics.
+
+### Step 5: Cleanup
+
+```
+process action:kill
+  session_id: "<session_id>"
+```
+
+Then remove the temp prompt file:
 
 ```bash
-tmux kill-session -t "$SESSION" 2>/dev/null
-rm -f "/tmp/${SESSION}.json" "/tmp/${SESSION}.sh" "/tmp/${SESSION}.prompt"
+rm -f "$PROMPT_FILE"
 ```
 
 ---
 
 ## Parallel worktrees (multiple agents at once)
 
+Write each prompt to its own file, then start one `process action:start` per agent:
+
 ```bash
-REPO_DIR=~/code/myproject
-
-for ISSUE in 42 99; do
-  SESSION="cca-issue-${ISSUE}-$(date +%s)"
-  OUTFILE="/tmp/${SESSION}.json"
-  PROMPT_FILE="/tmp/${SESSION}.prompt"
-
-  echo "Fix issue #${ISSUE}: <description>" > "$PROMPT_FILE"
-
-  cat > "/tmp/${SESSION}.sh" << SCRIPT_EOF
-#!/usr/bin/env bash
-cd $(printf '%q' "$REPO_DIR")
-cat $(printf '%q' "$PROMPT_FILE") | claude -w fix-issue-${ISSUE} \\
-  --print --output-format json --dangerously-skip-permissions \\
-  > $(printf '%q' "$OUTFILE") 2>&1
-echo '___CLAUDE_DONE___'
-SCRIPT_EOF
-  chmod +x "/tmp/${SESSION}.sh"
-  tmux new-session -d -s "$SESSION" -x 220 -y 50
-  tmux send-keys -t "$SESSION" "bash /tmp/${SESSION}.sh" Enter
-  echo "Started: $SESSION"
-done
+# Write prompt files
+echo "Fix issue #42: login button broken" > /tmp/cca-issue-42.prompt
+echo "Fix issue #99: avatar upload fails" > /tmp/cca-issue-99.prompt
 ```
+
+```
+process action:start
+  command: "cat /tmp/cca-issue-42.prompt | claude -w fix-issue-42 --print --output-format json --dangerously-skip-permissions --allowedTools \"Bash,Edit,Read,Write,Glob,Grep,LS,Task,TodoRead,TodoWrite,WebFetch,WebSearch\""
+  workdir: "~/code/myproject"
+```
+
+```
+process action:start
+  command: "cat /tmp/cca-issue-99.prompt | claude -w fix-issue-99 --print --output-format json --dangerously-skip-permissions --allowedTools \"Bash,Edit,Read,Write,Glob,Grep,LS,Task,TodoRead,TodoWrite,WebFetch,WebSearch\""
+  workdir: "~/code/myproject"
+```
+
+Poll each `session_id` independently. Use `process action:list` to see all active agents at once.
 
 ---
 
@@ -166,11 +160,12 @@ done
 
 - Default to `--model sonnet` (faster, cheaper); use `opus` only if the user asks or the task is very complex.
 - Keep `--max-budget-usd` at 2.0 unless the user explicitly requests more.
-- **Always write the prompt to a file and pipe it via stdin** — never interpolate `$prompt` directly into shell strings.
-- **Async mode always skips permissions** — no TTY available in detached tmux sessions.
-- Always report `tmux_session` and `session_id` back to the user so they can follow up.
+- **Always write the prompt to a file and pipe it via stdin** — never interpolate `$prompt` directly into the command string.
+- **Async mode always skips permissions** — no TTY available for background processes.
+- Always report the `process session_id` and Claude `session_id` back to the user so they can follow up.
 - If `is_error` is true, show the error and suggest a fix.
-- Clean up all temp files (`.json`, `.sh`, `.prompt`) after results are collected.
+- Clean up prompt temp files after results are collected.
+- The process tool buffers up to 1000 lines of output — request `lines: 500` or more when fetching Claude's JSON result to avoid truncation.
 
 ---
 
@@ -200,10 +195,10 @@ session_id: "3153e086-80f2-4937-afa3-80a922ef1bdc"
 async: false
 ```
 
-**Poll async session:**
+**Poll async agent:**
 
 ```yaml
-tmux_session: "cca-1772179451"
+process_session_id: "<process tool session_id>"
 prompt: "(check status)"
 ```
 
