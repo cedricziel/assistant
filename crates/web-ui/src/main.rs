@@ -193,7 +193,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         config.llm.base_url = base_url;
     }
 
-    let _otel_guard = init_tracing(storage.pool.clone(), config.mirror.trace_enabled)?;
+    let _otel_guard = init_tracing(storage.pool.clone(), &config.observability).await?;
 
     let cli_agent_override = args.agent.clone();
     let mut selected_agent = cli_agent_override

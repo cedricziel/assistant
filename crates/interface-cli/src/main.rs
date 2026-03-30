@@ -1305,7 +1305,7 @@ async fn main() -> Result<()> {
     }
     personas.ensure_exists(&selected_persona).await?;
 
-    let _otel_guard = init_tracing(storage.pool.clone(), config.mirror.trace_enabled)?;
+    let _otel_guard = init_tracing(storage.pool.clone(), &config.observability).await?;
     for msg in config_logs {
         match msg {
             ConfigLoadMessage::Info(text) => info!("{text}"),
