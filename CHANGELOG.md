@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.69](https://github.com/cedricziel/assistant/compare/v0.1.68...v0.1.69) (2026-03-30)
+
+
+### Features
+
+* **web-ui:** expose OpenAPI spec and Swagger UI ([#339](https://github.com/cedricziel/assistant/issues/339)) ([9b98d42](https://github.com/cedricziel/assistant/commit/9b98d42cf7c26be6bdc575980fd132b2fdc404e2))
+
 ## [0.1.68](https://github.com/cedricziel/assistant/compare/v0.1.67...v0.1.68) (2026-03-30)
 
 
