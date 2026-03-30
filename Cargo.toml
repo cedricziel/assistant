@@ -154,9 +154,9 @@ mattermost_api = "0.8"
 # Apache Iceberg
 iceberg = "0.9"
 iceberg-catalog-rest = "0.9"
-arrow-array = "57"
-arrow-schema = "57"
-parquet = "57"
+arrow-array = "57.1"
+arrow-schema = "57.1"
+parquet = "57.1"
 # Internal crates
 opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
 opentelemetry-exporter-iceberg = { path = "crates/opentelemetry-exporter-iceberg" }
