@@ -15,6 +15,7 @@ use crate::security::{SecurityRequirement, SecurityScheme};
 /// It provides essential metadata including the agent's identity, capabilities,
 /// skills, supported communication methods, and security requirements.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCard {
     /// A human-readable name for the agent.
@@ -69,6 +70,7 @@ pub struct AgentCard {
 /// Declares a combination of a target URL, transport, and protocol version for
 /// interacting with the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInterface {
     /// The URL where this interface is available.
@@ -87,6 +89,7 @@ pub struct AgentInterface {
 
 /// Represents the service provider of an agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentProvider {
     /// A URL for the provider's website or documentation.
@@ -98,6 +101,7 @@ pub struct AgentProvider {
 
 /// Defines optional capabilities supported by an agent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCapabilities {
     /// Indicates if the agent supports streaming responses.
@@ -119,6 +123,7 @@ pub struct AgentCapabilities {
 
 /// A declaration of a protocol extension supported by an Agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentExtension {
     /// The unique URI identifying the extension.
@@ -134,11 +139,13 @@ pub struct AgentExtension {
 
     /// Extension-specific configuration parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(additional_properties))]
     pub params: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Represents a distinct capability or function that an agent can perform.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSkill {
     /// A unique identifier for the skill.
@@ -172,6 +179,7 @@ pub struct AgentSkill {
 
 /// Represents a JWS signature of an AgentCard (RFC 7515).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCardSignature {
     /// The protected JWS header, base64url-encoded JSON object.
@@ -183,6 +191,7 @@ pub struct AgentCardSignature {
 
     /// The unprotected JWS header values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(additional_properties))]
     pub header: Option<HashMap<String, serde_json::Value>>,
 }
 

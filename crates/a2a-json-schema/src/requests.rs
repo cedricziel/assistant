@@ -12,6 +12,7 @@ use crate::types::{Message, PushNotificationConfig, SendMessageConfiguration, Ta
 
 /// Request for the `SendMessage` and `SendStreamingMessage` methods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageRequest {
     /// Optional tenant ID.
@@ -27,11 +28,13 @@ pub struct SendMessageRequest {
 
     /// Additional context or parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(additional_properties))]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Request for the `GetTask` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GetTaskRequest {
     /// Optional tenant ID.
@@ -48,6 +51,7 @@ pub struct GetTaskRequest {
 
 /// Request for the `ListTasks` method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListTasksRequest {
     /// Tenant ID.
@@ -85,6 +89,7 @@ pub struct ListTasksRequest {
 
 /// Request for the `CancelTask` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CancelTaskRequest {
     /// Optional tenant ID.
@@ -96,11 +101,13 @@ pub struct CancelTaskRequest {
 
     /// Additional context or parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(additional_properties))]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Request for the `SubscribeToTask` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeToTaskRequest {
     /// Optional tenant ID.
@@ -113,6 +120,7 @@ pub struct SubscribeToTaskRequest {
 
 /// Request for the `CreateTaskPushNotificationConfig` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskPushNotificationConfigRequest {
     /// Optional tenant ID.
@@ -128,6 +136,7 @@ pub struct CreateTaskPushNotificationConfigRequest {
 
 /// Request for the `GetTaskPushNotificationConfig` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GetTaskPushNotificationConfigRequest {
     /// Optional tenant ID.
@@ -143,6 +152,7 @@ pub struct GetTaskPushNotificationConfigRequest {
 
 /// Request for the `DeleteTaskPushNotificationConfig` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteTaskPushNotificationConfigRequest {
     /// Optional tenant ID.
@@ -158,6 +168,7 @@ pub struct DeleteTaskPushNotificationConfigRequest {
 
 /// Request for the `ListTaskPushNotificationConfigs` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListTaskPushNotificationConfigsRequest {
     /// Optional tenant ID.
@@ -178,6 +189,7 @@ pub struct ListTaskPushNotificationConfigsRequest {
 
 /// Request for the `GetExtendedAgentCard` method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct GetExtendedAgentCardRequest {
     /// Optional tenant ID.

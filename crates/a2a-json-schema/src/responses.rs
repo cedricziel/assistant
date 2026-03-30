@@ -13,6 +13,7 @@ use crate::types::{
 ///
 /// Contains either a task or a message (oneof payload in the proto).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageResponse {
     /// The task created or updated by the message.
@@ -28,6 +29,7 @@ pub struct SendMessageResponse {
 ///
 /// In SSE, each chunk is one `StreamResponse` serialized as JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct StreamResponse {
     /// A Task object containing the current state of the task.
@@ -91,6 +93,7 @@ impl StreamResponse {
 
 /// Response for the `ListTasks` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListTasksResponse {
     /// Tasks matching the specified criteria.
@@ -108,6 +111,7 @@ pub struct ListTasksResponse {
 
 /// Response for the `ListTaskPushNotificationConfigs` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ListTaskPushNotificationConfigsResponse {
     /// The list of push notification configurations.

@@ -62,12 +62,33 @@ fn bad_request(msg: impl Into<String>) -> Response {
 // -- Agent Card --
 
 /// `GET /.well-known/agent.json` -- Returns the public agent card.
+#[utoipa::path(
+    get,
+    path = "/.well-known/agent.json",
+    responses(
+        (status = 200, description = "Public agent card", body = AgentCard,
+         content_type = "application/json")
+    ),
+    tag = "agent-card",
+    security()
+)]
 pub async fn get_agent_card_well_known(State(state): State<A2AState>) -> Json<AgentCard> {
     Json(state.agent_card.clone())
 }
 
 /// `GET /agent/authenticatedExtendedCard` -- Returns the extended agent card
 /// (same as public for now).
+#[utoipa::path(
+    get,
+    path = "/agent/authenticatedExtendedCard",
+    responses(
+        (status = 200, description = "Authenticated extended agent card", body = AgentCard,
+         content_type = "application/json"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "agent-card",
+    security(("bearer_token" = []))
+)]
 pub async fn get_extended_agent_card(State(state): State<A2AState>) -> Json<AgentCard> {
     Json(state.agent_card.clone())
 }
@@ -78,6 +99,18 @@ pub async fn get_extended_agent_card(State(state): State<A2AState>) -> Json<Agen
 ///
 /// Creates a task, records the user message, transitions to Working, produces
 /// an agent reply, and returns the final task state.
+#[utoipa::path(
+    post,
+    path = "/message/send",
+    request_body(content = SendMessageRequest, content_type = "application/json"),
+    responses(
+        (status = 200, description = "Task created and completed", body = SendMessageResponse,
+         content_type = "application/json"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "messages",
+    security(("bearer_token" = []))
+)]
 pub async fn send_message(
     State(state): State<A2AState>,
     Json(req): Json<SendMessageRequest>,
@@ -144,6 +177,18 @@ pub async fn send_message(
 }
 
 /// `POST /message/stream` -- Sends a message with streaming response (SSE).
+#[utoipa::path(
+    post,
+    path = "/message/stream",
+    request_body(content = SendMessageRequest, content_type = "application/json"),
+    responses(
+        (status = 200, description = "Streaming SSE response; each event is a JSON-encoded StreamResponse",
+         content_type = "text/event-stream"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "messages",
+    security(("bearer_token" = []))
+)]
 pub async fn send_message_streaming(
     State(state): State<A2AState>,
     Json(req): Json<SendMessageRequest>,
@@ -239,6 +284,21 @@ pub async fn send_message_streaming(
 // -- Task operations --
 
 /// `GET /tasks/:id` -- Gets the latest state of a task.
+#[utoipa::path(
+    get,
+    path = "/tasks/{id}",
+    params(
+        ("id" = String, Path, description = "Task ID")
+    ),
+    responses(
+        (status = 200, description = "Task details", body = Task,
+         content_type = "application/json"),
+        (status = 404, description = "Task not found"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "tasks",
+    security(("bearer_token" = []))
+)]
 pub async fn get_task(State(state): State<A2AState>, Path(id): Path<String>) -> Response {
     match state.task_store.get_task(&id).await {
         Some(task) => Json(task).into_response(),
@@ -247,7 +307,7 @@ pub async fn get_task(State(state): State<A2AState>, Path(id): Path<String>) -> 
 }
 
 /// Query parameters for `GET /tasks`.
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, Default, serde::Deserialize, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ListTasksQuery {
     pub context_id: Option<String>,
@@ -256,6 +316,18 @@ pub struct ListTasksQuery {
 }
 
 /// `GET /tasks` -- Lists tasks matching optional filters.
+#[utoipa::path(
+    get,
+    path = "/tasks",
+    params(ListTasksQuery),
+    responses(
+        (status = 200, description = "Paginated task list", body = ListTasksResponse,
+         content_type = "application/json"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "tasks",
+    security(("bearer_token" = []))
+)]
 pub async fn list_tasks(
     State(state): State<A2AState>,
     Query(query): Query<ListTasksQuery>,
@@ -277,6 +349,21 @@ pub async fn list_tasks(
 }
 
 /// `POST /tasks/:id/cancel` -- Cancels a task.
+#[utoipa::path(
+    post,
+    path = "/tasks/{id}/cancel",
+    params(
+        ("id" = String, Path, description = "Task ID to cancel")
+    ),
+    responses(
+        (status = 200, description = "Cancelled task", body = Task,
+         content_type = "application/json"),
+        (status = 404, description = "Task not found"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "tasks",
+    security(("bearer_token" = []))
+)]
 pub async fn cancel_task(State(state): State<A2AState>, Path(id): Path<String>) -> Response {
     match state.task_store.cancel_task(&id).await {
         Some(task) => Json(task).into_response(),
@@ -285,6 +372,22 @@ pub async fn cancel_task(State(state): State<A2AState>, Path(id): Path<String>) 
 }
 
 /// `GET /tasks/:id/subscribe` -- Subscribes to task updates (SSE).
+#[utoipa::path(
+    get,
+    path = "/tasks/{id}/subscribe",
+    params(
+        ("id" = String, Path, description = "Task ID to subscribe to")
+    ),
+    responses(
+        (status = 200, description = "SSE stream of StreamResponse events",
+         content_type = "text/event-stream"),
+        (status = 400, description = "Task already in terminal state"),
+        (status = 404, description = "Task not found"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "tasks",
+    security(("bearer_token" = []))
+)]
 pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<String>) -> Response {
     let rx = state.task_store.subscribe(&id).await;
 
@@ -333,6 +436,22 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
 // -- Push notification config operations --
 
 /// `POST /tasks/:task_id/pushNotificationConfigs`
+#[utoipa::path(
+    post,
+    path = "/tasks/{task_id}/pushNotificationConfigs",
+    params(
+        ("task_id" = String, Path, description = "Parent task ID")
+    ),
+    request_body(content = CreateTaskPushNotificationConfigRequest, content_type = "application/json"),
+    responses(
+        (status = 201, description = "Push notification config created", body = TaskPushNotificationConfig,
+         content_type = "application/json"),
+        (status = 404, description = "Task not found"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "push-notifications",
+    security(("bearer_token" = []))
+)]
 pub async fn create_push_notification_config(
     State(state): State<A2AState>,
     Path(task_id): Path<String>,
@@ -349,6 +468,22 @@ pub async fn create_push_notification_config(
 }
 
 /// `GET /tasks/:task_id/pushNotificationConfigs/:config_id`
+#[utoipa::path(
+    get,
+    path = "/tasks/{task_id}/pushNotificationConfigs/{config_id}",
+    params(
+        ("task_id" = String, Path, description = "Parent task ID"),
+        ("config_id" = String, Path, description = "Push notification config ID")
+    ),
+    responses(
+        (status = 200, description = "Push notification config", body = TaskPushNotificationConfig,
+         content_type = "application/json"),
+        (status = 404, description = "Config not found"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "push-notifications",
+    security(("bearer_token" = []))
+)]
 pub async fn get_push_notification_config(
     State(state): State<A2AState>,
     Path((task_id, config_id)): Path<(String, String)>,
@@ -362,7 +497,7 @@ pub async fn get_push_notification_config(
 }
 
 /// Query params for listing push notification configs.
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, Default, serde::Deserialize, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct ListPushConfigsQuery {
@@ -371,6 +506,22 @@ pub struct ListPushConfigsQuery {
 }
 
 /// `GET /tasks/:task_id/pushNotificationConfigs`
+#[utoipa::path(
+    get,
+    path = "/tasks/{task_id}/pushNotificationConfigs",
+    params(
+        ("task_id" = String, Path, description = "Parent task ID"),
+        ListPushConfigsQuery
+    ),
+    responses(
+        (status = 200, description = "List of push notification configs",
+         body = ListTaskPushNotificationConfigsResponse,
+         content_type = "application/json"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "push-notifications",
+    security(("bearer_token" = []))
+)]
 pub async fn list_push_notification_configs(
     State(state): State<A2AState>,
     Path(task_id): Path<String>,
@@ -384,6 +535,21 @@ pub async fn list_push_notification_configs(
 }
 
 /// `DELETE /tasks/:task_id/pushNotificationConfigs/:config_id`
+#[utoipa::path(
+    delete,
+    path = "/tasks/{task_id}/pushNotificationConfigs/{config_id}",
+    params(
+        ("task_id" = String, Path, description = "Parent task ID"),
+        ("config_id" = String, Path, description = "Push notification config ID")
+    ),
+    responses(
+        (status = 204, description = "Config deleted"),
+        (status = 404, description = "Config not found"),
+        (status = 401, description = "Unauthorized")
+    ),
+    tag = "push-notifications",
+    security(("bearer_token" = []))
+)]
 pub async fn delete_push_notification_config(
     State(state): State<A2AState>,
     Path((task_id, config_id)): Path<(String, String)>,

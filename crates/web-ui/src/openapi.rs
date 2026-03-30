@@ -1,0 +1,178 @@
+//! OpenAPI spec generation and serving.
+//!
+//! Exposes:
+//! - `GET /api/openapi.json` — machine-readable OpenAPI 3.1 spec
+//! - `GET /api/docs` — Swagger UI
+
+use assistant_a2a_json_schema::{
+    agent_card::{
+        AgentCapabilities, AgentCard, AgentCardSignature, AgentExtension, AgentInterface,
+        AgentProvider, AgentSkill,
+    },
+    requests::{
+        CancelTaskRequest, CreateTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
+        GetTaskPushNotificationConfigRequest, GetTaskRequest,
+        ListTaskPushNotificationConfigsRequest, ListTasksRequest, SendMessageRequest,
+        SubscribeToTaskRequest,
+    },
+    responses::{
+        ListTaskPushNotificationConfigsResponse, ListTasksResponse, SendMessageResponse,
+        StreamResponse,
+    },
+    security::{
+        ApiKeySecurityScheme, AuthorizationCodeOAuthFlow, ClientCredentialsOAuthFlow,
+        DeviceCodeOAuthFlow, HttpAuthSecurityScheme, ImplicitOAuthFlow, MutualTlsSecurityScheme,
+        OAuth2SecurityScheme, OAuthFlows, OpenIdConnectSecurityScheme, PasswordOAuthFlow,
+        SecurityRequirement, SecurityScheme as A2ASecurityScheme,
+    },
+    types::{
+        Artifact, AuthenticationInfo, Message, Part, PushNotificationConfig, Role,
+        SendMessageConfiguration, StringList, Task, TaskArtifactUpdateEvent,
+        TaskPushNotificationConfig, TaskState, TaskStatus, TaskStatusUpdateEvent,
+    },
+};
+use utoipa::{
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+    Modify, OpenApi,
+};
+
+use crate::a2a::handlers;
+
+/// API error response body (JSON-RPC style used by A2A handlers).
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct ApiErrorResponse {
+    /// Numeric error code.
+    pub code: i32,
+    /// Human-readable error message.
+    pub message: String,
+}
+
+/// Adds the Bearer token security scheme to the OpenAPI components.
+struct BearerTokenSecurityAddon;
+
+impl Modify for BearerTokenSecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bearer_token",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some(
+                            "Bearer token. Pass the token issued by the server via \
+                             `Authorization: Bearer <token>`. \
+                             Configure it with `--auth-token` / `ASSISTANT_WEB_TOKEN`.",
+                        ))
+                        .build(),
+                ),
+            );
+        }
+    }
+}
+
+/// Assembled OpenAPI document for the Assistant web-UI.
+///
+/// Covers the machine-readable APIs:
+/// - **agent-card** — A2A agent discovery
+/// - **messages** — Send messages (unary + streaming)
+/// - **tasks** — Task lifecycle management
+/// - **push-notifications** — Push notification configuration
+#[allow(dead_code)] // schema types are used only by the macro
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Assistant API",
+        version = env!("CARGO_PKG_VERSION"),
+        description = "AI assistant API — A2A protocol (Agent-to-Agent), chat, and workflow management.\n\n\
+                       **Authentication**: protected endpoints require `Authorization: Bearer <token>`.\n\
+                       The token is set via `--auth-token` / `ASSISTANT_WEB_TOKEN` on the server.",
+        license(name = "MIT"),
+    ),
+    modifiers(&BearerTokenSecurityAddon),
+    paths(
+        handlers::get_agent_card_well_known,
+        handlers::get_extended_agent_card,
+        handlers::send_message,
+        handlers::send_message_streaming,
+        handlers::list_tasks,
+        handlers::get_task,
+        handlers::cancel_task,
+        handlers::subscribe_to_task,
+        handlers::list_push_notification_configs,
+        handlers::create_push_notification_config,
+        handlers::get_push_notification_config,
+        handlers::delete_push_notification_config,
+    ),
+    components(
+        schemas(
+            // A2A agent card types
+            AgentCard,
+            AgentCapabilities,
+            AgentCardSignature,
+            AgentExtension,
+            AgentInterface,
+            AgentProvider,
+            AgentSkill,
+            // A2A core types
+            Task,
+            TaskStatus,
+            TaskState,
+            Message,
+            Role,
+            Part,
+            Artifact,
+            TaskStatusUpdateEvent,
+            TaskArtifactUpdateEvent,
+            PushNotificationConfig,
+            AuthenticationInfo,
+            TaskPushNotificationConfig,
+            SendMessageConfiguration,
+            StringList,
+            // A2A request types
+            SendMessageRequest,
+            ListTasksRequest,
+            GetTaskRequest,
+            CancelTaskRequest,
+            SubscribeToTaskRequest,
+            CreateTaskPushNotificationConfigRequest,
+            GetTaskPushNotificationConfigRequest,
+            ListTaskPushNotificationConfigsRequest,
+            GetExtendedAgentCardRequest,
+            // A2A response types
+            SendMessageResponse,
+            StreamResponse,
+            ListTasksResponse,
+            ListTaskPushNotificationConfigsResponse,
+            // A2A security descriptor types (used inside AgentCard)
+            A2ASecurityScheme,
+            SecurityRequirement,
+            ApiKeySecurityScheme,
+            HttpAuthSecurityScheme,
+            OAuth2SecurityScheme,
+            OpenIdConnectSecurityScheme,
+            MutualTlsSecurityScheme,
+            OAuthFlows,
+            AuthorizationCodeOAuthFlow,
+            ClientCredentialsOAuthFlow,
+            ImplicitOAuthFlow,
+            PasswordOAuthFlow,
+            DeviceCodeOAuthFlow,
+            // Local handler types
+            ApiErrorResponse,
+        )
+    ),
+    tags(
+        (name = "agent-card",
+         description = "Agent discovery — retrieve the A2A agent manifest"),
+        (name = "messages",
+         description = "Message operations — send messages to the agent (unary or streaming)"),
+        (name = "tasks",
+         description = "Task lifecycle — list, retrieve, and cancel tasks"),
+        (name = "push-notifications",
+         description = "Push notification configuration — manage webhook callbacks for task updates"),
+    ),
+    servers(
+        (url = "/", description = "Local assistant server")
+    )
+)]
+pub struct ApiDoc;
