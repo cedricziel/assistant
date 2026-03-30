@@ -1,0 +1,561 @@
+//! Iceberg query backends that scan Parquet files directly from the warehouse.
+//!
+//! The Iceberg exporter uses an in-memory catalog whose metadata does not
+//! survive process restarts.  Rather than standing up a persistent catalog
+//! service, these backends walk the warehouse directory, read every `.parquet`
+//! file they find for the relevant table, and aggregate the results in memory.
+//!
+//! This works well for single-user deployments; for high-volume setups a
+//! persistent catalog (e.g. Nessie) and pushdown predicates are recommended.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use arrow_array::cast::AsArray;
+use arrow_array::types::{Int32Type, Int64Type, TimestampMicrosecondType};
+use arrow_array::{Array, RecordBatch};
+use async_trait::async_trait;
+use chrono::{DateTime, TimeZone, Utc};
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use serde_json::Value;
+use uuid::Uuid;
+
+use assistant_core::IcebergConfig;
+use assistant_storage::{LogStats, RecordedLog, RecordedSpan, TraceFilter, TraceSummary};
+
+use super::{LogBackend, TraceBackend};
+
+// -- helpers ------------------------------------------------------------------
+
+/// Resolve the warehouse root, expanding `~` if present.
+fn warehouse_path(config: &IcebergConfig) -> PathBuf {
+    let raw = config
+        .warehouse
+        .clone()
+        .unwrap_or_else(|| "~/.assistant/iceberg".to_string());
+    if let Some(rest) = raw.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(raw)
+}
+
+/// Collect every `.parquet` file under `dir` recursively.
+fn collect_parquet_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(collect_parquet_files(&path));
+            } else if path.extension().and_then(|e| e.to_str()) == Some("parquet") {
+                files.push(path);
+            }
+        }
+    }
+    // Most-recently modified files first so we can short-circuit if desired.
+    files.sort_by(|a, b| {
+        let mt = |p: &PathBuf| p.metadata().and_then(|m| m.modified()).ok();
+        mt(b).cmp(&mt(a))
+    });
+    files
+}
+
+/// Read all `RecordBatch`es from a single Parquet file.
+fn read_parquet(path: &Path) -> Result<Vec<RecordBatch>> {
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("opening parquet file {}", path.display()))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .with_context(|| format!("building parquet reader for {}", path.display()))?;
+    let reader = builder.build()?;
+    reader
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| anyhow::anyhow!("reading parquet batches: {e}"))
+}
+
+/// Extract a nullable `&str` value at row `i` from a string column named `col`.
+fn str_col<'a>(batch: &'a RecordBatch, col: &str, i: usize) -> Option<&'a str> {
+    let idx = batch.schema().index_of(col).ok()?;
+    let arr = batch.column(idx).as_string_opt::<i32>()?;
+    if arr.is_null(i) {
+        None
+    } else {
+        Some(arr.value(i))
+    }
+}
+
+/// Extract a non-nullable `&str` value at row `i` from a string column.
+fn str_col_req<'a>(batch: &'a RecordBatch, col: &str, i: usize) -> &'a str {
+    str_col(batch, col, i).unwrap_or("")
+}
+
+/// Extract a nullable `i64` microsecond timestamp (UTC) at row `i`.
+fn ts_col(batch: &RecordBatch, col: &str, i: usize) -> Option<DateTime<Utc>> {
+    let idx = batch.schema().index_of(col).ok()?;
+    let arr = batch
+        .column(idx)
+        .as_primitive_opt::<TimestampMicrosecondType>()?;
+    if arr.is_null(i) {
+        return None;
+    }
+    let us = arr.value(i);
+    Utc.timestamp_micros(us).single()
+}
+
+/// Extract a nullable `i64` at row `i`.
+fn i64_col(batch: &RecordBatch, col: &str, i: usize) -> Option<i64> {
+    let idx = batch.schema().index_of(col).ok()?;
+    let arr = batch.column(idx).as_primitive_opt::<Int64Type>()?;
+    if arr.is_null(i) {
+        None
+    } else {
+        Some(arr.value(i))
+    }
+}
+
+/// Extract a nullable `i32` at row `i`.
+fn i32_col(batch: &RecordBatch, col: &str, i: usize) -> Option<i32> {
+    let idx = batch.schema().index_of(col).ok()?;
+    let arr = batch.column(idx).as_primitive_opt::<Int32Type>()?;
+    if arr.is_null(i) {
+        None
+    } else {
+        Some(arr.value(i))
+    }
+}
+
+// -- IcebergTraceBackend ------------------------------------------------------
+
+pub struct IcebergTraceBackend {
+    config: IcebergConfig,
+}
+
+impl IcebergTraceBackend {
+    pub fn new(config: IcebergConfig) -> Self {
+        Self { config }
+    }
+
+    fn spans_data_dir(&self) -> PathBuf {
+        warehouse_path(&self.config)
+            .join(&self.config.namespace)
+            .join("assistant_spans")
+            .join("data")
+    }
+
+    fn load_all_batches(&self) -> Vec<RecordBatch> {
+        let dir = self.spans_data_dir();
+        let files = collect_parquet_files(&dir);
+        let mut batches = Vec::new();
+        for f in &files {
+            match read_parquet(f) {
+                Ok(b) => batches.extend(b),
+                Err(e) => tracing::warn!("skipping span parquet file {}: {e}", f.display()),
+            }
+        }
+        batches
+    }
+}
+
+#[async_trait]
+impl TraceBackend for IcebergTraceBackend {
+    async fn list_recent_traces(
+        &self,
+        limit: i64,
+        filter: &TraceFilter,
+        _agent_id: &str,
+    ) -> Result<Vec<TraceSummary>> {
+        let batches = self.load_all_batches();
+
+        // Per-trace accumulator.
+        struct Acc {
+            start: DateTime<Utc>,
+            end: DateTime<Utc>,
+            span_count: i64,
+            tool_span_count: i64,
+            error_count: i64,
+            tool_names: std::collections::HashSet<String>,
+            root_name: Option<String>,
+            root_service: Option<String>,
+            interface: Option<String>,
+            has_reply: bool,
+            conversation_id: Option<Uuid>,
+        }
+
+        let mut map: HashMap<String, Acc> = HashMap::new();
+
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                let trace_id = str_col_req(batch, "trace_id", i).to_string();
+                let start = ts_col(batch, "start_time", i).unwrap_or_else(Utc::now);
+                let end = ts_col(batch, "end_time", i).unwrap_or(start);
+
+                // Apply time filters.
+                if let Some(since) = filter.since {
+                    if start < since {
+                        continue;
+                    }
+                }
+                if let Some(until) = filter.until {
+                    if start > until {
+                        continue;
+                    }
+                }
+
+                let tool_name = str_col(batch, "tool_name", i).map(str::to_string);
+                let tool_status = str_col(batch, "tool_status", i).map(str::to_string);
+                let parent_span_id = str_col(batch, "parent_span_id", i);
+                let is_root = parent_span_id.is_none();
+                let service_name = str_col(batch, "service_name", i).map(str::to_string);
+                let span_name = str_col(batch, "name", i).map(str::to_string);
+
+                // Apply skill filter.
+                if let Some(ref sk) = filter.skill {
+                    if tool_name.as_deref() != Some(sk.as_str()) {
+                        continue;
+                    }
+                }
+
+                let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
+                let attrs: Value = serde_json::from_str(attrs_str).unwrap_or(Value::Null);
+                let interface = attrs
+                    .get("interface")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+
+                // Apply interface filter.
+                if let Some(ref iface) = filter.interface {
+                    if interface.as_deref() != Some(iface.as_str()) {
+                        continue;
+                    }
+                }
+
+                let is_error = tool_status.as_deref() == Some("error");
+                let is_reply = matches!(tool_name.as_deref(), Some("reply" | "slack-post"));
+                let conversation_id =
+                    str_col(batch, "conversation_id", i).and_then(|s| Uuid::parse_str(s).ok());
+
+                let acc = map.entry(trace_id).or_insert_with(|| Acc {
+                    start,
+                    end,
+                    span_count: 0,
+                    tool_span_count: 0,
+                    error_count: 0,
+                    tool_names: std::collections::HashSet::new(),
+                    root_name: None,
+                    root_service: None,
+                    interface: None,
+                    has_reply: false,
+                    conversation_id: None,
+                });
+
+                if start < acc.start {
+                    acc.start = start;
+                }
+                if end > acc.end {
+                    acc.end = end;
+                }
+                acc.span_count += 1;
+                if tool_name.is_some() {
+                    acc.tool_span_count += 1;
+                    if let Some(ref tn) = tool_name {
+                        acc.tool_names.insert(tn.clone());
+                    }
+                }
+                if is_error {
+                    acc.error_count += 1;
+                }
+                if is_reply {
+                    acc.has_reply = true;
+                }
+                if is_root {
+                    acc.root_name = span_name;
+                    acc.root_service = service_name;
+                    acc.interface = interface;
+                }
+                if acc.conversation_id.is_none() {
+                    acc.conversation_id = conversation_id;
+                }
+            }
+        }
+
+        let mut summaries: Vec<TraceSummary> = map
+            .into_iter()
+            .filter_map(|(trace_id, acc)| {
+                let duration_ms = (acc.end - acc.start).num_milliseconds();
+
+                // Apply post-fetch filters.
+                let status_ok = match filter.status.as_deref() {
+                    Some("ok") => acc.error_count == 0,
+                    Some("error") => acc.error_count > 0,
+                    _ => true,
+                };
+                let duration_ok = filter.min_duration_ms.is_none_or(|min| duration_ms >= min);
+                let conv_ok = filter
+                    .conversation
+                    .is_none_or(|c| acc.conversation_id == Some(c));
+
+                if !status_ok || !duration_ok || !conv_ok {
+                    return None;
+                }
+
+                Some(TraceSummary {
+                    trace_id,
+                    conversation_id: acc.conversation_id,
+                    start_time: acc.start,
+                    end_time: acc.end,
+                    span_count: acc.span_count,
+                    tool_span_count: acc.tool_span_count,
+                    error_count: acc.error_count,
+                    tool_names: acc.tool_names.into_iter().collect(),
+                    root_span_name: acc.root_name,
+                    root_service_name: acc.root_service,
+                    interface: acc.interface,
+                    has_reply: acc.has_reply,
+                })
+            })
+            .collect();
+
+        summaries.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+        summaries.truncate(limit as usize);
+        Ok(summaries)
+    }
+
+    async fn get_trace(&self, trace_id: &str, _agent_id: &str) -> Result<Vec<RecordedSpan>> {
+        let batches = self.load_all_batches();
+        let mut spans = Vec::new();
+
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                if str_col_req(batch, "trace_id", i) != trace_id {
+                    continue;
+                }
+
+                let start = ts_col(batch, "start_time", i).unwrap_or_else(Utc::now);
+                let end = ts_col(batch, "end_time", i).unwrap_or(start);
+                let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
+                let attributes: Value =
+                    serde_json::from_str(attrs_str).unwrap_or(Value::Object(Default::default()));
+
+                spans.push(RecordedSpan {
+                    span_id: str_col_req(batch, "span_id", i).to_string(),
+                    trace_id: trace_id.to_string(),
+                    parent_span_id: str_col(batch, "parent_span_id", i).map(str::to_string),
+                    name: str_col_req(batch, "name", i).to_string(),
+                    service_name: str_col(batch, "service_name", i).map(str::to_string),
+                    conversation_id: str_col(batch, "conversation_id", i)
+                        .and_then(|s| Uuid::parse_str(s).ok()),
+                    turn: None,
+                    tool_name: str_col(batch, "tool_name", i).map(str::to_string),
+                    tool_status: str_col(batch, "tool_status", i).map(str::to_string),
+                    observation: None,
+                    error: None,
+                    duration_ms: i64_col(batch, "duration_ms", i).unwrap_or(0),
+                    start_time: start,
+                    end_time: end,
+                    attributes,
+                    input_tokens: i64_col(batch, "input_tokens", i),
+                    output_tokens: i64_col(batch, "output_tokens", i),
+                });
+            }
+        }
+
+        spans.sort_by_key(|s| s.start_time);
+        Ok(spans)
+    }
+}
+
+// -- IcebergLogBackend --------------------------------------------------------
+
+pub struct IcebergLogBackend {
+    config: IcebergConfig,
+}
+
+impl IcebergLogBackend {
+    pub fn new(config: IcebergConfig) -> Self {
+        Self { config }
+    }
+
+    fn logs_data_dir(&self) -> PathBuf {
+        warehouse_path(&self.config)
+            .join(&self.config.namespace)
+            .join("assistant_logs")
+            .join("data")
+    }
+
+    fn load_all_batches(&self) -> Vec<RecordBatch> {
+        let dir = self.logs_data_dir();
+        let files = collect_parquet_files(&dir);
+        let mut batches = Vec::new();
+        for f in &files {
+            match read_parquet(f) {
+                Ok(b) => batches.extend(b),
+                Err(e) => tracing::warn!("skipping log parquet file {}: {e}", f.display()),
+            }
+        }
+        batches
+    }
+}
+
+#[async_trait]
+impl LogBackend for IcebergLogBackend {
+    #[allow(clippy::too_many_arguments)]
+    async fn list_recent_logs(
+        &self,
+        limit: i64,
+        min_severity: Option<i32>,
+        target_filter: Option<&str>,
+        search: Option<&str>,
+        trace_id_filter: Option<&str>,
+        _conversation_id: Option<&str>,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+        _agent_id: &str,
+    ) -> Result<Vec<RecordedLog>> {
+        let batches = self.load_all_batches();
+        let mut logs = Vec::new();
+
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                let ts = match ts_col(batch, "timestamp", i) {
+                    Some(t) => t,
+                    None => continue,
+                };
+
+                // Time range filter.
+                if let Some(s) = since {
+                    if ts < s {
+                        continue;
+                    }
+                }
+                if let Some(u) = until {
+                    if ts > u {
+                        continue;
+                    }
+                }
+
+                let sev = i32_col(batch, "severity_number", i);
+                if let Some(min) = min_severity {
+                    if sev.unwrap_or(0) < min {
+                        continue;
+                    }
+                }
+
+                let target = str_col(batch, "target", i);
+                if let Some(tf) = target_filter {
+                    if target != Some(tf) {
+                        continue;
+                    }
+                }
+
+                let body = str_col(batch, "body", i);
+                if let Some(q) = search {
+                    if !body.unwrap_or("").contains(q) {
+                        continue;
+                    }
+                }
+
+                let tid = str_col(batch, "trace_id", i);
+                if let Some(f) = trace_id_filter {
+                    if tid != Some(f) {
+                        continue;
+                    }
+                }
+
+                let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
+                let attributes: Value =
+                    serde_json::from_str(attrs_str).unwrap_or(Value::Object(Default::default()));
+
+                logs.push(RecordedLog {
+                    id: str_col_req(batch, "id", i).to_string(),
+                    timestamp: ts,
+                    observed_timestamp: None,
+                    severity_number: sev,
+                    severity_text: str_col(batch, "severity_text", i).map(str::to_string),
+                    body: body.map(str::to_string),
+                    trace_id: tid.map(str::to_string),
+                    span_id: str_col(batch, "span_id", i).map(str::to_string),
+                    span_name: None, // not stored in Iceberg logs table
+                    service_name: str_col(batch, "service_name", i).map(str::to_string),
+                    target: target.map(str::to_string),
+                    attributes,
+                });
+            }
+        }
+
+        logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        logs.truncate(limit as usize);
+        Ok(logs)
+    }
+
+    async fn get_log(&self, id: &str, _agent_id: &str) -> Result<Option<RecordedLog>> {
+        let batches = self.load_all_batches();
+
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                if str_col_req(batch, "id", i) != id {
+                    continue;
+                }
+                let ts = ts_col(batch, "timestamp", i).unwrap_or_else(Utc::now);
+                let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
+                let attributes: Value =
+                    serde_json::from_str(attrs_str).unwrap_or(Value::Object(Default::default()));
+
+                return Ok(Some(RecordedLog {
+                    id: id.to_string(),
+                    timestamp: ts,
+                    observed_timestamp: None,
+                    severity_number: i32_col(batch, "severity_number", i),
+                    severity_text: str_col(batch, "severity_text", i).map(str::to_string),
+                    body: str_col(batch, "body", i).map(str::to_string),
+                    trace_id: str_col(batch, "trace_id", i).map(str::to_string),
+                    span_id: str_col(batch, "span_id", i).map(str::to_string),
+                    span_name: None,
+                    service_name: str_col(batch, "service_name", i).map(str::to_string),
+                    target: str_col(batch, "target", i).map(str::to_string),
+                    attributes,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn log_stats(&self, _agent_id: &str) -> Result<LogStats> {
+        let batches = self.load_all_batches();
+        let mut stats = LogStats::default();
+
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                let sev = i32_col(batch, "severity_number", i).unwrap_or(0);
+                stats.total += 1;
+                match sev {
+                    1..=4 => stats.trace_count += 1,
+                    5..=8 => stats.debug_count += 1,
+                    9..=12 => stats.info_count += 1,
+                    13..=16 => stats.warn_count += 1,
+                    17..=20 => stats.error_count += 1,
+                    _ => stats.fatal_count += 1,
+                }
+            }
+        }
+        Ok(stats)
+    }
+
+    async fn list_targets(&self, _agent_id: &str) -> Result<Vec<String>> {
+        let batches = self.load_all_batches();
+        let mut targets: std::collections::HashSet<String> = Default::default();
+
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                if let Some(t) = str_col(batch, "target", i) {
+                    targets.insert(t.to_string());
+                }
+            }
+        }
+
+        let mut v: Vec<String> = targets.into_iter().collect();
+        v.sort();
+        Ok(v)
+    }
+}

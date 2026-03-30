@@ -51,6 +51,9 @@ url = { workspace = true }
 getrandom = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true }
+arrow-array = { workspace = true }
+parquet = { workspace = true }
+iceberg = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
