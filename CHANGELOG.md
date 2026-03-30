@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.70](https://github.com/cedricziel/assistant/compare/v0.1.69...v0.1.70) (2026-03-30)
+
+
+### Features
+
+* **skill:** upgrade claude-code-agent to use native process tool (Phase 3 of [#74](https://github.com/cedricziel/assistant/issues/74)) ([cbec05a](https://github.com/cedricziel/assistant/commit/cbec05a60b75b8b4ef6aa2e5ce57a51c4699a6c1))
+
+
+### Bug Fixes
+
+* **iceberg-exporter:** derive Arrow schemas from Iceberg schema to embed field IDs ([#343](https://github.com/cedricziel/assistant/issues/343)) ([f7a31e9](https://github.com/cedricziel/assistant/commit/f7a31e99684dd0b488d2cc3332651eb64aed00a9))
+
 ## [0.1.69](https://github.com/cedricziel/assistant/compare/v0.1.68...v0.1.69) (2026-03-30)
 
 
