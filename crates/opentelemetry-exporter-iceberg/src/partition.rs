@@ -1,8 +1,9 @@
 //! Converts [`PartitionGranularity`] config values to Iceberg [`UnboundPartitionSpec`]s.
 
 use anyhow::Result;
-use assistant_core::PartitionGranularity;
 use iceberg::spec::{Transform, UnboundPartitionSpec};
+
+use assistant_core::PartitionGranularity;
 
 /// Build an [`UnboundPartitionSpec`] that partitions a table by the given time
 /// column field ID, using the requested granularity.

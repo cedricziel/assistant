@@ -340,8 +340,13 @@ fn collect_rows(rm: &ResourceMetrics) -> Vec<MetricRow> {
                 AggregatedMetrics::F64(MetricData::Histogram(hist)) => {
                     append_histogram_rows(hist, &name, unit, scope_name.clone(), now_us, &mut rows);
                 }
-                // ExponentialHistogram and unhandled variants are skipped.
-                _ => {}
+                // ExponentialHistogram and unhandled variants are skipped with a warning.
+                _ => {
+                    tracing::warn!(
+                        metric_name = %name,
+                        "unsupported metric aggregation shape, rows skipped"
+                    );
+                }
             }
         }
     }

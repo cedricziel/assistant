@@ -17,7 +17,7 @@
 //! exporter = "iceberg"        # or "both" to run alongside SQLite
 //!
 //! [observability.iceberg]
-//! warehouse = "~/.assistant/iceberg"
+//! warehouse = "/home/user/.assistant/iceberg"  # defaults to ~/.assistant/iceberg
 //! namespace = "assistant"
 //! partition = "day"           # day | hour | month | year | none
 //! # catalog_uri = "http://localhost:8181"

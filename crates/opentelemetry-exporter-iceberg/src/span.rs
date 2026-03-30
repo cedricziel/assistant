@@ -1,6 +1,5 @@
 //! OpenTelemetry span exporter that writes to an Apache Iceberg table.
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
@@ -19,7 +18,7 @@ use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::IcebergWriter;
 use iceberg::writer::IcebergWriterBuilder;
 use iceberg::{TableCreation, TableIdent};
-use opentelemetry::Key;
+use opentelemetry::{Key, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{SpanData, SpanExporter};
 use opentelemetry_sdk::Resource;
@@ -41,6 +40,7 @@ pub struct IcebergSpanExporter {
     catalog: CatalogRef,
     config: IcebergConfig,
     resource_attributes: Arc<RwLock<Option<String>>>,
+    service_name: Arc<RwLock<Option<String>>>,
     rt_handle: Handle,
     /// Mutex guards mutable access to the `Table` handle, which is updated
     /// after every committed transaction.
@@ -88,6 +88,7 @@ impl IcebergSpanExporter {
             catalog,
             config,
             resource_attributes: Arc::new(RwLock::new(None)),
+            service_name: Arc::new(RwLock::new(None)),
             rt_handle: Handle::current(),
             table: Arc::new(Mutex::new(table)),
         })
@@ -99,10 +100,16 @@ impl IcebergSpanExporter {
         }
 
         let resource_attrs = self.resource_attributes.read().ok().and_then(|g| g.clone());
+        let service_name = self.service_name.read().ok().and_then(|g| g.clone());
 
         let arrow_schema = arrow_schema();
-        let record_batch = spans_to_record_batch(&arrow_schema, batch, resource_attrs.as_deref())
-            .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
+        let record_batch = spans_to_record_batch(
+            &arrow_schema,
+            batch,
+            resource_attrs.as_deref(),
+            service_name.as_deref(),
+        )
+        .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 
         let mut guard = self.table.lock().await;
         let table = &*guard;
@@ -168,7 +175,10 @@ impl SpanExporter for IcebergSpanExporter {
     }
 
     fn set_resource(&mut self, resource: &Resource) {
-        let service_name = resource.get(&Key::new(SERVICE_NAME)).map(|v| v.to_string());
+        let svc = resource.get(&Key::new(SERVICE_NAME)).map(|v| v.to_string());
+        if let Ok(mut guard) = self.service_name.write() {
+            *guard = svc;
+        }
         let attrs: serde_json::Map<String, serde_json::Value> = resource
             .iter()
             .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string())))
@@ -177,8 +187,6 @@ impl SpanExporter for IcebergSpanExporter {
         if let Ok(mut guard) = self.resource_attributes.write() {
             *guard = Some(json);
         }
-        // Mirror service_name into resource_attributes (already included above)
-        let _ = service_name;
     }
 }
 
@@ -216,6 +224,7 @@ fn spans_to_record_batch(
     schema: &ArrowSchema,
     spans: Vec<SpanData>,
     resource_attributes: Option<&str>,
+    service_name: Option<&str>,
 ) -> Result<RecordBatch> {
     use opentelemetry::trace::SpanId;
 
@@ -236,7 +245,28 @@ fn spans_to_record_batch(
     let mut resource_attrs_vals: Vec<Option<String>> = Vec::with_capacity(spans.len());
 
     for span in spans {
-        let attrs: HashMap<String, serde_json::Value> = span
+        // Extract numeric token counts directly from OTel Value before stringifying.
+        let input_tokens: Option<i64> = span
+            .attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == GEN_AI_USAGE_INPUT_TOKENS)
+            .and_then(|kv| match &kv.value {
+                Value::I64(v) => Some(*v),
+                Value::F64(v) => Some(*v as i64),
+                _ => None,
+            });
+        let output_tokens: Option<i64> = span
+            .attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == GEN_AI_USAGE_OUTPUT_TOKENS)
+            .and_then(|kv| match &kv.value {
+                Value::I64(v) => Some(*v),
+                Value::F64(v) => Some(*v as i64),
+                _ => None,
+            });
+
+        // Build the JSON attrs map for storage (all values stringified).
+        let attrs_json_map: serde_json::Map<String, serde_json::Value> = span
             .attributes
             .iter()
             .map(|kv| {
@@ -269,25 +299,19 @@ fn spans_to_record_batch(
             Some(span.parent_span_id.to_string())
         };
 
-        let conversation_id = attrs
+        let conversation_id = attrs_json_map
             .get("conversation_id")
             .and_then(|v| v.as_str())
             .map(str::to_string);
-        let tool_name = attrs
+        let tool_name = attrs_json_map
             .get("tool_name")
             .and_then(|v| v.as_str())
             .map(str::to_string);
-        let tool_status = attrs
+        let tool_status = attrs_json_map
             .get("tool_status")
             .and_then(|v| v.as_str())
             .map(str::to_string);
-        let input_tokens = attrs
-            .get(GEN_AI_USAGE_INPUT_TOKENS)
-            .and_then(|v| v.as_i64());
-        let output_tokens = attrs
-            .get(GEN_AI_USAGE_OUTPUT_TOKENS)
-            .and_then(|v| v.as_i64());
-        let attrs_json = serde_json::to_string(&attrs).ok();
+        let attrs_json = serde_json::to_string(&attrs_json_map).ok();
 
         trace_ids.push(span.span_context.trace_id().to_string());
         span_ids.push(span.span_context.span_id().to_string());
@@ -296,7 +320,7 @@ fn spans_to_record_batch(
         start_times.push(start_us);
         end_times.push(end_us);
         duration_ms_vals.push(dur_ms);
-        service_names.push(None); // set via set_resource
+        service_names.push(service_name.map(str::to_string));
         conversation_ids.push(conversation_id);
         tool_names.push(tool_name);
         tool_statuses.push(tool_status);

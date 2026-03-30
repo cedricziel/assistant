@@ -187,20 +187,24 @@ pub async fn init_tracing(
 
         // Iceberg exporters for all three signals — must be added before building providers.
         if enable_iceberg {
-            let (iceberg_span_exp, iceberg_log_exp, iceberg_metric_exp) =
-                build_exporters(observability.iceberg.clone()).await?;
+            match build_exporters(observability.iceberg.clone()).await {
+                Ok((iceberg_span_exp, iceberg_log_exp, iceberg_metric_exp)) => {
+                    let proc = BatchSpanProcessor::builder(iceberg_span_exp).build();
+                    trace_provider_builder = trace_provider_builder.with_span_processor(proc);
+                    have_trace_exporter = true;
 
-            let proc = BatchSpanProcessor::builder(iceberg_span_exp).build();
-            trace_provider_builder = trace_provider_builder.with_span_processor(proc);
-            have_trace_exporter = true;
+                    let proc = BatchLogProcessor::builder(iceberg_log_exp).build();
+                    log_builder = log_builder.with_log_processor(proc);
 
-            let proc = BatchLogProcessor::builder(iceberg_log_exp).build();
-            log_builder = log_builder.with_log_processor(proc);
-
-            let reader = PeriodicReader::builder(iceberg_metric_exp)
-                .with_interval(Duration::from_secs(60))
-                .build();
-            meter_builder = meter_builder.with_reader(reader);
+                    let reader = PeriodicReader::builder(iceberg_metric_exp)
+                        .with_interval(Duration::from_secs(60))
+                        .build();
+                    meter_builder = meter_builder.with_reader(reader);
+                }
+                Err(e) => {
+                    tracing::warn!("Iceberg exporter failed to initialise, skipping: {e:#}");
+                }
+            }
         }
 
         let log_prov = log_builder.build();

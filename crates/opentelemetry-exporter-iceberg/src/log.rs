@@ -17,9 +17,11 @@ use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::IcebergWriter;
 use iceberg::writer::IcebergWriterBuilder;
 use iceberg::{TableCreation, TableIdent};
+use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogBatch, LogExporter};
 use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions::attribute::SERVICE_NAME;
 use parquet::file::properties::WriterProperties;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
@@ -40,6 +42,7 @@ pub struct IcebergLogExporter {
     catalog: CatalogRef,
     config: IcebergConfig,
     resource_attributes: Arc<RwLock<Option<String>>>,
+    service_name: Arc<RwLock<Option<String>>>,
     rt_handle: Handle,
     table: Arc<Mutex<iceberg::table::Table>>,
 }
@@ -82,6 +85,7 @@ impl IcebergLogExporter {
             catalog,
             config,
             resource_attributes: Arc::new(RwLock::new(None)),
+            service_name: Arc::new(RwLock::new(None)),
             rt_handle: Handle::current(),
             table: Arc::new(Mutex::new(table)),
         })
@@ -97,10 +101,16 @@ impl IcebergLogExporter {
         }
 
         let resource_attrs = self.resource_attributes.read().ok().and_then(|g| g.clone());
+        let service_name = self.service_name.read().ok().and_then(|g| g.clone());
 
         let arrow_schema = arrow_schema();
-        let record_batch = logs_to_record_batch(&arrow_schema, batch, resource_attrs.as_deref())
-            .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
+        let record_batch = logs_to_record_batch(
+            &arrow_schema,
+            batch,
+            resource_attrs.as_deref(),
+            service_name.as_deref(),
+        )
+        .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 
         let mut guard = self.table.lock().await;
         let table = &*guard;
@@ -167,6 +177,10 @@ impl LogExporter for IcebergLogExporter {
     }
 
     fn set_resource(&mut self, resource: &Resource) {
+        let svc = resource.get(&Key::new(SERVICE_NAME)).map(|v| v.to_string());
+        if let Ok(mut guard) = self.service_name.write() {
+            *guard = svc;
+        }
         let attrs: serde_json::Map<String, serde_json::Value> = resource
             .iter()
             .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string())))
@@ -204,6 +218,7 @@ fn logs_to_record_batch(
     schema: &ArrowSchema,
     batch: LogBatch<'_>,
     resource_attributes: Option<&str>,
+    service_name: Option<&str>,
 ) -> Result<RecordBatch> {
     use opentelemetry::logs::AnyValue;
 
@@ -263,7 +278,7 @@ fn logs_to_record_batch(
             .and_then(|v| v.as_str())
             .map(str::to_string);
         targets.push(target);
-        service_names.push(None); // set via set_resource
+        service_names.push(service_name.map(str::to_string));
         attributes_vals.push(serde_json::to_string(&attrs_map).ok());
         resource_attrs_vals.push(resource_attributes.map(str::to_string));
     }

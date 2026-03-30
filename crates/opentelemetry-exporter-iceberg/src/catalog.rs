@@ -46,7 +46,10 @@ async fn build_rest_catalog(uri: &str) -> Result<CatalogRef> {
     Ok(Arc::new(catalog))
 }
 
-/// Build the filesystem `FileIO` used to write Parquet data files.
+/// Build a [`FileIO`] instance for writing Parquet data files.
+///
+/// The `_config` parameter is reserved for future backend selection (S3, GCS,
+/// Azure ADLS) once those storage factories are wired up.
 pub fn build_file_io(_config: &IcebergConfig) -> FileIO {
     FileIO::new_with_fs()
 }
@@ -76,6 +79,15 @@ fn warehouse_path(config: &IcebergConfig) -> String {
                     .to_string_lossy()
                     .into_owned()
             })
-            .unwrap_or_else(|| "/tmp/.assistant/iceberg".to_string())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map(|d| {
+                        d.join(".assistant")
+                            .join("iceberg")
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+                    .unwrap_or_else(|_| "./.assistant/iceberg".to_string())
+            })
     })
 }
