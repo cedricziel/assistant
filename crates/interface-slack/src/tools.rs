@@ -22,6 +22,9 @@ struct SlackReplyHandler {
     thread_ts: Option<SlackTs>,
     client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
     token: SlackApiToken,
+    /// If set, update this placeholder message in-place via `chat.update`
+    /// instead of posting a new message via `chat.postMessage`.
+    update_ts: Option<SlackTs>,
 }
 
 #[async_trait]
@@ -80,20 +83,39 @@ impl ToolHandler for SlackReplyHandler {
         }
 
         let session = self.client.open_session(&self.token);
-        let content = SlackMessageContent::new().with_text(markdown_to_mrkdwn(&text));
-        let mut req = SlackApiChatPostMessageRequest::new(self.channel_id.clone().into(), content);
-        if let Some(ts) = &self.thread_ts {
-            req = req.with_thread_ts(ts.clone());
-        }
+        let mrkdwn_text = markdown_to_mrkdwn(&text);
 
-        match session.chat_post_message(&req).await {
-            Ok(resp) => {
-                debug!(channel = %resp.channel, ts = %resp.ts.0, "chat.postMessage ok");
-                Ok(ToolOutput::success("Message posted successfully"))
+        if let Some(ref ts) = self.update_ts {
+            // Update the streaming placeholder in-place.
+            let content = SlackMessageContent::new().with_text(mrkdwn_text);
+            let req =
+                SlackApiChatUpdateRequest::new(self.channel_id.clone().into(), content, ts.clone());
+            match session.chat_update(&req).await {
+                Ok(resp) => {
+                    debug!(channel = %resp.channel, ts = %resp.ts.0, "chat.update ok");
+                    Ok(ToolOutput::success("Message updated successfully"))
+                }
+                Err(e) => {
+                    warn!(error = %e, "chat.update failed");
+                    Ok(ToolOutput::error(format!("Failed to update message: {e}")))
+                }
             }
-            Err(e) => {
-                warn!(error = %e, "chat.postMessage failed");
-                Ok(ToolOutput::error(format!("Failed to post message: {e}")))
+        } else {
+            let content = SlackMessageContent::new().with_text(mrkdwn_text);
+            let mut req =
+                SlackApiChatPostMessageRequest::new(self.channel_id.clone().into(), content);
+            if let Some(ts) = &self.thread_ts {
+                req = req.with_thread_ts(ts.clone());
+            }
+            match session.chat_post_message(&req).await {
+                Ok(resp) => {
+                    debug!(channel = %resp.channel, ts = %resp.ts.0, "chat.postMessage ok");
+                    Ok(ToolOutput::success("Message posted successfully"))
+                }
+                Err(e) => {
+                    warn!(error = %e, "chat.postMessage failed");
+                    Ok(ToolOutput::error(format!("Failed to post message: {e}")))
+                }
             }
         }
     }
@@ -740,12 +762,16 @@ fn try_parse_span(chars: &[char], pos: usize, delim_len: usize) -> Option<(Strin
 /// * `message_ts` — the `ts` of the triggering message (used for reactions)
 /// * `client` — shared Slack HTTP client
 /// * `token` — bot token used for API authentication
+/// * `update_ts` — if `Some`, the `reply` tool updates this pre-posted
+///   placeholder message in-place via `chat.update` instead of posting a new
+///   message via `chat.postMessage`
 pub fn build_slack_tools(
     channel_id: String,
     thread_ts: Option<SlackTs>,
     message_ts: SlackTs,
     client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
     token: SlackApiToken,
+    update_ts: Option<SlackTs>,
 ) -> Vec<Arc<dyn ToolHandler>> {
     vec![
         Arc::new(SlackReplyHandler {
@@ -753,6 +779,7 @@ pub fn build_slack_tools(
             thread_ts: thread_ts.clone(),
             client: client.clone(),
             token: token.clone(),
+            update_ts,
         }) as Arc<dyn ToolHandler>,
         Arc::new(SlackReactHandler {
             channel_id: channel_id.clone(),
