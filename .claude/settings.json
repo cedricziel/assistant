@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup-worktree.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup-worktree.sh",
             "timeout": 120
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format.sh",
             "statusMessage": "Formatting..."
           }
         ]
