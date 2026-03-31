@@ -17,10 +17,13 @@ use tracing::{debug, warn};
 
 // ── SlackReplyHandler ─────────────────────────────────────────────────────────
 
-struct SlackReplyHandler {
+struct SlackReplyHandler<H = SlackClientHyperHttpsConnector>
+where
+    H: SlackClientHttpConnector + Send + Sync + 'static,
+{
     channel_id: String,
     thread_ts: Option<SlackTs>,
-    client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
+    client: Arc<SlackClient<H>>,
     token: SlackApiToken,
     /// If set, update this placeholder message in-place via `chat.update`
     /// instead of posting a new message via `chat.postMessage`.
@@ -28,7 +31,10 @@ struct SlackReplyHandler {
 }
 
 #[async_trait]
-impl ToolHandler for SlackReplyHandler {
+impl<H> ToolHandler for SlackReplyHandler<H>
+where
+    H: SlackClientHttpConnector + Send + Sync + 'static,
+{
     fn name(&self) -> &str {
         "reply"
     }
@@ -998,5 +1004,132 @@ mod tests {
         let input = "Results:\n| x | y |\n| 1 | 2 |";
         let expected = "Results:\n```\n| x | y |\n| 1 | 2 |\n```";
         assert_eq!(markdown_to_mrkdwn(input), expected);
+    }
+
+    // ── SlackReplyHandler streaming-placeholder tests ─────────────────────────
+
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use assistant_core::{ExecutionContext, Interface, ToolHandler};
+    use hyper_util::client::legacy::connect::HttpConnector;
+    use serde_json::json;
+    use slack_morphism::prelude::*;
+    use uuid::Uuid;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Minimal `SlackApiChatPostMessageResponse`-shaped JSON accepted by the
+    /// slack-morphism deserializer (only required field is `message.ts`).
+    fn post_message_ok() -> serde_json::Value {
+        json!({
+            "ok": true,
+            "channel": "C01TEST",
+            "ts": "111.222",
+            "message": { "ts": "111.222" }
+        })
+    }
+
+    /// Minimal `SlackApiChatUpdateResponse`-shaped JSON.
+    fn update_message_ok() -> serde_json::Value {
+        json!({
+            "ok": true,
+            "channel": "C01TEST",
+            "ts": "111.222",
+            "message": {}
+        })
+    }
+
+    /// Create a `SlackClient` backed by a plain-HTTP connector pointing at
+    /// `base_url` (wiremock server address).
+    fn test_client(base_url: &str) -> Arc<SlackClient<SlackClientHyperConnector<HttpConnector>>> {
+        let connector = SlackClientHyperConnector::with_connector(HttpConnector::new())
+            .with_slack_api_url(base_url);
+        Arc::new(SlackClient::new(connector))
+    }
+
+    fn test_ctx() -> ExecutionContext {
+        ExecutionContext {
+            conversation_id: Uuid::nil(),
+            agent_id: "test".into(),
+            turn: 0,
+            interface: Interface::Slack,
+            interactive: false,
+            allowed_tools: None,
+            depth: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn reply_without_update_ts_calls_post_message() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(post_message_ok()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let handler = super::SlackReplyHandler {
+            channel_id: "C01TEST".into(),
+            thread_ts: Some(SlackTs("100.000".into())),
+            client: test_client(&server.uri()),
+            token: SlackApiToken::new("xoxb-test".into()),
+            update_ts: None,
+        };
+
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), json!("Hello"));
+        let result = handler.run(params, &test_ctx()).await.unwrap();
+        assert!(result.success, "Expected success output");
+        // wiremock verifies the mock expectation on drop
+    }
+
+    #[tokio::test]
+    async fn reply_with_update_ts_calls_chat_update() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat.update"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(update_message_ok()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let handler = super::SlackReplyHandler {
+            channel_id: "C01TEST".into(),
+            thread_ts: Some(SlackTs("100.000".into())),
+            client: test_client(&server.uri()),
+            token: SlackApiToken::new("xoxb-test".into()),
+            update_ts: Some(SlackTs("111.222".into())),
+        };
+
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), json!("Hello"));
+        let result = handler.run(params, &test_ctx()).await.unwrap();
+        assert!(result.success, "Expected success output");
+    }
+
+    #[tokio::test]
+    async fn reply_with_update_ts_does_not_call_post_message() {
+        let server = MockServer::start().await;
+        // Mount chat.update (the expected path) but NOT chat.postMessage.
+        // wiremock will fail the test if an unexpected request arrives.
+        Mock::given(method("POST"))
+            .and(path("/chat.update"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(update_message_ok()))
+            .mount(&server)
+            .await;
+
+        let handler = super::SlackReplyHandler {
+            channel_id: "C01TEST".into(),
+            thread_ts: Some(SlackTs("100.000".into())),
+            client: test_client(&server.uri()),
+            token: SlackApiToken::new("xoxb-test".into()),
+            update_ts: Some(SlackTs("111.222".into())),
+        };
+
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), json!("Hello"));
+        handler.run(params, &test_ctx()).await.unwrap();
     }
 }
