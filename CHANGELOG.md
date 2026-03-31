@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.71](https://github.com/cedricziel/assistant/compare/v0.1.70...v0.1.71) (2026-03-30)
+
+
+### Features
+
+* **claude:** add WorktreeCreate hook for web-ui vendoring and shared Cargo target ([#346](https://github.com/cedricziel/assistant/issues/346)) ([683d757](https://github.com/cedricziel/assistant/commit/683d757fb85f4253b188e26247bf310d2c3845ae))
+* **web-ui:** query Iceberg Parquet files when exporter = "iceberg" ([#345](https://github.com/cedricziel/assistant/issues/345)) ([f41dd56](https://github.com/cedricziel/assistant/commit/f41dd56c098318a55bddb0bc1bdb0174d027542b))
+
 ## [0.1.70](https://github.com/cedricziel/assistant/compare/v0.1.69...v0.1.70) (2026-03-30)
 
 
