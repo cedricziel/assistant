@@ -29,6 +29,9 @@ const STIMULUS_BOOT_JS: &str = include_str!("stimulus-boot.js");
 const WORKFLOW_EDITOR_CONTROLLER_JS: &str = include_str!("controllers/workflow-editor.js");
 const WORKFLOW_VIEW_MODE_CONTROLLER_JS: &str = include_str!("controllers/workflow-view-mode.js");
 const WORKFLOW_SECRETS_CONTROLLER_JS: &str = include_str!("controllers/workflow-secrets.js");
+const CONVERSATION_LIST_CONTROLLER_JS: &str =
+    include_str!("controllers/conversation-list-controller.js");
+const MESSAGE_PANEL_CONTROLLER_JS: &str = include_str!("controllers/message-panel-controller.js");
 const CHAT_JS: &str = include_str!("chat.js");
 const TRACE_DETAIL_JS: &str = include_str!("trace-detail.js");
 const AGENT_FORM_JS: &str = include_str!("agent-form.js");
@@ -133,6 +136,22 @@ static TRACE_DETAIL_JS_ASSET: LazyLock<Asset> =
 static AGENT_FORM_JS_ASSET: LazyLock<Asset> =
     LazyLock::new(|| fingerprint_static("agent-form", "js", AGENT_FORM_JS));
 
+static CONVERSATION_LIST_CONTROLLER_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| {
+    fingerprint_static(
+        "conversation-list-controller",
+        "js",
+        CONVERSATION_LIST_CONTROLLER_JS,
+    )
+});
+
+static MESSAGE_PANEL_CONTROLLER_JS_ASSET: LazyLock<Asset> = LazyLock::new(|| {
+    fingerprint_static(
+        "message-panel-controller",
+        "js",
+        MESSAGE_PANEL_CONTROLLER_JS,
+    )
+});
+
 static STIMULUS_ASSET: LazyLock<Asset> =
     LazyLock::new(|| fingerprint_static("stimulus", "js", STIMULUS_JS));
 
@@ -196,6 +215,16 @@ pub fn trace_detail_js_url() -> &'static str {
 /// Fingerprinted URL for the agent form validator JS.
 pub fn agent_form_js_url() -> &'static str {
     &AGENT_FORM_JS_ASSET.url
+}
+
+/// Fingerprinted URL for the conversation-list Stimulus controller.
+pub fn conversation_list_controller_js_url() -> &'static str {
+    &CONVERSATION_LIST_CONTROLLER_JS_ASSET.url
+}
+
+/// Fingerprinted URL for the message-panel Stimulus controller.
+pub fn message_panel_controller_js_url() -> &'static str {
+    &MESSAGE_PANEL_CONTROLLER_JS_ASSET.url
 }
 
 // -- Route handlers ----------------------------------------------------------
@@ -270,6 +299,14 @@ async fn serve_agent_form_js() -> Response {
     serve_js_immutable(AGENT_FORM_JS_ASSET.content)
 }
 
+async fn serve_conversation_list_controller_js() -> Response {
+    serve_js_immutable(CONVERSATION_LIST_CONTROLLER_JS_ASSET.content)
+}
+
+async fn serve_message_panel_controller_js() -> Response {
+    serve_js_immutable(MESSAGE_PANEL_CONTROLLER_JS_ASSET.content)
+}
+
 /// Serve a JS asset with aggressive immutable cache headers.
 fn serve_js_immutable(content: &'static str) -> Response {
     (
@@ -313,4 +350,12 @@ pub fn static_router() -> Router {
         .route(&CHAT_JS_ASSET.url, get(serve_chat_js))
         .route(&TRACE_DETAIL_JS_ASSET.url, get(serve_trace_detail_js))
         .route(&AGENT_FORM_JS_ASSET.url, get(serve_agent_form_js))
+        .route(
+            &CONVERSATION_LIST_CONTROLLER_JS_ASSET.url,
+            get(serve_conversation_list_controller_js),
+        )
+        .route(
+            &MESSAGE_PANEL_CONTROLLER_JS_ASSET.url,
+            get(serve_message_panel_controller_js),
+        )
 }
