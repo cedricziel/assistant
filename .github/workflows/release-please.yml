@@ -173,12 +173,12 @@ jobs:
 
           cd dist/x86_64-musl
           tar xzf "$(ls *.tar.gz | head -1)"
-          cp */assistant ../docker-context/bin/amd64/assistant
+          cp */assistant ../../docker-context/bin/amd64/assistant
           cd ../..
 
           cd dist/aarch64-musl
           tar xzf "$(ls *.tar.gz | head -1)"
-          cp */assistant ../docker-context/bin/arm64/assistant
+          cp */assistant ../../docker-context/bin/arm64/assistant
           cd ../..
 
           cp config.toml docker-context/config.toml

@@ -12,16 +12,25 @@ assistant has been installed.  To run a chat bot:
        assistant orchestrator run
        assistant webui serve
 
-  3. To run as a background OpenRC service, install a custom init script.
-     Example for the web UI:
+  3. To run as a background OpenRC service, create a dedicated service account
+     and install a custom init script.  Example for the web UI:
 
-       cat > /etc/init.d/assistant-web-ui << 'EOF'
+       # Create a dedicated service account (once)
+       addgroup -S assistant
+       adduser -S -G assistant -h /var/lib/assistant assistant
+       install -d -m 750 -o assistant -g assistant /var/lib/assistant/.assistant
+       # Copy your config.toml
+       install -m 640 -o assistant -g assistant \
+         /etc/assistant/config.toml.example \
+         /var/lib/assistant/.assistant/config.toml
+
+       cat > /etc/init.d/assistant-web-ui << EOF
        #!/sbin/openrc-run
        name="assistant-web-ui"
        command="/usr/local/bin/assistant"
        command_args="webui serve"
-       command_user="$(id -un)"
-       pidfile="/run/${RC_SVCNAME}.pid"
+       command_user="assistant:assistant"
+       pidfile="/run/\${RC_SVCNAME}.pid"
        command_background=yes
        EOF
        chmod +x /etc/init.d/assistant-web-ui

@@ -10,10 +10,18 @@
 #   linux/arm64  → TARGETARCH=arm64
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates ffmpeg
+RUN apk add --no-cache ca-certificates ffmpeg \
+    && addgroup -S assistant \
+    && adduser -S -G assistant assistant
 
 ARG TARGETARCH
 COPY bin/${TARGETARCH}/assistant /usr/local/bin/assistant
-COPY config.toml /etc/assistant/config.toml.example
+RUN chown assistant:assistant /usr/local/bin/assistant
 
+RUN mkdir -p /etc/assistant \
+    && chown assistant:assistant /etc/assistant
+COPY config.toml /etc/assistant/config.toml.example
+RUN chown assistant:assistant /etc/assistant/config.toml.example
+
+USER assistant
 ENTRYPOINT ["assistant"]
