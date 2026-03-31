@@ -408,7 +408,14 @@ pub async fn send_message(
     let agent_id = state.agent_id.read().await.clone();
     let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
 
-    // Auto-title the conversation on the first user message.
+    match store.get_conversation(conv_id).await {
+        Ok(None) | Err(_) => {
+            return (StatusCode::NOT_FOUND, "Conversation not found").into_response();
+        }
+        _ => {}
+    }
+
+    // Auto-title on the first user message (empty history).
     match store.load_history(conv_id).await {
         Ok(prior) if prior.is_empty() => {
             let title = if content.chars().count() > 60 {
@@ -417,13 +424,11 @@ pub async fn send_message(
                 content.clone()
             };
             if let Err(e) = store.update_title(conv_id, &title).await {
-                // Non-fatal: conversation might not exist yet — the orchestrator will create it.
                 warn!("Auto-title failed for {conv_id}: {e}");
             }
         }
         Err(e) => {
             warn!("Failed to load history for {conv_id}: {e}");
-            return (StatusCode::NOT_FOUND, "Conversation not found").into_response();
         }
         _ => {}
     }
@@ -474,4 +479,463 @@ pub async fn send_message(
     });
 
     Sse::new(ReceiverStream::new(sse_rx)).into_response()
+}
+
+// -- Tests -------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tokio::sync::RwLock;
+    use tower::ServiceExt;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use assistant_core::AssistantConfig;
+    use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
+    use assistant_runtime::Orchestrator;
+    use assistant_storage::{ConversationStore, SkillRegistry, StorageLayer};
+    use assistant_tool_executor::ToolExecutor;
+
+    use super::{api_router, ApiState};
+
+    // -- Helpers ---------------------------------------------------------------
+
+    /// Minimal LLM mock: returns a static assistant reply.
+    async fn mount_llm_reply(server: &MockServer, reply: &str) {
+        let body = serde_json::json!({
+            "model": "test",
+            "message": { "role": "assistant", "content": reply },
+            "done": true
+        });
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    /// Build an `ApiState` wired to an in-memory DB and a mock LLM server.
+    async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false;
+
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: llm_url.to_string(),
+                timeout_secs: 5,
+                retry_config: RetryConfig::disabled(),
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let bus = Arc::new(storage.message_bus());
+        let orchestrator = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor,
+            registry,
+            bus,
+            &config,
+        ));
+
+        // Spawn the turn-processing worker so submit_turn requests are handled.
+        let worker_orch = orchestrator.clone();
+        tokio::spawn(async move {
+            worker_orch.run_worker("test-worker").await;
+        });
+
+        let state = ApiState {
+            pool: storage.pool.clone(),
+            agent_id: Arc::new(RwLock::new("default".to_string())),
+            orchestrator,
+        };
+        (state, storage)
+    }
+
+    fn app(state: ApiState) -> axum::Router {
+        api_router().with_state(state)
+    }
+
+    async fn body_bytes(body: Body) -> Vec<u8> {
+        body.collect().await.unwrap().to_bytes().to_vec()
+    }
+
+    async fn body_json(body: Body) -> serde_json::Value {
+        let b = body_bytes(body).await;
+        serde_json::from_slice(&b).unwrap()
+    }
+
+    // -- GET /conversations ----------------------------------------------------
+
+    #[tokio::test]
+    async fn list_conversations_empty() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/conversations")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn list_conversations_returns_created_items() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        store.create_conversation(Some("Alpha")).await.unwrap();
+        store.create_conversation(Some("Beta")).await.unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/conversations")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        let titles: Vec<&str> = arr.iter().map(|c| c["title"].as_str().unwrap()).collect();
+        assert!(titles.contains(&"Alpha"));
+        assert!(titles.contains(&"Beta"));
+    }
+
+    // -- POST /conversations ---------------------------------------------------
+
+    #[tokio::test]
+    async fn create_conversation_returns_201_with_id() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"title":"My Chat"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["title"], "My Chat");
+        assert!(json["id"].as_str().is_some(), "should have an id");
+    }
+
+    #[tokio::test]
+    async fn create_conversation_without_title_uses_default() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["title"], "New Chat");
+    }
+
+    // -- GET /conversations/{id} -----------------------------------------------
+
+    #[tokio::test]
+    async fn get_conversation_returns_detail_with_empty_messages() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(Some("Test")).await.unwrap();
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["id"], id.to_string());
+        assert_eq!(json["title"], "Test");
+        assert_eq!(json["messages"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn get_conversation_unknown_id_returns_404() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        let id = uuid::Uuid::new_v4();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_conversation_bad_uuid_returns_400() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/conversations/not-a-uuid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // -- DELETE /conversations/{id} --------------------------------------------
+
+    #[tokio::test]
+    async fn delete_conversation_returns_204() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(Some("Bye")).await.unwrap();
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/conversations/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        // Verify it is gone.
+        let gone = store.get_conversation(id).await.unwrap();
+        assert!(gone.is_none(), "conversation should be deleted");
+    }
+
+    // -- PATCH /conversations/{id} ---------------------------------------------
+
+    #[tokio::test]
+    async fn patch_conversation_renames_it() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(Some("Old Name")).await.unwrap();
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/conversations/{id}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"title":"New Name"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["title"], "New Name");
+
+        let updated = store.get_conversation(id).await.unwrap().unwrap();
+        assert_eq!(updated.title.as_deref(), Some("New Name"));
+    }
+
+    // -- POST /conversations/{id}/messages — error paths ----------------------
+
+    #[tokio::test]
+    async fn send_message_bad_uuid_returns_400() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations/not-a-uuid/messages")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hi"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn send_message_empty_body_returns_400() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(Some("T")).await.unwrap();
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"   "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn send_message_unknown_conversation_returns_404() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        let id = uuid::Uuid::new_v4();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hello"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn send_message_streams_sse_tokens() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Hello world").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(Some("Stream")).await.unwrap();
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"ping"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("text/event-stream")
+        );
+        // Consume enough of the body to confirm SSE framing is present.
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("event:") || text.contains("data:"),
+            "expected SSE framing, got: {text}"
+        );
+    }
+
+    // -- Runtime agent_id switch -----------------------------------------------
+
+    #[tokio::test]
+    async fn list_reflects_agent_id_change_at_runtime() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        // Seed a conversation for "alice".
+        let store_alice = ConversationStore::for_agent(storage.pool.clone(), "alice");
+        store_alice
+            .create_conversation(Some("Alice conv"))
+            .await
+            .unwrap();
+
+        // Switch the shared agent ID to "alice" at runtime.
+        *state.agent_id.write().await = "alice".to_string();
+
+        let resp = api_router()
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/conversations")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["title"], "Alice conv");
+    }
 }
