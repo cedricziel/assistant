@@ -133,6 +133,12 @@ export default class MessagePanelController extends Controller {
     }
   }
 
+  /** Bubble a new-conversation request to the conversation-list controller. */
+  requestNewConversation(event) {
+    event.preventDefault();
+    this.dispatch("newConversation", { bubbles: true });
+  }
+
   /** Delete the current conversation. */
   async deleteConversation(event) {
     event.preventDefault();
@@ -141,7 +147,11 @@ export default class MessagePanelController extends Controller {
 
     const id = this.conversationIdValue;
     try {
-      await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        console.error("Failed to delete conversation:", res.status);
+        return;
+      }
     } catch (e) {
       console.error("Failed to delete conversation:", e);
       return;

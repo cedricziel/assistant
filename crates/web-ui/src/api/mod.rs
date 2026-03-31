@@ -37,7 +37,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 use uuid::Uuid;
@@ -48,12 +48,17 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct ApiState {
     pub pool: SqlitePool,
-    pub agent_id: String,
+    /// Shared live agent ID — updated when the user switches personas at runtime.
+    pub agent_id: Arc<RwLock<String>>,
     pub orchestrator: Arc<Orchestrator>,
 }
 
 impl ApiState {
-    pub fn new(pool: SqlitePool, orchestrator: Arc<Orchestrator>, agent_id: String) -> Self {
+    pub fn new(
+        pool: SqlitePool,
+        orchestrator: Arc<Orchestrator>,
+        agent_id: Arc<RwLock<String>>,
+    ) -> Self {
         Self {
             pool,
             agent_id,
@@ -111,6 +116,7 @@ pub struct UpdateConversationRequest {
 
 /// Body for `POST /api/conversations/{id}/messages`.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[schema(as = ApiSendMessageRequest)]
 pub struct SendMessageRequest {
     /// The message text to send to the assistant.
     pub message: String,
@@ -143,7 +149,8 @@ pub fn api_router() -> Router<ApiState> {
     security(("bearer_token" = []))
 )]
 pub async fn list_conversations(State(state): State<ApiState>) -> Response {
-    let store = ConversationStore::for_agent(state.pool, &state.agent_id);
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool, &agent_id);
     match store.list_conversations().await {
         Ok(convs) => {
             let summaries: Vec<ConversationSummary> = convs
@@ -185,7 +192,8 @@ pub async fn create_conversation(
     State(state): State<ApiState>,
     Json(body): Json<CreateConversationRequest>,
 ) -> Response {
-    let store = ConversationStore::for_agent(state.pool, &state.agent_id);
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool, &agent_id);
     let title = body.title.as_deref().unwrap_or("New Chat");
     match store.create_conversation(Some(title)).await {
         Ok(c) => (
@@ -229,7 +237,8 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    let store = ConversationStore::for_agent(state.pool, &state.agent_id);
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool, &agent_id);
 
     let conv = match store.get_conversation(conv_id).await {
         Ok(Some(c)) => c,
@@ -286,7 +295,8 @@ pub async fn delete_conversation(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    let store = ConversationStore::for_agent(state.pool, &state.agent_id);
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool, &agent_id);
     match store.delete_conversation(conv_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
@@ -326,7 +336,8 @@ pub async fn update_conversation(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
-    let store = ConversationStore::for_agent(state.pool, &state.agent_id);
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool, &agent_id);
     match store.update_title(conv_id, &body.title).await {
         Ok(()) => {}
         Err(e) if e.to_string().contains("not found") => {
@@ -394,13 +405,14 @@ pub async fn send_message(
     }
 
     // Verify the conversation exists before streaming.
-    let store = ConversationStore::for_agent(state.pool.clone(), &state.agent_id);
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
 
     // Auto-title the conversation on the first user message.
     match store.load_history(conv_id).await {
         Ok(prior) if prior.is_empty() => {
-            let title = if content.len() > 60 {
-                format!("{}...", &content[..57])
+            let title = if content.chars().count() > 60 {
+                format!("{}...", content.chars().take(57).collect::<String>())
             } else {
                 content.clone()
             };

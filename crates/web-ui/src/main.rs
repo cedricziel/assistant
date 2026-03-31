@@ -477,7 +477,7 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let chat_state = chat::ChatState::new(selected_agent.clone());
 
-    let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, selected_agent.clone());
+    let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()

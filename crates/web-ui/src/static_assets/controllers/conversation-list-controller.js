@@ -33,11 +33,7 @@ export default class ConversationListController extends Controller {
   connect() {
     this._load();
 
-    this._popHandler = () => {
-      const id = this._idFromUrl();
-      this.activeIdValue = id ?? "";
-      this._renderList();
-    };
+    this._popHandler = () => this._syncFromUrl();
     window.addEventListener("popstate", this._popHandler);
   }
 
@@ -120,11 +116,18 @@ export default class ConversationListController extends Controller {
       const res = await fetch("/api/conversations");
       if (!res.ok) return;
       this._conversations = await res.json();
-      const id = this._idFromUrl();
-      if (id) this.activeIdValue = id;
-      this._renderList();
+      this._syncFromUrl();
     } catch (e) {
       console.error("Failed to load conversations:", e);
+    }
+  }
+
+  _syncFromUrl() {
+    const id = this._idFromUrl();
+    this.activeIdValue = id ?? "";
+    this._renderList();
+    if (id) {
+      this.dispatch("selected", { detail: { id }, bubbles: true });
     }
   }
 

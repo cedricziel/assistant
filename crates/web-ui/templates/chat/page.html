@@ -108,7 +108,7 @@ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } } {% endblock
   <div
     class="conv-list-panel"
     data-controller="conversation-list"
-    data-action="message-panel:deleted@window->conversation-list#removeDeleted message-panel:responded@window->conversation-list#bumpToTop"
+    data-action="message-panel:deleted@window->conversation-list#removeDeleted message-panel:responded@window->conversation-list#bumpToTop message-panel:newConversation@window->conversation-list#newConversation"
   >
     <div class="conv-list-header">
       <button
@@ -159,7 +159,7 @@ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } } {% endblock
       </p>
       <button
         class="btn-new-chat"
-        data-action="click->conversation-list#newConversation"
+        data-action="click->message-panel#requestNewConversation"
         style="margin-top: 8px"
       >
         + New Chat
