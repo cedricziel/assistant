@@ -1081,12 +1081,39 @@ async fn on_push_event(
     // Build per-turn Slack extension tools bound to the *last* message in the
     // batch (most recent), so `react` targets the newest user message.
     let last = batch.last().expect("batch is non-empty");
+
+    // Post a placeholder "…" so the user gets immediate feedback while the
+    // LLM is processing. The `reply` extension tool will update this message
+    // in-place via `chat.update` instead of posting a new one.
+    let update_ts: Option<SlackTs> = {
+        let placeholder_req = SlackApiChatPostMessageRequest::new(
+            last.channel_id.clone().into(),
+            SlackMessageContent::new().with_text("\u{2026}".to_string()),
+        )
+        .with_thread_ts(last.thread_ts.clone());
+        match session.chat_post_message(&placeholder_req).await {
+            Ok(resp) => {
+                debug!(
+                    channel = %resp.channel,
+                    ts = %resp.ts.0,
+                    "Posted streaming placeholder"
+                );
+                Some(resp.ts)
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to post placeholder; reply will use postMessage");
+                None
+            }
+        }
+    };
+
     let extensions = build_slack_tools(
         last.channel_id.clone(),
         Some(last.thread_ts.clone()),
         last.msg_ts.clone(),
         client.clone(),
         bot_token.clone(),
+        update_ts,
     );
 
     // Combine all pending messages into a single contextualized prompt.

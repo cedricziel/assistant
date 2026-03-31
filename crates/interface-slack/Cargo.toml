@@ -34,6 +34,8 @@ tokio-tungstenite = { workspace = true }
 [dev-dependencies]
 toml = { workspace = true }
 url = { workspace = true }
+wiremock = { workspace = true }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 
 [package.metadata.cargo-machete]
 ignored = ["tokio-tungstenite"]
