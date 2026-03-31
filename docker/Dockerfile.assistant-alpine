@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# Lean Alpine image built from a pre-compiled musl binary.
+# The build context must contain:
+#   bin/amd64/assistant   (x86_64-unknown-linux-musl)
+#   bin/arm64/assistant   (aarch64-unknown-linux-musl)
+#   config.toml
+#
+# TARGETARCH is injected automatically by Docker Buildx:
+#   linux/amd64  → TARGETARCH=amd64
+#   linux/arm64  → TARGETARCH=arm64
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates ffmpeg
+
+ARG TARGETARCH
+COPY bin/${TARGETARCH}/assistant /usr/local/bin/assistant
+COPY config.toml /etc/assistant/config.toml.example
+
+ENTRYPOINT ["assistant"]
