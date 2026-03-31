@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.72](https://github.com/cedricziel/assistant/compare/v0.1.71...v0.1.72) (2026-03-31)
+
+
+### Features
+
+* **interface-slack:** stream replies via chat.update placeholder ([#349](https://github.com/cedricziel/assistant/issues/349)) ([b5503db](https://github.com/cedricziel/assistant/commit/b5503db0ff07aa4fde8ba12552db37cd2e23284f))
+* **web-ui:** JSON conversation API + Stimulus chat UI migration ([#348](https://github.com/cedricziel/assistant/issues/348)) ([9602bd8](https://github.com/cedricziel/assistant/commit/9602bd8808322b65e2324e7f23022b1a0b69a944))
+
+
+### Bug Fixes
+
+* **claude:** repair WorktreeCreate hook to correctly create worktrees ([#350](https://github.com/cedricziel/assistant/issues/350)) ([0d32d5c](https://github.com/cedricziel/assistant/commit/0d32d5c8c5f3f7333d695b70805b12e46ce62d38))
+
 ## [0.1.71](https://github.com/cedricziel/assistant/compare/v0.1.70...v0.1.71) (2026-03-30)
 
 
