@@ -267,7 +267,7 @@ fn logs_to_record_batch(
     let schema_ref = Arc::new(schema.clone());
     let columns: Vec<ArrayRef> = vec![
         Arc::new(StringArray::from(ids)),
-        Arc::new(TimestampMicrosecondArray::from(timestamps).with_timezone("UTC")),
+        Arc::new(TimestampMicrosecondArray::from(timestamps).with_timezone("+00:00")),
         Arc::new(Int32Array::from(severity_numbers)),
         Arc::new(StringArray::from(severity_texts)),
         Arc::new(StringArray::from(bodies)),
