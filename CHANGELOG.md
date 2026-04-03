@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.74](https://github.com/cedricziel/assistant/compare/v0.1.73...v0.1.74) (2026-04-03)
+
+
+### Features
+
+* **runtime:** per-persona turn timeout (default 3 h) ([#355](https://github.com/cedricziel/assistant/issues/355)) ([adf8d4c](https://github.com/cedricziel/assistant/commit/adf8d4c64f18d38dbfa6f8787f98a4afbd41e97f))
+
 ## [0.1.73](https://github.com/cedricziel/assistant/compare/v0.1.72...v0.1.73) (2026-04-03)
 
 
