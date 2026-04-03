@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.76](https://github.com/cedricziel/assistant/compare/v0.1.75...v0.1.76) (2026-04-03)
+
+
+### Features
+
+* **interface-slack:** true incremental streaming via token sink ([#359](https://github.com/cedricziel/assistant/issues/359)) ([bd56fe2](https://github.com/cedricziel/assistant/commit/bd56fe25ab2ae124e83268a8c4784f5d71c60dcb))
+
+
+### Bug Fixes
+
+* **cross:** vendor OpenSSL + fix musl cross-compilation environment ([#362](https://github.com/cedricziel/assistant/issues/362)) ([b69e801](https://github.com/cedricziel/assistant/commit/b69e80179c5ceb7247a936204ccab9772af18fd0))
+
 ## [0.1.75](https://github.com/cedricziel/assistant/compare/v0.1.74...v0.1.75) (2026-04-03)
 
 
