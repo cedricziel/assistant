@@ -16,6 +16,7 @@ use opentelemetry::{
     Context as OtelContext, KeyValue,
 };
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -184,32 +185,67 @@ impl Orchestrator {
                     // needs to be nacked for NATS redelivery.
                     let ext_for_retry = ext.clone();
 
-                    // Dispatch to the appropriate processing method.
-                    let result: Result<TurnResult> = if let Some(reg) = ext {
-                        // Extension-tool turn (Slack, Mattermost).
-                        self.run_turn_with_tools(
-                            &prompt,
-                            conv_id,
-                            interface,
-                            reg.tools,
-                            Some(&bus_consume_cx),
-                            reg.attachments,
-                        )
-                        .await
-                    } else if let Some(sink) = token_sink {
-                        // Streaming turn (CLI, Signal).
-                        self.run_turn_streaming(
-                            &prompt,
-                            conv_id,
-                            interface,
-                            sink,
-                            Some(&bus_consume_cx),
-                        )
-                        .await
-                    } else {
-                        // Standard non-streaming turn.
-                        self.run_turn(&prompt, conv_id, interface, Some(&bus_consume_cx))
-                            .await
+                    // Look up the cancellation token registered by submit_turn
+                    // for this specific request.  Turns dispatched outside of
+                    // submit_turn (e.g. the scheduler) won't have one, which is
+                    // fine — they run to completion regardless.
+                    let turn_cancel = msg
+                        .batch_id
+                        .and_then(|bid| {
+                            // Use try_read so we don't deadlock in the common
+                            // path; if the lock is contended we skip and the
+                            // turn runs without cancellation support (safe).
+                            self.turn_cancellations
+                                .try_read()
+                                .ok()
+                                .and_then(|g| g.get(&bid).cloned())
+                        })
+                        .unwrap_or_else(CancellationToken::new);
+
+                    // Dispatch to the appropriate processing method, racing
+                    // against the per-turn cancellation token so an expired
+                    // submit_turn deadline aborts work rather than letting it
+                    // run to completion unobserved.
+                    let result: Result<TurnResult> = tokio::select! {
+                        r = async {
+                            if let Some(reg) = ext {
+                                // Extension-tool turn (Slack, Mattermost).
+                                self.run_turn_with_tools(
+                                    &prompt,
+                                    conv_id,
+                                    interface,
+                                    reg.tools,
+                                    Some(&bus_consume_cx),
+                                    reg.attachments,
+                                )
+                                .await
+                            } else if let Some(sink) = token_sink {
+                                // Streaming turn (CLI, Signal).
+                                self.run_turn_streaming(
+                                    &prompt,
+                                    conv_id,
+                                    interface,
+                                    sink,
+                                    Some(&bus_consume_cx),
+                                )
+                                .await
+                            } else {
+                                // Standard non-streaming turn.
+                                self.run_turn(&prompt, conv_id, interface, Some(&bus_consume_cx))
+                                    .await
+                            }
+                        } => r,
+                        _ = turn_cancel.cancelled() => {
+                            info!(
+                                conversation_id = %conv_id,
+                                worker_id,
+                                "Turn cancelled by submit_turn timeout; discarding result"
+                            );
+                            // Ack the bus message so it isn't redelivered —
+                            // the caller already gave up and notified the user.
+                            let _ = self.bus.ack(msg.id).await;
+                            continue;
+                        }
                     };
 
                     match result {
@@ -517,6 +553,13 @@ impl Orchestrator {
         submit_metadata: HashMap<String, String>,
     ) -> Result<TurnResult> {
         let request_id = Uuid::new_v4();
+        // Register a cancellation token so the worker can be interrupted if
+        // submit_turn times out before the turn finishes.
+        let cancel_token = CancellationToken::new();
+        self.turn_cancellations
+            .write()
+            .await
+            .insert(request_id, cancel_token.clone());
         let interface_label = format!("{interface:?}");
         let interface_cx = crate::otel_spans::start_interface_root_context(
             &interface,
@@ -613,6 +656,9 @@ impl Orchestrator {
                     submit_state = "timeout",
                     "submit_turn waiter state"
                 );
+                // Signal the worker to abort the in-flight turn, then clean up.
+                cancel_token.cancel();
+                self.turn_cancellations.write().await.remove(&request_id);
                 anyhow::bail!(
                     "submit_turn timed out waiting for result \
                      (conversation_id={conversation_id}, request_id={request_id})"
@@ -678,6 +724,7 @@ impl Orchestrator {
                     continue;
                 }
                 self.bus.ack(msg.id).await?;
+                self.turn_cancellations.write().await.remove(&request_id);
                 consume_result_span.set_attribute(KeyValue::new("bus.status", "ok"));
                 consume_result_span.end();
                 if now > deadline {

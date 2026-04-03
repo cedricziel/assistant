@@ -183,6 +183,11 @@ pub struct Orchestrator {
     pub(crate) extension_registrations: tokio::sync::RwLock<HashMap<Uuid, ExtensionRegistration>>,
     /// Cancellation tokens for running subagents, keyed by agent ID.
     pub(crate) agent_cancellations: tokio::sync::RwLock<HashMap<String, CancellationToken>>,
+    /// Cancellation tokens for in-flight bus turns, keyed by request ID
+    /// (the `batch_id` / `correlation_id` set by `submit_turn`).
+    /// When `submit_turn` times out it cancels the token so the worker
+    /// drops the in-progress turn future rather than running to completion.
+    pub(crate) turn_cancellations: tokio::sync::RwLock<HashMap<Uuid, CancellationToken>>,
     /// OTel metric instruments for GenAI and operational metrics.
     pub(crate) metrics: crate::MetricsRecorder,
     /// Active assistant agent ID for memory/workspace conversation scoping.
@@ -220,6 +225,7 @@ impl Orchestrator {
             token_sinks: tokio::sync::RwLock::new(HashMap::new()),
             extension_registrations: tokio::sync::RwLock::new(HashMap::new()),
             agent_cancellations: tokio::sync::RwLock::new(HashMap::new()),
+            turn_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
             compaction_config: config.compaction.clone(),
