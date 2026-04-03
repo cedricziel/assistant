@@ -206,6 +206,81 @@ mod tests {
         let result = store.create("foo", "Foo Again").await;
         assert!(result.is_err(), "expected Err on duplicate id, got Ok");
     }
+
+    #[tokio::test]
+    async fn turn_timeout_defaults_to_none() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.ensure_default().await.unwrap();
+        let persona = store.get("default").await.unwrap().unwrap();
+        assert!(
+            persona.turn_timeout_secs.is_none(),
+            "new persona should have no explicit timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_and_clear_turn_timeout() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.create("bot", "Bot").await.unwrap();
+
+        store.set_turn_timeout("bot", 7200).await.unwrap();
+        let persona = store.get("bot").await.unwrap().unwrap();
+        assert_eq!(
+            persona.turn_timeout_secs,
+            Some(7200),
+            "turn_timeout_secs should reflect set value"
+        );
+
+        store.clear_turn_timeout("bot").await.unwrap();
+        let persona = store.get("bot").await.unwrap().unwrap();
+        assert!(
+            persona.turn_timeout_secs.is_none(),
+            "turn_timeout_secs should be None after clear"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_turn_timeout_rejects_zero() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.create("bot", "Bot").await.unwrap();
+        let result = store.set_turn_timeout("bot", 0).await;
+        assert!(result.is_err(), "zero timeout should be rejected");
+    }
+
+    #[tokio::test]
+    async fn set_turn_timeout_unknown_persona_returns_error() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let result = store.set_turn_timeout("nonexistent", 3600).await;
+        assert!(
+            result.is_err(),
+            "setting timeout on unknown persona should error"
+        );
+    }
+
+    #[tokio::test]
+    async fn turn_timeout_visible_in_list() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.ensure_default().await.unwrap();
+        store.create("slow", "Slow").await.unwrap();
+        store.set_turn_timeout("slow", 21600).await.unwrap();
+
+        let list = store.list().await.unwrap();
+        let slow = list.iter().find(|p| p.id == "slow").unwrap();
+        assert_eq!(slow.turn_timeout_secs, Some(21600));
+
+        let default = list.iter().find(|p| p.id == "default").unwrap();
+        assert!(default.turn_timeout_secs.is_none());
+    }
 }
 
 fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {

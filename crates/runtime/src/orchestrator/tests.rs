@@ -2267,6 +2267,66 @@ async fn submit_turn_without_worker_times_out() {
     );
 }
 
+/// Test that with_submit_timeout sets a custom deadline that is respected.
+///
+/// We configure a 1-second timeout and verify that submit_turn (with no worker
+/// running) completes within a short wall-clock window — i.e. it honours the
+/// configured value rather than the 3-hour default.
+#[tokio::test]
+async fn with_submit_timeout_respected() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "not used").await;
+
+    // Build without wrapping in Arc so we can apply with_submit_timeout first.
+    let mut config = AssistantConfig::default();
+    config.memory.enabled = false;
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let llm: Arc<dyn LlmProvider> = Arc::new(
+        LlmClient::new(LlmClientConfig {
+            model: "test".to_string(),
+            base_url: server.uri(),
+            timeout_secs: 10,
+            retry_config: assistant_llm::RetryConfig::disabled(),
+        })
+        .unwrap(),
+    );
+    let executor = Arc::new(ToolExecutor::new(
+        storage.clone(),
+        llm.clone(),
+        registry.clone(),
+        Arc::new(config.clone()),
+    ));
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+    let orch = Arc::new(
+        Orchestrator::new(llm, storage, executor.clone(), registry, bus, &config)
+            .with_submit_timeout(1), // 1-second deadline
+    );
+    executor.set_subagent_runner(orch.clone());
+
+    let conv_id = Uuid::new_v4();
+    let start = std::time::Instant::now();
+    // Wrap in a generous outer timeout to prevent the test hanging if the
+    // inner deadline is accidentally the 3-hour default.
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        orch.submit_turn("test message", conv_id, Interface::Slack, None),
+    )
+    .await;
+    let elapsed = start.elapsed();
+
+    // The inner submit_turn must have timed out (no worker running).
+    assert!(
+        result.is_ok() && result.unwrap().is_err(),
+        "submit_turn should return Err when no worker is running"
+    );
+    // And it should have done so close to the configured 1-second deadline.
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "submit_turn should respect the 1-second timeout, not the 3-hour default (elapsed: {elapsed:?})"
+    );
+}
+
 #[tokio::test]
 async fn failed_turn_propagates_error() {
     // Verifies that when the LLM returns an error, run_turn propagates Err.
