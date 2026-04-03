@@ -21,6 +21,9 @@ uuid = { workspace = true }
 lru = { workspace = true }
 matrix-sdk = { workspace = true }
 dirs = { workspace = true }
+# Force bundled-sqlcipher-vendored-openssl so libsqlite3-sys can find OpenSSL
+# headers when cross-compiling to musl targets (see workspace Cargo.toml comment).
+rusqlite = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }

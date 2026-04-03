@@ -76,6 +76,11 @@ reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multi
 # mattermost_api pulls in native-tls via feature unification; vendored ensures
 # openssl-sys builds from source rather than requiring a system installation.
 openssl = { version = "0.10", features = ["vendored"] }
+# matrix-sdk-sqlite uses rusqlite with bundled-sqlcipher, which requires OpenSSL
+# headers. The bundled-sqlcipher-vendored-openssl feature adds openssl-sys as a
+# build-dependency of libsqlite3-sys so the vendored headers are found during
+# cross-compilation (e.g. musl targets without a system OpenSSL).
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.8"
 reqwest-tracing = "0.5"
