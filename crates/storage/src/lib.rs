@@ -311,6 +311,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "029_persona_skill_access",
             include_str!("../../../migrations/029_persona_skill_access.sql"),
         ),
+        (
+            "030_persona_turn_timeout",
+            include_str!("../../../migrations/030_persona_turn_timeout.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {

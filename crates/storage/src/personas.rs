@@ -9,6 +9,9 @@ pub struct PersonaRecord {
     pub is_default: bool,
     /// Skill access mode: "all", "whitelist", or "blacklist". Defaults to "all".
     pub skill_access_mode: String,
+    /// Per-persona turn timeout in seconds. `None` means use the compiled-in
+    /// default (10 800 s / 3 h).
+    pub turn_timeout_secs: Option<u64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -72,7 +75,7 @@ impl PersonaStore {
 
     pub async fn list(&self) -> Result<Vec<PersonaRecord>> {
         let rows = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, created_at, updated_at
              FROM personas
              ORDER BY is_default DESC, id ASC",
         )
@@ -124,7 +127,7 @@ impl PersonaStore {
 
     pub async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
         let row = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, created_at, updated_at
              FROM personas
              WHERE id = ?1",
         )
@@ -156,6 +159,38 @@ impl PersonaStore {
             .await?
             .ok_or_else(|| anyhow::anyhow!("persona '{}' missing after create", id))
     }
+
+    /// Set a per-persona turn timeout. `secs` must be > 0.
+    pub async fn set_turn_timeout(&self, id: &str, secs: u64) -> Result<()> {
+        anyhow::ensure!(secs > 0, "turn_timeout_secs must be greater than 0");
+        let rows = sqlx::query(
+            "UPDATE personas
+             SET turn_timeout_secs = ?1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?2",
+        )
+        .bind(secs as i64)
+        .bind(id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        anyhow::ensure!(rows > 0, "persona '{}' not found", id);
+        Ok(())
+    }
+
+    /// Clear the per-persona turn timeout, reverting to the compiled-in default.
+    pub async fn clear_turn_timeout(&self, id: &str) -> Result<()> {
+        let rows = sqlx::query(
+            "UPDATE personas
+             SET turn_timeout_secs = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        anyhow::ensure!(rows > 0, "persona '{}' not found", id);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -181,6 +216,10 @@ fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
         skill_access_mode: row
             .try_get("skill_access_mode")
             .unwrap_or_else(|_| "all".to_string()),
+        turn_timeout_secs: row
+            .try_get::<Option<i64>, _>("turn_timeout_secs")
+            .unwrap_or(None)
+            .map(|v| v as u64),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })

@@ -203,6 +203,20 @@ enum PersonaCommand {
         /// Skill name to remove.
         skill_name: String,
     },
+    /// Set a per-persona turn timeout (overrides the 3-hour default).
+    #[command(name = "timeout-set")]
+    TimeoutSet {
+        /// Persona ID.
+        persona_id: String,
+        /// Timeout in seconds (must be > 0). Example: 10800 = 3 h.
+        secs: u64,
+    },
+    /// Clear the per-persona turn timeout, reverting to the default (3 h).
+    #[command(name = "timeout-clear")]
+    TimeoutClear {
+        /// Persona ID.
+        persona_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -768,6 +782,22 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
                 skill_name, persona_id
             );
         }
+        PersonaCommand::TimeoutSet { persona_id, secs } => {
+            store.set_turn_timeout(persona_id, *secs).await?;
+            println!(
+                "Persona '{}' turn timeout set to {} s ({:.1} h).",
+                persona_id,
+                secs,
+                *secs as f64 / 3600.0
+            );
+        }
+        PersonaCommand::TimeoutClear { persona_id } => {
+            store.clear_turn_timeout(persona_id).await?;
+            println!(
+                "Persona '{}' turn timeout cleared (reverts to default 3 h).",
+                persona_id
+            );
+        }
     }
 
     Ok(())
@@ -1098,9 +1128,16 @@ async fn bootstrap(
         }
     };
 
-    // Build orchestrator.
-    let orchestrator = Arc::new(
-        Orchestrator::new(
+    // Build orchestrator, applying the per-persona turn timeout if set.
+    let persona_timeout = storage
+        .persona_store()
+        .get(&config.agent.id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.turn_timeout_secs);
+    let orchestrator = Arc::new({
+        let mut o = Orchestrator::new(
             llm,
             storage.clone(),
             executor.clone(),
@@ -1108,8 +1145,12 @@ async fn bootstrap(
             bus,
             &config,
         )
-        .with_confirmation_callback(confirmation_cb),
-    );
+        .with_confirmation_callback(confirmation_cb);
+        if let Some(secs) = persona_timeout {
+            o = o.with_submit_timeout(secs);
+        }
+        o
+    });
 
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());

@@ -189,6 +189,10 @@ pub struct Orchestrator {
     pub(crate) agent_id: String,
     /// Context compaction configuration.
     pub(crate) compaction_config: assistant_core::CompactionConfig,
+    /// How long `submit_turn` waits for the worker to return a result before
+    /// timing out. Defaults to 10 800 s (3 h). Configurable per persona via
+    /// `with_submit_timeout`.
+    pub(crate) submit_timeout_secs: u64,
 }
 
 impl Orchestrator {
@@ -219,7 +223,17 @@ impl Orchestrator {
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
             compaction_config: config.compaction.clone(),
+            submit_timeout_secs: 10_800,
         }
+    }
+
+    /// Override the `submit_turn` timeout for this orchestrator instance.
+    ///
+    /// Call this after [`Orchestrator::new`] to apply a per-persona timeout
+    /// loaded from the database.  The value must be > 0.
+    pub fn with_submit_timeout(mut self, secs: u64) -> Self {
+        self.submit_timeout_secs = secs.max(1);
+        self
     }
 
     /// Return a reference to the message bus.
