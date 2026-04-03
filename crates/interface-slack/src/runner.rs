@@ -42,7 +42,7 @@ use base64::Engine as _;
 use chrono::{DateTime, Utc};
 
 use slack_morphism::prelude::*;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -1113,7 +1113,7 @@ async fn on_push_event(
         last.msg_ts.clone(),
         client.clone(),
         bot_token.clone(),
-        update_ts,
+        update_ts.clone(),
     );
 
     // Combine all pending messages into a single contextualized prompt.
@@ -1127,8 +1127,56 @@ async fn on_push_event(
         .flat_map(|m| m.attachments.iter().cloned())
         .collect();
 
+    // Set up a token-streaming channel so the worker calls
+    // run_turn_with_tools_streaming instead of run_turn_with_tools.
+    // A background task reads from the channel and performs throttled
+    // chat.update calls on the placeholder message so the user sees the
+    // reply being typed progressively.
+    let (token_tx, mut token_rx) = mpsc::channel::<String>(256);
+    orchestrator
+        .register_token_sink(conversation_id, token_tx)
+        .await;
+
+    // Spawn the background Slack streaming updater.
+    let stream_client = client.clone();
+    let stream_token = bot_token.clone();
+    let stream_channel = last.channel_id.clone();
+    let stream_ts = update_ts.clone();
+    let stream_handle: tokio::task::JoinHandle<()> = tokio::spawn(async move {
+        if let Some(ref ts) = stream_ts {
+            let session = stream_client.open_session(&stream_token);
+            let mut accumulated = String::new();
+            let mut last_update = tokio::time::Instant::now();
+            // Throttle: at most one chat.update per second to stay well
+            // within Slack's rate limits.
+            let interval = tokio::time::Duration::from_millis(1000);
+
+            while let Some(token) = token_rx.recv().await {
+                accumulated.push_str(&token);
+                if last_update.elapsed() >= interval && !accumulated.trim().is_empty() {
+                    let preview = format!("{accumulated}\u{2026}");
+                    let content = SlackMessageContent::new().with_text(preview);
+                    let req = SlackApiChatUpdateRequest::new(
+                        stream_channel.clone().into(),
+                        content,
+                        ts.clone(),
+                    );
+                    if let Err(e) = session.chat_update(&req).await {
+                        debug!(error = %e, "streaming chat.update failed (non-fatal)");
+                    }
+                    last_update = tokio::time::Instant::now();
+                }
+            }
+            // Channel closed: the reply tool has already posted the final
+            // text via chat.update, so no trailing update needed here.
+        } else {
+            // No placeholder — drain the channel silently.
+            while token_rx.recv().await.is_some() {}
+        }
+    });
+
     // Register extension tools and attachments so the worker dispatches
-    // to run_turn_with_tools when it claims this request.
+    // to run_turn_with_tools_streaming when it claims this request.
     orchestrator
         .register_extensions(conversation_id, extensions, all_attachments.clone())
         .await;
@@ -1177,6 +1225,11 @@ async fn on_push_event(
         )
         .await;
     let elapsed_ms = orchestrator_start.elapsed().as_millis();
+
+    // The orchestrator turn is done; stop the streaming updater.  The reply
+    // tool will have already called chat.update with the final text, so we
+    // abort rather than waiting for any last partial update.
+    stream_handle.abort();
 
     // Remove 👀 from every message in the batch and clear the typing status
     // — regardless of outcome.

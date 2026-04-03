@@ -2509,3 +2509,164 @@ async fn failed_turn_with_tools_max_iterations_returns_error() {
         ),
     }
 }
+
+// ── Streaming tests ───────────────────────────────────────────────────────────
+
+/// Build a newline-delimited JSON (NDJSON) streaming body that the Ollama
+/// `chat_native_streaming` parser can consume.  Each `token` becomes a
+/// `{"message":{"content":token},"done":false}` chunk; a final
+/// `{"done":true}` chunk terminates the stream.
+fn ollama_streaming_body(tokens: &[&str]) -> String {
+    let mut body = String::new();
+    for token in tokens {
+        let line = json!({
+            "model": "test",
+            "message": {"role": "assistant", "content": token},
+            "done": false,
+        });
+        body.push_str(&line.to_string());
+        body.push('\n');
+    }
+    // Final chunk signals end-of-stream.
+    let done = json!({
+        "model": "test",
+        "message": {"role": "assistant", "content": ""},
+        "done": true,
+        "done_reason": "stop",
+    });
+    body.push_str(&done.to_string());
+    body.push('\n');
+    body
+}
+
+/// `run_turn_with_tools_streaming` must forward tokens from the LLM text
+/// stream through the caller-supplied `token_sink`.
+#[tokio::test]
+async fn run_turn_with_tools_streaming_emits_tokens_through_sink() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(ollama_streaming_body(&["Hello", ",", " world", "!"])),
+        )
+        .mount(&server)
+        .await;
+
+    let (orch, _) = build(&server.uri()).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+
+    orch.run_turn_with_tools_streaming(
+        "hi",
+        Uuid::new_v4(),
+        Interface::Slack,
+        vec![],
+        None,
+        vec![],
+        tx,
+    )
+    .await
+    .unwrap();
+
+    // Drain all received tokens.
+    let mut received = String::new();
+    while let Ok(token) = rx.try_recv() {
+        received.push_str(&token);
+    }
+
+    assert_eq!(
+        received, "Hello, world!",
+        "token_sink must receive all LLM text tokens"
+    );
+}
+
+/// When the token_sink receives tokens in multiple chunks, they must arrive
+/// in order and form the complete response.
+#[tokio::test]
+async fn run_turn_with_tools_streaming_tokens_arrive_in_order() {
+    let server = MockServer::start().await;
+    let tokens = ["The", " quick", " brown", " fox"];
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(ollama_streaming_body(&tokens)))
+        .mount(&server)
+        .await;
+
+    let (orch, _) = build(&server.uri()).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+
+    orch.run_turn_with_tools_streaming(
+        "tell me something",
+        Uuid::new_v4(),
+        Interface::Slack,
+        vec![],
+        None,
+        vec![],
+        tx,
+    )
+    .await
+    .unwrap();
+
+    let mut received_tokens: Vec<String> = Vec::new();
+    while let Ok(t) = rx.try_recv() {
+        received_tokens.push(t);
+    }
+
+    let joined: String = received_tokens.join("");
+    assert_eq!(
+        joined, "The quick brown fox",
+        "tokens must arrive in order and reconstruct the full text"
+    );
+}
+
+/// When the worker processes a turn that has BOTH extension tools AND a
+/// token_sink registered, it must route to `run_turn_with_tools_streaming`
+/// so the sink receives tokens (rather than silently ignoring the sink).
+#[tokio::test]
+async fn worker_routes_ext_plus_sink_to_streaming_path() {
+    let server = MockServer::start().await;
+    // Mount a streaming answer: the LLM returns text tokens (FinalAnswer path),
+    // which flow through the token_sink.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(ollama_streaming_body(&["streamed", " answer"])),
+        )
+        .mount(&server)
+        .await;
+
+    let (orch, _) = build(&server.uri()).await;
+    let conv_id = Uuid::new_v4();
+
+    // Spawn the worker.
+    let worker_orch = orch.clone();
+    let _worker = tokio::spawn(async move {
+        worker_orch.run_worker("test-worker").await;
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Register BOTH a token_sink AND extension tools (the Slack pattern).
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+    orch.register_token_sink(conv_id, tx).await;
+    orch.register_extensions(conv_id, vec![], vec![]).await;
+
+    // submit_turn triggers the worker which should pick up both registrations.
+    let _ = orch
+        .submit_turn("stream please", conv_id, Interface::Slack, None)
+        .await;
+
+    // Allow any in-flight sends to the channel to complete.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mut received = String::new();
+    while let Ok(token) = rx.try_recv() {
+        received.push_str(&token);
+    }
+
+    assert_eq!(
+        received, "streamed answer",
+        "worker must route to streaming path when ext tools + token_sink are both registered; \
+         sink received: {received:?}"
+    );
+}

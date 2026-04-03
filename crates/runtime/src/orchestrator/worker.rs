@@ -209,16 +209,30 @@ impl Orchestrator {
                     let result: Result<TurnResult> = tokio::select! {
                         r = async {
                             if let Some(reg) = ext {
-                                // Extension-tool turn (Slack, Mattermost).
-                                self.run_turn_with_tools(
-                                    &prompt,
-                                    conv_id,
-                                    interface,
-                                    reg.tools,
-                                    Some(&bus_consume_cx),
-                                    reg.attachments,
-                                )
-                                .await
+                                if let Some(sink) = token_sink {
+                                    // Extension-tool turn with streaming (e.g. Slack).
+                                    self.run_turn_with_tools_streaming(
+                                        &prompt,
+                                        conv_id,
+                                        interface,
+                                        reg.tools,
+                                        Some(&bus_consume_cx),
+                                        reg.attachments,
+                                        sink,
+                                    )
+                                    .await
+                                } else {
+                                    // Extension-tool turn without streaming (e.g. Mattermost).
+                                    self.run_turn_with_tools(
+                                        &prompt,
+                                        conv_id,
+                                        interface,
+                                        reg.tools,
+                                        Some(&bus_consume_cx),
+                                        reg.attachments,
+                                    )
+                                    .await
+                                }
                             } else if let Some(sink) = token_sink {
                                 // Streaming turn (CLI, Signal).
                                 self.run_turn_streaming(

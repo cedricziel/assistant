@@ -344,6 +344,43 @@ impl Orchestrator {
             extensions,
             trace_cx,
             attachments,
+            None,
+        )
+        .instrument(turn_span)
+        .await
+    }
+
+    /// Like [`run_turn_with_tools`] but streams LLM text tokens (including the
+    /// text content of tool-call arguments) through `token_sink` as they arrive.
+    ///
+    /// Intended for messaging interfaces (e.g. Slack) that want to update a
+    /// placeholder message progressively while the turn is in progress.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_turn_with_tools_streaming(
+        &self,
+        user_message: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        extensions: Vec<Arc<dyn ToolHandler>>,
+        trace_cx: Option<&OtelContext>,
+        attachments: Vec<ContentBlock>,
+        token_sink: mpsc::Sender<String>,
+    ) -> Result<TurnResult> {
+        let turn_span = info_span!(
+            "conversation_turn",
+            %conversation_id,
+            interface = ?interface,
+            extension_tools = extensions.len(),
+            streaming = true
+        );
+        self.run_turn_with_tools_impl(
+            user_message,
+            conversation_id,
+            interface,
+            extensions,
+            trace_cx,
+            attachments,
+            Some(token_sink),
         )
         .instrument(turn_span)
         .await
@@ -382,6 +419,7 @@ impl Orchestrator {
 
     // ── Turn implementations ──────────────────────────────────────────────────
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_turn_with_tools_impl(
         &self,
         user_message: &str,
@@ -390,6 +428,7 @@ impl Orchestrator {
         extensions: Vec<Arc<dyn ToolHandler>>,
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
+        token_sink: Option<mpsc::Sender<String>>,
     ) -> Result<TurnResult> {
         self.metrics
             .record_turn(&self.agent_id, None, &format!("{interface:?}"));
@@ -487,7 +526,13 @@ impl Orchestrator {
                 &all_specs,
             );
             let llm_start = std::time::Instant::now();
-            let response = self.llm.chat(&system_prompt, &history, &all_specs).await;
+            let response = if let Some(ref sink) = token_sink {
+                self.llm
+                    .chat_streaming(&system_prompt, &history, &all_specs, Some(sink.clone()))
+                    .await
+            } else {
+                self.llm.chat(&system_prompt, &history, &all_specs).await
+            };
             let llm_elapsed = llm_start.elapsed();
             let response = match response {
                 Ok(r) => r,
