@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.77](https://github.com/cedricziel/assistant/compare/v0.1.76...v0.1.77) (2026-04-03)
+
+
+### Features
+
+* **skills:** add rust-dependencies and ci-organization skills ([#365](https://github.com/cedricziel/assistant/issues/365)) ([b48b998](https://github.com/cedricziel/assistant/commit/b48b99866344d9bdcab7420cb5f034e8e6134d99))
+
+
+### Bug Fixes
+
+* **interface-matrix:** vendor OpenSSL for rusqlite sqlcipher musl cross-build ([#363](https://github.com/cedricziel/assistant/issues/363)) ([0482b80](https://github.com/cedricziel/assistant/commit/0482b805f28d40b4a7582f1abcdc095b1dda4327))
+
 ## [0.1.76](https://github.com/cedricziel/assistant/compare/v0.1.75...v0.1.76) (2026-04-03)
 
 
