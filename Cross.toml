@@ -5,3 +5,22 @@ pre-build = [
     "curl -sSL -o /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v27.5/protoc-27.5-linux-x86_64.zip",
     "unzip -o /tmp/protoc.zip -d /usr/local",
 ]
+
+# musl targets: install Text::Template (required by OpenSSL 3.x Configure) and protoc
+# (needed by opentelemetry-otlp grpc-tonic build scripts running on the host triple).
+# No system libssl-dev is installed because openssl is built from source via the
+# vendored feature (openssl-src), which avoids any dependency on a musl OpenSSL package.
+[target.x86_64-unknown-linux-musl]
+pre-build = [
+    "apt-get update && apt-get install -y libtext-template-perl curl unzip",
+    "curl -sSL -o /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v27.5/protoc-27.5-linux-x86_64.zip",
+    "unzip -o /tmp/protoc.zip -d /usr/local",
+]
+
+[target.aarch64-unknown-linux-musl]
+pre-build = [
+    "apt-get update && apt-get install -y libtext-template-perl curl unzip",
+    # protoc build scripts run on the host triple (x86_64) even for aarch64 targets
+    "curl -sSL -o /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v27.5/protoc-27.5-linux-x86_64.zip",
+    "unzip -o /tmp/protoc.zip -d /usr/local",
+]
