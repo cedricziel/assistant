@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.78](https://github.com/cedricziel/assistant/compare/v0.1.77...v0.1.78) (2026-04-03)
+
+
+### Bug Fixes
+
+* **ci:** pass --allow-untrusted to apk index to accept nfpm-built packages ([#367](https://github.com/cedricziel/assistant/issues/367)) ([a72bcf2](https://github.com/cedricziel/assistant/commit/a72bcf254d0189c1901061df9126ed687bc6a0f3))
+
 ## [0.1.77](https://github.com/cedricziel/assistant/compare/v0.1.76...v0.1.77) (2026-04-03)
 
 
