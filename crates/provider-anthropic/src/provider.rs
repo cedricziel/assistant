@@ -517,8 +517,7 @@ impl AnthropicProvider {
         // State accumulated while parsing SSE events.
         let mut text_buf = String::new();
         let mut thinking_buf = String::new();
-        // tool blocks: index → (id, name, partial_json)
-        let mut tool_blocks: Vec<(String, String, String)> = Vec::new();
+        let mut tool_blocks: Vec<ToolBlock> = Vec::new();
         // Current block index and type.
         let mut current_block_idx: Option<usize> = None;
         let mut current_block_type = String::new();
@@ -581,16 +580,16 @@ impl AnthropicProvider {
         if !tool_blocks.is_empty() {
             let items: Vec<ToolCallItem> = tool_blocks
                 .into_iter()
-                .filter_map(|(id, name, partial_json)| {
-                    if name.is_empty() {
+                .filter_map(|block| {
+                    if block.name.is_empty() {
                         return None;
                     }
-                    let params = serde_json::from_str::<Value>(&partial_json)
+                    let params = serde_json::from_str::<Value>(&block.partial_json)
                         .unwrap_or(Value::Object(serde_json::Map::new()));
                     Some(ToolCallItem {
-                        name,
+                        name: block.name,
                         params,
-                        id: Some(id),
+                        id: Some(block.id),
                     })
                 })
                 .collect();
@@ -608,6 +607,85 @@ impl AnthropicProvider {
     }
 }
 
+// ── Tool-block accumulator ────────────────────────────────────────────────────
+
+/// Accumulator for a single streaming tool-call block.
+struct ToolBlock {
+    id: String,
+    name: String,
+    partial_json: String,
+    /// Number of decoded text characters already forwarded to the token sink.
+    text_chars_sent: usize,
+}
+
+impl ToolBlock {
+    fn new(id: String, name: String) -> Self {
+        Self {
+            id,
+            name,
+            partial_json: String::new(),
+            text_chars_sent: 0,
+        }
+    }
+
+    fn empty() -> Self {
+        Self::new(String::new(), String::new())
+    }
+}
+
+/// Extract the current decoded value of the `"text"` field from a
+/// partially-received JSON object (e.g. `{"text": "Hello wor`).
+///
+/// Handles JSON escape sequences.  Returns `None` if the key or opening
+/// quote has not yet been received.
+fn extract_partial_text(partial_json: &str) -> Option<String> {
+    let value_start = partial_json
+        .find("\"text\":\"")
+        .map(|p| p + 8)
+        .or_else(|| partial_json.find("\"text\": \"").map(|p| p + 9))?;
+
+    let text_part = &partial_json[value_start..];
+    let mut result = String::new();
+    let mut chars = text_part.chars();
+    let mut escape = false;
+
+    loop {
+        match chars.next() {
+            None => break, // Partial input — text still arriving
+            Some('\\') if !escape => {
+                escape = true;
+            }
+            Some('"') if !escape => break, // End of string
+            Some(ch) if escape => {
+                match ch {
+                    '"' => result.push('"'),
+                    '\\' => result.push('\\'),
+                    'n' => result.push('\n'),
+                    't' => result.push('\t'),
+                    'r' => result.push('\r'),
+                    '/' => result.push('/'),
+                    'b' => result.push('\x08'),
+                    'f' => result.push('\x0C'),
+                    _ => {
+                        result.push('\\');
+                        result.push(ch);
+                    }
+                }
+                escape = false;
+            }
+            Some(ch) => {
+                result.push(ch);
+            }
+        }
+    }
+
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
 // ── SSE event processor ───────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -616,7 +694,7 @@ async fn process_sse_event(
     json: &Value,
     text_buf: &mut String,
     thinking_buf: &mut String,
-    tool_blocks: &mut Vec<(String, String, String)>,
+    tool_blocks: &mut Vec<ToolBlock>,
     current_block_idx: &mut Option<usize>,
     current_block_type: &mut String,
     token_sink: &Option<mpsc::Sender<String>>,
@@ -656,9 +734,9 @@ async fn process_sse_event(
                     .to_string();
                 // Extend tool_blocks to accommodate this index.
                 while tool_blocks.len() <= idx {
-                    tool_blocks.push((String::new(), String::new(), String::new()));
+                    tool_blocks.push(ToolBlock::empty());
                 }
-                tool_blocks[idx] = (id, name, String::new());
+                tool_blocks[idx] = ToolBlock::new(id, name);
             }
         }
 
@@ -689,7 +767,22 @@ async fn process_sse_event(
                             json.pointer("/delta/partial_json").and_then(|v| v.as_str())
                         {
                             if idx < tool_blocks.len() {
-                                tool_blocks[idx].2.push_str(partial);
+                                tool_blocks[idx].partial_json.push_str(partial);
+                                // Stream the decoded text value of this tool block
+                                // so the caller can update a live preview (e.g. the
+                                // Slack placeholder message).
+                                if let Some(sink) = token_sink {
+                                    if let Some(text) =
+                                        extract_partial_text(&tool_blocks[idx].partial_json)
+                                    {
+                                        let already = tool_blocks[idx].text_chars_sent;
+                                        if text.len() > already {
+                                            let new_text = text[already..].to_string();
+                                            tool_blocks[idx].text_chars_sent = text.len();
+                                            let _ = sink.send(new_text).await;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -831,6 +924,110 @@ mod tests {
         }];
         let (messages, _) = build_anthropic_messages(&history);
         assert_eq!(messages[0]["content"], "hello");
+    }
+
+    // ── extract_partial_text ──────────────────────────────────────────────────
+
+    use super::extract_partial_text;
+
+    #[test]
+    fn extract_partial_text_complete_json() {
+        let json = r#"{"text":"Hello, world!"}"#;
+        assert_eq!(extract_partial_text(json).as_deref(), Some("Hello, world!"));
+    }
+
+    #[test]
+    fn extract_partial_text_space_after_colon() {
+        let json = r#"{"text": "Hi there"}"#;
+        assert_eq!(extract_partial_text(json).as_deref(), Some("Hi there"));
+    }
+
+    #[test]
+    fn extract_partial_text_partial_json_no_closing_quote() {
+        // The closing `"` hasn't arrived yet — should return what we have so far.
+        let json = r#"{"text":"Hello wor"#;
+        assert_eq!(extract_partial_text(json).as_deref(), Some("Hello wor"));
+    }
+
+    #[test]
+    fn extract_partial_text_key_not_yet_arrived() {
+        // Only the opening brace has been received — key missing.
+        assert_eq!(extract_partial_text("{"), None);
+        assert_eq!(extract_partial_text(r#"{"tex"#), None);
+    }
+
+    #[test]
+    fn extract_partial_text_empty_string_value() {
+        // Key present but value is the empty string → no text to stream yet.
+        let json = r#"{"text":""}"#;
+        assert_eq!(extract_partial_text(json), None);
+    }
+
+    #[test]
+    fn extract_partial_text_escape_sequences() {
+        // Embedded newline and quote, properly JSON-escaped.
+        let json = r#"{"text":"line1\nline2"}"#;
+        assert_eq!(extract_partial_text(json).as_deref(), Some("line1\nline2"));
+
+        let json_quote = r#"{"text":"say \"hi\""}"#;
+        assert_eq!(
+            extract_partial_text(json_quote).as_deref(),
+            Some(r#"say "hi""#)
+        );
+    }
+
+    #[test]
+    fn extract_partial_text_partial_escape_sequence() {
+        // The backslash has arrived but not the escape char yet.
+        let json = r#"{"text":"Hello \"#;
+        // The `\` starts an escape we can't finish — the partially-decoded
+        // result should be "Hello " (everything before the `\`).
+        let result = extract_partial_text(json);
+        assert_eq!(result.as_deref(), Some("Hello "));
+    }
+
+    #[test]
+    fn extract_partial_text_missing_text_key() {
+        // JSON with a different key should return None.
+        let json = r#"{"content":"Hello"}"#;
+        assert_eq!(extract_partial_text(json), None);
+    }
+
+    #[test]
+    fn extract_partial_text_incremental_deltas() {
+        // Simulate receiving JSON in fragments; each fragment is appended and
+        // we call extract_partial_text on the accumulated buffer.
+        let fragments = [
+            r#"{"text":"H"#,
+            r#"{"text":"He"#,
+            r#"{"text":"Hel"#,
+            r#"{"text":"Hell"#,
+            r#"{"text":"Hello"}"#,
+        ];
+        let expected = ["H", "He", "Hel", "Hell", "Hello"];
+        for (frag, exp) in fragments.iter().zip(expected.iter()) {
+            assert_eq!(
+                extract_partial_text(frag).as_deref(),
+                Some(*exp),
+                "fragment: {frag}"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_partial_text_only_sends_new_chars_when_tracked() {
+        // Simulate the text_chars_sent tracking: each call returns the full
+        // text so far, and the caller slices from `already_sent`.
+        let full = r#"{"text":"Hello world"}"#;
+        let text = extract_partial_text(full).unwrap();
+        assert_eq!(&text[0..], "Hello world");
+        assert_eq!(&text[5..], " world");
+    }
+
+    #[test]
+    fn extract_partial_text_tab_and_backslash_escapes() {
+        let json = r#"{"text":"a\tb\\c"}"#;
+        assert_eq!(extract_partial_text(json).as_deref(), Some("a\tb\\c"));
     }
 
     #[test]
