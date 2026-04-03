@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.73](https://github.com/cedricziel/assistant/compare/v0.1.72...v0.1.73) (2026-04-03)
+
+
+### Features
+
+* **release:** Alpine APK packages and lean Alpine Docker image ([#352](https://github.com/cedricziel/assistant/issues/352)) ([1b850b4](https://github.com/cedricziel/assistant/commit/1b850b4c2ac17cb7f8504ecba77aef2d40744595))
+
+
+### Bug Fixes
+
+* **iceberg-exporter:** use '+00:00' timezone to match Iceberg Timestamptz Arrow mapping ([#353](https://github.com/cedricziel/assistant/issues/353)) ([1a76570](https://github.com/cedricziel/assistant/commit/1a7657005c99fdcb813cc75ec5d77985c402d8a4))
+
 ## [0.1.72](https://github.com/cedricziel/assistant/compare/v0.1.71...v0.1.72) (2026-03-31)
 
 
