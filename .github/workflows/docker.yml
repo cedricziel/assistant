@@ -1,25 +1,62 @@
 name: Docker
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  # Single unified image — orchestrator/webui/worker/mcp are subcommands.
-  # Use CMD override to run a specific mode:
-  #   docker run ghcr.io/cedricziel/assistant/assistant assistant mcp
-  #   docker run ghcr.io/cedricziel/assistant/assistant assistant orchestrator run --interfaces slack --no-repl
-  #   docker run ghcr.io/cedricziel/assistant/assistant assistant webui serve --listen 0.0.0.0:8080 --auth-token changeme
+  # Lean Alpine image built from source using musl targets via cross.
+  # For release builds the image is also produced by the release-please workflow
+  # from pre-built artifacts (faster). This workflow exists for manual / dev
+  # tag builds where release-please artifacts are not available.
   build-assistant:
-    name: Build assistant image
+    name: Build assistant image (Alpine, from source)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-musl-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-musl-cargo-
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Install protoc
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: Vendor JS dependencies
+        run: make vendor
+
+      - name: Build x86_64 musl binary
+        run: cross build --release --target x86_64-unknown-linux-musl -p assistant-cli
+
+      - name: Build aarch64 musl binary
+        run: cross build --release --target aarch64-unknown-linux-musl -p assistant-cli
+
+      - name: Stage binaries for Docker build context
+        run: |
+          mkdir -p docker-context/bin/amd64 docker-context/bin/arm64
+          cp target/x86_64-unknown-linux-musl/release/assistant docker-context/bin/amd64/assistant
+          cp target/aarch64-unknown-linux-musl/release/assistant docker-context/bin/arm64/assistant
+          cp config.toml docker-context/config.toml
+          cp docker/Dockerfile.assistant-alpine docker-context/Dockerfile
+          chmod +x docker-context/bin/amd64/assistant docker-context/bin/arm64/assistant
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -46,8 +83,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
-          context: .
-          file: docker/Dockerfile.assistant
+          context: ./docker-context
+          file: ./docker-context/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
