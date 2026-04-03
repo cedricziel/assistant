@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.75](https://github.com/cedricziel/assistant/compare/v0.1.74...v0.1.75) (2026-04-03)
+
+
+### Features
+
+* **runtime:** cancel in-flight worker turn when submit_turn times out ([#358](https://github.com/cedricziel/assistant/issues/358)) ([f1d6d96](https://github.com/cedricziel/assistant/commit/f1d6d96e75af5fdbb55c01990e7be89f6a3f076f))
+
+
+### Bug Fixes
+
+* **interface-mattermost:** vendor OpenSSL to fix musl cross-compilation ([#357](https://github.com/cedricziel/assistant/issues/357)) ([dae7df4](https://github.com/cedricziel/assistant/commit/dae7df436a829b19e435dd1fe992496e8a7b794d))
+
 ## [0.1.74](https://github.com/cedricziel/assistant/compare/v0.1.73...v0.1.74) (2026-04-03)
 
 
