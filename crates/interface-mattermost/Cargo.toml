@@ -23,6 +23,8 @@ mattermost_api = { workspace = true }
 lru = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
+# Ensure vendored OpenSSL is used when cross-compiling to musl targets
+openssl = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }

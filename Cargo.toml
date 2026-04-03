@@ -72,6 +72,10 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
+# Force vendored OpenSSL for static linking when cross-compiling (e.g. musl targets).
+# mattermost_api pulls in native-tls via feature unification; vendored ensures
+# openssl-sys builds from source rather than requiring a system installation.
+openssl = { version = "0.10", features = ["vendored"] }
 reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.8"
 reqwest-tracing = "0.5"
