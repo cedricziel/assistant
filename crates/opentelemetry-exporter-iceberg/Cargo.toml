@@ -34,3 +34,6 @@ chrono = { workspace = true }
 dirs = { workspace = true }
 # Internal
 assistant-core = { path = "../core" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

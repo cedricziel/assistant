@@ -533,7 +533,7 @@ fn rows_to_record_batch(
     let schema_ref = Arc::new(schema.clone());
     let columns: Vec<ArrayRef> = vec![
         Arc::new(StringArray::from(ids)),
-        Arc::new(TimestampMicrosecondArray::from(recorded_ats).with_timezone("UTC")),
+        Arc::new(TimestampMicrosecondArray::from(recorded_ats).with_timezone("+00:00")),
         Arc::new(StringArray::from(metric_names)),
         Arc::new(StringArray::from(metric_kinds)),
         Arc::new(StringArray::from(units)),

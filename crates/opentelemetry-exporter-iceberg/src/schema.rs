@@ -137,3 +137,155 @@ pub fn metrics_schema() -> Result<Schema> {
 pub fn arc(schema: Schema) -> Arc<Schema> {
     Arc::new(schema)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use arrow_array::{
+        ArrayRef, Int32Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
+    };
+    use arrow_schema::{DataType, TimeUnit};
+
+    use super::*;
+
+    /// Helper: convert an Iceberg schema to an Arrow schema.
+    fn to_arrow(iceberg: &Schema) -> arrow_schema::Schema {
+        iceberg::arrow::schema_to_arrow_schema(iceberg)
+            .expect("failed to convert Iceberg schema to Arrow schema")
+    }
+
+    /// The Iceberg `Timestamptz` type must map to Arrow
+    /// `Timestamp(Microsecond, Some("+00:00"))`.  Arrow treats `"UTC"` and
+    /// `"+00:00"` as distinct values, so using `"UTC"` in the array builder
+    /// causes `RecordBatch::try_new` to fail with a type-mismatch error.
+    #[test]
+    fn timestamptz_maps_to_utc_offset_string() {
+        let schema = logs_schema().unwrap();
+        let arrow = to_arrow(&schema);
+
+        let ts_field = arrow.field_with_name("timestamp").unwrap();
+        assert_eq!(
+            ts_field.data_type(),
+            &DataType::Timestamp(TimeUnit::Microsecond, Some("+00:00".into())),
+            "Timestamptz must use the literal '+00:00' offset string, not 'UTC'"
+        );
+    }
+
+    /// A `RecordBatch` for the logs schema succeeds when the timestamp array
+    /// uses `"+00:00"` (the fix).
+    #[test]
+    fn logs_record_batch_succeeds_with_utc_offset() {
+        let schema = logs_schema().unwrap();
+        let arrow = Arc::new(to_arrow(&schema));
+
+        let cols: Vec<ArrayRef> = vec![
+            Arc::new(StringArray::from(vec!["id-1"])),
+            Arc::new(TimestampMicrosecondArray::from(vec![0_i64]).with_timezone("+00:00")),
+            Arc::new(Int32Array::from(vec![9_i32])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![Some("hello")])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+        ];
+
+        RecordBatch::try_new(arrow, cols).expect("RecordBatch with '+00:00' timezone must succeed");
+    }
+
+    /// The same construction fails when the timestamp array uses `"UTC"`,
+    /// reproducing the production error before the fix.
+    #[test]
+    fn logs_record_batch_fails_with_utc_string() {
+        let schema = logs_schema().unwrap();
+        let arrow = Arc::new(to_arrow(&schema));
+
+        let cols: Vec<ArrayRef> = vec![
+            Arc::new(StringArray::from(vec!["id-1"])),
+            // "UTC" triggers the pre-fix schema mismatch
+            Arc::new(TimestampMicrosecondArray::from(vec![0_i64]).with_timezone("UTC")),
+            Arc::new(Int32Array::from(vec![9_i32])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![Some("hello")])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+        ];
+
+        assert!(
+            RecordBatch::try_new(arrow, cols).is_err(),
+            "RecordBatch with 'UTC' timezone string must fail (pre-fix behaviour)"
+        );
+    }
+
+    /// A `RecordBatch` for the spans schema succeeds with `"+00:00"`.
+    #[test]
+    fn spans_record_batch_succeeds_with_utc_offset() {
+        let schema = spans_schema().unwrap();
+        let arrow = Arc::new(to_arrow(&schema));
+
+        let cols: Vec<ArrayRef> = vec![
+            Arc::new(StringArray::from(vec!["trace-1"])),
+            Arc::new(StringArray::from(vec!["span-1"])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec!["my-span"])),
+            Arc::new(TimestampMicrosecondArray::from(vec![0_i64]).with_timezone("+00:00")),
+            Arc::new(TimestampMicrosecondArray::from(vec![Some(1000_i64)]).with_timezone("+00:00")),
+            Arc::new(Int64Array::from(vec![Some(1_i64)])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(Int64Array::from(vec![None::<i64>])),
+            Arc::new(Int64Array::from(vec![None::<i64>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+        ];
+
+        RecordBatch::try_new(arrow, cols).expect("RecordBatch with '+00:00' timezone must succeed");
+    }
+
+    /// A `RecordBatch` for the metrics schema succeeds with `"+00:00"`.
+    #[test]
+    fn metrics_record_batch_succeeds_with_utc_offset() {
+        let schema = metrics_schema().unwrap();
+        let arrow = Arc::new(to_arrow(&schema));
+
+        let none_f64: Vec<Option<f64>> = vec![None];
+        let none_i64: Vec<Option<i64>> = vec![None];
+
+        use arrow_array::Float64Array;
+        let cols: Vec<ArrayRef> = vec![
+            Arc::new(StringArray::from(vec!["metric-id-1"])),
+            Arc::new(TimestampMicrosecondArray::from(vec![0_i64]).with_timezone("+00:00")),
+            Arc::new(StringArray::from(vec!["my.metric"])),
+            Arc::new(StringArray::from(vec!["gauge"])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(Float64Array::from(none_f64.clone())),
+            Arc::new(Int64Array::from(none_i64.clone())),
+            Arc::new(Float64Array::from(none_f64.clone())),
+            Arc::new(Float64Array::from(none_f64.clone())),
+            Arc::new(Float64Array::from(none_f64.clone())),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+        ];
+
+        RecordBatch::try_new(arrow, cols).expect("RecordBatch with '+00:00' timezone must succeed");
+    }
+}
