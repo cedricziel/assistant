@@ -393,8 +393,15 @@ async fn run_with_args(args: Args) -> Result<()> {
             Arc::new(storage.message_bus())
         }
     };
-    let orchestrator = Arc::new(
-        Orchestrator::new(
+    let persona_timeout = storage
+        .persona_store()
+        .get(&config.agent.id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.turn_timeout_secs);
+    let orchestrator = Arc::new({
+        let mut o = Orchestrator::new(
             llm,
             storage.clone(),
             executor.clone(),
@@ -404,8 +411,12 @@ async fn run_with_args(args: Args) -> Result<()> {
         )
         .with_confirmation_callback(Arc::new(AutoDenyConfirmation {
             interface_name: "Web",
-        })),
-    );
+        }));
+        if let Some(secs) = persona_timeout {
+            o = o.with_submit_timeout(secs);
+        }
+        o
+    });
 
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());

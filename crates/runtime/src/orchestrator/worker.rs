@@ -592,10 +592,10 @@ impl Orchestrator {
             }
         }
 
-        // Poll for the result with a 10-minute timeout.
+        // Poll for the result with a configurable timeout (default 3 h).
         // Match by both conversation_id and batch_id (request_id) so
         // overlapping turns for the same conversation don't collide.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(600);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(self.submit_timeout_secs);
         let late_result_deadline = deadline + Duration::from_secs(2);
         let filter = ClaimFilter::new()
             .with_agent_id(self.agent_id.clone())

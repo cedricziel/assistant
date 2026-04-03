@@ -203,8 +203,15 @@ async fn bootstrap() -> Result<(Arc<Orchestrator>, SignalConfig, PathBuf)> {
         }
     };
     let confirmation_cb: Arc<dyn ConfirmationCallback> = Arc::new(AutoDenyConfirmation);
-    let orchestrator = Arc::new(
-        Orchestrator::new(
+    let persona_timeout = storage
+        .persona_store()
+        .get(&config.agent.id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.turn_timeout_secs);
+    let orchestrator = Arc::new({
+        let mut o = Orchestrator::new(
             llm,
             storage,
             executor.clone(),
@@ -212,8 +219,12 @@ async fn bootstrap() -> Result<(Arc<Orchestrator>, SignalConfig, PathBuf)> {
             bus,
             &config,
         )
-        .with_confirmation_callback(confirmation_cb),
-    );
+        .with_confirmation_callback(confirmation_cb);
+        if let Some(secs) = persona_timeout {
+            o = o.with_submit_timeout(secs);
+        }
+        o
+    });
 
     // Wire up subagent support (breaks the init-time circular dep).
     executor.set_subagent_runner(orchestrator.clone());
