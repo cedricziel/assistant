@@ -2348,6 +2348,100 @@ async fn failed_turn_propagates_error() {
     );
 }
 
+/// Verify that when submit_turn times out it cancels the in-flight worker
+/// turn via the CancellationToken registered in turn_cancellations.
+///
+/// The mock LLM is configured to delay its response by 5 s.  submit_turn
+/// is given a 1-second deadline.  We assert:
+///  1. submit_turn returns an error within ~2 s (the deadline fires).
+///  2. The worker does NOT continue processing: if it did it would produce a
+///     turn.result message that would linger on the bus, which we check for.
+#[tokio::test]
+async fn timeout_cancels_in_flight_worker_turn() {
+    let server = MockServer::start().await;
+    // Delay the LLM response so the turn is still running when submit_turn times out.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(5))
+                .set_body_json(ollama_answer("delayed answer")),
+        )
+        .mount(&server)
+        .await;
+
+    let mut config = AssistantConfig::default();
+    config.memory.enabled = false;
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let llm: Arc<dyn LlmProvider> = Arc::new(
+        LlmClient::new(LlmClientConfig {
+            model: "test".to_string(),
+            base_url: server.uri(),
+            timeout_secs: 30,
+            retry_config: assistant_llm::RetryConfig::disabled(),
+        })
+        .unwrap(),
+    );
+    let executor = Arc::new(ToolExecutor::new(
+        storage.clone(),
+        llm.clone(),
+        registry.clone(),
+        Arc::new(config.clone()),
+    ));
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+    let orch = Arc::new(
+        Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor.clone(),
+            registry,
+            bus,
+            &config,
+        )
+        .with_submit_timeout(1), // 1-second deadline
+    );
+    executor.set_subagent_runner(orch.clone());
+
+    // Spawn the worker so it picks up and processes the turn.
+    let worker_orch = orch.clone();
+    let _worker = tokio::spawn(async move {
+        worker_orch.run_worker("test-worker").await;
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let conv_id = Uuid::new_v4();
+    let start = std::time::Instant::now();
+    let result = orch
+        .submit_turn("slow task", conv_id, Interface::Slack, None)
+        .await;
+    let elapsed = start.elapsed();
+
+    // submit_turn must have timed out with an error.
+    assert!(result.is_err(), "submit_turn should error on timeout");
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "submit_turn should have stopped within ~1 s, not waited for the 5-s LLM response (elapsed: {elapsed:?})"
+    );
+
+    // Give the worker a moment — if cancellation worked there should be no
+    // lingering turn.result message on the bus.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let leftover = storage
+        .message_bus()
+        .claim_filtered(
+            assistant_core::topic::TURN_RESULT,
+            "check",
+            &assistant_core::ClaimFilter::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        leftover.is_none(),
+        "worker should not have published a turn.result after cancellation"
+    );
+}
+
 /// `run_turn_with_tools` uses `run_turn_with_tools_impl` which has its own
 /// LLM call site.  Verify that an HTTP-500 from the LLM propagates as `Err`
 /// through the extension-tool path (separate from `run_turn_core`).
