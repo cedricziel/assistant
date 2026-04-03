@@ -169,6 +169,7 @@ jobs:
 
       - name: Stage binaries for Docker build context
         run: |
+          set -euo pipefail
           mkdir -p docker-context/bin/amd64 docker-context/bin/arm64
 
           cd dist/x86_64-musl
