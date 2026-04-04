@@ -30,7 +30,7 @@ use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 
 use crate::catalog::{build_catalog, build_file_io, ensure_namespace, CatalogRef};
-use crate::partition::partition_spec;
+use crate::partition::{batch_partition_key, partition_spec};
 use crate::schema::{arc, spans_schema, SPANS_START_TIME_FIELD_ID};
 
 /// OpenTelemetry span exporter that persists spans into an Apache Iceberg
@@ -99,6 +99,13 @@ impl IcebergSpanExporter {
             return Ok(());
         }
 
+        // Capture representative timestamp before consuming the batch.
+        let first_start_micros = batch[0]
+            .start_time
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros() as i64)
+            .unwrap_or(0);
+
         let resource_attrs = self.resource_attributes.read().ok().and_then(|g| g.clone());
         let service_name = self.service_name.read().ok().and_then(|g| g.clone());
 
@@ -116,6 +123,8 @@ impl IcebergSpanExporter {
 
         let mut guard = self.table.lock().await;
         let table = &*guard;
+
+        let partition_key = batch_partition_key(table, first_start_micros, &self.config.partition);
 
         let file_io = build_file_io(&self.config);
         let schema_ref =
@@ -135,7 +144,7 @@ impl IcebergSpanExporter {
         );
         let data_file_builder = DataFileWriterBuilder::new(rolling_builder);
         let mut writer = data_file_builder
-            .build(None)
+            .build(partition_key)
             .await
             .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 
