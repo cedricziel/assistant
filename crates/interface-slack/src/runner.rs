@@ -797,8 +797,8 @@ async fn on_push_event(
     }
 
     let (event_kind, reaction_emoji) = match &incoming.kind {
-        SlackIncomingKind::Message => ("message", None),
-        SlackIncomingKind::Reaction { emoji } => ("reaction", Some(emoji.as_str())),
+        SlackIncomingKind::Message => ("message", None::<String>),
+        SlackIncomingKind::Reaction { emoji } => ("reaction", Some(emoji.clone())),
     };
 
     info!(
@@ -813,496 +813,503 @@ async fn on_push_event(
         "Incoming Slack event"
     );
 
-    // Key conversations by (channel_id, thread_ts) so every message in the
-    // same Slack thread shares a single LLM conversation context.
-    let (conversation_id, is_new) = {
-        let mut map = conversations.lock().await;
-        let entry = map.entry((channel_id.clone(), thread_ts.0.clone()));
-        let is_new = matches!(entry, Entry::Vacant(_));
-        let id = *entry.or_insert_with(Uuid::new_v4);
-        (id, is_new)
-    };
+    // All checks passed — spawn the heavy work as an independent task so
+    // this callback returns immediately.  slack-morphism can then ACK Slack
+    // within the 3-second window and keep the WebSocket reader free to
+    // receive subsequent events without blocking on LLM turn latency.
+    tokio::spawn(async move {
+        // Open a Slack API session inside the task (borrows the task-owned
+        // client + bot_token).
+        let session = client.open_session(&bot_token);
 
-    debug!(conversation_id = %conversation_id, is_new, "Using conversation");
+        // Key conversations by (channel_id, thread_ts) so every message in the
+        // same Slack thread shares a single LLM conversation context.
+        let (conversation_id, is_new) = {
+            let mut map = conversations.lock().await;
+            let entry = map.entry((channel_id.clone(), thread_ts.0.clone()));
+            let is_new = matches!(entry, Entry::Vacant(_));
+            let id = *entry.or_insert_with(Uuid::new_v4);
+            (id, is_new)
+        };
 
-    // Open a Slack API session (cheaply wraps the client + token).
-    let session = client.open_session(&bot_token);
+        debug!(conversation_id = %conversation_id, is_new, "Using conversation");
 
-    // ── Thread history hydration ──────────────────────────────────────────────
-    //
-    // On first touch of a thread that already has messages in Slack (i.e. the
-    // bot was restarted or the thread existed before the bot joined), fetch the
-    // full thread history via `conversations.replies` and seed it into the
-    // local ConversationStore so the LLM has full context.
-    //
-    // `thread_ts == msg_ts` means this IS the parent (first) message, so there
-    // is no prior history to hydrate.
-    if is_new && thread_ts.0 != msg_ts.0 {
-        let conv_store = storage.conversation_store();
-        // Idempotent upsert — safe to call even if orchestrator creates it later.
-        let title = format!("slack:{}:{}", channel_id, thread_ts.0);
-        if let Err(e) = conv_store
-            .create_conversation_with_id(conversation_id, Some(&title))
-            .await
-        {
-            warn!(error = %e, "Failed to create conversation for history seeding");
-        } else {
-            // Paginate through all replies — Slack may return `has_more: true`
-            // with a cursor for long-lived threads (>100 messages per page).
-            let mut cursor: Option<SlackCursorId> = None;
-            let mut seeded = 0usize;
-            let mut fetch_error = false;
-            loop {
-                let mut replies_req = SlackApiConversationsRepliesRequest::new(
-                    channel_id.clone().into(),
-                    thread_ts.clone(),
-                );
-                if let Some(ref c) = cursor {
-                    replies_req = replies_req.with_cursor(c.clone());
-                }
-                match session.conversations_replies(&replies_req).await {
-                    Ok(resp) => {
-                        for hist_msg in &resp.messages {
-                            // Skip the triggering message when we're currently
-                            // processing a new user message (the orchestrator
-                            // inserts it). Reaction events are synthetic, so
-                            // we keep the original message in-context.
-                            if matches!(incoming.kind, SlackIncomingKind::Message)
-                                && hist_msg.origin.ts == msg_ts
-                            {
-                                continue;
+        // ── Thread history hydration ──────────────────────────────────────────────
+        //
+        // On first touch of a thread that already has messages in Slack (i.e. the
+        // bot was restarted or the thread existed before the bot joined), fetch the
+        // full thread history via `conversations.replies` and seed it into the
+        // local ConversationStore so the LLM has full context.
+        //
+        // `thread_ts == msg_ts` means this IS the parent (first) message, so there
+        // is no prior history to hydrate.
+        if is_new && thread_ts.0 != msg_ts.0 {
+            let conv_store = storage.conversation_store();
+            // Idempotent upsert — safe to call even if orchestrator creates it later.
+            let title = format!("slack:{}:{}", channel_id, thread_ts.0);
+            if let Err(e) = conv_store
+                .create_conversation_with_id(conversation_id, Some(&title))
+                .await
+            {
+                warn!(error = %e, "Failed to create conversation for history seeding");
+            } else {
+                // Paginate through all replies — Slack may return `has_more: true`
+                // with a cursor for long-lived threads (>100 messages per page).
+                let mut cursor: Option<SlackCursorId> = None;
+                let mut seeded = 0usize;
+                let mut fetch_error = false;
+                loop {
+                    let mut replies_req = SlackApiConversationsRepliesRequest::new(
+                        channel_id.clone().into(),
+                        thread_ts.clone(),
+                    );
+                    if let Some(ref c) = cursor {
+                        replies_req = replies_req.with_cursor(c.clone());
+                    }
+                    match session.conversations_replies(&replies_req).await {
+                        Ok(resp) => {
+                            for hist_msg in &resp.messages {
+                                // Skip the triggering message when we're currently
+                                // processing a new user message (the orchestrator
+                                // inserts it). Reaction events are synthetic, so
+                                // we keep the original message in-context.
+                                if matches!(incoming.kind, SlackIncomingKind::Message)
+                                    && hist_msg.origin.ts == msg_ts
+                                {
+                                    continue;
+                                }
+                                let role = match classify_history_msg(hist_msg) {
+                                    Some(r) => r,
+                                    None => continue,
+                                };
+                                let body = hist_msg.content.text.as_deref().unwrap_or("");
+                                let file_text = hist_msg
+                                    .content
+                                    .files
+                                    .as_ref()
+                                    .filter(|files| !files.is_empty())
+                                    .map(|files| format_file_attachments(files))
+                                    .unwrap_or_default();
+                                let content = match (body.trim().is_empty(), file_text.is_empty()) {
+                                    (true, true) => continue,
+                                    (true, false) => file_text,
+                                    (false, true) => body.to_string(),
+                                    (false, false) => format!("{body}\n\n{file_text}"),
+                                };
+                                let msg_to_seed = Message::new(conversation_id, role, content);
+                                if let Err(e) = conv_store.save_message(&msg_to_seed).await {
+                                    warn!(error = %e, "Failed to seed thread history message");
+                                } else {
+                                    seeded += 1;
+                                }
                             }
-                            let role = match classify_history_msg(hist_msg) {
-                                Some(r) => r,
-                                None => continue,
-                            };
-                            let body = hist_msg.content.text.as_deref().unwrap_or("");
-                            let file_text = hist_msg
-                                .content
-                                .files
+                            // Advance cursor; exit loop when all pages consumed.
+                            if resp
+                                .response_metadata
                                 .as_ref()
-                                .filter(|files| !files.is_empty())
-                                .map(|files| format_file_attachments(files))
-                                .unwrap_or_default();
-                            let content = match (body.trim().is_empty(), file_text.is_empty()) {
-                                (true, true) => continue,
-                                (true, false) => file_text,
-                                (false, true) => body.to_string(),
-                                (false, false) => format!("{body}\n\n{file_text}"),
-                            };
-                            let msg_to_seed = Message::new(conversation_id, role, content);
-                            if let Err(e) = conv_store.save_message(&msg_to_seed).await {
-                                warn!(error = %e, "Failed to seed thread history message");
+                                .and_then(|m| m.next_cursor.as_ref())
+                                .map(|c| !c.0.is_empty())
+                                .unwrap_or(false)
+                            {
+                                cursor = resp.response_metadata.and_then(|m| m.next_cursor);
                             } else {
-                                seeded += 1;
+                                break;
                             }
                         }
-                        // Advance cursor; exit loop when all pages consumed.
-                        if resp
-                            .response_metadata
-                            .as_ref()
-                            .and_then(|m| m.next_cursor.as_ref())
-                            .map(|c| !c.0.is_empty())
-                            .unwrap_or(false)
-                        {
-                            cursor = resp.response_metadata.and_then(|m| m.next_cursor);
-                        } else {
+                        Err(e) => {
+                            warn!(error = %e, "Failed to fetch thread history; proceeding without context");
+                            fetch_error = true;
                             break;
                         }
                     }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to fetch thread history; proceeding without context");
-                        fetch_error = true;
-                        break;
-                    }
+                }
+                if !fetch_error {
+                    info!(
+                        conversation_id = %conversation_id,
+                        seeded,
+                        "Seeded thread history"
+                    );
                 }
             }
-            if !fetch_error {
-                info!(
-                    conversation_id = %conversation_id,
-                    seeded,
-                    "Seeded thread history"
-                );
-            }
         }
-    }
 
-    // Acknowledge receipt with ⏳ — visible while the message is queued,
-    // before the per-conversation lock is acquired.
-    debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.add hourglass_flowing_sand (queued)");
-    let queue_req = SlackApiReactionsAddRequest::new(
-        channel_id.clone().into(),
-        SlackReactionName("hourglass_flowing_sand".to_string()),
-        msg_ts.clone(),
-    );
-    if let Err(e) = session.reactions_add(&queue_req).await {
-        let msg = e.to_string();
-        if msg.contains("already_reacted") {
-            debug!("Hourglass reaction already present, skipping");
-        } else {
-            warn!(error = %e, "reactions.add hourglass_flowing_sand failed");
-        }
-    }
-
-    // Download image files from Slack for vision-capable models.
-    // Non-image files are skipped — the LLM still sees their metadata in the
-    // text description appended by `format_file_attachments`.
-    let bot_token_str = bot_token.token_value.0.as_str();
-    let mut attachments = Vec::new();
-    for file in &slack_files {
-        if let Some(block) =
-            download_slack_file_as_content_block(file, bot_token_str, &http_client).await
-        {
-            attachments.push(block);
-        }
-    }
-    if !attachments.is_empty() {
-        info!(
-            count = attachments.len(),
-            "Downloaded image attachments for vision"
+        // Acknowledge receipt with ⏳ — visible while the message is queued,
+        // before the per-conversation lock is acquired.
+        debug!(channel = %channel_id, ts = %msg_ts.0, "reactions.add hourglass_flowing_sand (queued)");
+        let queue_req = SlackApiReactionsAddRequest::new(
+            channel_id.clone().into(),
+            SlackReactionName("hourglass_flowing_sand".to_string()),
+            msg_ts.clone(),
         );
-    }
-
-    // Transcribe audio files (voice messages) if a transcription provider is configured.
-    let mut text = text;
-    if let Some(ref provider) = transcription {
-        let transcript = transcribe_slack_audio_files(
-            &slack_files,
-            bot_token_str,
-            &http_client,
-            provider.as_ref(),
-            transcription_language.as_deref(),
-        )
-        .await;
-        if !transcript.is_empty() {
-            // Prepend the transcript so the LLM sees it before any file metadata.
-            text = if text.trim().is_empty() {
-                transcript
-            } else {
-                format!("{transcript}\n\n{text}")
-            };
-        }
-    }
-
-    // Push this message into the per-conversation pending queue so that if
-    // multiple messages pile up while a turn is in-flight, they can be
-    // drained and combined into a single orchestrator turn.
-    {
-        let mut queue = pending_messages.lock().await;
-        queue
-            .entry(conversation_id)
-            .or_default()
-            .push(PendingMessage {
-                text: text.clone(),
-                event_ts: incoming.event_ts.clone(),
-                event_kind: event_kind.to_string(),
-                user_id: user_id.clone(),
-                channel_id: channel_id.clone(),
-                thread_ts: thread_ts.clone(),
-                msg_ts: msg_ts.clone(),
-                attachments,
-            });
-    }
-
-    // Acquire (or create) the per-conversation mutex so that if two messages
-    // arrive for the same thread while a turn is in-flight, the second one
-    // waits until the first turn finishes.  This prevents interleaved history
-    // and duplicate replies caused by concurrent orchestrator runs.
-    let conv_lock = {
-        let mut locks = conv_locks.lock().await;
-        locks
-            .entry(conversation_id)
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-            .clone()
-    };
-    let _conv_guard = conv_lock.lock().await;
-
-    // ── Drain the pending queue ──────────────────────────────────────────────
-    //
-    // All messages that arrived while the previous turn was running (including
-    // our own) are now waiting in the queue.  Drain them all so they become a
-    // single combined orchestrator turn instead of N sequential turns.
-    let batch: Vec<PendingMessage> = {
-        let mut queue = pending_messages.lock().await;
-        queue.remove(&conversation_id).unwrap_or_default()
-    };
-
-    if batch.is_empty() {
-        // Another handler already drained our message — nothing to do.
-        debug!(conversation_id = %conversation_id, "Pending queue empty, another handler processed our message");
-        return Ok(());
-    }
-
-    let batch_size = batch.len();
-    info!(
-        conversation_id = %conversation_id,
-        batch_size,
-        "Drained pending queue — processing as single turn"
-    );
-
-    // Swap ⏳ → 👀 for every message in the batch now that we're actively
-    // processing this turn.
-    for pending in &batch {
-        debug!(channel = %pending.channel_id, ts = %pending.msg_ts.0, "⏳ → 👀");
-        let remove_hg = SlackApiReactionsRemoveRequest::new(SlackReactionName(
-            "hourglass_flowing_sand".to_string(),
-        ))
-        .with_channel(pending.channel_id.clone().into())
-        .with_timestamp(pending.msg_ts.clone());
-        if let Err(e) = session.reactions_remove(&remove_hg).await {
-            warn!(error = %e, ts = %pending.msg_ts.0, "reactions.remove hourglass_flowing_sand failed");
-        }
-        let add_eyes = SlackApiReactionsAddRequest::new(
-            pending.channel_id.clone().into(),
-            SlackReactionName("eyes".to_string()),
-            pending.msg_ts.clone(),
-        );
-        if let Err(e) = session.reactions_add(&add_eyes).await {
+        if let Err(e) = session.reactions_add(&queue_req).await {
             let msg = e.to_string();
             if msg.contains("already_reacted") {
-                debug!("Eyes reaction already present, skipping");
+                debug!("Hourglass reaction already present, skipping");
             } else {
-                warn!(error = %e, ts = %pending.msg_ts.0, "reactions.add eyes failed");
+                warn!(error = %e, "reactions.add hourglass_flowing_sand failed");
             }
         }
-    }
 
-    // Show a typing/processing status in the thread via the Assistant API.
-    debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → is thinking…");
-    let set_status_req = SlackApiAssistantThreadsSetStatusRequest::new(
-        channel_id.clone().into(),
-        "is thinking\u{2026}".to_string(),
-        thread_ts.clone(),
-    );
-    if let Err(e) = session.assistant_threads_set_status(&set_status_req).await {
-        debug!(error = %e, "assistant.threads.setStatus failed");
-    }
-
-    // Build per-turn Slack extension tools bound to the *last* message in the
-    // batch (most recent), so `react` targets the newest user message.
-    let last = batch.last().expect("batch is non-empty");
-
-    // Post a placeholder "…" so the user gets immediate feedback while the
-    // LLM is processing. The `reply` extension tool will update this message
-    // in-place via `chat.update` instead of posting a new one.
-    let update_ts: Option<SlackTs> = {
-        let placeholder_req = SlackApiChatPostMessageRequest::new(
-            last.channel_id.clone().into(),
-            SlackMessageContent::new().with_text("\u{2026}".to_string()),
-        )
-        .with_thread_ts(last.thread_ts.clone());
-        match session.chat_post_message(&placeholder_req).await {
-            Ok(resp) => {
-                debug!(
-                    channel = %resp.channel,
-                    ts = %resp.ts.0,
-                    "Posted streaming placeholder"
-                );
-                Some(resp.ts)
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to post placeholder; reply will use postMessage");
-                None
+        // Download image files from Slack for vision-capable models.
+        // Non-image files are skipped — the LLM still sees their metadata in the
+        // text description appended by `format_file_attachments`.
+        let bot_token_str = bot_token.token_value.0.as_str();
+        let mut attachments = Vec::new();
+        for file in &slack_files {
+            if let Some(block) =
+                download_slack_file_as_content_block(file, bot_token_str, &http_client).await
+            {
+                attachments.push(block);
             }
         }
-    };
+        if !attachments.is_empty() {
+            info!(
+                count = attachments.len(),
+                "Downloaded image attachments for vision"
+            );
+        }
 
-    let extensions = build_slack_tools(
-        last.channel_id.clone(),
-        Some(last.thread_ts.clone()),
-        last.msg_ts.clone(),
-        client.clone(),
-        bot_token.clone(),
-        update_ts.clone(),
-    );
+        // Transcribe audio files (voice messages) if a transcription provider is configured.
+        let mut text = text;
+        if let Some(ref provider) = transcription {
+            let transcript = transcribe_slack_audio_files(
+                &slack_files,
+                bot_token_str,
+                &http_client,
+                provider.as_ref(),
+                transcription_language.as_deref(),
+            )
+            .await;
+            if !transcript.is_empty() {
+                // Prepend the transcript so the LLM sees it before any file metadata.
+                text = if text.trim().is_empty() {
+                    transcript
+                } else {
+                    format!("{transcript}\n\n{text}")
+                };
+            }
+        }
 
-    // Combine all pending messages into a single contextualized prompt.
-    // Each message retains its own Slack context header so the LLM knows
-    // who sent what.
-    let contextualized_text = build_batch_prompt(&batch);
+        // Push this message into the per-conversation pending queue so that if
+        // multiple messages pile up while a turn is in-flight, they can be
+        // drained and combined into a single orchestrator turn.
+        {
+            let mut queue = pending_messages.lock().await;
+            queue
+                .entry(conversation_id)
+                .or_default()
+                .push(PendingMessage {
+                    text: text.clone(),
+                    event_ts: incoming.event_ts.clone(),
+                    event_kind: event_kind.to_string(),
+                    user_id: user_id.clone(),
+                    channel_id: channel_id.clone(),
+                    thread_ts: thread_ts.clone(),
+                    msg_ts: msg_ts.clone(),
+                    attachments,
+                });
+        }
 
-    // Collect image attachments from all messages in the batch.
-    let all_attachments: Vec<ContentBlock> = batch
-        .iter()
-        .flat_map(|m| m.attachments.iter().cloned())
-        .collect();
+        // Acquire (or create) the per-conversation mutex so that if two messages
+        // arrive for the same thread while a turn is in-flight, the second one
+        // waits until the first turn finishes.  This prevents interleaved history
+        // and duplicate replies caused by concurrent orchestrator runs.
+        let conv_lock = {
+            let mut locks = conv_locks.lock().await;
+            locks
+                .entry(conversation_id)
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+                .clone()
+        };
+        let _conv_guard = conv_lock.lock().await;
 
-    // Set up a token-streaming channel so the worker calls
-    // run_turn_with_tools_streaming instead of run_turn_with_tools.
-    // A background task reads from the channel and performs throttled
-    // chat.update calls on the placeholder message so the user sees the
-    // reply being typed progressively.
-    let (token_tx, mut token_rx) = mpsc::channel::<String>(256);
-    orchestrator
-        .register_token_sink(conversation_id, token_tx)
-        .await;
+        // ── Drain the pending queue ──────────────────────────────────────────────
+        //
+        // All messages that arrived while the previous turn was running (including
+        // our own) are now waiting in the queue.  Drain them all so they become a
+        // single combined orchestrator turn instead of N sequential turns.
+        let batch: Vec<PendingMessage> = {
+            let mut queue = pending_messages.lock().await;
+            queue.remove(&conversation_id).unwrap_or_default()
+        };
 
-    // Spawn the background Slack streaming updater.
-    let stream_client = client.clone();
-    let stream_token = bot_token.clone();
-    let stream_channel = last.channel_id.clone();
-    let stream_ts = update_ts.clone();
-    let stream_handle: tokio::task::JoinHandle<()> = tokio::spawn(async move {
-        if let Some(ref ts) = stream_ts {
-            let session = stream_client.open_session(&stream_token);
-            let mut accumulated = String::new();
-            let mut last_update = tokio::time::Instant::now();
-            // Throttle: at most one chat.update per second to stay well
-            // within Slack's rate limits.
-            let interval = tokio::time::Duration::from_millis(1000);
+        if batch.is_empty() {
+            // Another handler already drained our message — nothing to do.
+            debug!(conversation_id = %conversation_id, "Pending queue empty, another handler processed our message");
+            return;
+        }
 
-            while let Some(token) = token_rx.recv().await {
-                accumulated.push_str(&token);
-                if last_update.elapsed() >= interval && !accumulated.trim().is_empty() {
-                    let preview = format!("{accumulated}\u{2026}");
-                    let content = SlackMessageContent::new().with_text(preview);
-                    let req = SlackApiChatUpdateRequest::new(
-                        stream_channel.clone().into(),
-                        content,
-                        ts.clone(),
-                    );
-                    if let Err(e) = session.chat_update(&req).await {
-                        debug!(error = %e, "streaming chat.update failed (non-fatal)");
-                    }
-                    last_update = tokio::time::Instant::now();
+        let batch_size = batch.len();
+        info!(
+            conversation_id = %conversation_id,
+            batch_size,
+            "Drained pending queue — processing as single turn"
+        );
+
+        // Swap ⏳ → 👀 for every message in the batch now that we're actively
+        // processing this turn.
+        for pending in &batch {
+            debug!(channel = %pending.channel_id, ts = %pending.msg_ts.0, "⏳ → 👀");
+            let remove_hg = SlackApiReactionsRemoveRequest::new(SlackReactionName(
+                "hourglass_flowing_sand".to_string(),
+            ))
+            .with_channel(pending.channel_id.clone().into())
+            .with_timestamp(pending.msg_ts.clone());
+            if let Err(e) = session.reactions_remove(&remove_hg).await {
+                warn!(error = %e, ts = %pending.msg_ts.0, "reactions.remove hourglass_flowing_sand failed");
+            }
+            let add_eyes = SlackApiReactionsAddRequest::new(
+                pending.channel_id.clone().into(),
+                SlackReactionName("eyes".to_string()),
+                pending.msg_ts.clone(),
+            );
+            if let Err(e) = session.reactions_add(&add_eyes).await {
+                let msg = e.to_string();
+                if msg.contains("already_reacted") {
+                    debug!("Eyes reaction already present, skipping");
+                } else {
+                    warn!(error = %e, ts = %pending.msg_ts.0, "reactions.add eyes failed");
                 }
             }
-            // Channel closed: the reply tool has already posted the final
-            // text via chat.update, so no trailing update needed here.
-        } else {
-            // No placeholder — drain the channel silently.
-            while token_rx.recv().await.is_some() {}
         }
-    });
 
-    // Register extension tools and attachments so the worker dispatches
-    // to run_turn_with_tools_streaming when it claims this request.
-    orchestrator
-        .register_extensions(conversation_id, extensions, all_attachments.clone())
-        .await;
-
-    let batch_event_kind = {
-        let mut kinds = batch
-            .iter()
-            .map(|m| m.event_kind.as_str())
-            .collect::<std::collections::HashSet<_>>();
-        if kinds.len() == 1 {
-            kinds.drain().next().unwrap_or("message").to_string()
-        } else {
-            "mixed".to_string()
+        // Show a typing/processing status in the thread via the Assistant API.
+        debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → is thinking…");
+        let set_status_req = SlackApiAssistantThreadsSetStatusRequest::new(
+            channel_id.clone().into(),
+            "is thinking\u{2026}".to_string(),
+            thread_ts.clone(),
+        );
+        if let Err(e) = session.assistant_threads_set_status(&set_status_req).await {
+            debug!(error = %e, "assistant.threads.setStatus failed");
         }
-    };
 
-    let mut submit_metadata = HashMap::new();
-    submit_metadata.insert("slack.channel_id".to_string(), channel_id.clone());
-    submit_metadata.insert("slack.thread_ts".to_string(), thread_ts.0.clone());
-    submit_metadata.insert("slack.event_ts".to_string(), last.event_ts.0.clone());
-    submit_metadata.insert("slack.message_ts".to_string(), last.msg_ts.0.clone());
-    submit_metadata.insert("slack.batch_size".to_string(), batch_size.to_string());
-    submit_metadata.insert("slack.event_kind".to_string(), batch_event_kind);
+        // Build per-turn Slack extension tools bound to the *last* message in the
+        // batch (most recent), so `react` targets the newest user message.
+        let last = batch.last().expect("batch is non-empty");
 
-    let orchestrator_start = std::time::Instant::now();
-    debug!(
-        conversation_id = %conversation_id,
-        batch_size,
-        text_len = contextualized_text.len(),
-        attachment_count = all_attachments.len(),
-        "submit_turn →"
-    );
-    // Parse the last message's Slack timestamp ("unix.microseconds") to UTC.
-    let msg_ts: Option<DateTime<Utc>> = last.msg_ts.0.parse::<f64>().ok().and_then(|f| {
-        let secs = f as i64;
-        let nsecs = (f.fract() * 1_000_000_000.0) as u32;
-        DateTime::from_timestamp(secs, nsecs)
-    });
-    let turn_result = orchestrator
-        .submit_turn_with_metadata(
-            &contextualized_text,
-            conversation_id,
-            Interface::Slack,
-            msg_ts,
-            submit_metadata,
-        )
-        .await;
-    let elapsed_ms = orchestrator_start.elapsed().as_millis();
-
-    // The orchestrator turn is done; stop the streaming updater.  The reply
-    // tool will have already called chat.update with the final text, so we
-    // abort rather than waiting for any last partial update.
-    stream_handle.abort();
-
-    // Remove 👀 from every message in the batch and clear the typing status
-    // — regardless of outcome.
-    for pending in &batch {
-        debug!(channel = %pending.channel_id, ts = %pending.msg_ts.0, "reactions.remove eyes");
-        let remove_eyes =
-            SlackApiReactionsRemoveRequest::new(SlackReactionName("eyes".to_string()))
-                .with_channel(pending.channel_id.clone().into())
-                .with_timestamp(pending.msg_ts.clone());
-        if let Err(e) = session.reactions_remove(&remove_eyes).await {
-            warn!(error = %e, ts = %pending.msg_ts.0, "reactions.remove eyes failed");
-        }
-    }
-
-    debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → clear");
-    let clear_status_req = SlackApiAssistantThreadsSetStatusRequest::new(
-        channel_id.clone().into(),
-        String::new(),
-        thread_ts.clone(),
-    );
-    if let Err(e) = session
-        .assistant_threads_set_status(&clear_status_req)
-        .await
-    {
-        debug!(error = %e, "assistant.threads.setStatus clear failed");
-    }
-
-    match turn_result {
-        Err(e) => {
-            error!(
-                error = %e,
-                elapsed_ms,
-                batch_size,
-                conversation_id = %conversation_id,
-                channel = %channel_id,
-                thread_ts = %thread_ts.0,
-                slack_event_ts = %incoming.event_ts.0,
-                "orchestrator error"
-            );
-            // Note: the orchestrator already persists a synthetic assistant
-            // message on error (persist_error_recovery) so the conversation
-            // history keeps proper User→Assistant alternation.
-
-            // Notify the user so they aren't left waiting silently.
-            let err_req = SlackApiChatPostMessageRequest::new(
-                channel_id.clone().into(),
-                SlackMessageContent::new()
-                    .with_text("Sorry, something went wrong processing your message.".to_string()),
+        // Post a placeholder "…" so the user gets immediate feedback while the
+        // LLM is processing. The `reply` extension tool will update this message
+        // in-place via `chat.update` instead of posting a new one.
+        let update_ts: Option<SlackTs> = {
+            let placeholder_req = SlackApiChatPostMessageRequest::new(
+                last.channel_id.clone().into(),
+                SlackMessageContent::new().with_text("\u{2026}".to_string()),
             )
-            .with_thread_ts(thread_ts.clone());
-            if let Err(post_err) = session.chat_post_message(&err_req).await {
-                warn!(error = %post_err, "Failed to post error feedback to user");
+            .with_thread_ts(last.thread_ts.clone());
+            match session.chat_post_message(&placeholder_req).await {
+                Ok(resp) => {
+                    debug!(
+                        channel = %resp.channel,
+                        ts = %resp.ts.0,
+                        "Posted streaming placeholder"
+                    );
+                    Some(resp.ts)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to post placeholder; reply will use postMessage");
+                    None
+                }
             }
-            return Ok(());
-        }
-        Ok(turn) => {
-            debug!(
-                conversation_id = %conversation_id,
-                elapsed_ms,
-                batch_size,
-                attachments = turn.attachments.len(),
-                "submit_turn ← ok"
-            );
+        };
 
-            // Upload any file attachments produced by tools during the turn
-            // (e.g. images auto-detected by the bash handler).
-            if !turn.attachments.is_empty() {
-                let uploader = SlackSessionUploader::new(client.open_session(&bot_token));
-                upload_attachments(&uploader, &turn.attachments, &channel_id, Some(&thread_ts))
-                    .await;
+        let extensions = build_slack_tools(
+            last.channel_id.clone(),
+            Some(last.thread_ts.clone()),
+            last.msg_ts.clone(),
+            client.clone(),
+            bot_token.clone(),
+            update_ts.clone(),
+        );
+
+        // Combine all pending messages into a single contextualized prompt.
+        // Each message retains its own Slack context header so the LLM knows
+        // who sent what.
+        let contextualized_text = build_batch_prompt(&batch);
+
+        // Collect image attachments from all messages in the batch.
+        let all_attachments: Vec<ContentBlock> = batch
+            .iter()
+            .flat_map(|m| m.attachments.iter().cloned())
+            .collect();
+
+        // Set up a token-streaming channel so the worker calls
+        // run_turn_with_tools_streaming instead of run_turn_with_tools.
+        // A background task reads from the channel and performs throttled
+        // chat.update calls on the placeholder message so the user sees the
+        // reply being typed progressively.
+        let (token_tx, mut token_rx) = mpsc::channel::<String>(256);
+        orchestrator
+            .register_token_sink(conversation_id, token_tx)
+            .await;
+
+        // Spawn the background Slack streaming updater.
+        let stream_client = client.clone();
+        let stream_token = bot_token.clone();
+        let stream_channel = last.channel_id.clone();
+        let stream_ts = update_ts.clone();
+        let stream_handle: tokio::task::JoinHandle<()> = tokio::spawn(async move {
+            if let Some(ref ts) = stream_ts {
+                let session = stream_client.open_session(&stream_token);
+                let mut accumulated = String::new();
+                let mut last_update = tokio::time::Instant::now();
+                // Throttle: at most one chat.update per second to stay well
+                // within Slack's rate limits.
+                let interval = tokio::time::Duration::from_millis(1000);
+
+                while let Some(token) = token_rx.recv().await {
+                    accumulated.push_str(&token);
+                    if last_update.elapsed() >= interval && !accumulated.trim().is_empty() {
+                        let preview = format!("{accumulated}\u{2026}");
+                        let content = SlackMessageContent::new().with_text(preview);
+                        let req = SlackApiChatUpdateRequest::new(
+                            stream_channel.clone().into(),
+                            content,
+                            ts.clone(),
+                        );
+                        if let Err(e) = session.chat_update(&req).await {
+                            debug!(error = %e, "streaming chat.update failed (non-fatal)");
+                        }
+                        last_update = tokio::time::Instant::now();
+                    }
+                }
+                // Channel closed: the reply tool has already posted the final
+                // text via chat.update, so no trailing update needed here.
+            } else {
+                // No placeholder — drain the channel silently.
+                while token_rx.recv().await.is_some() {}
+            }
+        });
+
+        // Register extension tools and attachments so the worker dispatches
+        // to run_turn_with_tools_streaming when it claims this request.
+        orchestrator
+            .register_extensions(conversation_id, extensions, all_attachments.clone())
+            .await;
+
+        let batch_event_kind = {
+            let mut kinds = batch
+                .iter()
+                .map(|m| m.event_kind.as_str())
+                .collect::<std::collections::HashSet<_>>();
+            if kinds.len() == 1 {
+                kinds.drain().next().unwrap_or("message").to_string()
+            } else {
+                "mixed".to_string()
+            }
+        };
+
+        let mut submit_metadata = HashMap::new();
+        submit_metadata.insert("slack.channel_id".to_string(), channel_id.clone());
+        submit_metadata.insert("slack.thread_ts".to_string(), thread_ts.0.clone());
+        submit_metadata.insert("slack.event_ts".to_string(), last.event_ts.0.clone());
+        submit_metadata.insert("slack.message_ts".to_string(), last.msg_ts.0.clone());
+        submit_metadata.insert("slack.batch_size".to_string(), batch_size.to_string());
+        submit_metadata.insert("slack.event_kind".to_string(), batch_event_kind);
+
+        let orchestrator_start = std::time::Instant::now();
+        debug!(
+            conversation_id = %conversation_id,
+            batch_size,
+            text_len = contextualized_text.len(),
+            attachment_count = all_attachments.len(),
+            "submit_turn →"
+        );
+        // Parse the last message's Slack timestamp ("unix.microseconds") to UTC.
+        let msg_ts: Option<DateTime<Utc>> = last.msg_ts.0.parse::<f64>().ok().and_then(|f| {
+            let secs = f as i64;
+            let nsecs = (f.fract() * 1_000_000_000.0) as u32;
+            DateTime::from_timestamp(secs, nsecs)
+        });
+        let turn_result = orchestrator
+            .submit_turn_with_metadata(
+                &contextualized_text,
+                conversation_id,
+                Interface::Slack,
+                msg_ts,
+                submit_metadata,
+            )
+            .await;
+        let elapsed_ms = orchestrator_start.elapsed().as_millis();
+
+        // The orchestrator turn is done; stop the streaming updater.  The reply
+        // tool will have already called chat.update with the final text, so we
+        // abort rather than waiting for any last partial update.
+        stream_handle.abort();
+
+        // Remove 👀 from every message in the batch and clear the typing status
+        // — regardless of outcome.
+        for pending in &batch {
+            debug!(channel = %pending.channel_id, ts = %pending.msg_ts.0, "reactions.remove eyes");
+            let remove_eyes =
+                SlackApiReactionsRemoveRequest::new(SlackReactionName("eyes".to_string()))
+                    .with_channel(pending.channel_id.clone().into())
+                    .with_timestamp(pending.msg_ts.clone());
+            if let Err(e) = session.reactions_remove(&remove_eyes).await {
+                warn!(error = %e, ts = %pending.msg_ts.0, "reactions.remove eyes failed");
             }
         }
-    }
+
+        debug!(channel = %channel_id, thread_ts = %thread_ts.0, "assistant.threads.setStatus → clear");
+        let clear_status_req = SlackApiAssistantThreadsSetStatusRequest::new(
+            channel_id.clone().into(),
+            String::new(),
+            thread_ts.clone(),
+        );
+        if let Err(e) = session
+            .assistant_threads_set_status(&clear_status_req)
+            .await
+        {
+            debug!(error = %e, "assistant.threads.setStatus clear failed");
+        }
+
+        match turn_result {
+            Err(e) => {
+                error!(
+                    error = %e,
+                    elapsed_ms,
+                    batch_size,
+                    conversation_id = %conversation_id,
+                    channel = %channel_id,
+                    thread_ts = %thread_ts.0,
+                    slack_event_ts = %incoming.event_ts.0,
+                    "orchestrator error"
+                );
+                // Note: the orchestrator already persists a synthetic assistant
+                // message on error (persist_error_recovery) so the conversation
+                // history keeps proper User→Assistant alternation.
+
+                // Notify the user so they aren't left waiting silently.
+                let err_req = SlackApiChatPostMessageRequest::new(
+                    channel_id.clone().into(),
+                    SlackMessageContent::new().with_text(
+                        "Sorry, something went wrong processing your message.".to_string(),
+                    ),
+                )
+                .with_thread_ts(thread_ts.clone());
+                if let Err(post_err) = session.chat_post_message(&err_req).await {
+                    warn!(error = %post_err, "Failed to post error feedback to user");
+                }
+            }
+            Ok(turn) => {
+                debug!(
+                    conversation_id = %conversation_id,
+                    elapsed_ms,
+                    batch_size,
+                    attachments = turn.attachments.len(),
+                    "submit_turn ← ok"
+                );
+
+                // Upload any file attachments produced by tools during the turn
+                // (e.g. images auto-detected by the bash handler).
+                if !turn.attachments.is_empty() {
+                    let uploader = SlackSessionUploader::new(client.open_session(&bot_token));
+                    upload_attachments(&uploader, &turn.attachments, &channel_id, Some(&thread_ts))
+                        .await;
+                }
+            }
+        }
+    }); // tokio::spawn
 
     Ok(())
 }
@@ -1450,6 +1457,10 @@ impl SlackInterface {
         // so a turn in progress is not interrupted by a reconnect event.
         let conv_locks: Arc<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        // Per-conversation pending queue — shared across reconnects so
+        // messages queued while a reconnect is in progress are not lost.
+        let pending_messages: Arc<Mutex<HashMap<Uuid, Vec<PendingMessage>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         // LRU cache of threads the bot has been @-mentioned in.  Bounded to
         // avoid unbounded memory growth.  On a cache miss the database is
         // consulted so the bot keeps responding in old threads after a restart.
@@ -1527,7 +1538,7 @@ impl SlackInterface {
                     .build()
                     .expect("Failed to build HTTP client for Slack file downloads"),
                 conv_locks: conv_locks.clone(),
-                pending_messages: Arc::new(Mutex::new(HashMap::new())),
+                pending_messages: pending_messages.clone(),
                 active_threads: active_threads.clone(),
             };
 
