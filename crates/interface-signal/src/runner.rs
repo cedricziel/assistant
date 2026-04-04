@@ -85,7 +85,7 @@ impl SignalInterface {
 
         use std::collections::HashMap;
 
-        use assistant_core::Interface;
+        use assistant_core::{AllowlistFilter, Interface};
         use assistant_runtime::start_conversation_context;
         use chrono::Utc;
         use opentelemetry::Context as OtelContext;
@@ -189,8 +189,8 @@ impl SignalInterface {
                     let sender_str = sender.service_id_string();
 
                     // Allowlist check.
-                    if !self.config.allowed_senders.is_empty()
-                        && !self.config.allowed_senders.contains(&sender_str)
+                    if !AllowlistFilter::new(self.config.allowed_senders.clone())
+                        .is_allowed(&sender_str)
                     {
                         warn!(
                             sender = sender_str,

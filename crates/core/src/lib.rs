@@ -1,13 +1,16 @@
+pub mod allowlist;
 pub mod bus;
 pub mod bus_messages;
 pub mod config;
 pub mod context;
 pub mod memory;
 pub mod subagent;
+pub mod text;
 pub mod tool;
 pub mod types;
 pub mod upload;
 
+pub use allowlist::AllowlistFilter;
 pub use bus::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
 pub use bus_messages::{
     topic, AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase,
@@ -23,6 +26,7 @@ pub use memory::{
     base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments, MemoryLoader,
 };
 pub use subagent::SubagentRunner;
+pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
     AgentConfig, AssistantConfig, BusConfig, BusKind, CompactionConfig, EmbeddingConfig,

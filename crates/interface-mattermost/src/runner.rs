@@ -21,8 +21,8 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::Interface;
-use assistant_runtime::Orchestrator;
+use assistant_core::{preview, AllowlistFilter, Interface};
+use assistant_runtime::{InterfaceRunner, Orchestrator};
 use async_trait::async_trait;
 use chrono::DateTime;
 use lru::LruCache;
@@ -32,12 +32,6 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
-
-/// Short preview of a string for log output.
-fn preview(s: &str, max: usize) -> &str {
-    let end = s.char_indices().nth(max).map(|(i, _)| i).unwrap_or(s.len());
-    &s[..end]
-}
 
 use crate::config::{MattermostConfig, MattermostConfigExt};
 use crate::tools::build_mattermost_tools;
@@ -110,15 +104,13 @@ impl WebsocketHandler for MattermostHandler {
         }
 
         // Channel allowlist check.
-        if !self.config.allowed_channels.is_empty()
-            && !self.config.allowed_channels.contains(&channel_id)
-        {
+        if !AllowlistFilter::new(self.config.allowed_channels.clone()).is_allowed(&channel_id) {
             warn!(channel = %channel_id, "Ignoring message from non-allowlisted channel");
             return;
         }
 
         // User allowlist check.
-        if !self.config.allowed_users.is_empty() && !self.config.allowed_users.contains(&user_id) {
+        if !AllowlistFilter::new(self.config.allowed_users.clone()).is_allowed(&user_id) {
             warn!(user = %user_id, "Ignoring message from non-allowlisted user");
             return;
         }
@@ -410,5 +402,14 @@ mod tests {
         let known = "alice".to_string();
         let blocked = !cfg.allowed_users.is_empty() && !cfg.allowed_users.contains(&known);
         assert!(!blocked);
+    }
+}
+
+// ── InterfaceRunner impl ──────────────────────────────────────────────────────
+
+#[async_trait::async_trait]
+impl InterfaceRunner for MattermostInterface {
+    async fn run(&self) -> Result<()> {
+        self.run().await
     }
 }

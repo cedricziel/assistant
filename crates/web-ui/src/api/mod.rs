@@ -22,7 +22,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use assistant_core::{Interface, MessageRole};
-use assistant_runtime::Orchestrator;
+use assistant_runtime::AssistantInterface;
 use assistant_storage::ConversationStore;
 use axum::{
     extract::{Path, State},
@@ -50,13 +50,13 @@ pub struct ApiState {
     pub pool: SqlitePool,
     /// Shared live agent ID — updated when the user switches personas at runtime.
     pub agent_id: Arc<RwLock<String>>,
-    pub orchestrator: Arc<Orchestrator>,
+    pub orchestrator: Arc<dyn AssistantInterface>,
 }
 
 impl ApiState {
     pub fn new(
         pool: SqlitePool,
-        orchestrator: Arc<Orchestrator>,
+        orchestrator: Arc<dyn AssistantInterface>,
         agent_id: Arc<RwLock<String>>,
     ) -> Self {
         Self {

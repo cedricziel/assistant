@@ -13,7 +13,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{sanitize_llm_output, ExecutionContext, ToolHandler, ToolOutput};
 
 use crate::signing::sign_request;
 
@@ -26,110 +26,6 @@ fn build_client() -> reqwest::Client {
         .timeout(REQUEST_TIMEOUT)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
-}
-
-// ── Message sanitization ─────────────────────────────────────────────────────
-//
-// Strip hidden LLM reasoning and citation markup before posting to Nextcloud.
-// These are duplicated from the Slack interface; a future refactor should move
-// them to a shared utility in `assistant-core`.
-
-/// Remove `<think>...</think>` blocks from a message.
-///
-/// Case-insensitive matching.  If a `<think>` tag is unclosed, everything
-/// from that tag onward is discarded.
-fn strip_think_tags(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let lower = input.to_lowercase();
-    let mut pos = 0;
-    while pos < input.len() {
-        match lower[pos..].find("<think>") {
-            Some(open_rel) => {
-                let open_abs = pos + open_rel;
-                result.push_str(&input[pos..open_abs]);
-                match lower[open_abs..].find("</think>") {
-                    Some(close_rel) => {
-                        pos = open_abs + close_rel + "</think>".len();
-                    }
-                    None => break, // unclosed tag — discard the rest
-                }
-            }
-            None => {
-                result.push_str(&input[pos..]);
-                break;
-            }
-        }
-    }
-    result.trim().to_string()
-}
-
-/// Remove `<cite ...>...</cite>` wrapper tags but preserve the inner content.
-fn strip_cite_tags(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut pos = 0;
-    let bytes = input.as_bytes();
-
-    while pos < bytes.len() {
-        match input[pos..].find("<cite") {
-            Some(open_rel) => {
-                let open_abs = pos + open_rel;
-                let after = open_abs + "<cite".len();
-                if after < input.len() {
-                    let boundary = input.as_bytes()[after];
-                    if boundary != b' '
-                        && boundary != b'>'
-                        && boundary != b'/'
-                        && boundary != b'\t'
-                        && boundary != b'\n'
-                    {
-                        // Not actually a <cite> tag (e.g. <cited>).
-                        result.push_str(&input[pos..open_abs + 1]);
-                        pos = open_abs + 1;
-                        continue;
-                    }
-                }
-                result.push_str(&input[pos..open_abs]);
-                match input[open_abs..].find('>') {
-                    Some(gt_rel) => {
-                        let content_start = open_abs + gt_rel + 1;
-                        match input[content_start..].find("</cite>") {
-                            Some(close_rel) => {
-                                result.push_str(&input[content_start..content_start + close_rel]);
-                                pos = content_start + close_rel + "</cite>".len();
-                            }
-                            None => {
-                                result.push_str(&input[content_start..]);
-                                return result;
-                            }
-                        }
-                    }
-                    None => {
-                        result.push_str(&input[open_abs..]);
-                        return result;
-                    }
-                }
-            }
-            None => {
-                result.push_str(&input[pos..]);
-                break;
-            }
-        }
-    }
-    result
-}
-
-/// Sanitize a message for posting to Nextcloud Talk.
-///
-/// Strips `<think>` reasoning blocks and `<cite>` wrapper tags.
-/// Returns `None` if nothing visible remains after sanitization.
-fn sanitize_message(input: &str) -> Option<String> {
-    let cleaned = strip_cite_tags(&strip_think_tags(input));
-    let trimmed = cleaned.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
 }
 
 // ── Reply tool ───────────────────────────────────────────────────────────────
@@ -203,7 +99,7 @@ impl ToolHandler for NextcloudReplyHandler {
     ) -> Result<ToolOutput> {
         let raw_message = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
 
-        let message = match sanitize_message(raw_message) {
+        let message = match sanitize_llm_output(raw_message) {
             Some(m) => m,
             None => {
                 return Ok(ToolOutput::error(
@@ -467,14 +363,14 @@ mod tests {
     #[test]
     fn sanitize_strips_think_tags() {
         let input = "<think>internal reasoning</think>Hello world";
-        assert_eq!(sanitize_message(input).unwrap(), "Hello world");
+        assert_eq!(sanitize_llm_output(input).unwrap(), "Hello world");
     }
 
     #[test]
     fn sanitize_strips_cite_tags_preserves_content() {
         let input = "See <cite index=\"1\">this source</cite> for details.";
         assert_eq!(
-            sanitize_message(input).unwrap(),
+            sanitize_llm_output(input).unwrap(),
             "See this source for details."
         );
     }
@@ -482,18 +378,18 @@ mod tests {
     #[test]
     fn sanitize_only_think_returns_none() {
         let input = "<think>all hidden</think>";
-        assert!(sanitize_message(input).is_none());
+        assert!(sanitize_llm_output(input).is_none());
     }
 
     #[test]
     fn sanitize_combined() {
         let input = "<think>hmm</think>Result: <cite index=\"1\">answer</cite>!";
-        assert_eq!(sanitize_message(input).unwrap(), "Result: answer!");
+        assert_eq!(sanitize_llm_output(input).unwrap(), "Result: answer!");
     }
 
     #[test]
     fn sanitize_plain_text_unchanged() {
         let input = "Hello, how can I help?";
-        assert_eq!(sanitize_message(input).unwrap(), input);
+        assert_eq!(sanitize_llm_output(input).unwrap(), input);
     }
 }
