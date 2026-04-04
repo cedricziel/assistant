@@ -1,6 +1,11 @@
 @AGENTS.md
 
 ## Active Technologies
+
+- Flutter 3.x (stable) + Dart 3.x, `flutter_riverpod 3.x`, `go_router 17.x`, `dio 5.x`, `flutter_secure_storage 10.x`, `assistant_api` (generated Dart client via openapi-generator dart-dio) (005-flutter-frontend)
+- Rust: `rust-embed` (embeds `app/build/web/` into binary), `mime_guess` (MIME detection for SPA handler), `build.rs` runs `flutter build web --release` at compile time (005-flutter-frontend)
+- Platforms: web (embedded in binary, served at `/`) + macOS native `.app` (005-flutter-frontend)
+
 - Rust 2021 edition, workspace resolver 2 + `tar 0.4`, `flate2 1`, `sha2 0.10`, `hex 0.4` (new); `serde`, `serde_json`, `tokio`, `anyhow`, `tracing`, `chrono` (existing workspace deps) (004-backup-restore)
 - SQLite at `~/.assistant/assistant.db` (WAL-checkpointed before copy); no new tables (004-backup-restore)
 
