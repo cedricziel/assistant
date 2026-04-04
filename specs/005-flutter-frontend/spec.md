@@ -5,6 +5,15 @@
 **Status**: Draft
 **Input**: User description: "i want to replace our current web-frontend and future native app frontends with a flutter frontend that we can package"
 
+## Clarifications
+
+### Session 2026-04-04
+
+- Q: How should the Flutter web build be deployed relative to the Rust backend? → A: The Flutter web assets MUST be embedded into the `assistant-web-ui` Rust binary at compile time and served by the same HTTP server — no separate static-file deployment.
+- Q: When the embedded web app loads in a browser, how does it discover the server URL? → A: Auto-detect from browser origin (`window.location.origin`); web users enter token only. macOS desktop users enter both URL and token.
+- Q: How is the Flutter web build triggered relative to `cargo build`? → A: A `build.rs` script in `crates/web-ui` runs `flutter build web` automatically when `app/` sources change; requires Flutter SDK on all build machines and CI runners.
+- Q: How should URL routing work during transition — do both UIs coexist, or does Flutter immediately replace the root? → A: Flutter serves at `/`; existing server-rendered HTML routes (`/chat`, `/skills`, `/traces`, `/logs`, `/login`) are removed in the same PR. API routes (`/api/*`) and auth middleware remain.
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - Real-Time Chat with the Assistant (Priority: P1)
@@ -40,29 +49,36 @@ progress indicators.
 
 ### User Story 2 - Server Connection & Profile Setup (Priority: P2)
 
-On first launch (or when no server is configured), the user is presented with a setup screen
-where they enter the assistant server address and authentication token. The app validates
-the connection and stores the profile for future launches without requiring re-entry.
+On first launch (or when no credentials are saved), the user is prompted to authenticate.
+The setup experience differs by platform:
 
-**Why this priority**: Without a valid server connection, no other feature works. This story
+- **Web (embedded in Rust binary)**: The server URL is auto-detected from the browser
+  origin (`window.location.origin`). The user enters only their authentication token.
+- **macOS desktop**: The user enters both the server URL and the authentication token.
+
+In both cases the app validates the connection and stores credentials for future launches.
+
+**Why this priority**: Without valid credentials, no other feature works. This story
 gates all downstream functionality and is required before the app can be distributed to
 any user.
 
-**Independent Test**: Install the app fresh, enter a server URL and token, confirm the
-connection succeeds (or fails with a clear error), then relaunch the app and verify
-credentials are retained without re-entry.
+**Independent Test**: On macOS — fresh install, enter URL + token, confirm success, relaunch
+and verify credentials retained. On web — open embedded app in browser, enter token only,
+confirm success, reload page and verify token retained.
 
 **Acceptance Scenarios**:
 
-1. **Given** the app has no saved server profile, **When** the user launches the app,
-   **Then** they are taken to a connection setup screen before the main interface.
-2. **Given** the user enters a valid server URL and token, **When** they tap "Connect",
-   **Then** the app verifies the credentials, saves them, and navigates to the main
-   chat interface.
-3. **Given** the user enters an incorrect token or unreachable server, **When** they
+1. **Given** the web app loads in a browser with no saved token, **When** the setup
+   screen appears, **Then** only a token field is shown (no server URL field); the URL
+   is derived automatically from the page origin.
+2. **Given** the macOS app has no saved profile, **When** the user launches it,
+   **Then** both a server URL field and a token field are shown.
+3. **Given** the user submits valid credentials on either platform, **When** validation
+   succeeds, **Then** credentials are saved and the user navigates to the chat interface.
+4. **Given** the user enters an incorrect token or unreachable server, **When** they
    tap "Connect", **Then** the app shows a specific, actionable error message
    (e.g., "Server unreachable" or "Invalid token").
-4. **Given** a valid profile is saved, **When** the user relaunches the app,
+5. **Given** valid credentials are saved, **When** the user relaunches or reloads the app,
    **Then** they go directly to the chat interface without re-entering credentials.
 
 ---
@@ -165,16 +181,22 @@ persona are listed with names and descriptions.
   during an assistant turn.
 - **FR-003**: Users MUST be able to start new conversations, send messages, and view the
   full history of prior conversations.
-- **FR-004**: The app MUST allow users to configure the server address and authentication
-  token on first launch and persist this configuration across restarts.
+- **FR-004**: The app MUST handle first-launch credential setup in a platform-aware way:
+  on the web build, the server URL is auto-detected from `window.location.origin` and
+  only the authentication token is entered by the user; on macOS desktop, both the server
+  URL and authentication token are entered. Credentials MUST be persisted across restarts
+  on both platforms.
 - **FR-005**: The app MUST validate the server connection before saving credentials and
   display actionable error messages on failure (distinguishing unreachable server from
   invalid token).
 - **FR-006**: Users MUST be able to switch between available personas, with the active
   persona clearly indicated in the chat interface.
-- **FR-007**: The app MUST be packageable and distributable as a native application on
-  two target platforms for the initial release: web (browser) and macOS desktop. Both
-  must be buildable from the same codebase and produce distributable artefacts.
+- **FR-007**: The app MUST be packageable and distributable on two target platforms for
+  the initial release: web (browser) and macOS desktop. Both MUST be buildable from the
+  same codebase. The Flutter web build output MUST be embedded into the `assistant-web-ui`
+  Rust binary at compile time and served by the same HTTP server as the API, so that a
+  single `assistant webui serve` binary delivers both the UI and the API with no separate
+  static-file deployment step.
 - **FR-008**: The app MUST display traces (recent assistant turns with timing and
   tool-call breakdowns) on a dedicated observability screen.
 - **FR-009**: The app MUST display structured log lines on a dedicated logs screen with
@@ -185,6 +207,10 @@ persona are listed with names and descriptions.
   return the user to the connection setup screen with a clear message.
 - **FR-012**: The app MUST function correctly when the server is accessed over plain HTTP,
   to support local and private-network deployments.
+- **FR-013**: The embedded Flutter web assets MUST be served without authentication at
+  the root path (`/`) so that unauthenticated users can load the app and enter their
+  token. Only `/api/*` routes remain auth-protected. The existing server-rendered HTML
+  routes (`/chat`, `/skills`, `/traces`, `/logs`, `/login`) MUST be removed.
 
 ### Key Entities
 
@@ -216,9 +242,9 @@ persona are listed with names and descriptions.
 - **SC-003**: The app is installable and fully functional as a native package on at least
   two distinct platforms without any user-facing server-side setup beyond the existing
   assistant backend.
-- **SC-004**: All user-facing capabilities available in the current browser-based web UI
-  are reachable from the new app (full feature parity verified by a capability checklist)
-  before the current web UI is retired.
+- **SC-004**: The Flutter app covers all user-facing capabilities of the replaced
+  server-rendered web UI (chat, personas, skills, traces, logs), verified by a capability
+  checklist that passes before the PR merging this feature is approved.
 - **SC-005**: The app recovers gracefully from network interruption — the user sees a
   clear error message within 5 seconds of connectivity loss and can retry without
   restarting the app.
@@ -233,9 +259,10 @@ persona are listed with names and descriptions.
   feature, not pre-existing prerequisites.
 - Authentication uses a static bearer token (`ASSISTANT_WEB_TOKEN`), matching the current
   web UI behaviour. No OAuth2, SSO, or user account system is in scope for v1.
-- The existing server-rendered web UI (`assistant-web-ui`) will run in parallel with the
-  new app during a transition period. Both surfaces are supported until SC-004 is met
-  and the web UI is formally retired.
+- The existing server-rendered HTML routes (`/chat`, `/skills`, `/traces`, `/logs`,
+  `/login`) in `assistant-web-ui` are removed in the same PR as this feature ships.
+  The Flutter app at `/` is the only web UI from day one of deployment. No parallel
+  transition period is required.
 - Skill creation, editing, and deletion are out of scope. The app provides read-only
   skill visibility only (US5, FR-010).
 - Workflow management, webhook configuration, and A2A (agent-to-agent) protocol management
@@ -244,3 +271,8 @@ persona are listed with names and descriptions.
   aggregation is not in scope.
 - Users are assumed to be running the assistant backend themselves (self-hosted). There
   is no cloud-hosted backend or account registration flow in scope.
+- The Flutter web build output (`app/build/web/`) is embedded into the Rust binary at
+  compile time (not served from an external directory at runtime). A `build.rs` script
+  in `crates/web-ui` triggers `flutter build web` automatically when `app/` sources
+  change, so developers and CI only need to run `make build`. Flutter SDK MUST be
+  installed on all machines that build the `assistant-web-ui` crate.
