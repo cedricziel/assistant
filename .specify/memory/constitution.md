@@ -1,15 +1,21 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.0 → 1.1.0
+Version change: 1.1.0 → 1.2.0
 Modified principles: none renamed
 Added sections:
-  - VIII. Dual-Mode Parity (NON-NEGOTIABLE) — new principle
+  - IX. Realtime API-First for Frontend Consumers (NON-NEGOTIABLE) — new principle
+    Ensures every user-facing capability is accessible via a streaming/realtime API
+    consumable by any frontend (web, Flutter/native, third-party) without server-side
+    coupling.
 Removed sections: none
 Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ Constitution Check section present; no structural change needed
-  - .specify/templates/spec-template.md ✅ No new mandatory sections required
-  - .specify/templates/tasks-template.md ✅ Dual-mode testing note covered by principle; no template change needed
+  - .specify/templates/plan-template.md ✅ Constitution Check section present; new principle
+    automatically applies to all future plans; no structural change needed
+  - .specify/templates/spec-template.md ✅ No new mandatory sections required; realtime API
+    requirements surface naturally as Functional Requirements in individual specs
+  - .specify/templates/tasks-template.md ✅ Realtime API coverage covered by principle;
+    no template change needed
   - .specify/templates/commands/ ✅ No command files present
 Deferred items:
   - RATIFICATION_DATE remains 2026-03-27 (first population date; original project start unknown)
@@ -126,6 +132,35 @@ horizontally-scaled distributed system. Treating either mode as second-class wil
 break production deployments. The `MessageBus` abstraction (in-process vs. NATS) exists
 precisely to keep both modes first-class — this principle enforces that intent.
 
+### IX. Realtime API-First for Frontend Consumers (NON-NEGOTIABLE)
+
+Every user-facing capability MUST be accessible through a feature-complete, realtime-capable
+API that any frontend (web, native, or third-party) can consume independently.
+
+The API MUST satisfy all of the following:
+
+- **Feature completeness**: All assistant capabilities (conversations, tool calls, streaming
+  LLM responses, persona management, skill management, observability data) MUST be reachable
+  via stable, versioned API endpoints. A capability that exists only in server-rendered HTML
+  or CLI output is NOT considered exposed.
+- **Realtime streaming**: LLM response tokens, tool execution progress, and live system events
+  MUST be streamable to clients. Server-Sent Events (SSE) or WebSocket MUST be used for
+  streaming paths; polling-only designs are NOT acceptable for latency-sensitive data.
+- **Frontend agnosticism**: The API MUST carry zero assumptions about the consuming client.
+  No web-framework-specific session coupling, no template rendering, and no
+  platform-specific headers or cookies may be required for a client to consume any endpoint.
+- **Native-client parity**: Any feature reachable from the web UI MUST be equally reachable
+  from a native client (e.g., Flutter mobile/desktop app) using the same API surface.
+  A feature is NOT complete until it is consumable by both web and native frontends.
+
+New interfaces or features that bypass this API surface MUST be rejected unless an ADR
+explicitly justifies the exception and defines a migration path.
+
+**Rationale**: Frontend technologies evolve faster than backend logic. Decoupling all frontends
+through a complete, streaming-capable API allows web, native (Flutter), and third-party clients
+to be built or replaced without modifying the core. It also enforces a clean architecture
+boundary: the backend is the authoritative system; frontends are interchangeable consumers.
+
 ## Code Style Standards
 
 The following constraints apply workspace-wide:
@@ -157,6 +192,10 @@ The following constraints apply workspace-wide:
 - **Dual-mode testing**: When adding or modifying runtime behaviour, verify the change works
   under both `assistant orchestrator run` (single-binary) and with `assistant worker` +
   external bus (distributed). Document which modes were tested in the PR description.
+- **Realtime API coverage**: When adding any user-facing capability, verify that it is
+  accessible via a versioned API endpoint and, where applicable, exposes a streaming path
+  (SSE or WebSocket). Document the endpoint(s) in the PR description and note whether
+  native-client consumption was validated.
 - **Architectural changes**: MUST be accompanied by a new or updated ADR in `docs/adr/`.
 - **CI gates**: GitHub Actions runs check, test, lint, and format on every push to `main` and
   on every PR. The `signal` feature is linted separately. Integration tests run with
@@ -185,4 +224,4 @@ violations MUST be documented in `Complexity Tracking` sections of the feature p
 Runtime development guidance lives in `AGENTS.md`; this constitution governs the _why_,
 `AGENTS.md` governs the _how_.
 
-**Version**: 1.1.0 | **Ratified**: 2026-03-27 | **Last Amended**: 2026-03-27
+**Version**: 1.2.0 | **Ratified**: 2026-03-27 | **Last Amended**: 2026-04-04
