@@ -32,7 +32,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::catalog::{build_catalog, build_file_io, ensure_namespace, CatalogRef};
-use crate::partition::partition_spec;
+use crate::partition::{batch_partition_key, partition_spec};
 use crate::schema::{arc, metrics_schema, METRICS_RECORDED_AT_FIELD_ID};
 
 /// OpenTelemetry metric exporter that persists metric points into an Apache
@@ -107,6 +107,9 @@ impl IcebergMetricExporter {
             return Ok(());
         }
 
+        // Capture representative timestamp from the first row before consuming.
+        let first_recorded_at_micros = rows.first().map(|r| r.recorded_at_us).unwrap_or(0);
+
         let iceberg_schema =
             metrics_schema().map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
         let arrow_schema = iceberg::arrow::schema_to_arrow_schema(&iceberg_schema)
@@ -116,6 +119,9 @@ impl IcebergMetricExporter {
 
         let mut guard = self.table.lock().await;
         let table = &*guard;
+
+        let partition_key =
+            batch_partition_key(table, first_recorded_at_micros, &self.config.partition);
 
         let file_io = build_file_io(&self.config);
         let schema_ref =
@@ -135,7 +141,7 @@ impl IcebergMetricExporter {
         );
         let data_file_builder = DataFileWriterBuilder::new(rolling_builder);
         let mut writer = data_file_builder
-            .build(None)
+            .build(partition_key)
             .await
             .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 

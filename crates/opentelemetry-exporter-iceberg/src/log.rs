@@ -28,7 +28,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::catalog::{build_catalog, build_file_io, ensure_namespace, CatalogRef};
-use crate::partition::partition_spec;
+use crate::partition::{batch_partition_key, partition_spec};
 use crate::schema::{arc, logs_schema, LOGS_TIMESTAMP_FIELD_ID};
 
 /// OpenTelemetry log exporter that persists log records into an Apache Iceberg
@@ -93,7 +93,18 @@ impl IcebergLogExporter {
 
     async fn export_inner(&self, batch: LogBatch<'_>) -> OTelSdkResult {
         let mut count = 0usize;
-        for _ in batch.iter() {
+        let mut first_timestamp_micros: i64 = 0;
+        for (record, _) in batch.iter() {
+            if count == 0 {
+                first_timestamp_micros = record
+                    .timestamp()
+                    .map(|t| {
+                        t.duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_micros() as i64)
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
+            }
             count += 1;
         }
         if count == 0 {
@@ -118,6 +129,9 @@ impl IcebergLogExporter {
         let mut guard = self.table.lock().await;
         let table = &*guard;
 
+        let partition_key =
+            batch_partition_key(table, first_timestamp_micros, &self.config.partition);
+
         let file_io = build_file_io(&self.config);
         let schema_ref =
             arc(logs_schema().map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?);
@@ -136,7 +150,7 @@ impl IcebergLogExporter {
         );
         let data_file_builder = DataFileWriterBuilder::new(rolling_builder);
         let mut writer = data_file_builder
-            .build(None)
+            .build(partition_key)
             .await
             .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?;
 

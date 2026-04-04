@@ -111,6 +111,41 @@ async fn span_is_written_and_queryable() {
     );
 }
 
+/// Exporting a span with `partition = Day` must succeed end-to-end.
+///
+/// This is a regression test for the bug where `DataFileWriterBuilder::build(None)`
+/// produced data files with an empty partition struct while the table had a
+/// non-empty partition spec, causing `fast_append` to reject the commit with
+/// "Partition value is not compatible with partition type".
+#[tokio::test]
+async fn span_exported_with_day_partition_succeeds() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let warehouse = dir.path().to_str().unwrap();
+    let config = IcebergConfig {
+        warehouse: Some(warehouse.to_string()),
+        namespace: "test".to_string(),
+        partition: PartitionGranularity::Day,
+        catalog_uri: None,
+    };
+
+    let exporter = IcebergSpanExporter::new(config)
+        .await
+        .expect("IcebergSpanExporter::new");
+
+    let span = make_span("partitioned-span");
+    let result: OTelSdkResult = exporter.export(vec![span]).await;
+    assert!(
+        result.is_ok(),
+        "export with day partition must succeed: {result:?}"
+    );
+
+    let parquet_files = find_parquet_files(warehouse);
+    assert!(
+        !parquet_files.is_empty(),
+        "at least one Parquet file must be written for the partitioned export"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
