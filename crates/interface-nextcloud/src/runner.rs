@@ -26,8 +26,8 @@ use tokio::sync::{Mutex, Semaphore};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use assistant_core::{Interface, NextcloudConfig};
-use assistant_runtime::Orchestrator;
+use assistant_core::{AllowlistFilter, Interface, NextcloudConfig};
+use assistant_runtime::{InterfaceRunner, Orchestrator};
 
 use crate::config::NextcloudConfigExt;
 use crate::signing::{sign_request, verify_signature};
@@ -102,7 +102,7 @@ impl NextcloudInterface {
     }
 
     /// Start the webhook HTTP server and block until shutdown.
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(&self) -> Result<()> {
         let server_url = self
             .config
             .resolved_server_url()
@@ -139,8 +139,8 @@ impl NextcloudInterface {
             .unwrap_or_else(|_| reqwest::Client::new());
 
         let state = Arc::new(AppState {
-            config: self.config,
-            orchestrator: self.orchestrator,
+            config: self.config.clone(),
+            orchestrator: self.orchestrator.clone(),
             secret,
             server_url,
             conversations: Mutex::new(HashMap::new()),
@@ -160,7 +160,7 @@ impl NextcloudInterface {
 
         // Choose shutdown strategy: external token (background mode) or
         // process-wide signals (standalone mode).
-        match self.shutdown {
+        match self.shutdown.clone() {
             Some(token) => {
                 axum::serve(listener, app)
                     .with_graceful_shutdown(async move { token.cancelled().await })
@@ -311,8 +311,7 @@ async fn handle_message(state: Arc<AppState>, event: WebhookEvent) -> Result<()>
     let message_id = event.message_id().to_string();
 
     // Allowlist checks.
-    if !state.config.allowed_channels.is_empty()
-        && !state.config.allowed_channels.contains(&conversation_token)
+    if !AllowlistFilter::new(state.config.allowed_channels.clone()).is_allowed(&conversation_token)
     {
         debug!(
             conversation = %conversation_token,
@@ -321,7 +320,7 @@ async fn handle_message(state: Arc<AppState>, event: WebhookEvent) -> Result<()>
         return Ok(());
     }
 
-    if !state.config.allowed_users.is_empty() && !state.config.allowed_users.contains(&user_id) {
+    if !AllowlistFilter::new(state.config.allowed_users.clone()).is_allowed(&user_id) {
         debug!(user = %user_id, "User not in allowed_users, ignoring");
         return Ok(());
     }
@@ -669,5 +668,14 @@ mod tests {
 
             assert_ne!(id1, id3);
         });
+    }
+}
+
+// ── InterfaceRunner impl ──────────────────────────────────────────────────────
+
+#[async_trait::async_trait]
+impl InterfaceRunner for NextcloudInterface {
+    async fn run(&self) -> Result<()> {
+        self.run().await
     }
 }

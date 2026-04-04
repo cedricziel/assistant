@@ -24,8 +24,8 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::Interface;
-use assistant_runtime::Orchestrator;
+use assistant_core::{AllowlistFilter, Interface};
+use assistant_runtime::{InterfaceRunner, Orchestrator};
 use lru::LruCache;
 use matrix_sdk::config::SyncSettings;
 use matrix_sdk::ruma::events::room::member::StrippedRoomMemberEvent;
@@ -277,13 +277,13 @@ impl MatrixInterface {
                 }
 
                 // Room allowlist check.
-                if !config.allowed_rooms.is_empty() && !config.allowed_rooms.contains(&room_id) {
+                if !AllowlistFilter::new(config.allowed_rooms.clone()).is_allowed(&room_id) {
                     warn!(room = %room_id, "Ignoring message from non-allowlisted room");
                     return;
                 }
 
                 // User allowlist check.
-                if !config.allowed_users.is_empty() && !config.allowed_users.contains(&sender) {
+                if !AllowlistFilter::new(config.allowed_users.clone()).is_allowed(&sender) {
                     warn!(user = %sender, "Ignoring message from non-allowlisted user");
                     return;
                 }
@@ -501,5 +501,14 @@ mod tests {
 
         // Rooms A and B have different IDs.
         assert_ne!(id_a1, id_b1, "separate rooms get separate conversation IDs");
+    }
+}
+
+// ── InterfaceRunner impl ──────────────────────────────────────────────────────
+
+#[async_trait::async_trait]
+impl InterfaceRunner for MatrixInterface {
+    async fn run(&self) -> Result<()> {
+        self.run().await
     }
 }

@@ -2,6 +2,8 @@ pub mod bootstrap;
 pub(crate) mod compaction;
 pub(crate) mod conversation_indexer;
 pub(crate) mod history;
+pub mod interface_runner;
+pub mod interface_trait;
 pub mod memory_indexer;
 pub mod metrics;
 pub mod orchestrator;
@@ -11,6 +13,8 @@ pub mod telemetry;
 pub mod webhook_dispatch;
 
 pub use bootstrap::spawn_memory_indexer;
+pub use interface_runner::InterfaceRunner;
+pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;
 pub use orchestrator::{Orchestrator, TurnResult};
 pub use otel_spans::start_conversation_context;

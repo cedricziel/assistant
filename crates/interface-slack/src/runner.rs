@@ -33,9 +33,9 @@ use std::sync::Arc;
 use lru::LruCache;
 
 use anyhow::Result;
-use assistant_core::{Interface, Message, MessageRole};
+use assistant_core::{preview, AllowlistFilter, Interface, Message, MessageRole};
 use assistant_llm::ContentBlock;
-use assistant_runtime::Orchestrator;
+use assistant_runtime::{InterfaceRunner, Orchestrator};
 use assistant_storage::StorageLayer;
 use assistant_transcription::TranscriptionProvider;
 use base64::Engine as _;
@@ -45,12 +45,6 @@ use slack_morphism::prelude::*;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-
-/// Short preview of a string for log output (avoids flooding logs with long messages).
-fn preview(s: &str, max: usize) -> &str {
-    let end = s.char_indices().nth(max).map(|(i, _)| i).unwrap_or(s.len());
-    &s[..end]
-}
 
 #[derive(Debug)]
 enum SlackIncomingKind {
@@ -670,13 +664,13 @@ async fn on_push_event(
     let msg_ts = incoming.ack_ts.clone();
 
     // Channel allowlist check.
-    if !config.allowed_channels.is_empty() && !config.allowed_channels.contains(&channel_id) {
+    if !AllowlistFilter::new(config.allowed_channels.clone()).is_allowed(&channel_id) {
         warn!(channel = %channel_id, "Ignoring message from non-allowlisted channel");
         return Ok(());
     }
 
     // User allowlist check.
-    if !config.allowed_users.is_empty() && !config.allowed_users.contains(&user_id) {
+    if !AllowlistFilter::new(config.allowed_users.clone()).is_allowed(&user_id) {
         warn!(user = %user_id, "Ignoring message from non-allowlisted user");
         return Ok(());
     }
@@ -2785,5 +2779,14 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "C_MY_CHANNEL");
         assert_eq!(calls[0].1.as_deref(), Some("1700000000.123456"),);
+    }
+}
+
+// ── InterfaceRunner impl ──────────────────────────────────────────────────────
+
+#[async_trait::async_trait]
+impl InterfaceRunner for SlackInterface {
+    async fn run(&self) -> Result<()> {
+        self.run().await
     }
 }

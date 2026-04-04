@@ -9,7 +9,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{resolve_upload_bytes, ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{
+    resolve_upload_bytes, strip_cite_tags, strip_think_tags, ExecutionContext, ToolHandler,
+    ToolOutput,
+};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use slack_morphism::prelude::*;
@@ -388,110 +391,6 @@ impl ToolHandler for SlackUploadHandler {
     }
 }
 
-// ── Think-tag stripping ───────────────────────────────────────────────────────
-
-/// Strip `<think>…</think>` blocks that some models (e.g. qwen3) embed inline
-/// in their response text when not using a dedicated thinking API.
-///
-/// The full original text (including think blocks) is preserved in the database
-/// by the orchestrator; this function only removes them before posting to Slack
-/// so users never see raw reasoning output.
-fn strip_think_tags(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let lower = input.to_lowercase();
-    let mut pos = 0;
-    while pos < input.len() {
-        match lower[pos..].find("<think>") {
-            Some(open_rel) => {
-                let open_abs = pos + open_rel;
-                result.push_str(&input[pos..open_abs]);
-                match lower[open_abs..].find("</think>") {
-                    Some(close_rel) => {
-                        pos = open_abs + close_rel + "</think>".len();
-                    }
-                    None => break, // unclosed tag — discard the rest
-                }
-            }
-            None => {
-                result.push_str(&input[pos..]);
-                break;
-            }
-        }
-    }
-    result.trim().to_string()
-}
-
-// ── Cite-tag stripping ───────────────────────────────────────────────────────
-
-/// Strip `<cite index="…">…</cite>` tags that some models embed to attribute
-/// sources, keeping only the inner text.
-///
-/// Unlike think-tags the *content* of a cite block is meaningful and must be
-/// preserved; only the surrounding tags are removed.
-fn strip_cite_tags(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut pos = 0;
-    let bytes = input.as_bytes();
-
-    while pos < bytes.len() {
-        // Look for `<cite` (case-sensitive — models emit lowercase).
-        match input[pos..].find("<cite") {
-            Some(open_rel) => {
-                let open_abs = pos + open_rel;
-                // The character right after `<cite` must be a tag boundary
-                // (whitespace, `>`, or `/`) so we don't match `<cited>` etc.
-                let after = open_abs + "<cite".len();
-                if after < input.len() {
-                    let boundary = input.as_bytes()[after];
-                    if boundary != b' '
-                        && boundary != b'>'
-                        && boundary != b'/'
-                        && boundary != b'\t'
-                        && boundary != b'\n'
-                    {
-                        // Not a real `<cite` tag — copy the `<` and keep scanning.
-                        result.push_str(&input[pos..open_abs + 1]);
-                        pos = open_abs + 1;
-                        continue;
-                    }
-                }
-                // Copy everything before the tag.
-                result.push_str(&input[pos..open_abs]);
-
-                // Find the closing `>` of the opening tag.
-                match input[open_abs..].find('>') {
-                    Some(gt_rel) => {
-                        let content_start = open_abs + gt_rel + 1;
-                        // Find the matching `</cite>`.
-                        match input[content_start..].find("</cite>") {
-                            Some(close_rel) => {
-                                // Keep the inner content.
-                                result.push_str(&input[content_start..content_start + close_rel]);
-                                pos = content_start + close_rel + "</cite>".len();
-                            }
-                            None => {
-                                // Unclosed cite — keep everything after the opening tag as-is.
-                                result.push_str(&input[content_start..]);
-                                return result;
-                            }
-                        }
-                    }
-                    None => {
-                        // Malformed opening tag — copy remainder and bail.
-                        result.push_str(&input[open_abs..]);
-                        return result;
-                    }
-                }
-            }
-            None => {
-                result.push_str(&input[pos..]);
-                break;
-            }
-        }
-    }
-    result
-}
-
 // ── Markdown → mrkdwn conversion ─────────────────────────────────────────────
 
 /// Convert a subset of standard Markdown to Slack mrkdwn format.
@@ -810,7 +709,9 @@ pub fn build_slack_tools(
 
 #[cfg(test)]
 mod tests {
-    use super::{markdown_to_mrkdwn, strip_cite_tags, strip_think_tags};
+    use assistant_core::{strip_cite_tags, strip_think_tags};
+
+    use super::markdown_to_mrkdwn;
 
     #[test]
     fn think_tags_stripped() {
