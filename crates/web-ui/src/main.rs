@@ -3,15 +3,12 @@ mod analytics;
 pub mod api;
 pub mod auth;
 pub(crate) mod backends;
-mod chat;
 pub mod common;
 mod contexts;
-mod logs;
+mod flutter_assets;
 mod openapi;
 mod pwa;
-mod skills;
 pub(crate) mod static_assets;
-mod traces;
 mod webhooks;
 mod workflows;
 
@@ -45,7 +42,6 @@ use assistant_workflow::{
 use assistant_workflow_http::HttpRequestActionExecutor;
 use axum::{
     http::StatusCode,
-    response::Redirect,
     routing::{get, post},
     Extension, Router,
 };
@@ -512,13 +508,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
-    let skills_pages_state = skills::pages::SkillsPagesState {
-        registry: state.registry.clone(),
-        orchestrator: orchestrator.clone(),
-    };
-
-    let chat_state = chat::ChatState::new(selected_agent.clone());
-
     let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
 
     let persona_api_state = api::personas::PersonaApiState {
@@ -543,7 +532,6 @@ async fn run_with_args(args: Args) -> Result<()> {
     let public_routes = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
-        .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
         // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
         .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))
@@ -558,10 +546,6 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()
-        // Trace / log UI routes.
-        .route("/", get(|| async { Redirect::to("/chat") }))
-        .merge(traces::traces_router())
-        .merge(logs::logs_router())
         .merge(analytics::analytics_router())
         .merge(contexts::contexts_router())
         .with_state(state)
@@ -573,10 +557,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
         // Workflow graph management pages + JSON API.
         .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
-        // Skill management pages.
-        .merge(skills::skills_router().with_state(skills_pages_state))
-        // Chat interface.
-        .merge(chat::chat_router().with_state(chat_state))
         // Conversation REST API.
         .merge(api::api_router().with_state(api_state))
         // Persona REST API (GET /api/personas, POST /api/personas/active).
@@ -622,6 +602,9 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let router = public_routes
         .merge(protected_routes)
+        // Flutter SPA fallback: serves embedded web assets for all unmatched
+        // paths (no auth required — FR-013).
+        .fallback(flutter_assets::flutter_handler)
         .layer(cors)
         .layer(Extension(auth_config))
         .layer(TraceLayer::new_for_http());
@@ -636,7 +619,7 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     info!("Listening on http://{}", addr);
     info!("A2A agent card: http://{}/.well-known/agent.json", addr);
-    info!("Authentication enabled — login at http://{}/login", addr);
+    info!("Authentication enabled — enter token at http://{}/", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router.into_make_service()).await?;
     Ok(())

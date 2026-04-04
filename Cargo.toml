@@ -114,6 +114,10 @@ gray_matter = "0.3"
 serde_yaml = "0.9"
 # Embed static file trees into the binary at compile time
 include_dir = "0.7"
+# Embed files/directories into the binary via proc-macro (used for Flutter web assets)
+rust-embed = "8"
+# MIME type detection from file extension
+mime_guess = "2"
 # Type-safe compiled templates
 askama = "0.15"
 # SQL persistence
