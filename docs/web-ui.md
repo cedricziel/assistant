@@ -12,18 +12,20 @@ the same SQLite database the runtime writes to.
 ASSISTANT_WEB_TOKEN=changeme cargo run -p assistant-cli -- webui serve --listen 127.0.0.1:8080
 ```
 
-Open <http://127.0.0.1:8080/login> and enter the token to sign in.
+The Flutter web app loads at <http://127.0.0.1:8080>. Enter the server URL
+and token in the connection screen to sign in.
 
 ## CLI options
 
-| Flag                 | Env var               | Default                     | Description                                               |
-| -------------------- | --------------------- | --------------------------- | --------------------------------------------------------- |
-| `--auth-token`       | `ASSISTANT_WEB_TOKEN` | _(required)_                | Token used for login and Bearer auth                      |
-| `--listen`           |                       | `127.0.0.1:8080`            | Address to bind                                           |
-| `--db-path`          |                       | `~/.assistant/assistant.db` | Path to the SQLite database                               |
-| `--trace-limit`      |                       | `200`                       | Max traces shown on the dashboard                         |
-| `--log-limit`        |                       | `500`                       | Max logs shown on the logs page                           |
-| `--no-secure-cookie` |                       | `false`                     | Disable `Secure` attribute on session cookies (see below) |
+| Flag                 | Env var                     | Default                     | Description                                               |
+| -------------------- | --------------------------- | --------------------------- | --------------------------------------------------------- |
+| `--auth-token`       | `ASSISTANT_WEB_TOKEN`       | _(required)_                | Token used for Bearer auth                                |
+| `--listen`           |                             | `127.0.0.1:8080`            | Address to bind                                           |
+| `--db-path`          |                             | `~/.assistant/assistant.db` | Path to the SQLite database                               |
+| `--trace-limit`      |                             | `200`                       | Max traces returned by `GET /api/traces`                  |
+| `--log-limit`        |                             | `500`                       | Max log entries returned by `GET /api/logs`               |
+| `--cors-origin`      | `ASSISTANT_WEB_CORS_ORIGIN` | _(wildcard)_                | Restrict CORS to a specific origin (e.g. macOS app URL)   |
+| `--no-secure-cookie` |                             | `false`                     | Disable `Secure` attribute on session cookies (see below) |
 
 ### Plain HTTP on non-loopback addresses
 
@@ -40,19 +42,39 @@ acceptable, pass `--no-secure-cookie` to disable this behaviour:
 assistant webui serve --listen 0.0.0.0:8080 --no-secure-cookie --auth-token changeme
 ```
 
-## Pages
+## Flutter app (primary interface)
+
+All unmatched paths are handled by the embedded Flutter web app (SPA
+fallback). The app uses the REST API below to drive the chat,
+persona switching, traces, logs, and skills views.
+
+## REST API (`/api/*`)
+
+These endpoints power the Flutter app and are also consumable directly:
+
+| Route                              | Method | Description                                       |
+| ---------------------------------- | ------ | ------------------------------------------------- |
+| `/api/conversations`               | GET    | List conversations                                |
+| `/api/conversations`               | POST   | Create conversation                               |
+| `/api/conversations/{id}`          | GET    | Get conversation with messages                    |
+| `/api/conversations/{id}`          | PATCH  | Rename conversation                               |
+| `/api/conversations/{id}`          | DELETE | Delete conversation                               |
+| `/api/conversations/{id}/messages` | POST   | Send message (SSE streaming response)             |
+| `/api/personas`                    | GET    | List personas                                     |
+| `/api/personas/active`             | POST   | Switch active persona                             |
+| `/api/personas/{id}/skills`        | GET    | List skills for a persona                         |
+| `/api/traces`                      | GET    | List traces (supports limit/offset/filter params) |
+| `/api/traces/{id}`                 | GET    | Get trace with span breakdown                     |
+| `/api/logs`                        | GET    | List log entries (supports filter params)         |
+
+Full OpenAPI spec is served at `/api/openapi.json`; Swagger UI at `/api/docs`.
+
+## Server-side management pages
 
 | Route                    | Description                                                                |
 | ------------------------ | -------------------------------------------------------------------------- |
-| `/`                      | Dashboard — recent traces with span counts, errors, tool names             |
-| `/traces`                | Same as `/`                                                                |
-| `/trace/{id}`            | Trace detail — full span tree for a single trace                           |
-| `/logs`                  | Log viewer — filterable by severity, target, search, trace ID              |
-| `/log/{id}`              | Single log record detail                                                   |
 | `/analytics`             | Metrics dashboard — token usage, model comparison, tool stats, error rates |
 | `/agents`                | A2A Profile management — list, create, edit, delete                        |
-| `/agents/new`            | Create a new A2A Profile card                                              |
-| `/agents/{id}`           | A2A Profile detail view                                                    |
 | `/agents/{id}/card.json` | Raw A2A Profile card JSON                                                  |
 | `/webhooks`              | Webhook management — list, create, toggle, rotate secrets                  |
 
@@ -85,23 +107,33 @@ see that Bearer authentication is required before making any API calls.
 
 ## Architecture
 
-The web UI is a server-side rendered (SSR) Axum application. There is
-no JavaScript framework — pages are plain HTML generated in Rust with
-inline CSS. This keeps the dependency footprint minimal and the UI
-fast.
+The server is an Axum application that embeds the Flutter web app at
+compile time via `rust-embed`. All unmatched routes fall through to the
+Flutter SPA so client-side routing (`go_router`) works correctly.
+
+The Flutter app lives in `app/` and is built automatically by
+`crates/web-ui/build.rs` when Cargo compiles the crate (requires the
+Flutter SDK on `PATH`; falls back to a placeholder if unavailable).
 
 ```
 assistant webui serve
-├── auth.rs         # Token auth middleware, login page, session cookies
-├── common.rs       # Shared HTML helpers (sidebar, page shell, escaping)
-├── main.rs         # CLI args, router setup, auto-hardening, page handlers
-├── a2a/
-│   ├── mod.rs          # Public + protected router split
-│   ├── handlers.rs     # A2A protocol JSON handlers
-│   ├── pages.rs        # Agent management HTML pages
-│   ├── agent_store.rs  # Filesystem-backed agent card store
-│   └── task_store.rs   # In-memory A2A task store
-└── webhooks/
-    ├── mod.rs          # Webhook router
-    └── pages.rs        # Webhook management HTML pages
+├── build.rs            # Runs `flutter build web` before compilation
+├── src/
+│   ├── flutter_assets.rs   # rust-embed of app/build/web/ → SPA fallback handler
+│   ├── auth.rs             # Bearer token middleware + session cookies
+│   ├── main.rs             # CLI args, router assembly, CORS layer
+│   ├── api/                # REST API consumed by the Flutter app
+│   │   ├── mod.rs              # /api/conversations + /api/conversations/{id}/messages (SSE)
+│   │   ├── personas.rs         # /api/personas, /api/personas/active
+│   │   ├── skills.rs           # /api/personas/{id}/skills
+│   │   ├── traces.rs           # /api/traces, /api/traces/{id}
+│   │   └── logs.rs             # /api/logs
+│   ├── a2a/                # A2A protocol endpoints + agent management pages
+│   └── webhooks/           # Webhook management pages
+app/                        # Flutter source (web + macOS targets)
 ```
+
+The Flutter macOS app connects to any `assistant webui serve` instance
+(local or remote) by entering the server URL and token in the connection
+screen. Credentials are stored in the platform keychain via
+`flutter_secure_storage`.
