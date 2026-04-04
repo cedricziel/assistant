@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.79](https://github.com/cedricziel/assistant/compare/v0.1.78...v0.1.79) (2026-04-04)
+
+
+### Bug Fixes
+
+* **iceberg-exporter:** pass partition key to fix partition validation error ([#369](https://github.com/cedricziel/assistant/issues/369)) ([ee55a04](https://github.com/cedricziel/assistant/commit/ee55a04cb3cd2ed87fbf85abf61f114094b70e86))
+
 ## [0.1.78](https://github.com/cedricziel/assistant/compare/v0.1.77...v0.1.78) (2026-04-03)
 
 
