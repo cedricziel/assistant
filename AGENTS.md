@@ -56,7 +56,7 @@ flutter build macos      # build macOS .app → app/build/macos/Build/Products/R
 
 ### App Structure
 
-```
+```text
 app/lib/
   api/
     client.dart                    # AssistantClient: HTTP + SSE streaming

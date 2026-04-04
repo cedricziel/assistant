@@ -112,9 +112,9 @@ curl -N -H "Authorization: Bearer dev-token" \
 # List personas
 curl -H "Authorization: Bearer dev-token" http://127.0.0.1:8080/api/personas
 
-# Switch active persona
+# Switch active persona — replace <PERSONA_ID> with an id from the list above
 curl -X POST -H "Authorization: Bearer dev-token" \
      -H "Content-Type: application/json" \
-     -d '{"id":"default"}' \
+     -d '{"id":"<PERSONA_ID>"}' \
      http://127.0.0.1:8080/api/personas/active
 ```

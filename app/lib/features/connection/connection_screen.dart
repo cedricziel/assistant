@@ -100,7 +100,9 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                         return 'Server URL is required';
                       }
                       final uri = Uri.tryParse(value.trim());
-                      if (uri == null || (!uri.scheme.startsWith('http'))) {
+                      if (uri == null ||
+                          (uri.scheme != 'http' && uri.scheme != 'https') ||
+                          !uri.hasAuthority) {
                         return 'Enter a valid http:// or https:// URL';
                       }
                       return null;

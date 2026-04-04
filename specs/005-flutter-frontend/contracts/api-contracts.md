@@ -1,8 +1,8 @@
 # API Contracts: Cross-Platform Native App Frontend (005-flutter-frontend)
 
-All endpoints require:
+All `/api/*` endpoints require (public endpoints such as `/health` are exempt):
 
-```
+```http
 Authorization: Bearer <token>
 ```
 
@@ -129,7 +129,7 @@ No auth required. Used for connection validation on profile setup.
 
 **Response 200** (`text/event-stream`):
 
-```
+```text
 event:token
 data: Hello
 
@@ -350,7 +350,7 @@ List recent log entries, newest first.
 The assistant server MUST emit the following headers on all `/api/*` routes when
 the `Origin` request header is present:
 
-```
+```http
 Access-Control-Allow-Origin: *
 Access-Control-Allow-Headers: Authorization, Content-Type
 Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
@@ -358,7 +358,7 @@ Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
 
 For SSE endpoints, additionally:
 
-```
+```http
 Access-Control-Allow-Origin: *
 ```
 

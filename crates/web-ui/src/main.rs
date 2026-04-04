@@ -591,9 +591,13 @@ async fn run_with_args(args: Args) -> Result<()> {
     // but the macOS desktop app and external clients make cross-origin requests.
     // We emit permissive CORS headers on all /api/* routes.
     let cors = if let Some(ref origin) = args.cors_origin {
-        let origin_val = origin
-            .parse::<axum::http::HeaderValue>()
-            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("*"));
+        let origin_val = match origin.parse::<axum::http::HeaderValue>() {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Invalid --cors-origin value {origin:?}: {e}; falling back to wildcard");
+                axum::http::HeaderValue::from_static("*")
+            }
+        };
         CorsLayer::new()
             .allow_origin(origin_val)
             .allow_headers([
