@@ -1,0 +1,13 @@
+# openapi-generator configuration for the Assistant Dart/Flutter client.
+# Usage: make generate-flutter-client
+#
+# Generator: dart-dio  (https://openapi-generator.tech/docs/generators/dart-dio)
+
+pubName: assistant_api
+pubAuthor: assistant
+pubVersion: 0.0.1
+pubDescription: "Generated Dart client for the Assistant API"
+browserClient: false
+nullableFields: true
+dateLibrary: core
+enumUnknownDefaultCase: true

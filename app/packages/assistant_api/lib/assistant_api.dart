@@ -1,0 +1,84 @@
+//
+// AUTO-GENERATED FILE, DO NOT MODIFY!
+//
+
+export 'package:assistant_api/src/api.dart';
+export 'package:assistant_api/src/auth/api_key_auth.dart';
+export 'package:assistant_api/src/auth/basic_auth.dart';
+export 'package:assistant_api/src/auth/bearer_auth.dart';
+export 'package:assistant_api/src/auth/oauth.dart';
+export 'package:assistant_api/src/serializers.dart';
+export 'package:assistant_api/src/model/date.dart';
+
+export 'package:assistant_api/src/api/agent_card_api.dart';
+export 'package:assistant_api/src/api/conversations_api.dart';
+export 'package:assistant_api/src/api/logs_api.dart';
+export 'package:assistant_api/src/api/messages_api.dart';
+export 'package:assistant_api/src/api/personas_api.dart';
+export 'package:assistant_api/src/api/push_notifications_api.dart';
+export 'package:assistant_api/src/api/skills_api.dart';
+export 'package:assistant_api/src/api/tasks_api.dart';
+export 'package:assistant_api/src/api/traces_api.dart';
+
+export 'package:assistant_api/src/model/agent_capabilities.dart';
+export 'package:assistant_api/src/model/agent_card.dart';
+export 'package:assistant_api/src/model/agent_card_signature.dart';
+export 'package:assistant_api/src/model/agent_extension.dart';
+export 'package:assistant_api/src/model/agent_interface.dart';
+export 'package:assistant_api/src/model/agent_provider.dart';
+export 'package:assistant_api/src/model/agent_skill.dart';
+export 'package:assistant_api/src/model/api_error_response.dart';
+export 'package:assistant_api/src/model/api_key_security_scheme.dart';
+export 'package:assistant_api/src/model/api_send_message_request.dart';
+export 'package:assistant_api/src/model/artifact.dart';
+export 'package:assistant_api/src/model/authentication_info.dart';
+export 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
+export 'package:assistant_api/src/model/cancel_task_request.dart';
+export 'package:assistant_api/src/model/client_credentials_o_auth_flow.dart';
+export 'package:assistant_api/src/model/conversation_detail.dart';
+export 'package:assistant_api/src/model/conversation_summary.dart';
+export 'package:assistant_api/src/model/create_conversation_request.dart';
+export 'package:assistant_api/src/model/create_task_push_notification_config_request.dart';
+export 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
+export 'package:assistant_api/src/model/get_extended_agent_card_request.dart';
+export 'package:assistant_api/src/model/get_task_push_notification_config_request.dart';
+export 'package:assistant_api/src/model/get_task_request.dart';
+export 'package:assistant_api/src/model/http_auth_security_scheme.dart';
+export 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
+export 'package:assistant_api/src/model/list_task_push_notification_configs_request.dart';
+export 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
+export 'package:assistant_api/src/model/list_tasks_request.dart';
+export 'package:assistant_api/src/model/list_tasks_response.dart';
+export 'package:assistant_api/src/model/log_entry_response.dart';
+export 'package:assistant_api/src/model/message.dart';
+export 'package:assistant_api/src/model/message_summary.dart';
+export 'package:assistant_api/src/model/model_part.dart';
+export 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
+export 'package:assistant_api/src/model/o_auth2_security_scheme.dart';
+export 'package:assistant_api/src/model/o_auth_flows.dart';
+export 'package:assistant_api/src/model/open_id_connect_security_scheme.dart';
+export 'package:assistant_api/src/model/password_o_auth_flow.dart';
+export 'package:assistant_api/src/model/persona_summary.dart';
+export 'package:assistant_api/src/model/push_notification_config.dart';
+export 'package:assistant_api/src/model/role.dart';
+export 'package:assistant_api/src/model/security_requirement.dart';
+export 'package:assistant_api/src/model/security_scheme.dart';
+export 'package:assistant_api/src/model/send_message_configuration.dart';
+export 'package:assistant_api/src/model/send_message_request.dart';
+export 'package:assistant_api/src/model/send_message_response.dart';
+export 'package:assistant_api/src/model/set_active_persona_request.dart';
+export 'package:assistant_api/src/model/skill_entry_response.dart';
+export 'package:assistant_api/src/model/span_entry_response.dart';
+export 'package:assistant_api/src/model/stream_response.dart';
+export 'package:assistant_api/src/model/string_list.dart';
+export 'package:assistant_api/src/model/subscribe_to_task_request.dart';
+export 'package:assistant_api/src/model/task.dart';
+export 'package:assistant_api/src/model/task_artifact_update_event.dart';
+export 'package:assistant_api/src/model/task_push_notification_config.dart';
+export 'package:assistant_api/src/model/task_state.dart';
+export 'package:assistant_api/src/model/task_status.dart';
+export 'package:assistant_api/src/model/task_status_update_event.dart';
+export 'package:assistant_api/src/model/trace_detail_response.dart';
+export 'package:assistant_api/src/model/trace_summary_response.dart';
+export 'package:assistant_api/src/model/update_conversation_request.dart';
+

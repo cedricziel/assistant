@@ -1,0 +1,3218 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Assistant API",
+        "description": "AI assistant API — A2A protocol (Agent-to-Agent), chat, and workflow management.\n\n**Authentication**: protected endpoints require `Authorization: Bearer <token>`.\nThe token is set via `--auth-token` / `ASSISTANT_WEB_TOKEN` on the server.",
+        "license": {
+            "name": "MIT"
+        },
+        "version": "0.1.80"
+    },
+    "servers": [
+        {
+            "url": "/",
+            "description": "Local assistant server"
+        }
+    ],
+    "paths": {
+        "/.well-known/agent.json": {
+            "get": {
+                "tags": [
+                    "agent-card"
+                ],
+                "summary": "`GET /.well-known/agent.json` -- Returns the public agent card.",
+                "operationId": "get_agent_card_well_known",
+                "responses": {
+                    "200": {
+                        "description": "Public agent card",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AgentCard"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": []
+            }
+        },
+        "/agent/authenticatedExtendedCard": {
+            "get": {
+                "tags": [
+                    "agent-card"
+                ],
+                "summary": "`GET /agent/authenticatedExtendedCard` -- Returns the extended agent card\n(same as public for now).",
+                "operationId": "get_extended_agent_card",
+                "responses": {
+                    "200": {
+                        "description": "Authenticated extended agent card",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AgentCard"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/conversations": {
+            "get": {
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "`GET /api/conversations` — list all conversations, newest first.",
+                "operationId": "list_conversations",
+                "responses": {
+                    "200": {
+                        "description": "List of conversations",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ConversationSummary"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "`POST /api/conversations` — create a new conversation.",
+                "operationId": "create_conversation",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateConversationRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created conversation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ConversationSummary"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/conversations/{id}": {
+            "get": {
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "`GET /api/conversations/{id}` — get a conversation and its message history.",
+                "operationId": "get_conversation",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Conversation ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Conversation with messages",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ConversationDetail"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "`DELETE /api/conversations/{id}` — delete a conversation and all its messages.",
+                "operationId": "delete_conversation",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Conversation ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "400": {
+                        "description": "Invalid ID"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "`PATCH /api/conversations/{id}` — update a conversation's title.",
+                "operationId": "update_conversation",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Conversation ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UpdateConversationRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated conversation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ConversationSummary"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Not found"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/conversations/{id}/messages": {
+            "post": {
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "`POST /api/conversations/{id}/messages` — send a message and stream the response.",
+                "description": "The response is a `text/event-stream` (SSE) with two event types:\n- `event: token` — incremental assistant token (data is plain text)\n- `event: done`  — final JSON object: `{\"role\":\"assistant\",\"content\":\"...\"}`",
+                "operationId": "send_message",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Conversation ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApiSendMessageRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of assistant tokens and final message",
+                        "content": {
+                            "text/event-stream": {}
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID or empty message"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Conversation not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/logs": {
+            "get": {
+                "tags": [
+                    "logs"
+                ],
+                "summary": "`GET /api/logs` — list recent log entries, newest first.",
+                "operationId": "list_logs",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "format": "int64"
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "format": "int64"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "severity",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "since",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "until",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "trace_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "conversation",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of log entries",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/LogEntryResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/personas": {
+            "get": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`GET /api/personas` — list all personas defined on the server.",
+                "operationId": "list_personas",
+                "responses": {
+                    "200": {
+                        "description": "List of personas",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/PersonaSummary"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/personas/active": {
+            "post": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`POST /api/personas/active` — switch the active persona for the session.",
+                "operationId": "set_active_persona",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SetActivePersonaRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Switched persona",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonaSummary"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/personas/{persona_id}/skills": {
+            "get": {
+                "tags": [
+                    "skills"
+                ],
+                "summary": "`GET /api/personas/{persona_id}/skills` — list skills for a persona.",
+                "operationId": "list_persona_skills",
+                "parameters": [
+                    {
+                        "name": "persona_id",
+                        "in": "path",
+                        "description": "Persona ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of skills for the persona",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/SkillEntryResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/traces": {
+            "get": {
+                "tags": [
+                    "traces"
+                ],
+                "summary": "`GET /api/traces` — list recent traces, newest first.",
+                "operationId": "list_traces",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "format": "int64"
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "format": "int64"
+                        }
+                    },
+                    {
+                        "name": "since",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "until",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "skill",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "conversation",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of traces",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/TraceSummaryResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/traces/{trace_id}": {
+            "get": {
+                "tags": [
+                    "traces"
+                ],
+                "summary": "`GET /api/traces/{trace_id}` — get a single trace with span breakdown.",
+                "operationId": "get_trace",
+                "parameters": [
+                    {
+                        "name": "trace_id",
+                        "in": "path",
+                        "description": "Trace ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Trace detail with spans",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TraceDetailResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Trace not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/message/send": {
+            "post": {
+                "tags": [
+                    "messages"
+                ],
+                "summary": "`POST /message/send` -- Sends a message to the agent (unary).",
+                "description": "Creates a task, records the user message, transitions to Working, produces\nan agent reply, and returns the final task state.",
+                "operationId": "send_message",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SendMessageRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Task created and completed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SendMessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/message/stream": {
+            "post": {
+                "tags": [
+                    "messages"
+                ],
+                "summary": "`POST /message/stream` -- Sends a message with streaming response (SSE).",
+                "operationId": "send_message_streaming",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SendMessageRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Streaming SSE response; each event is a JSON-encoded StreamResponse",
+                        "content": {
+                            "text/event-stream": {}
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/tasks": {
+            "get": {
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "`GET /tasks` -- Lists tasks matching optional filters.",
+                "operationId": "list_tasks",
+                "parameters": [
+                    {
+                        "name": "contextId",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/TaskState"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "pageSize",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "format": "int32"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Paginated task list",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ListTasksResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/tasks/{id}": {
+            "get": {
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "`GET /tasks/:id` -- Gets the latest state of a task.",
+                "operationId": "get_task",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Task details",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Task"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Task not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/tasks/{id}/cancel": {
+            "post": {
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "`POST /tasks/:id/cancel` -- Cancels a task.",
+                "operationId": "cancel_task",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Task ID to cancel",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cancelled task",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Task"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Task not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/tasks/{id}/subscribe": {
+            "get": {
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "`GET /tasks/:id/subscribe` -- Subscribes to task updates (SSE).",
+                "operationId": "subscribe_to_task",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Task ID to subscribe to",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of StreamResponse events",
+                        "content": {
+                            "text/event-stream": {}
+                        }
+                    },
+                    "400": {
+                        "description": "Task already in terminal state"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Task not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/tasks/{task_id}/pushNotificationConfigs": {
+            "get": {
+                "tags": [
+                    "push-notifications"
+                ],
+                "summary": "`GET /tasks/:task_id/pushNotificationConfigs`",
+                "operationId": "list_push_notification_configs",
+                "parameters": [
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "description": "Parent task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "pageSize",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "format": "int32"
+                        }
+                    },
+                    {
+                        "name": "pageToken",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of push notification configs",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ListTaskPushNotificationConfigsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "push-notifications"
+                ],
+                "summary": "`POST /tasks/:task_id/pushNotificationConfigs`",
+                "operationId": "create_push_notification_config",
+                "parameters": [
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "description": "Parent task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateTaskPushNotificationConfigRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Push notification config created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TaskPushNotificationConfig"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Task not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/tasks/{task_id}/pushNotificationConfigs/{config_id}": {
+            "get": {
+                "tags": [
+                    "push-notifications"
+                ],
+                "summary": "`GET /tasks/:task_id/pushNotificationConfigs/:config_id`",
+                "operationId": "get_push_notification_config",
+                "parameters": [
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "description": "Parent task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "config_id",
+                        "in": "path",
+                        "description": "Push notification config ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Push notification config",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TaskPushNotificationConfig"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Config not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "push-notifications"
+                ],
+                "summary": "`DELETE /tasks/:task_id/pushNotificationConfigs/:config_id`",
+                "operationId": "delete_push_notification_config",
+                "parameters": [
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "description": "Parent task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "config_id",
+                        "in": "path",
+                        "description": "Push notification config ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Config deleted"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Config not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "AgentCapabilities": {
+                "type": "object",
+                "description": "Defines optional capabilities supported by an agent.",
+                "properties": {
+                    "extendedAgentCard": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ],
+                        "description": "Indicates if the agent supports providing an extended agent card."
+                    },
+                    "extensions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AgentExtension"
+                        },
+                        "description": "Protocol extensions supported by the agent."
+                    },
+                    "pushNotifications": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ],
+                        "description": "Indicates if the agent supports push notifications."
+                    },
+                    "streaming": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ],
+                        "description": "Indicates if the agent supports streaming responses."
+                    }
+                }
+            },
+            "AgentCard": {
+                "type": "object",
+                "description": "A self-describing manifest for an agent.\n\nIt provides essential metadata including the agent's identity, capabilities,\nskills, supported communication methods, and security requirements.",
+                "required": [
+                    "name",
+                    "description",
+                    "supportedInterfaces",
+                    "version",
+                    "capabilities",
+                    "defaultInputModes",
+                    "defaultOutputModes",
+                    "skills"
+                ],
+                "properties": {
+                    "capabilities": {
+                        "$ref": "#/components/schemas/AgentCapabilities",
+                        "description": "A2A capability set supported by the agent."
+                    },
+                    "defaultInputModes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Input modes the agent supports across all skills (media types)."
+                    },
+                    "defaultOutputModes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Output media types supported by this agent."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "A human-readable description of the agent's purpose."
+                    },
+                    "documentationUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A URL providing additional documentation about the agent."
+                    },
+                    "iconUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A URL to an icon for the agent."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "A human-readable name for the agent."
+                    },
+                    "provider": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/AgentProvider",
+                                "description": "The service provider of the agent."
+                            }
+                        ]
+                    },
+                    "securityRequirements": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SecurityRequirement"
+                        },
+                        "description": "Security requirements for contacting the agent."
+                    },
+                    "securitySchemes": {
+                        "type": "object",
+                        "description": "Security scheme definitions for authenticating with this agent.",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/SecurityScheme"
+                        },
+                        "propertyNames": {
+                            "type": "string"
+                        }
+                    },
+                    "signatures": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AgentCardSignature"
+                        },
+                        "description": "JSON Web Signatures computed for this `AgentCard`."
+                    },
+                    "skills": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AgentSkill"
+                        },
+                        "description": "Skills represent the abilities of an agent."
+                    },
+                    "supportedInterfaces": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AgentInterface"
+                        },
+                        "description": "Ordered list of supported interfaces. The first entry is preferred."
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "The version of the agent (e.g., \"1.0.0\")."
+                    }
+                }
+            },
+            "AgentCardSignature": {
+                "type": "object",
+                "description": "Represents a JWS signature of an AgentCard (RFC 7515).",
+                "required": [
+                    "protected",
+                    "signature"
+                ],
+                "properties": {
+                    "header": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "The unprotected JWS header values.",
+                        "additionalProperties": true
+                    },
+                    "protected": {
+                        "type": "string",
+                        "description": "The protected JWS header, base64url-encoded JSON object."
+                    },
+                    "signature": {
+                        "type": "string",
+                        "description": "The computed signature, base64url-encoded."
+                    }
+                }
+            },
+            "AgentExtension": {
+                "type": "object",
+                "description": "A declaration of a protocol extension supported by an Agent.",
+                "required": [
+                    "uri"
+                ],
+                "properties": {
+                    "description": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A human-readable description of how this agent uses the extension."
+                    },
+                    "params": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Extension-specific configuration parameters.",
+                        "additionalProperties": true
+                    },
+                    "required": {
+                        "type": "boolean",
+                        "description": "If true, the client must understand and comply with the extension."
+                    },
+                    "uri": {
+                        "type": "string",
+                        "description": "The unique URI identifying the extension."
+                    }
+                }
+            },
+            "AgentInterface": {
+                "type": "object",
+                "description": "Declares a combination of a target URL, transport, and protocol version for\ninteracting with the agent.",
+                "required": [
+                    "url",
+                    "protocolBinding",
+                    "protocolVersion"
+                ],
+                "properties": {
+                    "protocolBinding": {
+                        "type": "string",
+                        "description": "The protocol binding (e.g., \"JSONRPC\", \"GRPC\", \"HTTP+JSON\")."
+                    },
+                    "protocolVersion": {
+                        "type": "string",
+                        "description": "The version of the A2A protocol this interface exposes (e.g., \"1.0\")."
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Tenant ID to be used in the request when calling the agent."
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "The URL where this interface is available."
+                    }
+                }
+            },
+            "AgentProvider": {
+                "type": "object",
+                "description": "Represents the service provider of an agent.",
+                "required": [
+                    "url",
+                    "organization"
+                ],
+                "properties": {
+                    "organization": {
+                        "type": "string",
+                        "description": "The name of the provider's organization."
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "A URL for the provider's website or documentation."
+                    }
+                }
+            },
+            "AgentSkill": {
+                "type": "object",
+                "description": "Represents a distinct capability or function that an agent can perform.",
+                "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "tags"
+                ],
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "A detailed description of the skill."
+                    },
+                    "examples": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Example prompts or scenarios that this skill can handle."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "A unique identifier for the skill."
+                    },
+                    "inputModes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Supported input media types, overriding agent defaults."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "A human-readable name for the skill."
+                    },
+                    "outputModes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Supported output media types, overriding agent defaults."
+                    },
+                    "securityRequirements": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SecurityRequirement"
+                        },
+                        "description": "Security schemes necessary for this skill."
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Keywords describing the skill's capabilities."
+                    }
+                }
+            },
+            "ApiErrorResponse": {
+                "type": "object",
+                "description": "API error response body (JSON-RPC style used by A2A handlers).",
+                "required": [
+                    "code",
+                    "message"
+                ],
+                "properties": {
+                    "code": {
+                        "type": "integer",
+                        "format": "int32",
+                        "description": "Numeric error code."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Human-readable error message."
+                    }
+                }
+            },
+            "ApiKeySecurityScheme": {
+                "type": "object",
+                "description": "Defines a security scheme using an API key.",
+                "required": [
+                    "location",
+                    "name"
+                ],
+                "properties": {
+                    "description": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "An optional description for the security scheme."
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "The location of the API key: \"query\", \"header\", or \"cookie\"."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The name of the header, query, or cookie parameter to be used."
+                    }
+                }
+            },
+            "ApiSendMessageRequest": {
+                "type": "object",
+                "description": "Body for `POST /api/conversations/{id}/messages`.",
+                "required": [
+                    "message"
+                ],
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "The message text to send to the assistant."
+                    }
+                }
+            },
+            "Artifact": {
+                "type": "object",
+                "description": "Artifacts represent task outputs.",
+                "required": [
+                    "artifactId",
+                    "parts"
+                ],
+                "properties": {
+                    "artifactId": {
+                        "type": "string",
+                        "description": "Unique identifier (UUID) for the artifact, unique within a task."
+                    },
+                    "description": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A human-readable description of the artifact."
+                    },
+                    "extensions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "The URIs of extensions present or contributing to this artifact."
+                    },
+                    "metadata": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Metadata included with the artifact.",
+                        "additionalProperties": true
+                    },
+                    "name": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A human-readable name for the artifact."
+                    },
+                    "parts": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Part"
+                        },
+                        "description": "The content of the artifact. Must contain at least one part."
+                    }
+                }
+            },
+            "AuthenticationInfo": {
+                "type": "object",
+                "description": "Defines authentication details, used for push notifications.",
+                "required": [
+                    "scheme"
+                ],
+                "properties": {
+                    "credentials": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Credentials. Format depends on the scheme."
+                    },
+                    "scheme": {
+                        "type": "string",
+                        "description": "HTTP Authentication Scheme (e.g., \"Bearer\", \"Basic\", \"Digest\")."
+                    }
+                }
+            },
+            "AuthorizationCodeOAuthFlow": {
+                "type": "object",
+                "description": "OAuth 2.0 Authorization Code flow configuration.",
+                "required": [
+                    "authorizationUrl",
+                    "tokenUrl",
+                    "scopes"
+                ],
+                "properties": {
+                    "authorizationUrl": {
+                        "type": "string",
+                        "description": "The authorization URL."
+                    },
+                    "pkceRequired": {
+                        "type": "boolean",
+                        "description": "Indicates if PKCE (RFC 7636) is required."
+                    },
+                    "refreshUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The URL for obtaining refresh tokens."
+                    },
+                    "scopes": {
+                        "type": "object",
+                        "description": "Available scopes for the OAuth2 security scheme.",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "propertyNames": {
+                            "type": "string"
+                        }
+                    },
+                    "tokenUrl": {
+                        "type": "string",
+                        "description": "The token URL."
+                    }
+                }
+            },
+            "CancelTaskRequest": {
+                "type": "object",
+                "description": "Request for the `CancelTask` method.",
+                "required": [
+                    "id"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The resource ID of the task to cancel."
+                    },
+                    "metadata": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Additional context or parameters.",
+                        "additionalProperties": true
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "ClientCredentialsOAuthFlow": {
+                "type": "object",
+                "description": "OAuth 2.0 Client Credentials flow configuration.",
+                "required": [
+                    "tokenUrl",
+                    "scopes"
+                ],
+                "properties": {
+                    "refreshUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The URL for obtaining refresh tokens."
+                    },
+                    "scopes": {
+                        "type": "object",
+                        "description": "Available scopes for the OAuth2 security scheme.",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "propertyNames": {
+                            "type": "string"
+                        }
+                    },
+                    "tokenUrl": {
+                        "type": "string",
+                        "description": "The token URL."
+                    }
+                }
+            },
+            "ConversationDetail": {
+                "type": "object",
+                "description": "A conversation with its full message history.",
+                "required": [
+                    "id",
+                    "title",
+                    "created_at",
+                    "updated_at",
+                    "messages"
+                ],
+                "properties": {
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MessageSummary"
+                        }
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "ConversationSummary": {
+                "type": "object",
+                "description": "A conversation summary (no messages).",
+                "required": [
+                    "id",
+                    "title",
+                    "created_at",
+                    "updated_at"
+                ],
+                "properties": {
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "CreateConversationRequest": {
+                "type": "object",
+                "description": "Body for `POST /api/conversations`.",
+                "properties": {
+                    "title": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional title for the new conversation."
+                    }
+                }
+            },
+            "CreateTaskPushNotificationConfigRequest": {
+                "type": "object",
+                "description": "Request for the `CreateTaskPushNotificationConfig` method.",
+                "required": [
+                    "taskId",
+                    "config"
+                ],
+                "properties": {
+                    "config": {
+                        "$ref": "#/components/schemas/PushNotificationConfig",
+                        "description": "The configuration to create."
+                    },
+                    "taskId": {
+                        "type": "string",
+                        "description": "The parent task resource ID."
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "DeviceCodeOAuthFlow": {
+                "type": "object",
+                "description": "OAuth 2.0 Device Code flow configuration (RFC 8628).",
+                "required": [
+                    "deviceAuthorizationUrl",
+                    "tokenUrl",
+                    "scopes"
+                ],
+                "properties": {
+                    "deviceAuthorizationUrl": {
+                        "type": "string",
+                        "description": "The device authorization endpoint URL."
+                    },
+                    "refreshUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The URL for obtaining refresh tokens."
+                    },
+                    "scopes": {
+                        "type": "object",
+                        "description": "Available scopes for the OAuth2 security scheme.",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "propertyNames": {
+                            "type": "string"
+                        }
+                    },
+                    "tokenUrl": {
+                        "type": "string",
+                        "description": "The token URL."
+                    }
+                }
+            },
+            "GetExtendedAgentCardRequest": {
+                "type": "object",
+                "description": "Request for the `GetExtendedAgentCard` method.",
+                "properties": {
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "GetTaskPushNotificationConfigRequest": {
+                "type": "object",
+                "description": "Request for the `GetTaskPushNotificationConfig` method.",
+                "required": [
+                    "taskId",
+                    "id"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The resource ID of the configuration to retrieve."
+                    },
+                    "taskId": {
+                        "type": "string",
+                        "description": "The parent task resource ID."
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "GetTaskRequest": {
+                "type": "object",
+                "description": "Request for the `GetTask` method.",
+                "required": [
+                    "id"
+                ],
+                "properties": {
+                    "historyLength": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int32",
+                        "description": "Max number of recent messages to include in history."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "The resource ID of the task to retrieve."
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "HttpAuthSecurityScheme": {
+                "type": "object",
+                "description": "Defines a security scheme using HTTP authentication.",
+                "required": [
+                    "scheme"
+                ],
+                "properties": {
+                    "bearerFormat": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A hint for how the bearer token is formatted (e.g., \"JWT\")."
+                    },
+                    "description": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "An optional description for the security scheme."
+                    },
+                    "scheme": {
+                        "type": "string",
+                        "description": "The HTTP Authentication scheme (e.g., \"Bearer\")."
+                    }
+                }
+            },
+            "ImplicitOAuthFlow": {
+                "type": "object",
+                "description": "Deprecated: Use Authorization Code + PKCE instead.",
+                "properties": {
+                    "authorizationUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The authorization URL."
+                    },
+                    "refreshUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The URL for obtaining refresh tokens."
+                    },
+                    "scopes": {
+                        "type": "object",
+                        "description": "Available scopes.",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "propertyNames": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "ListTaskPushNotificationConfigsRequest": {
+                "type": "object",
+                "description": "Request for the `ListTaskPushNotificationConfigs` method.",
+                "required": [
+                    "taskId"
+                ],
+                "properties": {
+                    "pageSize": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int32",
+                        "description": "Max number of configurations to return."
+                    },
+                    "pageToken": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Page token from a previous call."
+                    },
+                    "taskId": {
+                        "type": "string",
+                        "description": "The parent task resource ID."
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "ListTaskPushNotificationConfigsResponse": {
+                "type": "object",
+                "description": "Response for the `ListTaskPushNotificationConfigs` method.",
+                "required": [
+                    "configs"
+                ],
+                "properties": {
+                    "configs": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TaskPushNotificationConfig"
+                        },
+                        "description": "The list of push notification configurations."
+                    },
+                    "nextPageToken": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A token to retrieve the next page of results."
+                    }
+                }
+            },
+            "ListTasksRequest": {
+                "type": "object",
+                "description": "Request for the `ListTasks` method.",
+                "properties": {
+                    "contextId": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Filter tasks by context ID."
+                    },
+                    "historyLength": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int32",
+                        "description": "Max number of messages to include in each task's history."
+                    },
+                    "includeArtifacts": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ],
+                        "description": "Whether to include artifacts in returned tasks."
+                    },
+                    "pageSize": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int32",
+                        "description": "Max number of tasks to return (1..=100, default 50)."
+                    },
+                    "pageToken": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Page token from a previous `ListTasks` call."
+                    },
+                    "status": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/TaskState",
+                                "description": "Filter tasks by current status state."
+                            }
+                        ]
+                    },
+                    "statusTimestampAfter": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "date-time",
+                        "description": "Filter tasks with status updated after this timestamp."
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Tenant ID."
+                    }
+                }
+            },
+            "ListTasksResponse": {
+                "type": "object",
+                "description": "Response for the `ListTasks` method.",
+                "required": [
+                    "tasks",
+                    "nextPageToken",
+                    "pageSize",
+                    "totalSize"
+                ],
+                "properties": {
+                    "nextPageToken": {
+                        "type": "string",
+                        "description": "A token to retrieve the next page of results."
+                    },
+                    "pageSize": {
+                        "type": "integer",
+                        "format": "int32",
+                        "description": "The page size used for this response."
+                    },
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Task"
+                        },
+                        "description": "Tasks matching the specified criteria."
+                    },
+                    "totalSize": {
+                        "type": "integer",
+                        "format": "int32",
+                        "description": "Total number of tasks available (before pagination)."
+                    }
+                }
+            },
+            "LogEntryResponse": {
+                "type": "object",
+                "description": "A log entry row returned by the API.",
+                "required": [
+                    "id",
+                    "timestamp",
+                    "severity",
+                    "target",
+                    "message",
+                    "fields"
+                ],
+                "properties": {
+                    "conversation_id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "fields": {},
+                    "id": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "severity": {
+                        "type": "string"
+                    },
+                    "target": {
+                        "type": "string"
+                    },
+                    "timestamp": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "trace_id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "Message": {
+                "type": "object",
+                "description": "`Message` is one unit of communication between client and server.",
+                "required": [
+                    "messageId",
+                    "role",
+                    "parts"
+                ],
+                "properties": {
+                    "contextId": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The context id of the message."
+                    },
+                    "extensions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "The URIs of extensions present or contributing to this message."
+                    },
+                    "messageId": {
+                        "type": "string",
+                        "description": "Unique identifier (UUID) of the message, created by the message creator."
+                    },
+                    "metadata": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Any metadata to provide along with the message.",
+                        "additionalProperties": true
+                    },
+                    "parts": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Part"
+                        },
+                        "description": "Content parts of the message."
+                    },
+                    "referenceTaskIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "A list of task IDs that this message references for additional context."
+                    },
+                    "role": {
+                        "$ref": "#/components/schemas/Role",
+                        "description": "Identifies the sender of the message."
+                    },
+                    "taskId": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The task id of the message."
+                    }
+                }
+            },
+            "MessageSummary": {
+                "type": "object",
+                "description": "A single message in a conversation.",
+                "required": [
+                    "id",
+                    "role",
+                    "content",
+                    "turn",
+                    "created_at"
+                ],
+                "properties": {
+                    "content": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "turn": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
+            "MutualTlsSecurityScheme": {
+                "type": "object",
+                "description": "Defines a security scheme using mTLS authentication.",
+                "properties": {
+                    "description": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "An optional description for the security scheme."
+                    }
+                }
+            },
+            "OAuth2SecurityScheme": {
+                "type": "object",
+                "description": "Defines a security scheme using OAuth 2.0.",
+                "required": [
+                    "flows"
+                ],
+                "properties": {
+                    "description": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "An optional description for the security scheme."
+                    },
+                    "flows": {
+                        "$ref": "#/components/schemas/OAuthFlows",
+                        "description": "Configuration for the supported OAuth 2.0 flows."
+                    },
+                    "oauth2MetadataUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "URL to the OAuth2 authorization server metadata (RFC 8414)."
+                    }
+                }
+            },
+            "OAuthFlows": {
+                "type": "object",
+                "description": "Configuration for supported OAuth 2.0 flows.",
+                "properties": {
+                    "authorizationCode": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/AuthorizationCodeOAuthFlow",
+                                "description": "Configuration for the OAuth Authorization Code flow."
+                            }
+                        ]
+                    },
+                    "clientCredentials": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/ClientCredentialsOAuthFlow",
+                                "description": "Configuration for the OAuth Client Credentials flow."
+                            }
+                        ]
+                    },
+                    "deviceCode": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/DeviceCodeOAuthFlow",
+                                "description": "Configuration for the OAuth Device Code flow."
+                            }
+                        ]
+                    },
+                    "implicit": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/ImplicitOAuthFlow",
+                                "description": "Deprecated: Use Authorization Code + PKCE instead."
+                            }
+                        ]
+                    },
+                    "password": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/PasswordOAuthFlow",
+                                "description": "Deprecated: Use Authorization Code + PKCE or Device Code."
+                            }
+                        ]
+                    }
+                }
+            },
+            "OpenIdConnectSecurityScheme": {
+                "type": "object",
+                "description": "Defines a security scheme using OpenID Connect.",
+                "required": [
+                    "openIdConnectUrl"
+                ],
+                "properties": {
+                    "description": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "An optional description for the security scheme."
+                    },
+                    "openIdConnectUrl": {
+                        "type": "string",
+                        "description": "The OpenID Connect Discovery URL."
+                    }
+                }
+            },
+            "Part": {
+                "type": "object",
+                "description": "`Part` represents a container for a section of communication content.\n\nParts can be purely textual, a file (image, video, etc.), or a structured\ndata blob (JSON).",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "description": "Arbitrary structured data as a JSON value."
+                    },
+                    "filename": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "An optional filename for the file."
+                    },
+                    "mediaType": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The MIME type of the part content."
+                    },
+                    "metadata": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Metadata associated with this part.",
+                        "additionalProperties": true
+                    },
+                    "raw": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Raw byte content of a file, base64-encoded in JSON."
+                    },
+                    "text": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The string content of a text part."
+                    },
+                    "url": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A URL pointing to the file's content."
+                    }
+                }
+            },
+            "PasswordOAuthFlow": {
+                "type": "object",
+                "description": "Deprecated: Use Authorization Code + PKCE or Device Code.",
+                "properties": {
+                    "refreshUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The URL for obtaining refresh tokens."
+                    },
+                    "scopes": {
+                        "type": "object",
+                        "description": "Available scopes.",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "propertyNames": {
+                            "type": "string"
+                        }
+                    },
+                    "tokenUrl": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "The token URL."
+                    }
+                }
+            },
+            "PersonaSummary": {
+                "type": "object",
+                "description": "A persona summary returned by the API.",
+                "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "is_default"
+                ],
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "is_default": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                }
+            },
+            "PushNotificationConfig": {
+                "type": "object",
+                "description": "Configuration for setting up push notifications for task updates.",
+                "required": [
+                    "url"
+                ],
+                "properties": {
+                    "authentication": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/AuthenticationInfo",
+                                "description": "Authentication information required to send the notification."
+                            }
+                        ]
+                    },
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A unique identifier (UUID) for this push notification configuration."
+                    },
+                    "token": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "A token unique for this task or session."
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "The URL where the notification should be sent."
+                    }
+                }
+            },
+            "Role": {
+                "type": "string",
+                "description": "Defines the sender of a message in A2A protocol communication.",
+                "enum": [
+                    "ROLE_UNSPECIFIED",
+                    "ROLE_USER",
+                    "ROLE_AGENT"
+                ]
+            },
+            "SecurityRequirement": {
+                "type": "object",
+                "description": "Defines the security requirements for an agent.",
+                "properties": {
+                    "schemes": {
+                        "type": "object",
+                        "description": "A map of security schemes to the required scopes.",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/StringList"
+                        },
+                        "propertyNames": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "SecurityScheme": {
+                "type": "object",
+                "description": "Defines a security scheme that can be used to secure an agent's endpoints.\n\nThis is a discriminated union based on the OpenAPI 3.2 Security Scheme\nObject.",
+                "properties": {
+                    "apiKeySecurityScheme": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/ApiKeySecurityScheme",
+                                "description": "API key-based authentication."
+                            }
+                        ]
+                    },
+                    "httpAuthSecurityScheme": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/HttpAuthSecurityScheme",
+                                "description": "HTTP authentication (Basic, Bearer, etc.)."
+                            }
+                        ]
+                    },
+                    "mtlsSecurityScheme": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/MutualTlsSecurityScheme",
+                                "description": "Mutual TLS authentication."
+                            }
+                        ]
+                    },
+                    "oauth2SecurityScheme": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/OAuth2SecurityScheme",
+                                "description": "OAuth 2.0 authentication."
+                            }
+                        ]
+                    },
+                    "openIdConnectSecurityScheme": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/OpenIdConnectSecurityScheme",
+                                "description": "OpenID Connect authentication."
+                            }
+                        ]
+                    }
+                }
+            },
+            "SendMessageConfiguration": {
+                "type": "object",
+                "description": "Configuration of a send message request.",
+                "properties": {
+                    "acceptedOutputModes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Media types the client accepts for response parts."
+                    },
+                    "blocking": {
+                        "type": "boolean",
+                        "description": "If true, wait until the task reaches a terminal or interrupted state."
+                    },
+                    "historyLength": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int32",
+                        "description": "Max number of recent messages to include in the response."
+                    },
+                    "pushNotificationConfig": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/PushNotificationConfig",
+                                "description": "Push notification configuration for task updates."
+                            }
+                        ]
+                    }
+                }
+            },
+            "SendMessageRequest": {
+                "type": "object",
+                "description": "Request for the `SendMessage` and `SendStreamingMessage` methods.",
+                "required": [
+                    "message"
+                ],
+                "properties": {
+                    "configuration": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/SendMessageConfiguration",
+                                "description": "Configuration for the send request."
+                            }
+                        ]
+                    },
+                    "message": {
+                        "$ref": "#/components/schemas/Message",
+                        "description": "The message to send to the agent."
+                    },
+                    "metadata": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Additional context or parameters.",
+                        "additionalProperties": true
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "SendMessageResponse": {
+                "type": "object",
+                "description": "Response for the `SendMessage` method.\n\nContains either a task or a message (oneof payload in the proto).",
+                "properties": {
+                    "message": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/Message",
+                                "description": "A message from the agent."
+                            }
+                        ]
+                    },
+                    "task": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/Task",
+                                "description": "The task created or updated by the message."
+                            }
+                        ]
+                    }
+                }
+            },
+            "SetActivePersonaRequest": {
+                "type": "object",
+                "description": "Body for `POST /api/personas/active`.",
+                "required": [
+                    "id"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SkillEntryResponse": {
+                "type": "object",
+                "description": "A skill entry returned by the API.",
+                "required": [
+                    "name",
+                    "description",
+                    "enabled"
+                ],
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SpanEntryResponse": {
+                "type": "object",
+                "description": "A single span within a trace.",
+                "required": [
+                    "span_id",
+                    "name",
+                    "start_time",
+                    "duration_ms",
+                    "attributes"
+                ],
+                "properties": {
+                    "attributes": {},
+                    "duration_ms": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "span_id": {
+                        "type": "string"
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "StreamResponse": {
+                "type": "object",
+                "description": "A wrapper for streaming operations encapsulating different response types.\n\nIn SSE, each chunk is one `StreamResponse` serialized as JSON.",
+                "properties": {
+                    "artifactUpdate": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/TaskArtifactUpdateEvent",
+                                "description": "An event indicating a task artifact update."
+                            }
+                        ]
+                    },
+                    "message": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/Message",
+                                "description": "A Message object containing a message from the agent."
+                            }
+                        ]
+                    },
+                    "statusUpdate": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/TaskStatusUpdateEvent",
+                                "description": "An event indicating a task status update."
+                            }
+                        ]
+                    },
+                    "task": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/Task",
+                                "description": "A Task object containing the current state of the task."
+                            }
+                        ]
+                    }
+                }
+            },
+            "StringList": {
+                "type": "object",
+                "description": "A list of strings (used in security requirements).",
+                "properties": {
+                    "list": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "The individual string values."
+                    }
+                }
+            },
+            "SubscribeToTaskRequest": {
+                "type": "object",
+                "description": "Request for the `SubscribeToTask` method.",
+                "required": [
+                    "id"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The resource ID of the task to subscribe to."
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "Task": {
+                "type": "object",
+                "description": "`Task` is the core unit of action for A2A. It has a current status and when\nresults are created they are stored in artifacts. Multi-turn interactions\nare stored in history.",
+                "required": [
+                    "id",
+                    "contextId",
+                    "status"
+                ],
+                "properties": {
+                    "artifacts": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Artifact"
+                        },
+                        "description": "Output artifacts for the task."
+                    },
+                    "contextId": {
+                        "type": "string",
+                        "description": "Unique identifier (UUID) for the contextual collection of interactions."
+                    },
+                    "history": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Message"
+                        },
+                        "description": "The history of interactions for this task."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Unique identifier (UUID) for the task, generated by the server."
+                    },
+                    "metadata": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Custom metadata about the task.",
+                        "additionalProperties": true
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/TaskStatus",
+                        "description": "The current status of the task."
+                    }
+                }
+            },
+            "TaskArtifactUpdateEvent": {
+                "type": "object",
+                "description": "A task delta where an artifact has been generated.",
+                "required": [
+                    "taskId",
+                    "contextId",
+                    "artifact"
+                ],
+                "properties": {
+                    "append": {
+                        "type": "boolean",
+                        "description": "If true, append content to a previously sent artifact with the same ID."
+                    },
+                    "artifact": {
+                        "$ref": "#/components/schemas/Artifact",
+                        "description": "The artifact that was generated or updated."
+                    },
+                    "contextId": {
+                        "type": "string",
+                        "description": "The ID of the context that this task belongs to."
+                    },
+                    "lastChunk": {
+                        "type": "boolean",
+                        "description": "If true, this is the final chunk of the artifact."
+                    },
+                    "metadata": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Metadata associated with the artifact update.",
+                        "additionalProperties": true
+                    },
+                    "taskId": {
+                        "type": "string",
+                        "description": "The ID of the task for this artifact."
+                    }
+                }
+            },
+            "TaskPushNotificationConfig": {
+                "type": "object",
+                "description": "A container associating a push notification configuration with a specific\ntask.",
+                "required": [
+                    "taskId",
+                    "pushNotificationConfig"
+                ],
+                "properties": {
+                    "pushNotificationConfig": {
+                        "$ref": "#/components/schemas/PushNotificationConfig",
+                        "description": "The push notification configuration details."
+                    },
+                    "taskId": {
+                        "type": "string",
+                        "description": "The ID of the task this configuration is associated with."
+                    },
+                    "tenant": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Tenant ID."
+                    }
+                }
+            },
+            "TaskState": {
+                "type": "string",
+                "description": "Defines the possible lifecycle states of a `Task`.",
+                "enum": [
+                    "TASK_STATE_UNSPECIFIED",
+                    "TASK_STATE_SUBMITTED",
+                    "TASK_STATE_WORKING",
+                    "TASK_STATE_COMPLETED",
+                    "TASK_STATE_FAILED",
+                    "TASK_STATE_CANCELED",
+                    "TASK_STATE_INPUT_REQUIRED",
+                    "TASK_STATE_REJECTED",
+                    "TASK_STATE_AUTH_REQUIRED"
+                ]
+            },
+            "TaskStatus": {
+                "type": "object",
+                "description": "A container for the status of a task.",
+                "required": [
+                    "state"
+                ],
+                "properties": {
+                    "message": {
+                        "oneOf": [
+                            {
+                                "type": "null"
+                            },
+                            {
+                                "$ref": "#/components/schemas/Message",
+                                "description": "A message associated with the status."
+                            }
+                        ]
+                    },
+                    "state": {
+                        "$ref": "#/components/schemas/TaskState",
+                        "description": "The current state of this task."
+                    },
+                    "timestamp": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp when the status was recorded."
+                    }
+                }
+            },
+            "TaskStatusUpdateEvent": {
+                "type": "object",
+                "description": "An event sent by the agent to notify the client of a change in a task's\nstatus.",
+                "required": [
+                    "taskId",
+                    "contextId",
+                    "status"
+                ],
+                "properties": {
+                    "contextId": {
+                        "type": "string",
+                        "description": "The ID of the context that the task belongs to."
+                    },
+                    "metadata": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "description": "Metadata associated with the task update.",
+                        "additionalProperties": true
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/TaskStatus",
+                        "description": "The new status of the task."
+                    },
+                    "taskId": {
+                        "type": "string",
+                        "description": "The ID of the task that has changed."
+                    }
+                }
+            },
+            "TraceDetailResponse": {
+                "type": "object",
+                "description": "Full trace detail with span list.",
+                "required": [
+                    "trace_id",
+                    "persona_id",
+                    "start_time",
+                    "duration_ms",
+                    "spans"
+                ],
+                "properties": {
+                    "duration_ms": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "persona_id": {
+                        "type": "string"
+                    },
+                    "spans": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SpanEntryResponse"
+                        }
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "trace_id": {
+                        "type": "string"
+                    }
+                }
+            },
+            "TraceSummaryResponse": {
+                "type": "object",
+                "description": "A trace summary row.",
+                "required": [
+                    "trace_id",
+                    "persona_id",
+                    "start_time",
+                    "duration_ms",
+                    "status"
+                ],
+                "properties": {
+                    "conversation_id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "duration_ms": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "persona_id": {
+                        "type": "string"
+                    },
+                    "skill_name": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "trace_id": {
+                        "type": "string"
+                    }
+                }
+            },
+            "UpdateConversationRequest": {
+                "type": "object",
+                "description": "Body for `PATCH /api/conversations/{id}`.",
+                "required": [
+                    "title"
+                ],
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "New title for the conversation."
+                    }
+                }
+            }
+        },
+        "securitySchemes": {
+            "bearer_token": {
+                "type": "http",
+                "scheme": "bearer",
+                "description": "Bearer token. Pass the token issued by the server via `Authorization: Bearer <token>`. Configure it with `--auth-token` / `ASSISTANT_WEB_TOKEN`."
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "conversations",
+            "description": "Conversation management — list, create, fetch, update, delete, and send messages"
+        },
+        {
+            "name": "agent-card",
+            "description": "Agent discovery — retrieve the A2A agent manifest"
+        },
+        {
+            "name": "messages",
+            "description": "Message operations — send messages to the agent (unary or streaming)"
+        },
+        {
+            "name": "tasks",
+            "description": "Task lifecycle — list, retrieve, and cancel tasks"
+        },
+        {
+            "name": "push-notifications",
+            "description": "Push notification configuration — manage webhook callbacks for task updates"
+        }
+    ]
+}

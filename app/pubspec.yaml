@@ -47,6 +47,10 @@ dependencies:
   # HTTP client (with streaming response support for SSE)
   http: ^1.2.2
 
+  # Generated OpenAPI client (spec-driven, see app/packages/assistant_api)
+  assistant_api:
+    path: packages/assistant_api
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

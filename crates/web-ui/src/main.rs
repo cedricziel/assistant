@@ -122,6 +122,12 @@ struct Args {
     /// Use `ASSISTANT_WEB_CORS_ORIGIN` env var as an alternative.
     #[arg(long, env = "ASSISTANT_WEB_CORS_ORIGIN")]
     cors_origin: Option<String>,
+
+    /// Print the OpenAPI specification as JSON to stdout and exit.
+    /// Use this to regenerate the committed `openapi.json` file:
+    ///   `cargo run -p assistant-cli -- webui serve --print-openapi > openapi.json`
+    #[arg(long)]
+    print_openapi: bool,
 }
 
 #[derive(Clone)]
@@ -154,6 +160,13 @@ impl AssistantTurnClient for OrchestratorTurnClient {
 }
 
 async fn run_with_args(args: Args) -> Result<()> {
+    // -- OpenAPI spec dump (no server required) -------------------------------
+    if args.print_openapi {
+        let spec = openapi::ApiDoc::openapi().to_json()?;
+        println!("{spec}");
+        return Ok(());
+    }
+
     // -- Auth token (required) -----------------------------------------------
     let auth_token = match args.auth_token.map(|t| t.trim().to_string()) {
         Some(t) if !t.is_empty() => t,
