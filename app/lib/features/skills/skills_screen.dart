@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../api/models/skill.dart';
+import 'package:assistant_api/assistant_api.dart';
+
 import '../personas/personas_provider.dart';
 import 'skills_provider.dart';
 
@@ -69,7 +70,7 @@ class SkillsScreen extends ConsumerWidget {
 class _SkillRow extends StatelessWidget {
   const _SkillRow({required this.skill});
 
-  final Skill skill;
+  final SkillEntryResponse skill;
 
   @override
   Widget build(BuildContext context) {

@@ -1,19 +1,18 @@
+import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/client.dart';
-import '../../api/endpoints/conversations.dart';
-import '../../api/models/conversation.dart';
+import '../../api/api_client.dart';
 import '../../api/models/stream_event.dart';
 import '../connection/connection_provider.dart';
 
 // -- Client provider ---------------------------------------------------------
 
-/// Creates an [AssistantClient] from the active [ServerProfile].
+/// Creates an [ApiClient] from the active [ServerProfile].
 /// Returns `null` when not connected.
-final assistantClientProvider = Provider<AssistantClient?>((ref) {
+final apiClientProvider = Provider<ApiClient?>((ref) {
   final profile = ref.watch(activeProfileProvider);
   if (profile == null) return null;
-  return AssistantClient(baseUrl: profile.baseUrl, token: profile.token);
+  return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
 });
 
 // -- Conversation list -------------------------------------------------------
@@ -52,18 +51,15 @@ class ConversationListNotifier
     return _fetchAll();
   }
 
-  ConversationsEndpoint? get _endpoint {
-    final client = ref.read(assistantClientProvider);
-    if (client == null) return null;
-    return ConversationsEndpoint(client);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<ConversationListState> _fetchAll() async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return const ConversationListState();
+    final api = _api;
+    if (api == null) return const ConversationListState();
 
     try {
-      final conversations = await endpoint.list();
+      final response = await api.conversations.listConversations();
+      final conversations = response.data!.toList();
       return ConversationListState(conversations: conversations);
     } catch (e) {
       return ConversationListState(error: e.toString());
@@ -78,11 +74,16 @@ class ConversationListNotifier
 
   /// Create a new conversation and add it to the list.
   Future<ConversationSummary?> createConversation({String? title}) async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return null;
+    final api = _api;
+    if (api == null) return null;
 
     try {
-      final created = await endpoint.create(title: title);
+      final response = await api.conversations.createConversation(
+        createConversationRequest: CreateConversationRequest(
+          (b) => b.title = title ?? 'New Chat',
+        ),
+      );
+      final created = response.data!;
       final current = state.valueOrNull ?? const ConversationListState();
       state = AsyncData(
         current.copyWith(
@@ -111,10 +112,10 @@ class ConversationListNotifier
 
   /// Delete a conversation by ID.
   Future<void> deleteConversation(String id) async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return;
+    final api = _api;
+    if (api == null) return;
 
-    await endpoint.delete(id);
+    await api.conversations.deleteConversation(id: id);
     final current = state.valueOrNull ?? const ConversationListState();
     state = AsyncData(
       current.copyWith(
@@ -201,11 +202,7 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
     return const ChatState();
   }
 
-  ConversationsEndpoint? get _endpoint {
-    final client = ref.read(assistantClientProvider);
-    if (client == null) return null;
-    return ConversationsEndpoint(client);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   /// Load an existing conversation by ID.
   Future<void> loadConversation(String conversationId) async {
@@ -216,8 +213,8 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
       ),
     );
 
-    final endpoint = _endpoint;
-    if (endpoint == null) {
+    final api = _api;
+    if (api == null) {
       state = AsyncData(
         const ChatState(error: 'Not connected to server'),
       );
@@ -225,7 +222,8 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
     }
 
     try {
-      final detail = await endpoint.get(conversationId);
+      final response = await api.conversations.getConversation(id: conversationId);
+      final detail = response.data!;
       final messages = detail.messages
           .map(
             (m) => ChatMessage(id: m.id, role: m.role, content: m.content),
@@ -261,8 +259,8 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
   Future<void> sendMessage(String message) async {
     if (message.trim().isEmpty) return;
 
-    final endpoint = _endpoint;
-    if (endpoint == null) return;
+    final api = _api;
+    if (api == null) return;
 
     final current = state.valueOrNull ?? const ChatState();
     String? conversationId = current.conversationId;
@@ -270,7 +268,10 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
     // Create a new conversation if needed.
     if (conversationId == null) {
       try {
-        final conv = await endpoint.create();
+        final response = await api.conversations.createConversation(
+          createConversationRequest: CreateConversationRequest((b) => b),
+        );
+        final conv = response.data!;
         conversationId = conv.id;
         // Reflect the new conversation in the local list (no extra POST).
         ref.read(conversationListProvider.notifier).prependConversation(conv);
@@ -308,8 +309,7 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
 
     // Stream SSE events.
     try {
-      await for (final event
-          in endpoint.sendMessage(conversationId, message)) {
+      await for (final event in api.streamMessages(conversationId, message)) {
         final chatState = state.valueOrNull ?? const ChatState();
 
         if (event is TokenEvent) {

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/models/persona.dart';
+import 'package:assistant_api/assistant_api.dart';
+
 import 'personas_provider.dart';
 
 /// Show the persona picker as a modal bottom sheet.
@@ -135,7 +136,7 @@ class _PersonaTile extends StatelessWidget {
     required this.onTap,
   });
 
-  final Persona persona;
+  final PersonaSummary persona;
   final bool isActive;
   final bool isSwitching;
   final VoidCallback onTap;

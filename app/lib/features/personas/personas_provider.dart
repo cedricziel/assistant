@@ -1,8 +1,7 @@
+import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/client.dart';
-import '../../api/endpoints/personas.dart';
-import '../../api/models/persona.dart';
+import '../../api/api_client.dart';
 import '../connection/connection_provider.dart';
 
 /// State for the personas feature.
@@ -14,14 +13,14 @@ class PersonasState {
     this.error,
   });
 
-  final List<Persona> personas;
-  final Persona? activePersona;
+  final List<PersonaSummary> personas;
+  final PersonaSummary? activePersona;
   final bool isLoading;
   final String? error;
 
   PersonasState copyWith({
-    List<Persona>? personas,
-    Persona? activePersona,
+    List<PersonaSummary>? personas,
+    PersonaSummary? activePersona,
     bool? isLoading,
     String? error,
     bool clearError = false,
@@ -42,22 +41,19 @@ class PersonasNotifier extends AutoDisposeAsyncNotifier<PersonasState> {
     return _fetchPersonas();
   }
 
-  PersonasEndpoint? get _endpoint {
+  ApiClient? get _api {
     final profile = ref.read(activeProfileProvider);
     if (profile == null) return null;
-    final client = AssistantClient(
-      baseUrl: profile.baseUrl,
-      token: profile.token,
-    );
-    return PersonasEndpoint(client);
+    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
   }
 
   Future<PersonasState> _fetchPersonas() async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return const PersonasState();
+    final api = _api;
+    if (api == null) return const PersonasState();
 
     try {
-      final personas = await endpoint.list();
+      final response = await api.personas.listPersonas();
+      final personas = response.data!.toList();
       final defaultPersona =
           personas.where((p) => p.isDefault).firstOrNull ?? personas.firstOrNull;
       return PersonasState(
@@ -77,14 +73,17 @@ class PersonasNotifier extends AutoDisposeAsyncNotifier<PersonasState> {
 
   /// Switch the active persona on the server and update local state.
   Future<void> switchPersona(String id) async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return;
+    final api = _api;
+    if (api == null) return;
 
     final current = state.valueOrNull ?? const PersonasState();
     state = AsyncData(current.copyWith(isLoading: true, clearError: true));
 
     try {
-      final updated = await endpoint.setActive(id);
+      final response = await api.personas.setActivePersona(
+        setActivePersonaRequest: SetActivePersonaRequest((b) => b.id = id),
+      );
+      final updated = response.data!;
       state = AsyncData(
         current.copyWith(
           activePersona: updated,

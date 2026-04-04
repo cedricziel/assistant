@@ -1,8 +1,7 @@
+import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/client.dart';
-import '../../api/endpoints/logs.dart';
-import '../../api/models/log_entry.dart';
+import '../../api/api_client.dart';
 import '../connection/connection_provider.dart';
 
 /// State for the logs screen.
@@ -14,7 +13,7 @@ class LogsState {
     this.error,
   });
 
-  final List<LogEntry> logs;
+  final List<LogEntryResponse> logs;
 
   /// Current keyword filter (debounced before the API call).
   final String searchQuery;
@@ -23,7 +22,7 @@ class LogsState {
   final String? error;
 
   LogsState copyWith({
-    List<LogEntry>? logs,
+    List<LogEntryResponse>? logs,
     String? searchQuery,
     bool? isLoading,
     String? error,
@@ -45,27 +44,22 @@ class LogsNotifier extends AutoDisposeAsyncNotifier<LogsState> {
     return _fetchLogs('');
   }
 
-  LogsEndpoint? get _endpoint {
+  ApiClient? get _api {
     final profile = ref.read(activeProfileProvider);
     if (profile == null) return null;
-    final client = AssistantClient(
-      baseUrl: profile.baseUrl,
-      token: profile.token,
-    );
-    return LogsEndpoint(client);
+    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
   }
 
   Future<LogsState> _fetchLogs(String search) async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return const LogsState();
+    final api = _api;
+    if (api == null) return const LogsState();
 
     try {
-      final logs = await endpoint.list(
-        filters: LogFilters(
-          limit: 100,
-          search: search.trim().isEmpty ? null : search.trim(),
-        ),
+      final response = await api.logs.listLogs(
+        limit: 100,
+        search: search.trim().isEmpty ? null : search.trim(),
       );
+      final logs = response.data!.toList();
       return LogsState(logs: logs, searchQuery: search);
     } catch (e) {
       return LogsState(error: e.toString(), searchQuery: search);

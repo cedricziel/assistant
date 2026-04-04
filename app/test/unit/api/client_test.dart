@@ -1,32 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:assistant_app/api/client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
 
 void main() {
-  group('AssistantClient SSE parser', () {
-    late AssistantClient client;
-
-    setUp(() {
-      client = AssistantClient(
-        baseUrl: 'http://localhost:8080',
-        token: 'test-token',
-      );
-    });
-
-    tearDown(() {
-      client.dispose();
-    });
-
-    // Access the private _parseSse method via a test-accessible wrapper by
-    // testing through a mock HTTP response simulation.
-    test('parses token events correctly', () async {
-      // We invoke the public streamSse method indirectly by testing the model.
-      // Direct SSE parser test via StreamEvent model.
-      final tokenEvent = TokenEvent('Hello');
-      expect(tokenEvent.token, equals('Hello'));
-    });
-
+  group('StreamEvent model', () {
     test('TokenEvent stores token', () {
       const event = TokenEvent('test token');
       expect(event.token, equals('test token'));

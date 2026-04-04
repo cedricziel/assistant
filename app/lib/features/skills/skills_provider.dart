@@ -1,8 +1,7 @@
+import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/client.dart';
-import '../../api/endpoints/skills.dart';
-import '../../api/models/skill.dart';
+import '../../api/api_client.dart';
 import '../connection/connection_provider.dart';
 import '../personas/personas_provider.dart';
 
@@ -15,7 +14,7 @@ class SkillsState {
     this.error,
   });
 
-  final List<Skill> skills;
+  final List<SkillEntryResponse> skills;
 
   /// The persona ID whose skills are shown.
   final String? personaId;
@@ -24,7 +23,7 @@ class SkillsState {
   final String? error;
 
   SkillsState copyWith({
-    List<Skill>? skills,
+    List<SkillEntryResponse>? skills,
     String? personaId,
     bool? isLoading,
     String? error,
@@ -54,26 +53,23 @@ class SkillsNotifier extends AutoDisposeAsyncNotifier<SkillsState> {
     return _fetchSkills();
   }
 
-  SkillsEndpoint? get _endpoint {
+  ApiClient? get _api {
     final profile = ref.read(activeProfileProvider);
     if (profile == null) return null;
-    final client = AssistantClient(
-      baseUrl: profile.baseUrl,
-      token: profile.token,
-    );
-    return SkillsEndpoint(client);
+    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
   }
 
   Future<SkillsState> _fetchSkills() async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return const SkillsState();
+    final api = _api;
+    if (api == null) return const SkillsState();
 
     // Use the active persona ID.
     final personaId =
         ref.read(personasProvider).valueOrNull?.activePersona?.id ?? 'default';
 
     try {
-      final skills = await endpoint.listForPersona(personaId);
+      final response = await api.skills.listPersonaSkills(personaId: personaId);
+      final skills = response.data!.toList();
       return SkillsState(skills: skills, personaId: personaId);
     } catch (e) {
       return SkillsState(error: e.toString(), personaId: personaId);

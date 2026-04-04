@@ -44,8 +44,11 @@ dependencies:
   # Secure credentials storage (platform keychain)
   flutter_secure_storage: ^9.2.4
 
-  # HTTP client (with streaming response support for SSE)
+  # HTTP client (used for the health-check in connection_provider.dart)
   http: ^1.2.2
+
+  # Dio HTTP client — needed directly for SSE streaming over the generated client
+  dio: ^5.0.0
 
   # Generated OpenAPI client (spec-driven, see app/packages/assistant_api)
   assistant_api:

@@ -1,8 +1,7 @@
+import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/client.dart';
-import '../../api/endpoints/traces.dart';
-import '../../api/models/trace.dart';
+import '../../api/api_client.dart';
 import '../connection/connection_provider.dart';
 
 /// State for the traces screen.
@@ -13,12 +12,12 @@ class TracesState {
     this.error,
   });
 
-  final List<TraceSummary> traces;
+  final List<TraceSummaryResponse> traces;
   final bool isLoading;
   final String? error;
 
   TracesState copyWith({
-    List<TraceSummary>? traces,
+    List<TraceSummaryResponse>? traces,
     bool? isLoading,
     String? error,
     bool clearError = false,
@@ -38,24 +37,19 @@ class TracesNotifier extends AutoDisposeAsyncNotifier<TracesState> {
     return _fetchTraces();
   }
 
-  TracesEndpoint? get _endpoint {
+  ApiClient? get _api {
     final profile = ref.read(activeProfileProvider);
     if (profile == null) return null;
-    final client = AssistantClient(
-      baseUrl: profile.baseUrl,
-      token: profile.token,
-    );
-    return TracesEndpoint(client);
+    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
   }
 
   Future<TracesState> _fetchTraces() async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return const TracesState();
+    final api = _api;
+    if (api == null) return const TracesState();
 
     try {
-      final traces = await endpoint.list(
-        filters: const TraceFilters(limit: 50),
-      );
+      final response = await api.traces.listTraces(limit: 50);
+      final traces = response.data!.toList();
       return TracesState(traces: traces);
     } catch (e) {
       return TracesState(error: e.toString());
@@ -82,7 +76,7 @@ class TraceDetailState {
     this.error,
   });
 
-  final TraceDetail? detail;
+  final TraceDetailResponse? detail;
   final bool isLoading;
   final String? error;
 }
@@ -95,22 +89,19 @@ class TraceDetailNotifier
     return _fetchDetail(traceId);
   }
 
-  TracesEndpoint? get _endpoint {
+  ApiClient? get _api {
     final profile = ref.read(activeProfileProvider);
     if (profile == null) return null;
-    final client = AssistantClient(
-      baseUrl: profile.baseUrl,
-      token: profile.token,
-    );
-    return TracesEndpoint(client);
+    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
   }
 
   Future<TraceDetailState> _fetchDetail(String traceId) async {
-    final endpoint = _endpoint;
-    if (endpoint == null) return const TraceDetailState();
+    final api = _api;
+    if (api == null) return const TraceDetailState();
 
     try {
-      final detail = await endpoint.get(traceId);
+      final response = await api.traces.getTrace(traceId: traceId);
+      final detail = response.data!;
       return TraceDetailState(detail: detail);
     } catch (e) {
       return TraceDetailState(error: e.toString());

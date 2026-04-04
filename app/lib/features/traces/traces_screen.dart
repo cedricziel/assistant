@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../api/models/trace.dart';
+import 'package:assistant_api/assistant_api.dart';
+
 import 'traces_provider.dart';
 
 /// Observability screen that lists recent assistant traces.
@@ -62,7 +63,7 @@ class TracesScreen extends ConsumerWidget {
 class _TraceRow extends ConsumerStatefulWidget {
   const _TraceRow({required this.trace});
 
-  final TraceSummary trace;
+  final TraceSummaryResponse trace;
 
   @override
   ConsumerState<_TraceRow> createState() => _TraceRowState();
@@ -74,7 +75,7 @@ class _TraceRowState extends ConsumerState<_TraceRow> {
   @override
   Widget build(BuildContext context) {
     final trace = widget.trace;
-    final isError = trace.isError;
+    final isError = trace.status == 'error';
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -191,7 +192,7 @@ class _SpanDetail extends ConsumerWidget {
               style: TextStyle(color: Colors.red.shade700, fontSize: 12),
             );
           }
-          final spans = state.detail?.spans ?? [];
+          final spans = state.detail?.spans.toList() ?? [];
           if (spans.isEmpty) {
             return const Text(
               'No spans recorded',
@@ -214,7 +215,7 @@ class _SpanDetail extends ConsumerWidget {
 class _SpanRow extends StatelessWidget {
   const _SpanRow({required this.span});
 
-  final SpanEntry span;
+  final SpanEntryResponse span;
 
   @override
   Widget build(BuildContext context) {

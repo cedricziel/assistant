@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../api/models/log_entry.dart';
+import 'package:assistant_api/assistant_api.dart';
+
 import 'logs_provider.dart';
 
 /// Observability screen that lists recent structured log entries.
@@ -119,7 +120,7 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
 class _LogRow extends StatelessWidget {
   const _LogRow({required this.entry});
 
-  final LogEntry entry;
+  final LogEntryResponse entry;
 
   @override
   Widget build(BuildContext context) {
