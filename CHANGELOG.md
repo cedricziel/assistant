@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.80](https://github.com/cedricziel/assistant/compare/v0.1.79...v0.1.80) (2026-04-04)
+
+
+### Bug Fixes
+
+* **interface-slack:** unblock WebSocket reader by spawning heavy work ([#372](https://github.com/cedricziel/assistant/issues/372)) ([9517197](https://github.com/cedricziel/assistant/commit/9517197454708ffa5e89435cbf0c50a3ad64cfab))
+
 ## [0.1.79](https://github.com/cedricziel/assistant/compare/v0.1.78...v0.1.79) (2026-04-04)
 
 
