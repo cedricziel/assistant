@@ -38,3 +38,10 @@ crates/web-ui/src/static_assets/vendor/
 
 # Logs
 *.log
+
+# Flutter app build artefacts and tool caches
+app/build/
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages

@@ -28,6 +28,76 @@ Install hooks after cloning: `make install-hooks`.
 
 **Note:** `cargo check --all-features` and the `signal` feature require `protoc` (protobuf compiler).
 
+## Flutter App (`app/`)
+
+The `app/` directory contains a Flutter 3.x application targeting web and macOS platforms.
+
+### Prerequisites
+
+- Flutter SDK 3.x (stable channel): https://docs.flutter.dev/get-started/install
+- Dart 3.x (bundled with Flutter)
+- Xcode (macOS target only — required for `flutter build macos`)
+- Chrome or another web browser (web target)
+
+Verify installation: `flutter doctor`
+
+### Flutter Commands
+
+```sh
+# Run from the app/ directory (cd app/ first, or prefix commands with `cd app &&`)
+flutter pub get          # install dependencies (run after cloning or pubspec.yaml changes)
+flutter analyze          # static analysis — zero issues required (--fatal-infos enforced in CI)
+flutter test             # run all unit and widget tests
+flutter run -d chrome    # launch on web (requires Chrome)
+flutter run -d macos     # launch on macOS (requires Xcode)
+flutter build web        # build static web site → app/build/web/
+flutter build macos      # build macOS .app → app/build/macos/Build/Products/Release/
+```
+
+### App Structure
+
+```
+app/lib/
+  api/
+    client.dart                    # AssistantClient: HTTP + SSE streaming
+    models/                        # Data classes (ServerProfile, Conversation, Persona, …)
+    endpoints/                     # Typed API endpoint wrappers
+  features/
+    connection/                    # Server profile setup & auth (US2)
+    chat/                          # Streaming chat UI (US1)
+    personas/                      # Persona picker (US3)
+    traces/                        # Trace viewer (US4)
+    logs/                          # Log viewer (US4)
+    skills/                        # Skill browser (US5)
+  router/
+    app_router.dart                # go_router routes + auth redirect guards
+  main.dart
+app/test/
+  unit/api/client_test.dart        # SSE model unit tests
+  widget/connection_screen_test.dart
+  widget_test.dart
+```
+
+### State Management
+
+Riverpod 2.x (`flutter_riverpod`). Providers live in `*_provider.dart` files alongside their screens. All async providers use `AsyncNotifier` / `AutoDisposeAsyncNotifier`.
+
+### CORS
+
+The Rust web-ui server emits `Access-Control-Allow-Origin` headers for Flutter web. Configure the allowed origin with:
+
+```sh
+assistant webui serve --cors-origin http://localhost:4040
+# or via env var:
+ASSISTANT_WEB_CORS_ORIGIN=http://localhost:4040 assistant webui serve
+```
+
+### CI
+
+GitHub Actions runs `flutter analyze --fatal-infos` and `flutter test` on every push/PR that touches `app/**` (see `.github/workflows/flutter.yml`).
+
+---
+
 ## Workspace Structure
 
 Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.

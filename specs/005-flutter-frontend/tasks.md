@@ -25,11 +25,11 @@ description: "Task list for 005-flutter-frontend"
 
 **Purpose**: Create the Flutter project scaffold and shared infrastructure.
 
-- [ ] T001 Create Flutter project in `app/` with web and macOS targets enabled (`flutter create --platforms=web,macos app`)
-- [ ] T002 Configure `app/pubspec.yaml` with dependencies: `flutter_riverpod`, `go_router`, `flutter_secure_storage`, `http`
-- [ ] T003 [P] Add CORS `tower-http` layer to `crates/web-ui/src/main.rs` — emit `Access-Control-Allow-Origin` on all `/api/*` routes with configurable origin via `--cors-origin` flag / `ASSISTANT_WEB_CORS_ORIGIN` env var
-- [ ] T004 [P] Scaffold `app/lib/router/app_router.dart` with `go_router` — placeholder routes for `/setup`, `/chat`, `/personas`, `/traces`, `/logs`, `/skills`
-- [ ] T005 [P] Add Flutter CI job to GitHub Actions (`.github/workflows/`): `dart analyze` (zero issues) + `flutter test`
+- [x] T001 Create Flutter project in `app/` with web and macOS targets enabled (`flutter create --platforms=web,macos app`)
+- [x] T002 Configure `app/pubspec.yaml` with dependencies: `flutter_riverpod`, `go_router`, `flutter_secure_storage`, `http`
+- [x] T003 [P] Add CORS `tower-http` layer to `crates/web-ui/src/main.rs` — emit `Access-Control-Allow-Origin` on all `/api/*` routes with configurable origin via `--cors-origin` flag / `ASSISTANT_WEB_CORS_ORIGIN` env var
+- [x] T004 [P] Scaffold `app/lib/router/app_router.dart` with `go_router` — placeholder routes for `/setup`, `/chat`, `/personas`, `/traces`, `/logs`, `/skills`
+- [x] T005 [P] Add Flutter CI job to GitHub Actions (`.github/workflows/`): `dart analyze` (zero issues) + `flutter test`
 
 **Checkpoint**: `flutter pub get` succeeds; `dart analyze` passes; `make lint` still passes with new CORS code.
 
@@ -39,15 +39,15 @@ description: "Task list for 005-flutter-frontend"
 
 **Purpose**: Flutter API client layer and shared data models — required by every user story.
 
-- [ ] T006 Implement `app/lib/api/client.dart` — `AssistantClient` class: HTTP client with `Authorization: Bearer` injection, JSON deserialization helper, and SSE stream parser (`parseSSE(Stream<List<int>>)` → `Stream<StreamEvent>`)
-- [ ] T007 [P] Implement `app/lib/api/models/server_profile.dart` — `ServerProfile` data class (baseUrl, token, label) with JSON serialisation
-- [ ] T008 [P] Implement `app/lib/api/models/conversation.dart` — `ConversationSummary`, `ConversationDetail`, `Message` data classes
-- [ ] T009 [P] Implement `app/lib/api/models/stream_event.dart` — sealed `StreamEvent` hierarchy: `TokenEvent`, `DoneEvent`, `ErrorEvent`
-- [ ] T010 [P] Implement `app/lib/api/models/persona.dart` — `Persona` data class
-- [ ] T011 [P] Implement `app/lib/api/models/skill.dart` — `Skill` data class
-- [ ] T012 [P] Implement `app/lib/api/models/trace.dart` — `TraceSummary`, `TraceDetail`, `SpanEntry` data classes
-- [ ] T013 [P] Implement `app/lib/api/models/log_entry.dart` — `LogEntry` data class
-- [ ] T014 Implement `app/lib/api/endpoints/conversations.dart` — `ConversationsEndpoint`: `list()`, `create()`, `get()`, `delete()`, `rename()`, `sendMessage()` (returns `Stream<StreamEvent>`)
+- [x] T006 Implement `app/lib/api/client.dart` — `AssistantClient` class: HTTP client with `Authorization: Bearer` injection, JSON deserialization helper, and SSE stream parser (`parseSSE(Stream<List<int>>)` → `Stream<StreamEvent>`)
+- [x] T007 [P] Implement `app/lib/api/models/server_profile.dart` — `ServerProfile` data class (baseUrl, token, label) with JSON serialisation
+- [x] T008 [P] Implement `app/lib/api/models/conversation.dart` — `ConversationSummary`, `ConversationDetail`, `Message` data classes
+- [x] T009 [P] Implement `app/lib/api/models/stream_event.dart` — sealed `StreamEvent` hierarchy: `TokenEvent`, `DoneEvent`, `ErrorEvent`
+- [x] T010 [P] Implement `app/lib/api/models/persona.dart` — `Persona` data class
+- [x] T011 [P] Implement `app/lib/api/models/skill.dart` — `Skill` data class
+- [x] T012 [P] Implement `app/lib/api/models/trace.dart` — `TraceSummary`, `TraceDetail`, `SpanEntry` data classes
+- [x] T013 [P] Implement `app/lib/api/models/log_entry.dart` — `LogEntry` data class
+- [x] T014 Implement `app/lib/api/endpoints/conversations.dart` — `ConversationsEndpoint`: `list()`, `create()`, `get()`, `delete()`, `rename()`, `sendMessage()` (returns `Stream<StreamEvent>`)
 
 **Checkpoint**: Foundation ready — `flutter test test/unit/api/` passes. All user story implementations can now begin.
 
@@ -59,9 +59,9 @@ description: "Task list for 005-flutter-frontend"
 
 **Independent Test**: Fresh install → enter `http://127.0.0.1:8080` + `dev-token` → tap Connect → app navigates to chat screen → re-launch → app goes directly to chat.
 
-- [ ] T015 [P] [US2] Implement `app/lib/features/connection/connection_provider.dart` — `ServerProfileNotifier` (Riverpod `AsyncNotifier`): load/save profile via `flutter_secure_storage`; expose `connect(baseUrl, token)` that calls `GET /health` to validate
-- [ ] T016 [P] [US2] Implement `app/lib/features/connection/connection_screen.dart` — form: server URL field, token field, Connect button; shows specific error on failure (`401` → "Invalid token", network error → "Server unreachable")
-- [ ] T017 [US2] Wire `connection_provider` and `connection_screen` into `app/lib/router/app_router.dart`: redirect unauthenticated users to `/setup`; redirect authenticated users away from `/setup` to `/chat`
+- [x] T015 [P] [US2] Implement `app/lib/features/connection/connection_provider.dart` — `ServerProfileNotifier` (Riverpod `AsyncNotifier`): load/save profile via `flutter_secure_storage`; expose `connect(baseUrl, token)` that calls `GET /health` to validate
+- [x] T016 [P] [US2] Implement `app/lib/features/connection/connection_screen.dart` — form: server URL field, token field, Connect button; shows specific error on failure (`401` → "Invalid token", network error → "Server unreachable")
+- [x] T017 [US2] Wire `connection_provider` and `connection_screen` into `app/lib/router/app_router.dart`: redirect unauthenticated users to `/setup`; redirect authenticated users away from `/setup` to `/chat`
 
 **Checkpoint**: US2 independently testable — connection screen appears on fresh install, validates credentials, persists across restarts, shows actionable errors.
 
@@ -73,10 +73,10 @@ description: "Task list for 005-flutter-frontend"
 
 **Independent Test**: With US2 complete, open app → navigate to chat → create conversation → send "Hello" → response streams token by token → conversation appears in sidebar list → reopen conversation → history visible.
 
-- [ ] T018 [P] [US1] Implement `app/lib/features/chat/chat_provider.dart` — `ConversationListNotifier` (list + CRUD) and `ChatNotifier` (active conversation + `StreamProvider` for SSE stream; accumulates `TokenEvent` chunks; finalises on `DoneEvent`)
-- [ ] T019 [P] [US1] Implement `app/lib/features/chat/conversation_list.dart` — sidebar/panel widget: list of `ConversationSummary`, new chat button, tap to open, swipe-to-delete
-- [ ] T020 [US1] Implement `app/lib/features/chat/chat_screen.dart` — message list (streaming assistant bubble updates in place), text input + send button, tool call progress indicator (shown while `TokenEvent` stream is open before `DoneEvent`), error banner on stream failure
-- [ ] T021 [US1] Wire chat into `app/lib/router/app_router.dart`: `/chat` (no conversation), `/chat/:id` (specific conversation); update `app/lib/main.dart` to use `ProviderScope` + router
+- [x] T018 [P] [US1] Implement `app/lib/features/chat/chat_provider.dart` — `ConversationListNotifier` (list + CRUD) and `ChatNotifier` (active conversation + `StreamProvider` for SSE stream; accumulates `TokenEvent` chunks; finalises on `DoneEvent`)
+- [x] T019 [P] [US1] Implement `app/lib/features/chat/conversation_list.dart` — sidebar/panel widget: list of `ConversationSummary`, new chat button, tap to open, swipe-to-delete
+- [x] T020 [US1] Implement `app/lib/features/chat/chat_screen.dart` — message list (streaming assistant bubble updates in place), text input + send button, tool call progress indicator (shown while `TokenEvent` stream is open before `DoneEvent`), error banner on stream failure
+- [x] T021 [US1] Wire chat into `app/lib/router/app_router.dart`: `/chat` (no conversation), `/chat/:id` (specific conversation); update `app/lib/main.dart` to use `ProviderScope` + router
 
 **Checkpoint**: US1 independently testable — streaming chat works end-to-end from a running backend; conversation list persists; tool call indicator appears mid-stream.
 
@@ -88,12 +88,12 @@ description: "Task list for 005-flutter-frontend"
 
 **Independent Test**: With US1 complete, open persona picker → multiple personas listed → switch → return to chat → active persona name shown → new conversation uses switched persona.
 
-- [ ] T022 Implement `crates/web-ui/src/api/personas.rs` — `GET /api/personas` (list all) and `POST /api/personas/active` (switch); add to OpenAPI doc; tests using `StorageLayer::new_in_memory()`
-- [ ] T023 Register persona routes in `crates/web-ui/src/main.rs` under the auth-protected scope
-- [ ] T024 [P] [US3] Implement `app/lib/api/endpoints/personas.dart` — `PersonasEndpoint`: `list()`, `setActive(id)`
-- [ ] T025 [P] [US3] Implement `app/lib/features/personas/personas_provider.dart` — `PersonasNotifier`: fetch list on mount; `switchPersona(id)` calls `POST /api/personas/active` and updates local active persona state
-- [ ] T026 [US3] Implement `app/lib/features/personas/persona_picker.dart` — modal bottom sheet or drawer panel: persona list with name + description, active indicator, tap to switch
-- [ ] T027 [US3] Integrate persona picker into `app/lib/features/chat/chat_screen.dart`: active persona name shown in app bar; tap opens `persona_picker.dart`
+- [x] T022 Implement `crates/web-ui/src/api/personas.rs` — `GET /api/personas` (list all) and `POST /api/personas/active` (switch); add to OpenAPI doc; tests using `StorageLayer::new_in_memory()`
+- [x] T023 Register persona routes in `crates/web-ui/src/main.rs` under the auth-protected scope
+- [x] T024 [P] [US3] Implement `app/lib/api/endpoints/personas.dart` — `PersonasEndpoint`: `list()`, `setActive(id)`
+- [x] T025 [P] [US3] Implement `app/lib/features/personas/personas_provider.dart` — `PersonasNotifier`: fetch list on mount; `switchPersona(id)` calls `POST /api/personas/active` and updates local active persona state
+- [x] T026 [US3] Implement `app/lib/features/personas/persona_picker.dart` — modal bottom sheet or drawer panel: persona list with name + description, active indicator, tap to switch
+- [x] T027 [US3] Integrate persona picker into `app/lib/features/chat/chat_screen.dart`: active persona name shown in app bar; tap opens `persona_picker.dart`
 
 **Checkpoint**: US3 independently testable — persona picker opens from chat, switching updates the active persona label and routes subsequent messages correctly.
 
@@ -105,16 +105,16 @@ description: "Task list for 005-flutter-frontend"
 
 **Independent Test**: Navigate to traces screen → 50 most-recent traces listed → expand one → spans with durations visible → navigate to logs → type keyword → list filters in real time.
 
-- [ ] T028 Implement `crates/web-ui/src/api/traces.rs` — `GET /api/traces` (with query params: limit, offset, since, until, skill, status, conversation) and `GET /api/traces/{trace_id}`; add to OpenAPI doc; tests using `StorageLayer::new_in_memory()`
-- [ ] T029 Implement `crates/web-ui/src/api/logs.rs` — `GET /api/logs` (with query params: limit, offset, search, severity, since, until, trace_id, conversation); add to OpenAPI doc; tests using `StorageLayer::new_in_memory()`
-- [ ] T030 Register traces + logs routes in `crates/web-ui/src/main.rs` under the auth-protected scope
-- [ ] T031 [P] [US4] Implement `app/lib/api/endpoints/traces.dart` — `TracesEndpoint`: `list({filters})`, `get(traceId)`
-- [ ] T032 [P] [US4] Implement `app/lib/api/endpoints/logs.dart` — `LogsEndpoint`: `list({filters})`
-- [ ] T033 [P] [US4] Implement `app/lib/features/traces/traces_provider.dart` — `TracesNotifier`: paginated list, expandable detail; `TraceDetailNotifier`: fetch single trace with spans
-- [ ] T034 [P] [US4] Implement `app/lib/features/logs/logs_provider.dart` — `LogsNotifier`: paginated list, debounced keyword filter state
-- [ ] T035 [P] [US4] Implement `app/lib/features/traces/traces_screen.dart` — list of `TraceSummary` rows (timestamp, persona, duration, status); expandable detail showing `SpanEntry` list with individual durations
-- [ ] T036 [P] [US4] Implement `app/lib/features/logs/logs_screen.dart` — list of `LogEntry` rows (timestamp, severity chip, target, message); keyword filter text field at top
-- [ ] T037 [US4] Wire traces + logs into navigation: add `/traces` and `/logs` routes in `app/lib/router/app_router.dart`; add navigation entries (drawer or bottom nav)
+- [x] T028 Implement `crates/web-ui/src/api/traces.rs` — `GET /api/traces` (with query params: limit, offset, since, until, skill, status, conversation) and `GET /api/traces/{trace_id}`; add to OpenAPI doc; tests using `StorageLayer::new_in_memory()`
+- [x] T029 Implement `crates/web-ui/src/api/logs.rs` — `GET /api/logs` (with query params: limit, offset, search, severity, since, until, trace_id, conversation); add to OpenAPI doc; tests using `StorageLayer::new_in_memory()`
+- [x] T030 Register traces + logs routes in `crates/web-ui/src/main.rs` under the auth-protected scope
+- [x] T031 [P] [US4] Implement `app/lib/api/endpoints/traces.dart` — `TracesEndpoint`: `list({filters})`, `get(traceId)`
+- [x] T032 [P] [US4] Implement `app/lib/api/endpoints/logs.dart` — `LogsEndpoint`: `list({filters})`
+- [x] T033 [P] [US4] Implement `app/lib/features/traces/traces_provider.dart` — `TracesNotifier`: paginated list, expandable detail; `TraceDetailNotifier`: fetch single trace with spans
+- [x] T034 [P] [US4] Implement `app/lib/features/logs/logs_provider.dart` — `LogsNotifier`: paginated list, debounced keyword filter state
+- [x] T035 [P] [US4] Implement `app/lib/features/traces/traces_screen.dart` — list of `TraceSummary` rows (timestamp, persona, duration, status); expandable detail showing `SpanEntry` list with individual durations
+- [x] T036 [P] [US4] Implement `app/lib/features/logs/logs_screen.dart` — list of `LogEntry` rows (timestamp, severity chip, target, message); keyword filter text field at top
+- [x] T037 [US4] Wire traces + logs into navigation: add `/traces` and `/logs` routes in `app/lib/router/app_router.dart`; add navigation entries (drawer or bottom nav)
 
 **Checkpoint**: US4 independently testable — both screens load data from a live backend; trace detail expands; log filter narrows results within 2 seconds.
 
@@ -126,12 +126,12 @@ description: "Task list for 005-flutter-frontend"
 
 **Independent Test**: Navigate to skills screen for the active persona → skills list with name, description, enabled/disabled badge visible → empty state shows when no skills configured.
 
-- [ ] T038 Implement `crates/web-ui/src/api/skills.rs` — `GET /api/personas/{id}/skills`; add to OpenAPI doc; tests using `StorageLayer::new_in_memory()`
-- [ ] T039 Register skills route in `crates/web-ui/src/main.rs` under the auth-protected scope
-- [ ] T040 [P] [US5] Implement `app/lib/api/endpoints/skills.dart` — `SkillsEndpoint`: `listForPersona(personaId)`
-- [ ] T041 [P] [US5] Implement `app/lib/features/skills/skills_provider.dart` — `SkillsNotifier`: fetch skills for active persona on mount; refresh on persona switch
-- [ ] T042 [US5] Implement `app/lib/features/skills/skills_screen.dart` — list of `Skill` rows (name, description, enabled/disabled chip); empty state widget when list is empty
-- [ ] T043 [US5] Wire skills into navigation: add `/skills` route; add navigation entry alongside traces + logs
+- [x] T038 Implement `crates/web-ui/src/api/skills.rs` — `GET /api/personas/{id}/skills`; add to OpenAPI doc; tests using `StorageLayer::new_in_memory()`
+- [x] T039 Register skills route in `crates/web-ui/src/main.rs` under the auth-protected scope
+- [x] T040 [P] [US5] Implement `app/lib/api/endpoints/skills.dart` — `SkillsEndpoint`: `listForPersona(personaId)`
+- [x] T041 [P] [US5] Implement `app/lib/features/skills/skills_provider.dart` — `SkillsNotifier`: fetch skills for active persona on mount; refresh on persona switch
+- [x] T042 [US5] Implement `app/lib/features/skills/skills_screen.dart` — list of `Skill` rows (name, description, enabled/disabled chip); empty state widget when list is empty
+- [x] T043 [US5] Wire skills into navigation: add `/skills` route; add navigation entry alongside traces + logs
 
 **Checkpoint**: US5 independently testable — skills screen loads and displays read-only skill list for the active persona; empty state appears when persona has no skills.
 
@@ -141,12 +141,12 @@ description: "Task list for 005-flutter-frontend"
 
 **Purpose**: Build verification, backend test coverage, and end-to-end validation.
 
-- [ ] T044 [P] Add unit tests for `app/lib/api/client.dart` SSE parser in `app/test/unit/api/client_test.dart` — verify `TokenEvent`, `DoneEvent`, `ErrorEvent` parsing from raw byte streams
-- [ ] T045 [P] Add widget tests for `app/lib/features/connection/connection_screen.dart` in `app/test/widget/connection_screen_test.dart` — verify error messages for invalid token and unreachable server
+- [x] T044 [P] Add unit tests for `app/lib/api/client.dart` SSE parser in `app/test/unit/api/client_test.dart` — verify `TokenEvent`, `DoneEvent`, `ErrorEvent` parsing from raw byte streams
+- [x] T045 [P] Add widget tests for `app/lib/features/connection/connection_screen.dart` in `app/test/widget/connection_screen_test.dart` — verify error messages for invalid token and unreachable server
 - [ ] T046 [P] Verify `flutter build web` produces a deployable static site in `app/build/web/`
 - [ ] T047 [P] Verify `flutter build macos` produces a `.app` bundle in `app/build/macos/Build/Products/Release/`
 - [ ] T048 Run `quickstart.md` validation end-to-end against a local backend: connection → chat → persona switch → traces → logs → skills
-- [ ] T049 Update `AGENTS.md` with Flutter development setup: Flutter SDK requirement, `flutter pub get`, `flutter run -d chrome|macos`, `flutter test`
+- [x] T049 Update `AGENTS.md` with Flutter development setup: Flutter SDK requirement, `flutter pub get`, `flutter run -d chrome|macos`, `flutter test`
 
 ---
 

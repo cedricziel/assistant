@@ -1,22 +1,36 @@
-//! REST JSON API for conversation management.
+//! REST JSON API for the assistant web UI.
 //!
-//! Designed for native/external clients (mobile apps, desktop apps, etc.)
-//! that need to manage conversations and send messages programmatically.
-//!
-//! All endpoints require `Authorization: Bearer <token>` (same token as the
-//! web UI).  Responses are `application/json`.  The streaming send endpoint
-//! uses `text/event-stream` (SSE).
-//!
-//! ## Routes
-//!
-//! | Method   | Path                                  | Description                     |
-//! |----------|---------------------------------------|---------------------------------|
-//! | GET      | `/api/conversations`                  | List all conversations          |
-//! | POST     | `/api/conversations`                  | Create a new conversation       |
-//! | GET      | `/api/conversations/{id}`             | Get conversation + history      |
-//! | DELETE   | `/api/conversations/{id}`             | Delete a conversation           |
-//! | PATCH    | `/api/conversations/{id}`             | Update conversation title       |
-//! | POST     | `/api/conversations/{id}/messages`    | Send a message (SSE stream)     |
+//! Sub-modules:
+//! - `mod.rs` (this file): conversation management endpoints
+//! - `personas.rs`: persona listing and active persona switching
+//! - `traces.rs`: distributed trace retrieval
+//! - `logs.rs`: log entry retrieval
+//! - `skills.rs`: skill discovery per persona
+
+pub mod logs;
+pub mod personas;
+pub mod skills;
+pub mod traces;
+
+// -- Conversation API below --------------------------------------------------
+//
+// Designed for native/external clients (mobile apps, desktop apps, etc.)
+// that need to manage conversations and send messages programmatically.
+//
+// All endpoints require `Authorization: Bearer <token>` (same token as the
+// web UI).  Responses are `application/json`.  The streaming send endpoint
+// uses `text/event-stream` (SSE).
+//
+// Routes:
+//
+// | Method   | Path                                  | Description                     |
+// |----------|---------------------------------------|---------------------------------|
+// | GET      | `/api/conversations`                  | List all conversations          |
+// | POST     | `/api/conversations`                  | Create a new conversation       |
+// | GET      | `/api/conversations/{id}`             | Get conversation + history      |
+// | DELETE   | `/api/conversations/{id}`             | Delete a conversation           |
+// | PATCH    | `/api/conversations/{id}`             | Update conversation title       |
+// | POST     | `/api/conversations/{id}/messages`    | Send a message (SSE stream)     |
 
 use std::convert::Infallible;
 use std::sync::Arc;

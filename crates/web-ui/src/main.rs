@@ -58,6 +58,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use utoipa::OpenApi as _;
@@ -119,6 +120,12 @@ struct Args {
     /// Assistant agent context ID (e.g. "default", "work", "personal").
     #[arg(long, env = "ASSISTANT_AGENT")]
     agent: Option<String>,
+
+    /// Allowed CORS origin for API routes (e.g. "http://localhost:3000").
+    /// Defaults to wildcard (`*`) when not set.
+    /// Use `ASSISTANT_WEB_CORS_ORIGIN` env var as an alternative.
+    #[arg(long, env = "ASSISTANT_WEB_CORS_ORIGIN")]
+    cors_origin: Option<String>,
 }
 
 #[derive(Clone)]
@@ -514,6 +521,24 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
 
+    let persona_api_state = api::personas::PersonaApiState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
+    };
+
+    let traces_api_state = api::traces::TracesApiState {
+        pool: storage.pool.clone(),
+    };
+
+    let logs_api_state = api::logs::LogsApiState {
+        pool: storage.pool.clone(),
+    };
+
+    let skills_api_state = api::skills::SkillsApiState {
+        pool: storage.pool.clone(),
+        registry: state.registry.clone(),
+    };
+
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
         .route("/health", get(health))
@@ -554,13 +579,50 @@ async fn run_with_args(args: Args) -> Result<()> {
         .merge(chat::chat_router().with_state(chat_state))
         // Conversation REST API.
         .merge(api::api_router().with_state(api_state))
+        // Persona REST API (GET /api/personas, POST /api/personas/active).
+        .merge(api::personas::personas_router().with_state(persona_api_state))
+        // Traces REST API (GET /api/traces, GET /api/traces/{id}).
+        .merge(api::traces::traces_router().with_state(traces_api_state))
+        // Logs REST API (GET /api/logs).
+        .merge(api::logs::logs_router().with_state(logs_api_state))
+        // Skills REST API (GET /api/personas/{id}/skills).
+        .merge(api::skills::skills_router().with_state(skills_api_state))
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,
         ))
         .route_layer(axum::middleware::from_fn(auth::require_auth));
 
+    // -- CORS layer for /api/* routes ----------------------------------------
+    //
+    // The Flutter web build runs at the same origin as the server (embedded),
+    // but the macOS desktop app and external clients make cross-origin requests.
+    // We emit permissive CORS headers on all /api/* routes.
+    let cors = if let Some(ref origin) = args.cors_origin {
+        let origin_val = origin
+            .parse::<axum::http::HeaderValue>()
+            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("*"));
+        CorsLayer::new()
+            .allow_origin(origin_val)
+            .allow_headers([
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+            ])
+            .allow_methods(Any)
+    } else {
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_headers([
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+            ])
+            .allow_methods(Any)
+    };
+
     let router = public_routes
         .merge(protected_routes)
+        .layer(cors)
         .layer(Extension(auth_config))
         .layer(TraceLayer::new_for_http());
 

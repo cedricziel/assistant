@@ -13,6 +13,16 @@ updates:
         patterns:
           - "reqwest*"
 
+  - package-ecosystem: pub
+    directory: /app
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      all-pub:
+        patterns:
+          - "*"
+
   - package-ecosystem: docker
     directory: /docker
     schedule:
