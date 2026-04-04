@@ -82,57 +82,39 @@ pub async fn list_persona_skills(
         _ => {}
     }
 
-    // Use the skill registry to list skills filtered by persona access rules.
-    match state
-        .registry
-        .list_for_persona(&persona_id, &state.pool)
+    let skill_access_store =
+        assistant_storage::persona_skill_access::PersonaSkillAccessStore::new(state.pool.clone());
+
+    // Determine which skills are enabled for this persona.
+    let mode = skill_access_store
+        .get_mode(&persona_id)
         .await
-    {
-        Ok(skills) => {
-            let skill_access_store =
-                assistant_storage::persona_skill_access::PersonaSkillAccessStore::new(
-                    state.pool.clone(),
-                );
+        .unwrap_or_else(|_| "all".to_string());
 
-            // Determine which skills are enabled for this persona.
-            let mode = skill_access_store
-                .get_mode(&persona_id)
-                .await
-                .unwrap_or_else(|_| "all".to_string());
+    let listed_skills = skill_access_store
+        .list_skill_names(&persona_id)
+        .await
+        .unwrap_or_default();
 
-            let listed_skills = skill_access_store
-                .list_skill_names(&persona_id)
-                .await
-                .unwrap_or_default();
+    let all_skills = state.registry.list().await;
 
-            let all_skills = state.registry.list().await;
+    let entries: Vec<SkillEntryResponse> = all_skills
+        .into_iter()
+        .map(|s| {
+            let enabled = match mode.as_str() {
+                "whitelist" => listed_skills.contains(&s.name),
+                "blacklist" => !listed_skills.contains(&s.name),
+                _ => true, // "all" mode
+            };
+            SkillEntryResponse {
+                name: s.name,
+                description: s.description,
+                enabled,
+            }
+        })
+        .collect();
 
-            let entries: Vec<SkillEntryResponse> = all_skills
-                .into_iter()
-                .map(|s| {
-                    let enabled = match mode.as_str() {
-                        "whitelist" => listed_skills.contains(&s.name),
-                        "blacklist" => !listed_skills.contains(&s.name),
-                        _ => true, // "all" mode
-                    };
-                    // Check if it is in the filtered list (list_for_persona respects mode).
-                    let in_filtered = skills.iter().any(|fs| fs.name == s.name);
-                    let _ = in_filtered;
-                    SkillEntryResponse {
-                        name: s.name,
-                        description: s.description,
-                        enabled,
-                    }
-                })
-                .collect();
-
-            Json(entries).into_response()
-        }
-        Err(e) => {
-            warn!("Failed to list skills for persona {persona_id}: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to list skills").into_response()
-        }
-    }
+    Json(entries).into_response()
 }
 
 // -- Tests -------------------------------------------------------------------

@@ -95,23 +95,32 @@ class ConversationListNotifier
     }
   }
 
+  /// Add an already-created conversation to the front of the local list.
+  ///
+  /// Unlike [createConversation], this does NOT make a network call — it only
+  /// updates local state. Use this when the conversation was already created
+  /// by a different code path (e.g. [ChatNotifier.sendMessage]).
+  void prependConversation(ConversationSummary conv) {
+    final current = state.valueOrNull ?? const ConversationListState();
+    state = AsyncData(
+      current.copyWith(
+        conversations: [conv, ...current.conversations],
+      ),
+    );
+  }
+
   /// Delete a conversation by ID.
   Future<void> deleteConversation(String id) async {
     final endpoint = _endpoint;
     if (endpoint == null) return;
 
-    try {
-      await endpoint.delete(id);
-      final current = state.valueOrNull ?? const ConversationListState();
-      state = AsyncData(
-        current.copyWith(
-          conversations:
-              current.conversations.where((c) => c.id != id).toList(),
-        ),
-      );
-    } catch (_) {
-      // Silently ignore delete errors — the list will refresh on next load.
-    }
+    await endpoint.delete(id);
+    final current = state.valueOrNull ?? const ConversationListState();
+    state = AsyncData(
+      current.copyWith(
+        conversations: current.conversations.where((c) => c.id != id).toList(),
+      ),
+    );
   }
 }
 
@@ -263,10 +272,8 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
       try {
         final conv = await endpoint.create();
         conversationId = conv.id;
-        // Also update the conversation list.
-        ref
-            .read(conversationListProvider.notifier)
-            .createConversation(title: conv.title);
+        // Reflect the new conversation in the local list (no extra POST).
+        ref.read(conversationListProvider.notifier).prependConversation(conv);
       } catch (e) {
         state = AsyncData(
           current.copyWith(error: 'Failed to create conversation: $e'),

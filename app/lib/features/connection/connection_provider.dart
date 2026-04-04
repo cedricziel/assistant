@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -128,13 +126,6 @@ class ServerProfileNotifier extends AsyncNotifier<ServerConnectionState> {
       state = AsyncData(
         ServerConnectionState(profile: profile),
       );
-    } on SocketException catch (_) {
-      state = AsyncData(
-        (state.valueOrNull ?? const ServerConnectionState()).copyWith(
-          isConnecting: false,
-          error: 'Server unreachable',
-        ),
-      );
     } on Exception catch (e) {
       final message = e.toString().contains('Connection refused') ||
               e.toString().contains('Failed host lookup') ||
@@ -182,4 +173,5 @@ final activeProfileProvider = Provider<ServerProfile?>((ref) {
 bool get isWebPlatform => kIsWeb;
 
 /// Returns `true` when running on macOS desktop.
-bool get isMacOSPlatform => !kIsWeb && Platform.isMacOS;
+bool get isMacOSPlatform =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;

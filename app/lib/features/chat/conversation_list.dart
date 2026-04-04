@@ -107,10 +107,15 @@ class ConversationList extends ConsumerWidget {
                       color: Colors.red,
                       child: const Icon(Icons.delete, color: Colors.white),
                     ),
-                    onDismissed: (_) {
-                      ref
-                          .read(conversationListProvider.notifier)
-                          .deleteConversation(conv.id);
+                    confirmDismiss: (_) async {
+                      try {
+                        await ref
+                            .read(conversationListProvider.notifier)
+                            .deleteConversation(conv.id);
+                        return true;
+                      } catch (_) {
+                        return false;
+                      }
                     },
                     child: ListTile(
                       title: Text(

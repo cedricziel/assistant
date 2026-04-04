@@ -19,15 +19,15 @@ class AppRoutes {
   static const skills = '/skills';
 }
 
-/// Build the application router.
-///
-/// Redirect rules:
-/// - Unauthenticated → `/setup`
-/// - Authenticated + on `/setup` → `/chat`
-GoRouter buildRouter(WidgetRef ref) {
+/// Provider that creates a single [GoRouter] instance for the application
+/// lifetime. Creating this as a [Provider] ensures the router is not
+/// re-instantiated on every widget rebuild, which would lose navigation state.
+final routerProvider = Provider<GoRouter>((ref) {
+  final notifier = _RouterRefreshNotifier(ref);
+  ref.onDispose(notifier.dispose);
   return GoRouter(
     initialLocation: AppRoutes.chat,
-    refreshListenable: _RouterRefreshNotifier(ref),
+    refreshListenable: notifier,
     redirect: (context, state) {
       final isConnected = ref.read(isConnectedProvider);
       final onSetup = state.fullPath == AppRoutes.setup;
@@ -81,12 +81,20 @@ GoRouter buildRouter(WidgetRef ref) {
       ),
     ],
   );
-}
+});
 
 /// A [ChangeNotifier] that tells go_router to re-evaluate redirects whenever
 /// the connection state changes.
 class _RouterRefreshNotifier extends ChangeNotifier {
-  _RouterRefreshNotifier(WidgetRef ref) {
-    ref.listenManual(isConnectedProvider, (prev, next) => notifyListeners());
+  _RouterRefreshNotifier(Ref ref) {
+    _sub = ref.listen<bool>(isConnectedProvider, (_, next) => notifyListeners());
+  }
+
+  late final ProviderSubscription<bool> _sub;
+
+  @override
+  void dispose() {
+    _sub.close();
+    super.dispose();
   }
 }

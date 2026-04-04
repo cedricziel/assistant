@@ -255,5 +255,5 @@ With multiple developers:
 - Backend tasks (Rust) MUST be done before the corresponding Flutter endpoint client can make real API calls; use mock data in Flutter during backend development
 - Backend unit tests for new Rust handlers are required by Constitution Principle III — included in T022, T028, T029, T038 task descriptions
 - Secrets (server token) MUST be stored via `flutter_secure_storage` only — never in plain SharedPreferences or logged (Constitution Principle X)
-- The Flutter web build is a static site — it is NOT served by the Rust backend. Deploy separately (nginx, GitHub Pages, etc.)
+- The Flutter web build is embedded in the Rust binary via `rust-embed` and served by `assistant webui serve` at the root path (`/`). No separate web server is needed.
 - `flutter build macos` requires Xcode on macOS; CI must run on a macOS runner for the macOS build step

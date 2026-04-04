@@ -22,8 +22,10 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
   @override
   void initState() {
     super.initState();
-    // Default URL for macOS — user may change it.
-    _urlController = TextEditingController(text: 'http://127.0.0.1:8080');
+    // Pre-populate with origin on web; default backend address on macOS.
+    _urlController = TextEditingController(
+      text: isWebPlatform ? Uri.base.origin : 'http://127.0.0.1:8080',
+    );
     _tokenController = TextEditingController();
   }
 
@@ -34,13 +36,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
     super.dispose();
   }
 
-  String get _serverUrl {
-    if (isWebPlatform) {
-      // Auto-detect from the browser origin.
-      return Uri.base.origin;
-    }
-    return _urlController.text.trim();
-  }
+  String get _serverUrl => _urlController.text.trim();
 
   Future<void> _connect() async {
     if (!_formKey.currentState!.validate()) return;
@@ -87,33 +83,30 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                   ),
                   const SizedBox(height: 32),
 
-                  // Server URL field — shown on macOS only, hidden on web.
-                  if (!isWebPlatform) ...[
-                    TextFormField(
-                      key: const Key('server_url_field'),
-                      controller: _urlController,
-                      decoration: const InputDecoration(
-                        labelText: 'Server URL',
-                        hintText: 'http://127.0.0.1:8080',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.dns_outlined),
-                      ),
-                      keyboardType: TextInputType.url,
-                      autocorrect: false,
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Server URL is required';
-                        }
-                        final uri = Uri.tryParse(value.trim());
-                        if (uri == null ||
-                            (!uri.scheme.startsWith('http'))) {
-                          return 'Enter a valid http:// or https:// URL';
-                        }
-                        return null;
-                      },
+                  // Server URL field — shown on all platforms.
+                  TextFormField(
+                    key: const Key('server_url_field'),
+                    controller: _urlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Server URL',
+                      hintText: 'http://127.0.0.1:8080',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.dns_outlined),
                     ),
-                    const SizedBox(height: 16),
-                  ],
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Server URL is required';
+                      }
+                      final uri = Uri.tryParse(value.trim());
+                      if (uri == null || (!uri.scheme.startsWith('http'))) {
+                        return 'Enter a valid http:// or https:// URL';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
 
                   // Token field — always shown.
                   TextFormField(
@@ -184,18 +177,6 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                         : const Text('Connect'),
                   ),
 
-                  // Web hint: show auto-detected URL.
-                  if (isWebPlatform) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'Connecting to: ${Uri.base.origin}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.black45,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),

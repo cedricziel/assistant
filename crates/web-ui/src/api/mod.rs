@@ -423,8 +423,12 @@ pub async fn send_message(
     let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
 
     match store.get_conversation(conv_id).await {
-        Ok(None) | Err(_) => {
+        Ok(None) => {
             return (StatusCode::NOT_FOUND, "Conversation not found").into_response();
+        }
+        Err(e) => {
+            warn!("Failed to check conversation {conv_id}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
         _ => {}
     }
