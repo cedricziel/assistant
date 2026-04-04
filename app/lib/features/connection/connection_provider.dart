@@ -77,7 +77,7 @@ class ServerProfileNotifier extends AsyncNotifier<ServerConnectionState> {
   /// 4. On success, persists the profile and updates state.
   Future<void> connect(String baseUrl, String token) async {
     state = AsyncData(
-      (state.valueOrNull ?? const ServerConnectionState()).copyWith(
+      (state.value ?? const ServerConnectionState()).copyWith(
         isConnecting: true,
         clearError: true,
       ),
@@ -98,7 +98,7 @@ class ServerProfileNotifier extends AsyncNotifier<ServerConnectionState> {
 
       if (response.statusCode == 401) {
         state = AsyncData(
-          (state.valueOrNull ?? const ServerConnectionState()).copyWith(
+          (state.value ?? const ServerConnectionState()).copyWith(
             isConnecting: false,
             error: 'Invalid token',
           ),
@@ -108,7 +108,7 @@ class ServerProfileNotifier extends AsyncNotifier<ServerConnectionState> {
 
       if (response.statusCode != 200) {
         state = AsyncData(
-          (state.valueOrNull ?? const ServerConnectionState()).copyWith(
+          (state.value ?? const ServerConnectionState()).copyWith(
             isConnecting: false,
             error: 'Server returned ${response.statusCode}',
           ),
@@ -133,7 +133,7 @@ class ServerProfileNotifier extends AsyncNotifier<ServerConnectionState> {
           ? 'Server unreachable'
           : e.toString();
       state = AsyncData(
-        (state.valueOrNull ?? const ServerConnectionState()).copyWith(
+        (state.value ?? const ServerConnectionState()).copyWith(
           isConnecting: false,
           error: message,
         ),
@@ -159,13 +159,13 @@ final serverProfileProvider =
 /// Convenience provider — resolves to `true` when credentials are loaded and valid.
 final isConnectedProvider = Provider<bool>((ref) {
   final profileState = ref.watch(serverProfileProvider);
-  return profileState.valueOrNull?.isConnected ?? false;
+  return profileState.value?.isConnected ?? false;
 });
 
 /// Provides the active [ServerProfile], or `null` if not connected.
 final activeProfileProvider = Provider<ServerProfile?>((ref) {
   final profileState = ref.watch(serverProfileProvider);
-  return profileState.valueOrNull?.profile;
+  return profileState.value?.profile;
 });
 
 /// Returns `true` when running in a web browser (i.e. the server URL is

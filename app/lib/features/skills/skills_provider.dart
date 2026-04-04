@@ -39,12 +39,12 @@ class SkillsState {
 }
 
 /// Notifier for the skills list, bound to the active persona.
-class SkillsNotifier extends AutoDisposeAsyncNotifier<SkillsState> {
+class SkillsNotifier extends AsyncNotifier<SkillsState> {
   @override
   Future<SkillsState> build() async {
     // Refresh skills whenever the active persona changes.
     ref.listen(personasProvider, (_, next) {
-      final newPersonaId = next.valueOrNull?.activePersona?.id;
+      final newPersonaId = next.value?.activePersona?.id;
       if (newPersonaId != null) {
         _reload(newPersonaId);
       }
@@ -65,7 +65,7 @@ class SkillsNotifier extends AutoDisposeAsyncNotifier<SkillsState> {
 
     // Use the active persona ID.
     final personaId =
-        ref.read(personasProvider).valueOrNull?.activePersona?.id ?? 'default';
+        ref.read(personasProvider).value?.activePersona?.id ?? 'default';
 
     try {
       final response = await api.skills.listPersonaSkills(personaId: personaId);

@@ -35,7 +35,7 @@ class PersonasState {
 }
 
 /// Notifier for persona list and active persona management.
-class PersonasNotifier extends AutoDisposeAsyncNotifier<PersonasState> {
+class PersonasNotifier extends AsyncNotifier<PersonasState> {
   @override
   Future<PersonasState> build() async {
     return _fetchPersonas();
@@ -76,7 +76,7 @@ class PersonasNotifier extends AutoDisposeAsyncNotifier<PersonasState> {
     final api = _api;
     if (api == null) return;
 
-    final current = state.valueOrNull ?? const PersonasState();
+    final current = state.value ?? const PersonasState();
     state = AsyncData(current.copyWith(isLoading: true, clearError: true));
 
     try {

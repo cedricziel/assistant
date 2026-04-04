@@ -19,7 +19,7 @@ class SkillsScreen extends ConsumerWidget {
     final skillsAsync = ref.watch(skillsProvider);
     final personasAsync = ref.watch(personasProvider);
     final activePersonaName =
-        personasAsync.valueOrNull?.activePersona?.name ?? 'Active Persona';
+        personasAsync.value?.activePersona?.name ?? 'Active Persona';
 
     return Scaffold(
       appBar: AppBar(

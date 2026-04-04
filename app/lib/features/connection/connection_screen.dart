@@ -50,7 +50,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
   @override
   Widget build(BuildContext context) {
     final connectionState =
-        ref.watch(serverProfileProvider).valueOrNull ?? const ServerConnectionState();
+        ref.watch(serverProfileProvider).value ?? const ServerConnectionState();
     final isConnecting = connectionState.isConnecting;
     final errorMessage = connectionState.error;
 

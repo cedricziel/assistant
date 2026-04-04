@@ -45,7 +45,7 @@ class ConversationListState {
 
 /// Manages the list of conversations.
 class ConversationListNotifier
-    extends AutoDisposeAsyncNotifier<ConversationListState> {
+    extends AsyncNotifier<ConversationListState> {
   @override
   Future<ConversationListState> build() async {
     return _fetchAll();
@@ -84,7 +84,7 @@ class ConversationListNotifier
         ),
       );
       final created = response.data!;
-      final current = state.valueOrNull ?? const ConversationListState();
+      final current = state.value ?? const ConversationListState();
       state = AsyncData(
         current.copyWith(
           conversations: [created, ...current.conversations],
@@ -102,7 +102,7 @@ class ConversationListNotifier
   /// updates local state. Use this when the conversation was already created
   /// by a different code path (e.g. [ChatNotifier.sendMessage]).
   void prependConversation(ConversationSummary conv) {
-    final current = state.valueOrNull ?? const ConversationListState();
+    final current = state.value ?? const ConversationListState();
     state = AsyncData(
       current.copyWith(
         conversations: [conv, ...current.conversations],
@@ -116,7 +116,7 @@ class ConversationListNotifier
     if (api == null) return;
 
     await api.conversations.deleteConversation(id: id);
-    final current = state.valueOrNull ?? const ConversationListState();
+    final current = state.value ?? const ConversationListState();
     state = AsyncData(
       current.copyWith(
         conversations: current.conversations.where((c) => c.id != id).toList(),
@@ -196,7 +196,7 @@ class ChatState {
 }
 
 /// Manages the active chat conversation.
-class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
+class ChatNotifier extends AsyncNotifier<ChatState> {
   @override
   Future<ChatState> build() async {
     return const ChatState();
@@ -207,7 +207,7 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
   /// Load an existing conversation by ID.
   Future<void> loadConversation(String conversationId) async {
     state = AsyncData(
-      (state.valueOrNull ?? const ChatState()).copyWith(
+      (state.value ?? const ChatState()).copyWith(
         isLoadingHistory: true,
         clearError: true,
       ),
@@ -251,7 +251,7 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
   /// Set the active conversation ID without loading history.
   void setConversationId(String id) {
     state = AsyncData(
-      (state.valueOrNull ?? const ChatState()).copyWith(conversationId: id),
+      (state.value ?? const ChatState()).copyWith(conversationId: id),
     );
   }
 
@@ -262,7 +262,7 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
     final api = _api;
     if (api == null) return;
 
-    final current = state.valueOrNull ?? const ChatState();
+    final current = state.value ?? const ChatState();
     String? conversationId = current.conversationId;
 
     // Create a new conversation if needed.
@@ -310,7 +310,7 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
     // Stream SSE events.
     try {
       await for (final event in api.streamMessages(conversationId, message)) {
-        final chatState = state.valueOrNull ?? const ChatState();
+        final chatState = state.value ?? const ChatState();
 
         if (event is TokenEvent) {
           final newContent = chatState.streamingContent + event.token;
@@ -361,7 +361,7 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
       }
 
       // Stream ended without DoneEvent — treat accumulated buffer as final.
-      final finalState = state.valueOrNull ?? const ChatState();
+      final finalState = state.value ?? const ChatState();
       if (finalState.isSending) {
         final msgs = List<ChatMessage>.from(finalState.messages);
         final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
@@ -385,7 +385,7 @@ class ChatNotifier extends AutoDisposeAsyncNotifier<ChatState> {
         );
       }
     } catch (e) {
-      final chatState = state.valueOrNull ?? const ChatState();
+      final chatState = state.value ?? const ChatState();
       final msgs = List<ChatMessage>.from(chatState.messages)
         ..removeWhere((m) => m.id == 'assistant-streaming');
       state = AsyncData(

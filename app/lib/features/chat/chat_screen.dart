@@ -86,18 +86,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final chatAsync = ref.watch(chatProvider);
-    final chatState = chatAsync.valueOrNull ?? const ChatState();
+    final chatState = chatAsync.value ?? const ChatState();
     final isWide = MediaQuery.of(context).size.width > 700;
 
     // Scroll to bottom when messages change.
     ref.listen(chatProvider, (_, next) {
-      if (next.valueOrNull?.messages.isNotEmpty == true) {
+      if (next.value?.messages.isNotEmpty == true) {
         _scrollToBottom();
       }
     });
 
     final personasAsync = ref.watch(personasProvider);
-    final activePersona = personasAsync.valueOrNull?.activePersona;
+    final activePersona = personasAsync.value?.activePersona;
     final activePersonaName = activePersona?.name ?? 'Assistant';
 
     return Scaffold(

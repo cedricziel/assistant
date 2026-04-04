@@ -38,7 +38,7 @@ class LogsState {
 }
 
 /// Notifier for the logs list with debounced keyword filter.
-class LogsNotifier extends AutoDisposeAsyncNotifier<LogsState> {
+class LogsNotifier extends AsyncNotifier<LogsState> {
   @override
   Future<LogsState> build() async {
     return _fetchLogs('');
@@ -68,13 +68,13 @@ class LogsNotifier extends AutoDisposeAsyncNotifier<LogsState> {
 
   /// Update the keyword filter and reload logs.
   Future<void> setSearch(String query) async {
-    final current = state.valueOrNull ?? const LogsState();
+    final current = state.value ?? const LogsState();
     state = AsyncData(current.copyWith(isLoading: true, searchQuery: query));
     state = AsyncData(await _fetchLogs(query));
   }
 
   Future<void> refresh() async {
-    final query = state.valueOrNull?.searchQuery ?? '';
+    final query = state.value?.searchQuery ?? '';
     state = const AsyncLoading();
     state = AsyncData(await _fetchLogs(query));
   }

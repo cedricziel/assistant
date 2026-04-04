@@ -31,7 +31,7 @@ class TracesState {
 }
 
 /// Notifier for the traces list.
-class TracesNotifier extends AutoDisposeAsyncNotifier<TracesState> {
+class TracesNotifier extends AsyncNotifier<TracesState> {
   @override
   Future<TracesState> build() async {
     return _fetchTraces();
@@ -82,11 +82,18 @@ class TraceDetailState {
 }
 
 /// Notifier for a single trace's span breakdown.
-class TraceDetailNotifier
-    extends AutoDisposeFamilyAsyncNotifier<TraceDetailState, String> {
+///
+/// In Riverpod 3, family notifiers still extend [AsyncNotifier]. The family
+/// argument is passed through the constructor (via the factory function
+/// supplied to [AsyncNotifierProvider.family]).
+class TraceDetailNotifier extends AsyncNotifier<TraceDetailState> {
+  TraceDetailNotifier(this._traceId);
+
+  final String _traceId;
+
   @override
-  Future<TraceDetailState> build(String traceId) async {
-    return _fetchDetail(traceId);
+  Future<TraceDetailState> build() async {
+    return _fetchDetail(_traceId);
   }
 
   ApiClient? get _api {
@@ -112,5 +119,5 @@ class TraceDetailNotifier
 /// Family provider for [TraceDetailNotifier].
 final traceDetailProvider = AsyncNotifierProvider.autoDispose
     .family<TraceDetailNotifier, TraceDetailState, String>(
-  TraceDetailNotifier.new,
+  (arg) => TraceDetailNotifier(arg),
 );
