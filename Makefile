@@ -75,3 +75,20 @@ run-worker:
 # Requires presage git deps to be resolvable (see crates/interface-signal/README.md).
 build-signal:
 	cargo build -p assistant-interface-signal --features signal
+
+# ── OpenAPI & Flutter client generation ──────────────────────────────────────
+
+# Export the OpenAPI spec to openapi.json (requires no running server).
+dump-openapi:
+	cargo run -p assistant-cli -- webui serve --print-openapi 2>/dev/null \
+	  | python3 -m json.tool --no-ensure-ascii > openapi.json
+
+# Generate the Dart/Flutter API client from openapi.json.
+# Requires: openapi-generator (brew install openapi-generator)
+generate-flutter-client: openapi.json
+	openapi-generator generate \
+	  -i openapi.json \
+	  -g dart-dio \
+	  -o app/packages/assistant_api \
+	  -c app/openapi-generator.yaml \
+	  --skip-validate-spec

@@ -1,0 +1,239 @@
+// GENERATED CODE - DO NOT MODIFY BY HAND
+
+part of 'serializers.dart';
+
+// **************************************************************************
+// BuiltValueGenerator
+// **************************************************************************
+
+Serializers _$serializers = (Serializers().toBuilder()
+      ..add(AgentCapabilities.serializer)
+      ..add(AgentCard.serializer)
+      ..add(AgentCardSignature.serializer)
+      ..add(AgentExtension.serializer)
+      ..add(AgentInterface.serializer)
+      ..add(AgentProvider.serializer)
+      ..add(AgentSkill.serializer)
+      ..add(ApiErrorResponse.serializer)
+      ..add(ApiKeySecurityScheme.serializer)
+      ..add(ApiSendMessageRequest.serializer)
+      ..add(Artifact.serializer)
+      ..add(AuthenticationInfo.serializer)
+      ..add(AuthorizationCodeOAuthFlow.serializer)
+      ..add(CancelTaskRequest.serializer)
+      ..add(ClientCredentialsOAuthFlow.serializer)
+      ..add(ConversationDetail.serializer)
+      ..add(ConversationSummary.serializer)
+      ..add(CreateConversationRequest.serializer)
+      ..add(CreateTaskPushNotificationConfigRequest.serializer)
+      ..add(DeviceCodeOAuthFlow.serializer)
+      ..add(GetExtendedAgentCardRequest.serializer)
+      ..add(GetTaskPushNotificationConfigRequest.serializer)
+      ..add(GetTaskRequest.serializer)
+      ..add(HttpAuthSecurityScheme.serializer)
+      ..add(ImplicitOAuthFlow.serializer)
+      ..add(ListTaskPushNotificationConfigsRequest.serializer)
+      ..add(ListTaskPushNotificationConfigsResponse.serializer)
+      ..add(ListTasksRequest.serializer)
+      ..add(ListTasksResponse.serializer)
+      ..add(LogEntryResponse.serializer)
+      ..add(Message.serializer)
+      ..add(MessageSummary.serializer)
+      ..add(ModelPart.serializer)
+      ..add(MutualTlsSecurityScheme.serializer)
+      ..add(OAuth2SecurityScheme.serializer)
+      ..add(OAuthFlows.serializer)
+      ..add(OpenIdConnectSecurityScheme.serializer)
+      ..add(PasswordOAuthFlow.serializer)
+      ..add(PersonaSummary.serializer)
+      ..add(PushNotificationConfig.serializer)
+      ..add(Role.serializer)
+      ..add(SecurityRequirement.serializer)
+      ..add(SecurityScheme.serializer)
+      ..add(SendMessageConfiguration.serializer)
+      ..add(SendMessageRequest.serializer)
+      ..add(SendMessageResponse.serializer)
+      ..add(SetActivePersonaRequest.serializer)
+      ..add(SkillEntryResponse.serializer)
+      ..add(SpanEntryResponse.serializer)
+      ..add(StreamResponse.serializer)
+      ..add(StringList.serializer)
+      ..add(SubscribeToTaskRequest.serializer)
+      ..add(Task.serializer)
+      ..add(TaskArtifactUpdateEvent.serializer)
+      ..add(TaskPushNotificationConfig.serializer)
+      ..add(TaskState.serializer)
+      ..add(TaskStatus.serializer)
+      ..add(TaskStatusUpdateEvent.serializer)
+      ..add(TraceDetailResponse.serializer)
+      ..add(TraceSummaryResponse.serializer)
+      ..add(UpdateConversationRequest.serializer)
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(AgentExtension)]),
+          () => ListBuilder<AgentExtension>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(Artifact)]),
+          () => ListBuilder<Artifact>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(Message)]),
+          () => ListBuilder<Message>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(MessageSummary)]),
+          () => ListBuilder<MessageSummary>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(SpanEntryResponse)]),
+          () => ListBuilder<SpanEntryResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(
+              BuiltList, const [const FullType(SecurityRequirement)]),
+          () => ListBuilder<SecurityRequirement>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap,
+              const [const FullType(String), const FullType(SecurityScheme)]),
+          () => MapBuilder<String, SecurityScheme>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(AgentCardSignature)]),
+          () => ListBuilder<AgentCardSignature>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(AgentSkill)]),
+          () => ListBuilder<AgentSkill>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(AgentInterface)]),
+          () => ListBuilder<AgentInterface>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(
+              BuiltList, const [const FullType(SecurityRequirement)]),
+          () => ListBuilder<SecurityRequirement>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(ModelPart)]),
+          () => ListBuilder<ModelPart>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(ModelPart)]),
+          () => ListBuilder<ModelPart>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(Task)]),
+          () => ListBuilder<Task>())
+      ..addBuilderFactory(
+          const FullType(
+              BuiltList, const [const FullType(TaskPushNotificationConfig)]),
+          () => ListBuilder<TaskPushNotificationConfig>())
+      ..addBuilderFactory(
+          const FullType(
+              BuiltMap, const [const FullType(String), const FullType(String)]),
+          () => MapBuilder<String, String>())
+      ..addBuilderFactory(
+          const FullType(
+              BuiltMap, const [const FullType(String), const FullType(String)]),
+          () => MapBuilder<String, String>())
+      ..addBuilderFactory(
+          const FullType(
+              BuiltMap, const [const FullType(String), const FullType(String)]),
+          () => MapBuilder<String, String>())
+      ..addBuilderFactory(
+          const FullType(
+              BuiltMap, const [const FullType(String), const FullType(String)]),
+          () => MapBuilder<String, String>())
+      ..addBuilderFactory(
+          const FullType(
+              BuiltMap, const [const FullType(String), const FullType(String)]),
+          () => MapBuilder<String, String>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap,
+              const [const FullType(String), const FullType(StringList)]),
+          () => MapBuilder<String, StringList>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>())
+      ..addBuilderFactory(
+          const FullType(BuiltMap, const [
+            const FullType(String),
+            const FullType.nullable(JsonObject)
+          ]),
+          () => MapBuilder<String, JsonObject?>()))
+    .build();
+
+// ignore_for_file: deprecated_member_use_from_same_package,type=lint

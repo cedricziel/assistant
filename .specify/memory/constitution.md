@@ -1,18 +1,34 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.0 → 1.1.0
-Modified principles: none renamed
+Version change: 1.2.0 → 1.3.0
+Modified principles:
+  - IV. Observability — doc-comment style rules removed and relocated to
+    Code Style Standards (those rules are style, not observability)
 Added sections:
-  - VIII. Dual-Mode Parity (NON-NEGOTIABLE) — new principle
+  - X. Security & Safety Gates (NON-NEGOTIABLE) — new principle
+    Mandates SafetyGate interception, is_mutating/requires_confirmation
+    contracts, no-secrets-in-logs, and interface boundary validation.
+  - XI. Database Migration Discipline — new principle
+    Mandates forward-only, monotonically-numbered, additive-preferred
+    migrations; in-memory parity required; destructive changes need ADR.
 Removed sections: none
 Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ Constitution Check section present; no structural change needed
+  - .specify/templates/plan-template.md ✅ Constitution Check section present;
+    new principles X and XI apply automatically; no structural change needed
   - .specify/templates/spec-template.md ✅ No new mandatory sections required
-  - .specify/templates/tasks-template.md ✅ Dual-mode testing note covered by principle; no template change needed
+  - .specify/templates/tasks-template.md ✅ No structural change needed
   - .specify/templates/commands/ ✅ No command files present
+Condensation analysis:
+  - I (Crate Modularity) + II (Trait DI): kept separate — different enforcement
+    points and failure modes; merging would create a mixed-concern principle
+  - III (Test Discipline) + VII (Code Quality Gate): kept separate — VII covers
+    commit format and ADR requirements beyond test patterns
+  - VI (Interface Parity) + IX (Realtime API-First): kept separate — VI governs
+    internal routing, IX governs external API surface
 Deferred items:
-  - RATIFICATION_DATE remains 2026-03-27 (first population date; original project start unknown)
+  - RATIFICATION_DATE remains 2026-03-27 (first population date; original project
+    start unknown)
 -->
 
 # assistant Constitution
@@ -61,7 +77,6 @@ All library crates MUST use `tracing` macros (`debug!`, `info!`, `warn!`, `error
 `println!` is NEVER permitted in library crates.
 The ReAct orchestration loop MUST emit OpenTelemetry spans for each turn.
 Structured trace data MUST be persisted to SQLite via the `opentelemetry-exporter-sqlite` crate.
-Module-level docs use `//!`; function docs `///`; section dividers `// -- Name --`.
 
 **Rationale**: Passive trace logging enables the self-improvement feedback loop (skill refinement
 proposals) and makes runtime behavior inspectable without modifying code.
@@ -126,6 +141,79 @@ horizontally-scaled distributed system. Treating either mode as second-class wil
 break production deployments. The `MessageBus` abstraction (in-process vs. NATS) exists
 precisely to keep both modes first-class — this principle enforces that intent.
 
+### IX. Realtime API-First for Frontend Consumers (NON-NEGOTIABLE)
+
+Every user-facing capability MUST be accessible through a feature-complete, realtime-capable
+API that any frontend (web, native, or third-party) can consume independently.
+
+The API MUST satisfy all of the following:
+
+- **Feature completeness**: All assistant capabilities (conversations, tool calls, streaming
+  LLM responses, persona management, skill management, observability data) MUST be reachable
+  via stable, versioned API endpoints. A capability that exists only in server-rendered HTML
+  or CLI output is NOT considered exposed.
+- **Realtime streaming**: LLM response tokens, tool execution progress, and live system events
+  MUST be streamable to clients. Server-Sent Events (SSE) or WebSocket MUST be used for
+  streaming paths; polling-only designs are NOT acceptable for latency-sensitive data.
+- **Frontend agnosticism**: The API MUST carry zero assumptions about the consuming client.
+  No web-framework-specific session coupling, no template rendering, and no
+  platform-specific headers or cookies may be required for a client to consume any endpoint.
+- **Native-client parity**: Any feature reachable from the web UI MUST be equally reachable
+  from a native client (e.g., Flutter mobile/desktop app) using the same API surface.
+  A feature is NOT complete until it is consumable by both web and native frontends.
+
+New interfaces or features that bypass this API surface MUST be rejected unless an ADR
+explicitly justifies the exception and defines a migration path.
+
+**Rationale**: Frontend technologies evolve faster than backend logic. Decoupling all frontends
+through a complete, streaming-capable API allows web, native (Flutter), and third-party clients
+to be built or replaced without modifying the core. It also enforces a clean architecture
+boundary: the backend is the authoritative system; frontends are interchangeable consumers.
+
+### X. Security & Safety Gates (NON-NEGOTIABLE)
+
+All tool execution MUST pass through the SafetyGate before running.
+Every `ToolHandler` that writes to disk, executes processes, modifies external state, or
+terminates agents MUST return `true` from `is_mutating()`.
+Any mutating tool that requires explicit user approval before execution MUST return `true` from
+`requires_confirmation()` — this flag MUST NOT be set to `false` as a convenience shortcut.
+`unsafe` Rust code is NEVER permitted in workspace crates without a dedicated ADR that
+documents the invariants upheld and the absence of safe alternatives.
+
+Interface boundaries (HTTP requests, WebSocket frames, Slack/Mattermost payloads, Matrix
+events) MUST validate and sanitize all inbound data before passing it to the Orchestrator.
+Input validation failures MUST be rejected at the boundary and MUST NOT propagate as
+unhandled panics or opaque errors.
+
+Secrets (API keys, passwords, session tokens, private keys) MUST NOT appear in:
+
+- `tracing` log output at any level
+- OpenTelemetry span attributes or events
+- Error messages returned to clients or written to the trace store
+
+**Rationale**: The assistant can execute bash commands, write arbitrary files, and spawn
+sub-processes on behalf of LLM-driven decisions. A missing or bypassed safety gate can cause
+irreversible harm to user data or host systems. The `is_mutating` / `requires_confirmation`
+contract is the enforcement mechanism — constitutionalising it prevents silent regression.
+
+### XI. Database Migration Discipline
+
+All SQLite schema changes MUST be expressed as numbered SQL migration files in `migrations/`
+and registered in the `run_migrations()` function in `crates/storage/src/lib.rs`.
+Migration numbers MUST be monotonically increasing integers and MUST NOT be reused or
+reordered after merging to `main`.
+Migrations MUST be forward-only; no rollback (`down`) migrations are permitted.
+Migrations MUST be additive wherever possible (new columns with DEFAULT, new tables, new
+indexes). Destructive changes (column drops, table drops, column renames, constraint removals)
+MUST be preceded by a deprecation migration and MUST be justified in an ADR.
+`StorageLayer::new_in_memory()` MUST always apply the full migration sequence. Tests that
+depend on a partially-migrated schema are NOT acceptable and MUST be treated as test failures.
+
+**Rationale**: The hand-rolled migration registry (30+ migrations as of v1.3.0) is the single
+source of truth for schema state. Without discipline around ordering, additive preference, and
+in-memory parity, migrations can silently diverge between test and production databases,
+recreating the exact failure mode principle III was designed to prevent for application logic.
+
 ## Code Style Standards
 
 The following constraints apply workspace-wide:
@@ -137,6 +225,8 @@ The following constraints apply workspace-wide:
   async methods; `tokio::fs` for file I/O in tool handlers.
 - **Naming**: crates `assistant-*`, modules `snake_case`, structs/traits `PascalCase`, handler
   structs `<Feature>Handler`, tool names `kebab-case`, constants `SCREAMING_SNAKE`.
+- **Documentation**: Module-level docs use `//!`; function docs `///`; section dividers
+  `// -- Name --`. All public items in library crates MUST have doc comments.
 - **Terminology**: Use `Persona`, `Subagent Process`, and `A2A Profile` in all new docs and
   UX copy. Avoid unqualified `agent` in architecture prose. Canonical definitions live in
   `docs/glossary.md`.
@@ -153,10 +243,15 @@ The following constraints apply workspace-wide:
   `make test-integration` (requires Ollama), `make lint`, `make format`.
 - **Adding a builtin tool**: Follow the 5-step checklist in `AGENTS.md` — handler struct →
   `ToolHandler` impl → export from `mod.rs` → register in `ToolExecutor::register_builtins()`
-  → optional `skills/<name>/SKILL.md`.
+  → optional `skills/<name>/SKILL.md`. Set `is_mutating()` and `requires_confirmation()`
+  correctly before the first commit.
 - **Dual-mode testing**: When adding or modifying runtime behaviour, verify the change works
   under both `assistant orchestrator run` (single-binary) and with `assistant worker` +
   external bus (distributed). Document which modes were tested in the PR description.
+- **Realtime API coverage**: When adding any user-facing capability, verify that it is
+  accessible via a versioned API endpoint and, where applicable, exposes a streaming path
+  (SSE or WebSocket). Document the endpoint(s) in the PR description and note whether
+  native-client consumption was validated.
 - **Architectural changes**: MUST be accompanied by a new or updated ADR in `docs/adr/`.
 - **CI gates**: GitHub Actions runs check, test, lint, and format on every push to `main` and
   on every PR. The `signal` feature is linted separately. Integration tests run with
@@ -185,4 +280,4 @@ violations MUST be documented in `Complexity Tracking` sections of the feature p
 Runtime development guidance lives in `AGENTS.md`; this constitution governs the _why_,
 `AGENTS.md` governs the _how_.
 
-**Version**: 1.1.0 | **Ratified**: 2026-03-27 | **Last Amended**: 2026-03-27
+**Version**: 1.3.0 | **Ratified**: 2026-03-27 | **Last Amended**: 2026-04-04

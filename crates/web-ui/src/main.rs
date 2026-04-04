@@ -3,15 +3,12 @@ mod analytics;
 pub mod api;
 pub mod auth;
 pub(crate) mod backends;
-mod chat;
 pub mod common;
 mod contexts;
-mod logs;
+mod flutter_assets;
 mod openapi;
 mod pwa;
-mod skills;
 pub(crate) mod static_assets;
-mod traces;
 mod webhooks;
 mod workflows;
 
@@ -45,7 +42,6 @@ use assistant_workflow::{
 use assistant_workflow_http::HttpRequestActionExecutor;
 use axum::{
     http::StatusCode,
-    response::Redirect,
     routing::{get, post},
     Extension, Router,
 };
@@ -58,6 +54,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use utoipa::OpenApi as _;
@@ -119,6 +116,18 @@ struct Args {
     /// Assistant agent context ID (e.g. "default", "work", "personal").
     #[arg(long, env = "ASSISTANT_AGENT")]
     agent: Option<String>,
+
+    /// Allowed CORS origin for API routes (e.g. "http://localhost:3000").
+    /// Defaults to wildcard (`*`) when not set.
+    /// Use `ASSISTANT_WEB_CORS_ORIGIN` env var as an alternative.
+    #[arg(long, env = "ASSISTANT_WEB_CORS_ORIGIN")]
+    cors_origin: Option<String>,
+
+    /// Print the OpenAPI specification as JSON to stdout and exit.
+    /// Use this to regenerate the committed `openapi.json` file:
+    ///   `cargo run -p assistant-cli -- webui serve --print-openapi > openapi.json`
+    #[arg(long)]
+    print_openapi: bool,
 }
 
 #[derive(Clone)]
@@ -151,6 +160,13 @@ impl AssistantTurnClient for OrchestratorTurnClient {
 }
 
 async fn run_with_args(args: Args) -> Result<()> {
+    // -- OpenAPI spec dump (no server required) -------------------------------
+    if args.print_openapi {
+        let spec = openapi::ApiDoc::openapi().to_json()?;
+        println!("{spec}");
+        return Ok(());
+    }
+
     // -- Auth token (required) -----------------------------------------------
     let auth_token = match args.auth_token.map(|t| t.trim().to_string()) {
         Some(t) if !t.is_empty() => t,
@@ -505,20 +521,30 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
-    let skills_pages_state = skills::pages::SkillsPagesState {
-        registry: state.registry.clone(),
-        orchestrator: orchestrator.clone(),
+    let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
+
+    let persona_api_state = api::personas::PersonaApiState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
     };
 
-    let chat_state = chat::ChatState::new(selected_agent.clone());
+    let traces_api_state = api::traces::TracesApiState {
+        pool: storage.pool.clone(),
+    };
 
-    let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
+    let logs_api_state = api::logs::LogsApiState {
+        pool: storage.pool.clone(),
+    };
+
+    let skills_api_state = api::skills::SkillsApiState {
+        pool: storage.pool.clone(),
+        registry: state.registry.clone(),
+    };
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
-        .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
         // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
         .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))
@@ -533,10 +559,6 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()
-        // Trace / log UI routes.
-        .route("/", get(|| async { Redirect::to("/chat") }))
-        .merge(traces::traces_router())
-        .merge(logs::logs_router())
         .merge(analytics::analytics_router())
         .merge(contexts::contexts_router())
         .with_state(state)
@@ -548,19 +570,59 @@ async fn run_with_args(args: Args) -> Result<()> {
         .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
         // Workflow graph management pages + JSON API.
         .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
-        // Skill management pages.
-        .merge(skills::skills_router().with_state(skills_pages_state))
-        // Chat interface.
-        .merge(chat::chat_router().with_state(chat_state))
         // Conversation REST API.
         .merge(api::api_router().with_state(api_state))
+        // Persona REST API (GET /api/personas, POST /api/personas/active).
+        .merge(api::personas::personas_router().with_state(persona_api_state))
+        // Traces REST API (GET /api/traces, GET /api/traces/{id}).
+        .merge(api::traces::traces_router().with_state(traces_api_state))
+        // Logs REST API (GET /api/logs).
+        .merge(api::logs::logs_router().with_state(logs_api_state))
+        // Skills REST API (GET /api/personas/{id}/skills).
+        .merge(api::skills::skills_router().with_state(skills_api_state))
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,
         ))
         .route_layer(axum::middleware::from_fn(auth::require_auth));
 
+    // -- CORS layer for /api/* routes ----------------------------------------
+    //
+    // The Flutter web build runs at the same origin as the server (embedded),
+    // but the macOS desktop app and external clients make cross-origin requests.
+    // We emit permissive CORS headers on all /api/* routes.
+    let cors = if let Some(ref origin) = args.cors_origin {
+        let origin_val = match origin.parse::<axum::http::HeaderValue>() {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Invalid --cors-origin value {origin:?}: {e}; falling back to wildcard");
+                axum::http::HeaderValue::from_static("*")
+            }
+        };
+        CorsLayer::new()
+            .allow_origin(origin_val)
+            .allow_headers([
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+            ])
+            .allow_methods(Any)
+    } else {
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_headers([
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+            ])
+            .allow_methods(Any)
+    };
+
     let router = public_routes
         .merge(protected_routes)
+        // Flutter SPA fallback: serves embedded web assets for all unmatched
+        // paths (no auth required — FR-013).
+        .fallback(flutter_assets::flutter_handler)
+        .layer(cors)
         .layer(Extension(auth_config))
         .layer(TraceLayer::new_for_http());
 
@@ -574,7 +636,7 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     info!("Listening on http://{}", addr);
     info!("A2A agent card: http://{}/.well-known/agent.json", addr);
-    info!("Authentication enabled — login at http://{}/login", addr);
+    info!("Authentication enabled — enter token at http://{}/", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router.into_make_service()).await?;
     Ok(())

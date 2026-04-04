@@ -38,6 +38,10 @@ use utoipa::{
 
 use crate::a2a::handlers;
 use crate::api::{
+    logs::LogEntryResponse,
+    personas::{PersonaSummary, SetActivePersonaRequest},
+    skills::SkillEntryResponse,
+    traces::{SpanEntryResponse, TraceDetailResponse, TraceSummaryResponse},
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
     SendMessageRequest as ApiSendMessageRequest, UpdateConversationRequest,
 };
@@ -100,6 +104,12 @@ impl Modify for BearerTokenSecurityAddon {
         crate::api::delete_conversation,
         crate::api::update_conversation,
         crate::api::send_message,
+        crate::api::personas::list_personas,
+        crate::api::personas::set_active_persona,
+        crate::api::skills::list_persona_skills,
+        crate::api::traces::list_traces,
+        crate::api::traces::get_trace,
+        crate::api::logs::list_logs,
         handlers::get_agent_card_well_known,
         handlers::get_extended_agent_card,
         handlers::send_message,
@@ -174,6 +184,14 @@ impl Modify for BearerTokenSecurityAddon {
             CreateConversationRequest,
             UpdateConversationRequest,
             ApiSendMessageRequest,
+            // Flutter-facing API types
+            PersonaSummary,
+            SetActivePersonaRequest,
+            SkillEntryResponse,
+            TraceSummaryResponse,
+            SpanEntryResponse,
+            TraceDetailResponse,
+            LogEntryResponse,
         // Local handler types
             ApiErrorResponse,
         )
