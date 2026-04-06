@@ -67,7 +67,6 @@ use auth::AuthConfig;
 
 use a2a::agent_store::AgentStore;
 use a2a::handlers::{build_default_agent_card, A2AState};
-use a2a::pages::AgentPagesState;
 use a2a::task_store::TaskStore;
 
 #[derive(Parser, Debug)]
@@ -510,26 +509,10 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_card,
     };
 
-    let agent_pages_state = AgentPagesState {
-        agent_store,
-        base_url: base_url.clone(),
-    };
-
-    let webhook_pages_state = webhooks::pages::WebhookPagesState {
-        pool: storage.pool.clone(),
-        agent_id: state.agent_id.clone(),
-    };
-
+    // Workflow pages state is still needed for the public webhook trigger ingress.
     let workflow_pages_state = workflows::pages::WorkflowPagesState {
         pool: storage.pool.clone(),
         agent_id: state.agent_id.clone(),
-    };
-
-    let chat_state = chat::ChatState::new(selected_agent.clone());
-
-    let skills_pages_state = skills::pages::SkillsPagesState {
-        registry: state.registry.clone(),
-        orchestrator: orchestrator.clone(),
     };
 
     let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
@@ -585,23 +568,10 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()
-        .merge(analytics::analytics_router())
-        .merge(contexts::contexts_router())
         .with_state(state)
         // A2A protocol routes (auth-protected endpoints only).
         .merge(a2a::protected_router().with_state(a2a_state))
-        // Agent management UI pages.
-        .merge(a2a::agent_pages_router().with_state(agent_pages_state))
-        // Webhook management UI pages.
-        .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
-        // Skill management UI pages.
-        .merge(skills::skills_router().with_state(skills_pages_state))
-        // Chat shell (Stimulus-hydrated, renders nav chrome for breakpoint tests).
-        .merge(chat::chat_router().with_state(chat_state))
-        // Workflow graph management pages + JSON API.
-        .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
-        // REST API — all sub-routers are nested under /api to avoid
-        // conflicting with the HTML UI page routes (e.g. GET /personas).
+        // REST API — all page routes are now handled by the Flutter SPA fallback.
         .nest(
             "/api",
             api::api_router()
