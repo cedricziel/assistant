@@ -196,6 +196,7 @@ struct AddSkillForm {
 
 pub(crate) fn contexts_router() -> axum::Router<AppState> {
     axum::Router::new()
+        .route("/contexts", axum::routing::get(show_contexts))
         .route("/personas", axum::routing::get(show_contexts))
         .route("/personas/new", axum::routing::get(show_new_persona_form)) // MUST be before /{id}
         .route("/personas", axum::routing::post(create_persona))

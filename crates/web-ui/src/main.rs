@@ -3,11 +3,13 @@ mod analytics;
 pub mod api;
 pub mod auth;
 pub(crate) mod backends;
+mod chat;
 pub mod common;
 mod contexts;
 mod flutter_assets;
 mod openapi;
 mod pwa;
+mod skills;
 pub(crate) mod static_assets;
 mod webhooks;
 mod workflows;
@@ -521,6 +523,13 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
+    let chat_state = chat::ChatState::new(selected_agent.clone());
+
+    let skills_pages_state = skills::pages::SkillsPagesState {
+        registry: state.registry.clone(),
+        orchestrator: orchestrator.clone(),
+    };
+
     let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
 
     let persona_api_state = api::personas::PersonaApiState {
@@ -545,6 +554,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     let public_routes = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
+        .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
         // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
         .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))
@@ -568,18 +578,23 @@ async fn run_with_args(args: Args) -> Result<()> {
         .merge(a2a::agent_pages_router().with_state(agent_pages_state))
         // Webhook management UI pages.
         .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
+        // Skill management UI pages.
+        .merge(skills::skills_router().with_state(skills_pages_state))
+        // Chat shell (Stimulus-hydrated, renders nav chrome for breakpoint tests).
+        .merge(chat::chat_router().with_state(chat_state))
         // Workflow graph management pages + JSON API.
         .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
-        // Conversation REST API.
-        .merge(api::api_router().with_state(api_state))
-        // Persona REST API (GET /api/personas, POST /api/personas/active).
-        .merge(api::personas::personas_router().with_state(persona_api_state))
-        // Traces REST API (GET /api/traces, GET /api/traces/{id}).
-        .merge(api::traces::traces_router().with_state(traces_api_state))
-        // Logs REST API (GET /api/logs).
-        .merge(api::logs::logs_router().with_state(logs_api_state))
-        // Skills REST API (GET /api/personas/{id}/skills).
-        .merge(api::skills::skills_router().with_state(skills_api_state))
+        // REST API — all sub-routers are nested under /api to avoid
+        // conflicting with the HTML UI page routes (e.g. GET /personas).
+        .nest(
+            "/api",
+            api::api_router()
+                .with_state(api_state)
+                .merge(api::personas::personas_router().with_state(persona_api_state))
+                .merge(api::traces::traces_router().with_state(traces_api_state))
+                .merge(api::logs::logs_router().with_state(logs_api_state))
+                .merge(api::skills::skills_router().with_state(skills_api_state)),
+        )
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,
         ))
