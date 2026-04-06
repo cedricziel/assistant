@@ -7,10 +7,13 @@
 //! - `logs.rs`: log entry retrieval
 //! - `skills.rs`: skill discovery per persona
 
+pub mod agents;
+pub mod analytics;
 pub mod logs;
 pub mod personas;
 pub mod skills;
 pub mod traces;
+pub mod webhooks;
 
 // -- Conversation API below --------------------------------------------------
 //

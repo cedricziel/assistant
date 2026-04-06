@@ -489,6 +489,8 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     // -- Persona-scoped A2A profile store (filesystem-backed) --
     let agent_store = AgentStore::for_persona(&selected_agent)?;
+    // Clone for the agents REST API — AgentStore is Clone (wraps a PathBuf).
+    let agents_api_store = agent_store.clone();
 
     // -- A2A protocol state --
     let base_url = format!("http://{}", args.listen);
@@ -550,6 +552,20 @@ async fn run_with_args(args: Args) -> Result<()> {
         registry: state.registry.clone(),
     };
 
+    let webhooks_api_state = api::webhooks::WebhooksApiState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
+    };
+
+    let agents_api_state = api::agents::AgentsApiState {
+        agent_store: agents_api_store,
+    };
+
+    let analytics_api_state = api::analytics::AnalyticsApiState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
+    };
+
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
         .route("/health", get(health))
@@ -593,7 +609,10 @@ async fn run_with_args(args: Args) -> Result<()> {
                 .merge(api::personas::personas_router().with_state(persona_api_state))
                 .merge(api::traces::traces_router().with_state(traces_api_state))
                 .merge(api::logs::logs_router().with_state(logs_api_state))
-                .merge(api::skills::skills_router().with_state(skills_api_state)),
+                .merge(api::skills::skills_router().with_state(skills_api_state))
+                .merge(api::webhooks::webhooks_api_router().with_state(webhooks_api_state))
+                .merge(api::agents::agents_api_router().with_state(agents_api_state))
+                .merge(api::analytics::analytics_api_router().with_state(analytics_api_state)),
         )
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,

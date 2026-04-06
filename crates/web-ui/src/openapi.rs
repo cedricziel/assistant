@@ -38,6 +38,11 @@ use utoipa::{
 
 use crate::a2a::handlers;
 use crate::api::{
+    agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
+    analytics::{
+        AnalyticsQueryParams, AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse,
+        ToolUsageResponse,
+    },
     logs::LogEntryResponse,
     personas::{
         AddSkillAccessRequest, CreatePersonaRequest, PersonaDetail, PersonaFileContent,
@@ -46,6 +51,10 @@ use crate::api::{
     },
     skills::{CreateSkillRequest, SkillDetail, SkillEntryResponse, UpdateSkillRequest},
     traces::{SpanEntryResponse, TraceDetailResponse, TraceSummaryResponse},
+    webhooks::{
+        CreateWebhookRequest, RotateSecretResponse, UpdateWebhookRequest, VerifyWebhookResponse,
+        WebhookResponse,
+    },
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
     SendMessageRequest as ApiSendMessageRequest, UpdateConversationRequest,
 };
@@ -127,6 +136,21 @@ impl Modify for BearerTokenSecurityAddon {
         crate::api::traces::list_traces,
         crate::api::traces::get_trace,
         crate::api::logs::list_logs,
+        crate::api::webhooks::list_webhooks,
+        crate::api::webhooks::create_webhook,
+        crate::api::webhooks::get_webhook,
+        crate::api::webhooks::update_webhook,
+        crate::api::webhooks::delete_webhook,
+        crate::api::webhooks::toggle_webhook,
+        crate::api::webhooks::rotate_secret,
+        crate::api::webhooks::verify_webhook,
+        crate::api::agents::list_agents,
+        crate::api::agents::register_agent,
+        crate::api::agents::get_agent,
+        crate::api::agents::update_agent,
+        crate::api::agents::delete_agent,
+        crate::api::agents::set_default_agent,
+        crate::api::analytics::get_analytics,
         handlers::get_agent_card_well_known,
         handlers::get_extended_agent_card,
         handlers::send_message,
@@ -220,6 +244,23 @@ impl Modify for BearerTokenSecurityAddon {
             SpanEntryResponse,
             TraceDetailResponse,
             LogEntryResponse,
+            // Webhook API types
+            WebhookResponse,
+            CreateWebhookRequest,
+            UpdateWebhookRequest,
+            RotateSecretResponse,
+            VerifyWebhookResponse,
+            // Agent API types
+            AgentSummary,
+            AgentDetail,
+            RegisterAgentRequest,
+            UpdateAgentRequest,
+            // Analytics API types
+            AnalyticsSummaryResponse,
+            ModelUsageResponse,
+            ToolUsageResponse,
+            TimeSeriesResponse,
+            AnalyticsQueryParams,
         // Local handler types
             ApiErrorResponse,
         )
@@ -239,6 +280,12 @@ impl Modify for BearerTokenSecurityAddon {
          description = "Persona management — list, create, get detail, manage files and skill access"),
         (name = "skills",
          description = "Skill management — list, create, update, and delete skills"),
+        (name = "webhooks",
+         description = "Webhook management — create, configure, verify, and rotate secrets"),
+        (name = "agents",
+         description = "A2A agent registry — register and manage remote agents"),
+        (name = "analytics",
+         description = "Usage analytics — token consumption, model usage, and tool metrics"),
     ),
     servers(
         (url = "/", description = "Local assistant server")

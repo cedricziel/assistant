@@ -435,7 +435,7 @@ impl WebhookFormData {
 /// later resolves to a private IP) are not mitigated. For high-security
 /// deployments, consider using a DNS-resolving validation library or
 /// network-level controls.
-fn validate_webhook_url(url: &str) -> Result<(), String> {
+pub(crate) fn validate_webhook_url(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
 
     // Enforce HTTP(S) scheme only.
@@ -475,7 +475,7 @@ fn validate_webhook_url(url: &str) -> Result<(), String> {
 
 /// Returns `true` if the IP is loopback, private (RFC 1918 / RFC 4193), or
 /// link-local.
-fn is_private_ip(ip: IpAddr) -> bool {
+pub(crate) fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             v4.is_loopback()            // 127.0.0.0/8
@@ -498,7 +498,7 @@ fn is_private_ip(ip: IpAddr) -> bool {
 // -- Crypto helpers --
 
 /// Generate a 32-byte random hex secret for HMAC signing.
-fn generate_secret() -> String {
+pub(crate) fn generate_secret() -> String {
     use std::fmt::Write;
     let bytes: [u8; 32] = rand_bytes();
     let mut s = String::with_capacity(64);
@@ -509,14 +509,14 @@ fn generate_secret() -> String {
 }
 
 /// Collect 32 random bytes from the OS CSPRNG.
-fn rand_bytes() -> [u8; 32] {
+pub(crate) fn rand_bytes() -> [u8; 32] {
     let mut buf = [0u8; 32];
     getrandom::fill(&mut buf).expect("OS RNG should be available");
     buf
 }
 
 /// Compute HMAC-SHA256 of `body` using `secret`, returning hex.
-fn compute_signature(secret: &str, body: &str) -> String {
+pub(crate) fn compute_signature(secret: &str, body: &str) -> String {
     type HmacSha256 = Hmac<Sha256>;
     let mut mac =
         HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
