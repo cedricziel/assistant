@@ -102,7 +102,7 @@ async function createSkill(
   await page.fill('input[name="description"]', "E2E test skill");
   await page.fill('textarea[name="body"]', "When asked, do the e2e thing.");
 
-  await page.locator('form button[type="submit"]').click();
+  await page.locator('button.action-btn[type="submit"]').click();
   await page.waitForURL(/\/skills\/[^/]+$/);
   return name;
 }
@@ -169,6 +169,50 @@ async function queueWorkflowRun(
     throw new Error("failed to parse workflow run id from test-run response");
   }
   return runId;
+}
+
+// -- API helpers ------------------------------------------------------------
+
+/** Make an authenticated JSON API request from within the browser context. */
+async function apiGet(
+  page: Page,
+  path: string,
+): Promise<{ status: number; body: unknown }> {
+  return page.evaluate(async (p) => {
+    const response = await fetch(p, { credentials: "same-origin" });
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    return { status: response.status, body };
+  }, path);
+}
+
+async function apiPost(
+  page: Page,
+  path: string,
+  payload: unknown,
+): Promise<{ status: number; body: unknown }> {
+  return page.evaluate(
+    async ([p, data]) => {
+      const response = await fetch(p as string, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        credentials: "same-origin",
+      });
+      let body: unknown = null;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+      return { status: response.status, body };
+    },
+    [path, payload] as const,
+  );
 }
 
 // -- Tests ------------------------------------------------------------------
@@ -276,21 +320,26 @@ test.describe("Authenticated pages", () => {
     const webhookId = await createWebhook(page);
 
     await navigateAndSettle(page, `/webhooks/${webhookId}`);
+    const webhookDynamicMask = [
+      page.locator(".breadcrumb-current"),
+      page.locator(".hdr-trace-id"),
+      page.locator(".hdr-svc"),
+      page.locator(".entity-section").filter({ hasText: "Endpoint URL" }),
+      page.locator("#secret-value"),
+      page.locator(".entity-section").filter({ hasText: "Timestamps" }),
+    ];
+
     await expect(page).toHaveScreenshot("webhook-detail.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
-      mask: [
-        page.locator(".hdr-trace-id"),
-        page.locator(".entity-section").filter({ hasText: "Endpoint URL" }),
-        page.locator("#secret-value"),
-        page.locator(".entity-section").filter({ hasText: "Timestamps" }),
-      ],
+      mask: webhookDynamicMask,
     });
 
     await navigateAndSettle(page, `/webhooks/${webhookId}/edit`);
     await expect(page).toHaveScreenshot("webhook-edit.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: webhookDynamicMask,
     });
   });
 
@@ -305,18 +354,19 @@ test.describe("Authenticated pages", () => {
   test("workflow detail/edit/editor sub-screens", async ({ page }) => {
     const workflowId = await createWorkflow(page);
 
-    await navigateAndSettle(page, "/workflows");
-    await expect(page).toHaveScreenshot("workflow-list.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-      mask: [page.locator("table tbody tr")],
-    });
+    // Mask dynamic workflow name/ID in all detail/edit/editor screenshots
+    const wfDynamicMask = [
+      page.locator(".breadcrumb-current"),
+      page.locator(".breadcrumb-page"),
+      page.locator(".wf-hero"),
+    ];
 
     await navigateAndSettle(page, `/workflows/${workflowId}`);
 
     await expect(page).toHaveScreenshot("workflow-detail.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: wfDynamicMask,
     });
 
     await page
@@ -327,6 +377,7 @@ test.describe("Authenticated pages", () => {
     await expect(page).toHaveScreenshot("workflow-detail-runs.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: wfDynamicMask,
     });
 
     const viewport = page.viewportSize();
@@ -340,6 +391,7 @@ test.describe("Authenticated pages", () => {
       await expect(page).toHaveScreenshot("workflow-detail-graph.png", {
         fullPage: true,
         maxDiffPixelRatio: MAX_DIFF_RATIO,
+        mask: wfDynamicMask,
       });
     }
 
@@ -347,12 +399,14 @@ test.describe("Authenticated pages", () => {
     await expect(page).toHaveScreenshot("workflow-edit.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: wfDynamicMask,
     });
 
     await navigateAndSettle(page, `/workflows/${workflowId}/editor`);
     await expect(page).toHaveScreenshot("workflow-editor.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: wfDynamicMask,
     });
 
     await page
@@ -363,6 +417,7 @@ test.describe("Authenticated pages", () => {
     await expect(page).toHaveScreenshot("workflow-editor-steps.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: wfDynamicMask,
     });
 
     if (width >= 768) {
@@ -374,6 +429,7 @@ test.describe("Authenticated pages", () => {
       await expect(page).toHaveScreenshot("workflow-editor-graph.png", {
         fullPage: true,
         maxDiffPixelRatio: MAX_DIFF_RATIO,
+        mask: wfDynamicMask,
       });
     }
 
@@ -442,14 +498,14 @@ test.describe("Authenticated pages", () => {
     await page.fill('input[name="name"]', name);
     await page.fill('input[name="description"]', "CRUD flow test skill");
     await page.fill('textarea[name="body"]', "When asked, do the crud thing.");
-    await page.locator('form button[type="submit"]').click();
+    await page.locator('button.action-btn[type="submit"]').click();
     await page.waitForURL(/\/skills\/[^/]+$/);
     expect(new URL(page.url()).pathname).toContain(name);
 
     // Edit
     await navigateAndSettle(page, `/skills/${name}/edit`);
     await page.fill('input[name="description"]', "Updated description");
-    await page.locator('form button[type="submit"]').click();
+    await page.locator('button.action-btn[type="submit"]').click();
     await page.waitForURL(/\/skills\/[^/]+$/);
 
     // Verify updated description visible on detail page
@@ -457,7 +513,8 @@ test.describe("Authenticated pages", () => {
     const bodyText = await page.textContent("body");
     expect(bodyText).toContain("Updated description");
 
-    // Delete
+    // Delete (accept the confirm() dialog on the button)
+    page.once("dialog", (dialog) => dialog.accept());
     await page.locator('form[action*="/delete"] button[type="submit"]').click();
     await page.waitForURL("/skills");
     const listText = await page.textContent("body");
@@ -483,6 +540,7 @@ test.describe("Authenticated pages", () => {
     await expect(page).toHaveScreenshot("persona-skill-access.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO,
+      mask: [page.locator("table")],
     });
   });
 
@@ -542,6 +600,84 @@ test.describe("Authenticated pages", () => {
         .getAttribute("aria-current");
       expect(ariaCurrent, `more tab aria-current on ${item.path}`).toBe("page");
     }
+  });
+
+  test("REST API: GET /api/personas returns JSON array", async ({ page }) => {
+    const { status, body } = await apiGet(page, "/api/personas");
+    expect(status, "GET /api/personas should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: GET /api/conversations returns JSON array", async ({
+    page,
+  }) => {
+    const { status, body } = await apiGet(page, "/api/conversations");
+    expect(status, "GET /api/conversations should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: POST /api/conversations creates a conversation", async ({
+    page,
+  }) => {
+    const { status, body } = await apiPost(page, "/api/conversations", {
+      title: "E2E test conversation",
+    });
+    expect(status, "POST /api/conversations should return 201").toBe(201);
+    const b = body as Record<string, unknown>;
+    expect(typeof b?.id, "response should include an id").toBe("string");
+    expect(b?.title).toBe("E2E test conversation");
+  });
+
+  test("REST API: GET /api/traces returns JSON array", async ({ page }) => {
+    const { status, body } = await apiGet(page, "/api/traces");
+    expect(status, "GET /api/traces should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: GET /api/logs returns JSON array", async ({ page }) => {
+    const { status, body } = await apiGet(page, "/api/logs");
+    expect(status, "GET /api/logs should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: GET /api/personas/{id}/skills returns JSON array", async ({
+    page,
+  }) => {
+    // Get the active persona id from the personas list
+    const { status: listStatus, body: listBody } = await apiGet(
+      page,
+      "/api/personas",
+    );
+    expect(listStatus).toBe(200);
+    const personas = listBody as Array<{ id: string }>;
+    expect(
+      personas.length,
+      "at least one persona should exist",
+    ).toBeGreaterThan(0);
+    const personaId = personas[0].id;
+
+    const { status, body } = await apiGet(
+      page,
+      `/api/personas/${personaId}/skills`,
+    );
+    expect(
+      status,
+      `GET /api/personas/${personaId}/skills should return 200`,
+    ).toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: POST /api/personas/active switches active persona", async ({
+    page,
+  }) => {
+    const { body: listBody } = await apiGet(page, "/api/personas");
+    const personas = listBody as Array<{ id: string }>;
+    expect(personas.length).toBeGreaterThan(0);
+
+    const { status } = await apiPost(page, "/api/personas/active", {
+      id: personas[0].id,
+    });
+    expect(status, "POST /api/personas/active should return 200").toBe(200);
   });
 
   test("core routes avoid viewport horizontal overflow", async ({ page }) => {
