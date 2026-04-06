@@ -148,7 +148,7 @@ url = "2"
 # OS-level CSPRNG
 getrandom = "0.4"
 # NATS message bus
-async-nats = "0.46"
+async-nats = "0.47"
 # Integration testing
 testcontainers = "0.27"
 # OpenAPI spec generation
