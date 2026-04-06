@@ -7,13 +7,18 @@ part of 'serializers.dart';
 // **************************************************************************
 
 Serializers _$serializers = (Serializers().toBuilder()
+      ..add(AddSkillAccessRequest.serializer)
       ..add(AgentCapabilities.serializer)
       ..add(AgentCard.serializer)
       ..add(AgentCardSignature.serializer)
+      ..add(AgentDetail.serializer)
       ..add(AgentExtension.serializer)
       ..add(AgentInterface.serializer)
       ..add(AgentProvider.serializer)
       ..add(AgentSkill.serializer)
+      ..add(AgentSummary.serializer)
+      ..add(AnalyticsQueryParams.serializer)
+      ..add(AnalyticsSummaryResponse.serializer)
       ..add(ApiErrorResponse.serializer)
       ..add(ApiKeySecurityScheme.serializer)
       ..add(ApiSendMessageRequest.serializer)
@@ -25,7 +30,10 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ConversationDetail.serializer)
       ..add(ConversationSummary.serializer)
       ..add(CreateConversationRequest.serializer)
+      ..add(CreatePersonaRequest.serializer)
+      ..add(CreateSkillRequest.serializer)
       ..add(CreateTaskPushNotificationConfigRequest.serializer)
+      ..add(CreateWebhookRequest.serializer)
       ..add(DeviceCodeOAuthFlow.serializer)
       ..add(GetExtendedAgentCardRequest.serializer)
       ..add(GetTaskPushNotificationConfigRequest.serializer)
@@ -40,20 +48,29 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(Message.serializer)
       ..add(MessageSummary.serializer)
       ..add(ModelPart.serializer)
+      ..add(ModelUsageResponse.serializer)
       ..add(MutualTlsSecurityScheme.serializer)
       ..add(OAuth2SecurityScheme.serializer)
       ..add(OAuthFlows.serializer)
       ..add(OpenIdConnectSecurityScheme.serializer)
       ..add(PasswordOAuthFlow.serializer)
+      ..add(PersonaDetail.serializer)
+      ..add(PersonaFileContent.serializer)
+      ..add(PersonaFileSlot.serializer)
+      ..add(PersonaSkillAccess.serializer)
       ..add(PersonaSummary.serializer)
       ..add(PushNotificationConfig.serializer)
+      ..add(RegisterAgentRequest.serializer)
       ..add(Role.serializer)
+      ..add(RotateSecretResponse.serializer)
       ..add(SecurityRequirement.serializer)
       ..add(SecurityScheme.serializer)
       ..add(SendMessageConfiguration.serializer)
       ..add(SendMessageRequest.serializer)
       ..add(SendMessageResponse.serializer)
       ..add(SetActivePersonaRequest.serializer)
+      ..add(SetSkillAccessModeRequest.serializer)
+      ..add(SkillDetail.serializer)
       ..add(SkillEntryResponse.serializer)
       ..add(SpanEntryResponse.serializer)
       ..add(StreamResponse.serializer)
@@ -65,9 +82,17 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(TaskState.serializer)
       ..add(TaskStatus.serializer)
       ..add(TaskStatusUpdateEvent.serializer)
+      ..add(TimeSeriesResponse.serializer)
+      ..add(ToolUsageResponse.serializer)
       ..add(TraceDetailResponse.serializer)
       ..add(TraceSummaryResponse.serializer)
+      ..add(UpdateAgentRequest.serializer)
       ..add(UpdateConversationRequest.serializer)
+      ..add(UpdateSkillRequest.serializer)
+      ..add(UpdateWebhookRequest.serializer)
+      ..add(VerifyWebhookResponse.serializer)
+      ..add(WebhookResponse.serializer)
+      ..add(WritePersonaFileRequest.serializer)
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(AgentExtension)]),
           () => ListBuilder<AgentExtension>())
@@ -87,8 +112,38 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(MessageSummary)]),
           () => ListBuilder<MessageSummary>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(ModelUsageResponse)]),
+          () => ListBuilder<ModelUsageResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(TimeSeriesResponse)]),
+          () => ListBuilder<TimeSeriesResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(TimeSeriesResponse)]),
+          () => ListBuilder<TimeSeriesResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(ToolUsageResponse)]),
+          () => ListBuilder<ToolUsageResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(PersonaFileSlot)]),
+          () => ListBuilder<PersonaFileSlot>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpanEntryResponse)]),
           () => ListBuilder<SpanEntryResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

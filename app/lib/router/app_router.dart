@@ -2,12 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/agents/agent_detail_screen.dart';
+import '../features/agents/agents_screen.dart';
+import '../features/analytics/analytics_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/connection/connection_provider.dart';
 import '../features/connection/connection_screen.dart';
 import '../features/logs/logs_screen.dart';
+import '../features/personas/persona_create_screen.dart';
+import '../features/personas/persona_detail_screen.dart';
+import '../features/personas/persona_file_editor_screen.dart';
+import '../features/personas/personas_screen.dart';
 import '../features/skills/skills_screen.dart';
 import '../features/traces/traces_screen.dart';
+import '../features/webhooks/webhook_detail_screen.dart';
+import '../features/webhooks/webhooks_screen.dart';
+import '../features/workflows/workflow_detail_screen.dart';
+import '../features/workflows/workflows_screen.dart';
+import '../shared/nav_shell.dart';
 
 /// Named route constants.
 class AppRoutes {
@@ -17,6 +29,17 @@ class AppRoutes {
   static const traces = '/traces';
   static const logs = '/logs';
   static const skills = '/skills';
+  static const contexts = '/contexts';
+  static const contextsNew = '/contexts/new';
+  static const contextsDetail = '/contexts/:id';
+  static const contextsFile = '/contexts/:id/files/:filename';
+  static const workflows = '/workflows';
+  static const workflowDetail = '/workflows/:id';
+  static const webhooks = '/webhooks';
+  static const webhookDetail = '/webhooks/:id';
+  static const agents = '/agents';
+  static const agentDetail = '/agents/:id';
+  static const analytics = '/analytics';
 }
 
 /// Provider that creates a single [GoRouter] instance for the application
@@ -47,37 +70,126 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ConnectionScreen(),
       ),
 
-      // -- Chat --------------------------------------------------------------
-      GoRoute(
-        path: AppRoutes.chat,
-        builder: (context, state) => const ChatScreen(),
+      // -- Shell: all main screens use the navigation shell ------------------
+      ShellRoute(
+        builder: (context, state, child) => NavShell(child: child),
         routes: [
+          // -- Chat ----------------------------------------------------------
           GoRoute(
-            path: ':id',
-            builder: (context, state) {
-              final id = state.pathParameters['id'];
-              return ChatScreen(conversationId: id);
-            },
+            path: AppRoutes.chat,
+            builder: (context, state) => const ChatScreen(),
+            routes: [
+              GoRoute(
+                path: ':id',
+                builder: (context, state) {
+                  final id = state.pathParameters['id'];
+                  return ChatScreen(conversationId: id);
+                },
+              ),
+            ],
+          ),
+
+          // -- Observability: Traces -----------------------------------------
+          GoRoute(
+            path: AppRoutes.traces,
+            builder: (context, state) => const TracesScreen(),
+          ),
+
+          // -- Observability: Logs -------------------------------------------
+          GoRoute(
+            path: AppRoutes.logs,
+            builder: (context, state) => const LogsScreen(),
+          ),
+
+          // -- Skills --------------------------------------------------------
+          GoRoute(
+            path: AppRoutes.skills,
+            builder: (context, state) => const SkillsScreen(),
+          ),
+
+          // -- Personas / Contexts ------------------------------------------
+          GoRoute(
+            path: AppRoutes.contexts,
+            builder: (context, state) => const PersonasScreen(),
+            routes: [
+              GoRoute(
+                path: 'new',
+                builder: (context, state) => const PersonaCreateScreen(),
+              ),
+              GoRoute(
+                path: ':id',
+                builder: (context, state) {
+                  final id = state.pathParameters['id']!;
+                  return PersonaDetailScreen(personaId: id);
+                },
+                routes: [
+                  GoRoute(
+                    path: 'files/:filename',
+                    builder: (context, state) {
+                      final id = state.pathParameters['id']!;
+                      final filename = state.pathParameters['filename']!;
+                      return PersonaFileEditorScreen(
+                        personaId: id,
+                        filename: filename,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          // -- Workflows -----------------------------------------------------
+          GoRoute(
+            path: AppRoutes.workflows,
+            builder: (context, state) => const WorkflowsScreen(),
+            routes: [
+              GoRoute(
+                path: ':id',
+                builder: (context, state) {
+                  final id = state.pathParameters['id']!;
+                  return WorkflowDetailScreen(workflowId: id);
+                },
+              ),
+            ],
+          ),
+
+          // -- Webhooks ------------------------------------------------------
+          GoRoute(
+            path: AppRoutes.webhooks,
+            builder: (context, state) => const WebhooksScreen(),
+            routes: [
+              GoRoute(
+                path: ':id',
+                builder: (context, state) {
+                  final id = state.pathParameters['id']!;
+                  return WebhookDetailScreen(webhookId: id);
+                },
+              ),
+            ],
+          ),
+
+          // -- Agents -------------------------------------------------------
+          GoRoute(
+            path: AppRoutes.agents,
+            builder: (context, state) => const AgentsScreen(),
+            routes: [
+              GoRoute(
+                path: ':id',
+                builder: (context, state) {
+                  final id = state.pathParameters['id']!;
+                  return AgentDetailScreen(agentId: id);
+                },
+              ),
+            ],
+          ),
+
+          // -- Analytics ----------------------------------------------------
+          GoRoute(
+            path: AppRoutes.analytics,
+            builder: (context, state) => const AnalyticsScreen(),
           ),
         ],
-      ),
-
-      // -- Observability: Traces ---------------------------------------------
-      GoRoute(
-        path: AppRoutes.traces,
-        builder: (context, state) => const TracesScreen(),
-      ),
-
-      // -- Observability: Logs -----------------------------------------------
-      GoRoute(
-        path: AppRoutes.logs,
-        builder: (context, state) => const LogsScreen(),
-      ),
-
-      // -- Skills (read-only discovery) --------------------------------------
-      GoRoute(
-        path: AppRoutes.skills,
-        builder: (context, state) => const SkillsScreen(),
       ),
     ],
   );
