@@ -98,8 +98,17 @@ impl SqliteMetricExporter {
                         )
                         .await;
                     }
-                    AggregatedMetrics::U64(_) => {
-                        warn!(metric = name, "u64 metrics not yet supported, skipping");
+                    AggregatedMetrics::U64(data) => {
+                        Self::process_u64_metric(
+                            &mut tx,
+                            resource_id,
+                            scope_id,
+                            name,
+                            unit,
+                            desc,
+                            data,
+                        )
+                        .await;
                     }
                 }
             }
@@ -474,6 +483,157 @@ impl SqliteMetricExporter {
             }
             _ => {
                 warn!(metric = name, "unsupported f64 metric data type, skipping");
+            }
+        }
+    }
+
+    /// Persist a single sum data point (u64, stored as f64).
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_sum_scalar_u64(
+        conn: &mut SqliteConnection,
+        resource_id: i64,
+        scope_id: i64,
+        name: &str,
+        kind: &str,
+        unit: &str,
+        description: &str,
+        dp: &SumDataPoint<u64>,
+        sum_start_time: std::time::SystemTime,
+        sum_time: std::time::SystemTime,
+    ) -> Result<(), sqlx::Error> {
+        let attrs: Vec<KeyValue> = dp.attributes().cloned().collect();
+        let da = extract_denormalized(&attrs);
+        let attrs_json = keyvalues_to_json(&attrs);
+        let start_time = non_epoch_time(Some(sum_start_time));
+        let recorded_at: DateTime<Utc> = sum_time.into();
+
+        sqlx::query(
+            "INSERT INTO metric_points \
+                (resource_id, scope_id, metric_name, metric_kind, unit, description, \
+                 value, attributes, start_time, recorded_at, \
+                 model, provider, operation, skill, interface, agent_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+        )
+        .bind(resource_id)
+        .bind(scope_id)
+        .bind(name)
+        .bind(kind)
+        .bind(unit)
+        .bind(description)
+        .bind(dp.value() as f64)
+        .bind(&attrs_json)
+        .bind(start_time)
+        .bind(recorded_at)
+        .bind(&da.model)
+        .bind(&da.provider)
+        .bind(&da.operation)
+        .bind(&da.skill)
+        .bind(&da.interface)
+        .bind(&da.agent_id)
+        .execute(&mut *conn)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Persist a single gauge data point (u64, stored as f64).
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_gauge_scalar_u64(
+        conn: &mut SqliteConnection,
+        resource_id: i64,
+        scope_id: i64,
+        name: &str,
+        unit: &str,
+        description: &str,
+        dp: &GaugeDataPoint<u64>,
+    ) -> Result<(), sqlx::Error> {
+        let attrs: Vec<KeyValue> = dp.attributes().cloned().collect();
+        let da = extract_denormalized(&attrs);
+        let attrs_json = keyvalues_to_json(&attrs);
+
+        sqlx::query(
+            "INSERT INTO metric_points \
+                (resource_id, scope_id, metric_name, metric_kind, unit, description, \
+                 value, attributes, recorded_at, \
+                 model, provider, operation, skill, interface, agent_id) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+        )
+        .bind(resource_id)
+        .bind(scope_id)
+        .bind(name)
+        .bind("gauge")
+        .bind(unit)
+        .bind(description)
+        .bind(dp.value() as f64)
+        .bind(&attrs_json)
+        .bind(Utc::now())
+        .bind(&da.model)
+        .bind(&da.provider)
+        .bind(&da.operation)
+        .bind(&da.skill)
+        .bind(&da.interface)
+        .bind(&da.agent_id)
+        .execute(&mut *conn)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Process a single `MetricData<u64>` value.
+    async fn process_u64_metric(
+        conn: &mut SqliteConnection,
+        resource_id: i64,
+        scope_id: i64,
+        name: &str,
+        unit: &str,
+        desc: &str,
+        metric_data: &MetricData<u64>,
+    ) {
+        match metric_data {
+            MetricData::Sum(sum) => {
+                let kind = if sum.is_monotonic() {
+                    "counter"
+                } else {
+                    "up_down_counter"
+                };
+                for dp in sum.data_points() {
+                    if let Err(e) = Self::insert_sum_scalar_u64(
+                        &mut *conn,
+                        resource_id,
+                        scope_id,
+                        name,
+                        kind,
+                        unit,
+                        desc,
+                        dp,
+                        sum.start_time(),
+                        sum.time(),
+                    )
+                    .await
+                    {
+                        warn!(metric = name, error = %e, "failed to persist u64 sum");
+                    }
+                }
+            }
+            MetricData::Gauge(gauge) => {
+                for dp in gauge.data_points() {
+                    if let Err(e) = Self::insert_gauge_scalar_u64(
+                        &mut *conn,
+                        resource_id,
+                        scope_id,
+                        name,
+                        unit,
+                        desc,
+                        dp,
+                    )
+                    .await
+                    {
+                        warn!(metric = name, error = %e, "failed to persist u64 gauge");
+                    }
+                }
+            }
+            _ => {
+                warn!(metric = name, "unsupported u64 metric data type, skipping");
             }
         }
     }
