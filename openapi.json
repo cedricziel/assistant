@@ -66,6 +66,302 @@
                 ]
             }
         },
+        "/api/agents": {
+            "get": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "`GET /api/agents` — list all registered agents.",
+                "operationId": "list_agents",
+                "responses": {
+                    "200": {
+                        "description": "List of registered agents",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/AgentSummary"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "`POST /api/agents` — register a new agent.",
+                "operationId": "register_agent",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegisterAgentRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Agent registered",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AgentDetail"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid agent card"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/agents/{id}": {
+            "get": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "`GET /api/agents/{id}` — get an agent by ID.",
+                "operationId": "get_agent",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Agent ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Agent detail",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AgentDetail"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Agent not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "`PUT /api/agents/{id}` — update an agent's card.",
+                "operationId": "update_agent",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Agent ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UpdateAgentRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated agent detail",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AgentDetail"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid agent card"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Agent not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "`DELETE /api/agents/{id}` — remove a registered agent.",
+                "operationId": "delete_agent",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Agent ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Agent not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/agents/{id}/set-default": {
+            "post": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "`POST /api/agents/{id}/set-default` — set an agent as the default.",
+                "operationId": "set_default_agent",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Agent ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated agent detail",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AgentDetail"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Agent not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/analytics": {
+            "get": {
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "`GET /api/analytics` — get aggregated usage analytics for a time window.",
+                "operationId": "get_analytics",
+                "parameters": [
+                    {
+                        "name": "window",
+                        "in": "query",
+                        "description": "Window in hours. Valid values: 1, 6, 24, 72, 168. Defaults to 24.",
+                        "required": false,
+                        "schema": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "format": "int64"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Analytics summary",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AnalyticsSummaryResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
         "/api/conversations": {
             "get": {
                 "tags": [
@@ -491,6 +787,49 @@
                         "bearer_token": []
                     }
                 ]
+            },
+            "post": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`POST /api/personas` — create a new persona.",
+                "operationId": "create_persona",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreatePersonaRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Persona created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonaDetail"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID or missing name"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "409": {
+                        "description": "Persona ID already exists"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
             }
         },
         "/api/personas/active": {
@@ -520,6 +859,377 @@
                                 }
                             }
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/personas/{id}": {
+            "get": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`GET /api/personas/{id}` — get full persona detail.",
+                "operationId": "get_persona",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Persona ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Persona detail",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonaDetail"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/personas/{id}/files/{filename}": {
+            "get": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`GET /api/personas/{id}/files/{filename}` — read a persona file slot.",
+                "operationId": "get_persona_file",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Persona ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "filename",
+                        "in": "path",
+                        "description": "File slot name (e.g. SOUL.md)",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File content (empty string if not yet written)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonaFileContent"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID or filename"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`PUT /api/personas/{id}/files/{filename}` — write a persona file slot.",
+                "operationId": "put_persona_file",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Persona ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "filename",
+                        "in": "path",
+                        "description": "File slot name (e.g. SOUL.md)",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/WritePersonaFileRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "File written",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonaFileContent"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID or filename"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    },
+                    "413": {
+                        "description": "Content too large (max 2 MB)"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/personas/{id}/skill-access": {
+            "get": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`GET /api/personas/{id}/skill-access` — get skill access config.",
+                "operationId": "get_skill_access",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Persona ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Skill access configuration",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonaSkillAccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`PATCH /api/personas/{id}/skill-access` — set skill access mode.",
+                "operationId": "patch_skill_access_mode",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Persona ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SetSkillAccessModeRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated skill access configuration",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonaSkillAccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID or mode"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/personas/{id}/skill-access/skills": {
+            "post": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`POST /api/personas/{id}/skill-access/skills` — add a skill to the access list.",
+                "operationId": "add_skill_access",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Persona ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AddSkillAccessRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated skill access configuration",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonaSkillAccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/personas/{id}/skill-access/skills/{skill_name}": {
+            "delete": {
+                "tags": [
+                    "personas"
+                ],
+                "summary": "`DELETE /api/personas/{id}/skill-access/skills/{skill_name}` — remove a skill from the access list.",
+                "operationId": "delete_skill_access",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Persona ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "skill_name",
+                        "in": "path",
+                        "description": "Skill name to remove",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Skill removed"
+                    },
+                    "400": {
+                        "description": "Invalid ID"
                     },
                     "401": {
                         "description": "Unauthorized"
@@ -572,6 +1282,209 @@
                     },
                     "404": {
                         "description": "Persona not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/skills": {
+            "get": {
+                "tags": [
+                    "skills"
+                ],
+                "summary": "`GET /api/skills` — list all skills.",
+                "operationId": "list_skills",
+                "responses": {
+                    "200": {
+                        "description": "List of all skills",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/SkillDetail"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "skills"
+                ],
+                "summary": "`POST /api/skills` — create a new user skill.",
+                "operationId": "create_skill",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateSkillRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Skill created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SkillDetail"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "409": {
+                        "description": "Skill already exists"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/skills/{name}": {
+            "get": {
+                "tags": [
+                    "skills"
+                ],
+                "summary": "`GET /api/skills/{name}` — get a skill by name.",
+                "operationId": "get_skill",
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "path",
+                        "description": "Skill name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Skill detail",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SkillDetail"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Skill not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "skills"
+                ],
+                "summary": "`PUT /api/skills/{name}` — update a user skill.",
+                "operationId": "update_skill",
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "path",
+                        "description": "Skill name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UpdateSkillRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated skill detail",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SkillDetail"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Cannot modify a builtin skill"
+                    },
+                    "404": {
+                        "description": "Skill not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "skills"
+                ],
+                "summary": "`DELETE /api/skills/{name}` — delete a user skill.",
+                "operationId": "delete_skill",
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "path",
+                        "description": "Skill name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Skill deleted"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Skill not found"
                     }
                 },
                 "security": [
@@ -730,6 +1643,342 @@
                     },
                     "404": {
                         "description": "Trace not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/webhooks": {
+            "get": {
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "`GET /api/webhooks` — list all webhooks.",
+                "operationId": "list_webhooks",
+                "responses": {
+                    "200": {
+                        "description": "List of webhooks",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/WebhookResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "`POST /api/webhooks` — create a new webhook.",
+                "operationId": "create_webhook",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateWebhookRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Webhook created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WebhookResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid URL or empty name"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/webhooks/{id}": {
+            "get": {
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "`GET /api/webhooks/{id}` — get a webhook by ID.",
+                "operationId": "get_webhook",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Webhook ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Webhook detail",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WebhookResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Webhook not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "`DELETE /api/webhooks/{id}` — delete a webhook.",
+                "operationId": "delete_webhook",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Webhook ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Webhook not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "`PATCH /api/webhooks/{id}` — update a webhook.",
+                "operationId": "update_webhook",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Webhook ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UpdateWebhookRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated webhook",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WebhookResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid URL"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Webhook not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/webhooks/{id}/rotate-secret": {
+            "post": {
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "`POST /api/webhooks/{id}/rotate-secret` — regenerate a webhook's signing secret.",
+                "operationId": "rotate_secret",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Webhook ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "New secret",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RotateSecretResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Webhook not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/webhooks/{id}/toggle": {
+            "post": {
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "`POST /api/webhooks/{id}/toggle` — toggle a webhook's active state.",
+                "operationId": "toggle_webhook",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Webhook ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated webhook",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WebhookResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Webhook not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_token": []
+                    }
+                ]
+            }
+        },
+        "/api/webhooks/{id}/verify": {
+            "post": {
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "`POST /api/webhooks/{id}/verify` — send a signed test payload to the webhook URL.",
+                "description": "Always returns HTTP 200; the `success` field in the body indicates whether\nthe remote endpoint responded with a 2xx status.",
+                "operationId": "verify_webhook",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Webhook ID",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Verification result",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/VerifyWebhookResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Webhook not found"
                     }
                 },
                 "security": [
@@ -1223,6 +2472,18 @@
     },
     "components": {
         "schemas": {
+            "AddSkillAccessRequest": {
+                "type": "object",
+                "description": "Body for `POST /api/personas/{id}/skill-access/skills`.",
+                "required": [
+                    "skill_name"
+                ],
+                "properties": {
+                    "skill_name": {
+                        "type": "string"
+                    }
+                }
+            },
             "AgentCapabilities": {
                 "type": "object",
                 "description": "Defines optional capabilities supported by an agent.",
@@ -1392,6 +2653,26 @@
                     }
                 }
             },
+            "AgentDetail": {
+                "type": "object",
+                "description": "Full agent detail, including the serialized agent card.",
+                "required": [
+                    "id",
+                    "is_default",
+                    "card"
+                ],
+                "properties": {
+                    "card": {
+                        "description": "Full AgentCard serialized as JSON."
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "is_default": {
+                        "type": "boolean"
+                    }
+                }
+            },
             "AgentExtension": {
                 "type": "object",
                 "description": "A declaration of a protocol extension supported by an Agent.",
@@ -1528,6 +2809,137 @@
                             "type": "string"
                         },
                         "description": "Keywords describing the skill's capabilities."
+                    }
+                }
+            },
+            "AgentSummary": {
+                "type": "object",
+                "description": "A brief summary of a registered agent.",
+                "required": [
+                    "id",
+                    "name",
+                    "version",
+                    "description",
+                    "is_default",
+                    "skill_count",
+                    "interface_count"
+                ],
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "interface_count": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "is_default": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "skill_count": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                }
+            },
+            "AnalyticsQueryParams": {
+                "type": "object",
+                "description": "Query parameters for the analytics endpoint.",
+                "properties": {
+                    "window": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int64",
+                        "description": "Window in hours. Valid values: 1, 6, 24, 72, 168. Defaults to 24."
+                    }
+                }
+            },
+            "AnalyticsSummaryResponse": {
+                "type": "object",
+                "description": "Aggregated analytics summary for a time window.",
+                "required": [
+                    "window_hours",
+                    "total_tokens_in",
+                    "total_tokens_out",
+                    "total_requests",
+                    "total_tool_invocations",
+                    "avg_duration_s",
+                    "error_count",
+                    "unique_models",
+                    "models",
+                    "tools",
+                    "token_series",
+                    "request_series"
+                ],
+                "properties": {
+                    "avg_duration_s": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "error_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "models": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ModelUsageResponse"
+                        }
+                    },
+                    "request_series": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TimeSeriesResponse"
+                        }
+                    },
+                    "token_series": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TimeSeriesResponse"
+                        }
+                    },
+                    "tools": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ToolUsageResponse"
+                        }
+                    },
+                    "total_requests": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "total_tokens_in": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "total_tokens_out": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "total_tool_invocations": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "unique_models": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "window_hours": {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "The requested window in hours."
                     }
                 }
             },
@@ -1831,6 +3243,42 @@
                     }
                 }
             },
+            "CreatePersonaRequest": {
+                "type": "object",
+                "description": "Body for `POST /api/personas`.",
+                "required": [
+                    "id",
+                    "name"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                }
+            },
+            "CreateSkillRequest": {
+                "type": "object",
+                "description": "Body for `POST /api/skills`.",
+                "required": [
+                    "name",
+                    "description",
+                    "body"
+                ],
+                "properties": {
+                    "body": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                }
+            },
             "CreateTaskPushNotificationConfigRequest": {
                 "type": "object",
                 "description": "Request for the `CreateTaskPushNotificationConfig` method.",
@@ -1853,6 +3301,36 @@
                             "null"
                         ],
                         "description": "Optional tenant ID."
+                    }
+                }
+            },
+            "CreateWebhookRequest": {
+                "type": "object",
+                "description": "Body for `POST /api/webhooks`.",
+                "required": [
+                    "name",
+                    "url",
+                    "event_types"
+                ],
+                "properties": {
+                    "active": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ],
+                        "description": "Defaults to `true` when omitted."
+                    },
+                    "event_types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
                     }
                 }
             },
@@ -2311,6 +3789,38 @@
                     }
                 }
             },
+            "ModelUsageResponse": {
+                "type": "object",
+                "description": "Per-model token usage breakdown.",
+                "required": [
+                    "model",
+                    "input_tokens",
+                    "output_tokens",
+                    "request_count",
+                    "avg_duration_s"
+                ],
+                "properties": {
+                    "avg_duration_s": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "input_tokens": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "model": {
+                        "type": "string"
+                    },
+                    "output_tokens": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "request_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
             "MutualTlsSecurityScheme": {
                 "type": "object",
                 "description": "Defines a security scheme using mTLS authentication.",
@@ -2515,6 +4025,112 @@
                     }
                 }
             },
+            "PersonaDetail": {
+                "type": "object",
+                "description": "Full persona detail including file slot inventory.",
+                "required": [
+                    "id",
+                    "name",
+                    "is_default",
+                    "skill_access_mode",
+                    "created_at",
+                    "updated_at",
+                    "files"
+                ],
+                "properties": {
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "files": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PersonaFileSlot"
+                        }
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "is_default": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "skill_access_mode": {
+                        "type": "string"
+                    },
+                    "turn_timeout_secs": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int64",
+                        "minimum": 0
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    }
+                }
+            },
+            "PersonaFileContent": {
+                "type": "object",
+                "description": "Content of a persona file slot.",
+                "required": [
+                    "filename",
+                    "content"
+                ],
+                "properties": {
+                    "content": {
+                        "type": "string"
+                    },
+                    "filename": {
+                        "type": "string"
+                    }
+                }
+            },
+            "PersonaFileSlot": {
+                "type": "object",
+                "description": "A single persona file slot.",
+                "required": [
+                    "filename",
+                    "display_name",
+                    "description",
+                    "exists"
+                ],
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "display_name": {
+                        "type": "string"
+                    },
+                    "exists": {
+                        "type": "boolean"
+                    },
+                    "filename": {
+                        "type": "string"
+                    }
+                }
+            },
+            "PersonaSkillAccess": {
+                "type": "object",
+                "description": "Skill access configuration for a persona.",
+                "required": [
+                    "mode",
+                    "skills"
+                ],
+                "properties": {
+                    "mode": {
+                        "type": "string"
+                    },
+                    "skills": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
             "PersonaSummary": {
                 "type": "object",
                 "description": "A persona summary returned by the API.",
@@ -2577,6 +4193,25 @@
                     }
                 }
             },
+            "RegisterAgentRequest": {
+                "type": "object",
+                "description": "Body for `POST /api/agents`.",
+                "required": [
+                    "card"
+                ],
+                "properties": {
+                    "card": {
+                        "description": "Full AgentCard JSON."
+                    },
+                    "set_default": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ],
+                        "description": "If `true`, make this agent the default after registration."
+                    }
+                }
+            },
             "Role": {
                 "type": "string",
                 "description": "Defines the sender of a message in A2A protocol communication.",
@@ -2585,6 +4220,18 @@
                     "ROLE_USER",
                     "ROLE_AGENT"
                 ]
+            },
+            "RotateSecretResponse": {
+                "type": "object",
+                "description": "Response after rotating a webhook secret.",
+                "required": [
+                    "secret"
+                ],
+                "properties": {
+                    "secret": {
+                        "type": "string"
+                    }
+                }
             },
             "SecurityRequirement": {
                 "type": "object",
@@ -2774,6 +4421,47 @@
                 ],
                 "properties": {
                     "id": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SetSkillAccessModeRequest": {
+                "type": "object",
+                "description": "Body for `PATCH /api/personas/{id}/skill-access`.",
+                "required": [
+                    "mode"
+                ],
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "description": "One of \"all\", \"whitelist\", or \"blacklist\"."
+                    }
+                }
+            },
+            "SkillDetail": {
+                "type": "object",
+                "description": "Full skill detail returned by the API.",
+                "required": [
+                    "name",
+                    "description",
+                    "body",
+                    "source",
+                    "is_builtin"
+                ],
+                "properties": {
+                    "body": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "is_builtin": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "source": {
                         "type": "string"
                     }
                 }
@@ -3096,6 +4784,45 @@
                     }
                 }
             },
+            "TimeSeriesResponse": {
+                "type": "object",
+                "description": "A single point in a time series.",
+                "required": [
+                    "bucket",
+                    "value"
+                ],
+                "properties": {
+                    "bucket": {
+                        "type": "string"
+                    },
+                    "value": {
+                        "type": "number",
+                        "format": "double"
+                    }
+                }
+            },
+            "ToolUsageResponse": {
+                "type": "object",
+                "description": "Tool invocation statistics.",
+                "required": [
+                    "tool_name",
+                    "invocations",
+                    "avg_duration_s"
+                ],
+                "properties": {
+                    "avg_duration_s": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "invocations": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "tool_name": {
+                        "type": "string"
+                    }
+                }
+            },
             "TraceDetailResponse": {
                 "type": "object",
                 "description": "Full trace detail with span list.",
@@ -3171,6 +4898,18 @@
                     }
                 }
             },
+            "UpdateAgentRequest": {
+                "type": "object",
+                "description": "Body for `PUT /api/agents/{id}`.",
+                "required": [
+                    "card"
+                ],
+                "properties": {
+                    "card": {
+                        "description": "Updated full AgentCard JSON."
+                    }
+                }
+            },
             "UpdateConversationRequest": {
                 "type": "object",
                 "description": "Body for `PATCH /api/conversations/{id}`.",
@@ -3181,6 +4920,135 @@
                     "title": {
                         "type": "string",
                         "description": "New title for the conversation."
+                    }
+                }
+            },
+            "UpdateSkillRequest": {
+                "type": "object",
+                "description": "Body for `PUT /api/skills/{name}`.",
+                "required": [
+                    "description",
+                    "body"
+                ],
+                "properties": {
+                    "body": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    }
+                }
+            },
+            "UpdateWebhookRequest": {
+                "type": "object",
+                "description": "Body for `PATCH /api/webhooks/{id}`.",
+                "properties": {
+                    "active": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ]
+                    },
+                    "event_types": {
+                        "type": [
+                            "array",
+                            "null"
+                        ],
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "name": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "url": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "VerifyWebhookResponse": {
+                "type": "object",
+                "description": "Response after attempting webhook verification.",
+                "required": [
+                    "success",
+                    "detail"
+                ],
+                "properties": {
+                    "detail": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "WebhookResponse": {
+                "type": "object",
+                "description": "A webhook entry returned by the API.",
+                "required": [
+                    "id",
+                    "name",
+                    "url",
+                    "secret",
+                    "event_types",
+                    "active",
+                    "created_at",
+                    "updated_at"
+                ],
+                "properties": {
+                    "active": {
+                        "type": "boolean"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "event_types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "secret": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "url": {
+                        "type": "string"
+                    },
+                    "verified_at": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "date-time"
+                    }
+                }
+            },
+            "WritePersonaFileRequest": {
+                "type": "object",
+                "description": "Body for `PUT /api/personas/{id}/files/{filename}`.",
+                "required": [
+                    "content"
+                ],
+                "properties": {
+                    "content": {
+                        "type": "string"
                     }
                 }
             }
@@ -3213,6 +5081,26 @@
         {
             "name": "push-notifications",
             "description": "Push notification configuration — manage webhook callbacks for task updates"
+        },
+        {
+            "name": "personas",
+            "description": "Persona management — list, create, get detail, manage files and skill access"
+        },
+        {
+            "name": "skills",
+            "description": "Skill management — list, create, update, and delete skills"
+        },
+        {
+            "name": "webhooks",
+            "description": "Webhook management — create, configure, verify, and rotate secrets"
+        },
+        {
+            "name": "agents",
+            "description": "A2A agent registry — register and manage remote agents"
+        },
+        {
+            "name": "analytics",
+            "description": "Usage analytics — token consumption, model usage, and tool metrics"
         }
     ]
 }

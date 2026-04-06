@@ -69,6 +69,13 @@ Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
 [*AgentCardApi*](doc/AgentCardApi.md) | [**getAgentCardWellKnown**](doc/AgentCardApi.md#getagentcardwellknown) | **GET** /.well-known/agent.json | &#x60;GET /.well-known/agent.json&#x60; -- Returns the public agent card.
 [*AgentCardApi*](doc/AgentCardApi.md) | [**getExtendedAgentCard**](doc/AgentCardApi.md#getextendedagentcard) | **GET** /agent/authenticatedExtendedCard | &#x60;GET /agent/authenticatedExtendedCard&#x60; -- Returns the extended agent card (same as public for now).
+[*AgentsApi*](doc/AgentsApi.md) | [**deleteAgent**](doc/AgentsApi.md#deleteagent) | **DELETE** /api/agents/{id} | &#x60;DELETE /api/agents/{id}&#x60; — remove a registered agent.
+[*AgentsApi*](doc/AgentsApi.md) | [**getAgent**](doc/AgentsApi.md#getagent) | **GET** /api/agents/{id} | &#x60;GET /api/agents/{id}&#x60; — get an agent by ID.
+[*AgentsApi*](doc/AgentsApi.md) | [**listAgents**](doc/AgentsApi.md#listagents) | **GET** /api/agents | &#x60;GET /api/agents&#x60; — list all registered agents.
+[*AgentsApi*](doc/AgentsApi.md) | [**registerAgent**](doc/AgentsApi.md#registeragent) | **POST** /api/agents | &#x60;POST /api/agents&#x60; — register a new agent.
+[*AgentsApi*](doc/AgentsApi.md) | [**setDefaultAgent**](doc/AgentsApi.md#setdefaultagent) | **POST** /api/agents/{id}/set-default | &#x60;POST /api/agents/{id}/set-default&#x60; — set an agent as the default.
+[*AgentsApi*](doc/AgentsApi.md) | [**updateAgent**](doc/AgentsApi.md#updateagent) | **PUT** /api/agents/{id} | &#x60;PUT /api/agents/{id}&#x60; — update an agent&#39;s card.
+[*AnalyticsApi*](doc/AnalyticsApi.md) | [**getAnalytics**](doc/AnalyticsApi.md#getanalytics) | **GET** /api/analytics | &#x60;GET /api/analytics&#x60; — get aggregated usage analytics for a time window.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**createConversation**](doc/ConversationsApi.md#createconversation) | **POST** /api/conversations | &#x60;POST /api/conversations&#x60; — create a new conversation.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**deleteConversation**](doc/ConversationsApi.md#deleteconversation) | **DELETE** /api/conversations/{id} | &#x60;DELETE /api/conversations/{id}&#x60; — delete a conversation and all its messages.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**getConversation**](doc/ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
@@ -78,30 +85,56 @@ Class | Method | HTTP request | Description
 [*LogsApi*](doc/LogsApi.md) | [**listLogs**](doc/LogsApi.md#listlogs) | **GET** /api/logs | &#x60;GET /api/logs&#x60; — list recent log entries, newest first.
 [*MessagesApi*](doc/MessagesApi.md) | [**sendMessage**](doc/MessagesApi.md#sendmessage) | **POST** /message/send | &#x60;POST /message/send&#x60; -- Sends a message to the agent (unary).
 [*MessagesApi*](doc/MessagesApi.md) | [**sendMessageStreaming**](doc/MessagesApi.md#sendmessagestreaming) | **POST** /message/stream | &#x60;POST /message/stream&#x60; -- Sends a message with streaming response (SSE).
+[*PersonasApi*](doc/PersonasApi.md) | [**addSkillAccess**](doc/PersonasApi.md#addskillaccess) | **POST** /api/personas/{id}/skill-access/skills | &#x60;POST /api/personas/{id}/skill-access/skills&#x60; — add a skill to the access list.
+[*PersonasApi*](doc/PersonasApi.md) | [**createPersona**](doc/PersonasApi.md#createpersona) | **POST** /api/personas | &#x60;POST /api/personas&#x60; — create a new persona.
+[*PersonasApi*](doc/PersonasApi.md) | [**deleteSkillAccess**](doc/PersonasApi.md#deleteskillaccess) | **DELETE** /api/personas/{id}/skill-access/skills/{skill_name} | &#x60;DELETE /api/personas/{id}/skill-access/skills/{skill_name}&#x60; — remove a skill from the access list.
+[*PersonasApi*](doc/PersonasApi.md) | [**getPersona**](doc/PersonasApi.md#getpersona) | **GET** /api/personas/{id} | &#x60;GET /api/personas/{id}&#x60; — get full persona detail.
+[*PersonasApi*](doc/PersonasApi.md) | [**getPersonaFile**](doc/PersonasApi.md#getpersonafile) | **GET** /api/personas/{id}/files/{filename} | &#x60;GET /api/personas/{id}/files/{filename}&#x60; — read a persona file slot.
+[*PersonasApi*](doc/PersonasApi.md) | [**getSkillAccess**](doc/PersonasApi.md#getskillaccess) | **GET** /api/personas/{id}/skill-access | &#x60;GET /api/personas/{id}/skill-access&#x60; — get skill access config.
 [*PersonasApi*](doc/PersonasApi.md) | [**listPersonas**](doc/PersonasApi.md#listpersonas) | **GET** /api/personas | &#x60;GET /api/personas&#x60; — list all personas defined on the server.
+[*PersonasApi*](doc/PersonasApi.md) | [**patchSkillAccessMode**](doc/PersonasApi.md#patchskillaccessmode) | **PATCH** /api/personas/{id}/skill-access | &#x60;PATCH /api/personas/{id}/skill-access&#x60; — set skill access mode.
+[*PersonasApi*](doc/PersonasApi.md) | [**putPersonaFile**](doc/PersonasApi.md#putpersonafile) | **PUT** /api/personas/{id}/files/{filename} | &#x60;PUT /api/personas/{id}/files/{filename}&#x60; — write a persona file slot.
 [*PersonasApi*](doc/PersonasApi.md) | [**setActivePersona**](doc/PersonasApi.md#setactivepersona) | **POST** /api/personas/active | &#x60;POST /api/personas/active&#x60; — switch the active persona for the session.
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**createPushNotificationConfig**](doc/PushNotificationsApi.md#createpushnotificationconfig) | **POST** /tasks/{task_id}/pushNotificationConfigs | &#x60;POST /tasks/:task_id/pushNotificationConfigs&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**deletePushNotificationConfig**](doc/PushNotificationsApi.md#deletepushnotificationconfig) | **DELETE** /tasks/{task_id}/pushNotificationConfigs/{config_id} | &#x60;DELETE /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**getPushNotificationConfig**](doc/PushNotificationsApi.md#getpushnotificationconfig) | **GET** /tasks/{task_id}/pushNotificationConfigs/{config_id} | &#x60;GET /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
 [*PushNotificationsApi*](doc/PushNotificationsApi.md) | [**listPushNotificationConfigs**](doc/PushNotificationsApi.md#listpushnotificationconfigs) | **GET** /tasks/{task_id}/pushNotificationConfigs | &#x60;GET /tasks/:task_id/pushNotificationConfigs&#x60;
+[*SkillsApi*](doc/SkillsApi.md) | [**createSkill**](doc/SkillsApi.md#createskill) | **POST** /api/skills | &#x60;POST /api/skills&#x60; — create a new user skill.
+[*SkillsApi*](doc/SkillsApi.md) | [**deleteSkill**](doc/SkillsApi.md#deleteskill) | **DELETE** /api/skills/{name} | &#x60;DELETE /api/skills/{name}&#x60; — delete a user skill.
+[*SkillsApi*](doc/SkillsApi.md) | [**getSkill**](doc/SkillsApi.md#getskill) | **GET** /api/skills/{name} | &#x60;GET /api/skills/{name}&#x60; — get a skill by name.
 [*SkillsApi*](doc/SkillsApi.md) | [**listPersonaSkills**](doc/SkillsApi.md#listpersonaskills) | **GET** /api/personas/{persona_id}/skills | &#x60;GET /api/personas/{persona_id}/skills&#x60; — list skills for a persona.
+[*SkillsApi*](doc/SkillsApi.md) | [**listSkills**](doc/SkillsApi.md#listskills) | **GET** /api/skills | &#x60;GET /api/skills&#x60; — list all skills.
+[*SkillsApi*](doc/SkillsApi.md) | [**updateSkill**](doc/SkillsApi.md#updateskill) | **PUT** /api/skills/{name} | &#x60;PUT /api/skills/{name}&#x60; — update a user skill.
 [*TasksApi*](doc/TasksApi.md) | [**cancelTask**](doc/TasksApi.md#canceltask) | **POST** /tasks/{id}/cancel | &#x60;POST /tasks/:id/cancel&#x60; -- Cancels a task.
 [*TasksApi*](doc/TasksApi.md) | [**getTask**](doc/TasksApi.md#gettask) | **GET** /tasks/{id} | &#x60;GET /tasks/:id&#x60; -- Gets the latest state of a task.
 [*TasksApi*](doc/TasksApi.md) | [**listTasks**](doc/TasksApi.md#listtasks) | **GET** /tasks | &#x60;GET /tasks&#x60; -- Lists tasks matching optional filters.
 [*TasksApi*](doc/TasksApi.md) | [**subscribeToTask**](doc/TasksApi.md#subscribetotask) | **GET** /tasks/{id}/subscribe | &#x60;GET /tasks/:id/subscribe&#x60; -- Subscribes to task updates (SSE).
 [*TracesApi*](doc/TracesApi.md) | [**getTrace**](doc/TracesApi.md#gettrace) | **GET** /api/traces/{trace_id} | &#x60;GET /api/traces/{trace_id}&#x60; — get a single trace with span breakdown.
 [*TracesApi*](doc/TracesApi.md) | [**listTraces**](doc/TracesApi.md#listtraces) | **GET** /api/traces | &#x60;GET /api/traces&#x60; — list recent traces, newest first.
+[*WebhooksApi*](doc/WebhooksApi.md) | [**createWebhook**](doc/WebhooksApi.md#createwebhook) | **POST** /api/webhooks | &#x60;POST /api/webhooks&#x60; — create a new webhook.
+[*WebhooksApi*](doc/WebhooksApi.md) | [**deleteWebhook**](doc/WebhooksApi.md#deletewebhook) | **DELETE** /api/webhooks/{id} | &#x60;DELETE /api/webhooks/{id}&#x60; — delete a webhook.
+[*WebhooksApi*](doc/WebhooksApi.md) | [**getWebhook**](doc/WebhooksApi.md#getwebhook) | **GET** /api/webhooks/{id} | &#x60;GET /api/webhooks/{id}&#x60; — get a webhook by ID.
+[*WebhooksApi*](doc/WebhooksApi.md) | [**listWebhooks**](doc/WebhooksApi.md#listwebhooks) | **GET** /api/webhooks | &#x60;GET /api/webhooks&#x60; — list all webhooks.
+[*WebhooksApi*](doc/WebhooksApi.md) | [**rotateSecret**](doc/WebhooksApi.md#rotatesecret) | **POST** /api/webhooks/{id}/rotate-secret | &#x60;POST /api/webhooks/{id}/rotate-secret&#x60; — regenerate a webhook&#39;s signing secret.
+[*WebhooksApi*](doc/WebhooksApi.md) | [**toggleWebhook**](doc/WebhooksApi.md#togglewebhook) | **POST** /api/webhooks/{id}/toggle | &#x60;POST /api/webhooks/{id}/toggle&#x60; — toggle a webhook&#39;s active state.
+[*WebhooksApi*](doc/WebhooksApi.md) | [**updateWebhook**](doc/WebhooksApi.md#updatewebhook) | **PATCH** /api/webhooks/{id} | &#x60;PATCH /api/webhooks/{id}&#x60; — update a webhook.
+[*WebhooksApi*](doc/WebhooksApi.md) | [**verifyWebhook**](doc/WebhooksApi.md#verifywebhook) | **POST** /api/webhooks/{id}/verify | &#x60;POST /api/webhooks/{id}/verify&#x60; — send a signed test payload to the webhook URL.
 
 
 ## Documentation For Models
 
+ - [AddSkillAccessRequest](doc/AddSkillAccessRequest.md)
  - [AgentCapabilities](doc/AgentCapabilities.md)
  - [AgentCard](doc/AgentCard.md)
  - [AgentCardSignature](doc/AgentCardSignature.md)
+ - [AgentDetail](doc/AgentDetail.md)
  - [AgentExtension](doc/AgentExtension.md)
  - [AgentInterface](doc/AgentInterface.md)
  - [AgentProvider](doc/AgentProvider.md)
  - [AgentSkill](doc/AgentSkill.md)
+ - [AgentSummary](doc/AgentSummary.md)
+ - [AnalyticsQueryParams](doc/AnalyticsQueryParams.md)
+ - [AnalyticsSummaryResponse](doc/AnalyticsSummaryResponse.md)
  - [ApiErrorResponse](doc/ApiErrorResponse.md)
  - [ApiKeySecurityScheme](doc/ApiKeySecurityScheme.md)
  - [ApiSendMessageRequest](doc/ApiSendMessageRequest.md)
@@ -113,7 +146,10 @@ Class | Method | HTTP request | Description
  - [ConversationDetail](doc/ConversationDetail.md)
  - [ConversationSummary](doc/ConversationSummary.md)
  - [CreateConversationRequest](doc/CreateConversationRequest.md)
+ - [CreatePersonaRequest](doc/CreatePersonaRequest.md)
+ - [CreateSkillRequest](doc/CreateSkillRequest.md)
  - [CreateTaskPushNotificationConfigRequest](doc/CreateTaskPushNotificationConfigRequest.md)
+ - [CreateWebhookRequest](doc/CreateWebhookRequest.md)
  - [DeviceCodeOAuthFlow](doc/DeviceCodeOAuthFlow.md)
  - [GetExtendedAgentCardRequest](doc/GetExtendedAgentCardRequest.md)
  - [GetTaskPushNotificationConfigRequest](doc/GetTaskPushNotificationConfigRequest.md)
@@ -128,20 +164,29 @@ Class | Method | HTTP request | Description
  - [Message](doc/Message.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
+ - [ModelUsageResponse](doc/ModelUsageResponse.md)
  - [MutualTlsSecurityScheme](doc/MutualTlsSecurityScheme.md)
  - [OAuth2SecurityScheme](doc/OAuth2SecurityScheme.md)
  - [OAuthFlows](doc/OAuthFlows.md)
  - [OpenIdConnectSecurityScheme](doc/OpenIdConnectSecurityScheme.md)
  - [PasswordOAuthFlow](doc/PasswordOAuthFlow.md)
+ - [PersonaDetail](doc/PersonaDetail.md)
+ - [PersonaFileContent](doc/PersonaFileContent.md)
+ - [PersonaFileSlot](doc/PersonaFileSlot.md)
+ - [PersonaSkillAccess](doc/PersonaSkillAccess.md)
  - [PersonaSummary](doc/PersonaSummary.md)
  - [PushNotificationConfig](doc/PushNotificationConfig.md)
+ - [RegisterAgentRequest](doc/RegisterAgentRequest.md)
  - [Role](doc/Role.md)
+ - [RotateSecretResponse](doc/RotateSecretResponse.md)
  - [SecurityRequirement](doc/SecurityRequirement.md)
  - [SecurityScheme](doc/SecurityScheme.md)
  - [SendMessageConfiguration](doc/SendMessageConfiguration.md)
  - [SendMessageRequest](doc/SendMessageRequest.md)
  - [SendMessageResponse](doc/SendMessageResponse.md)
  - [SetActivePersonaRequest](doc/SetActivePersonaRequest.md)
+ - [SetSkillAccessModeRequest](doc/SetSkillAccessModeRequest.md)
+ - [SkillDetail](doc/SkillDetail.md)
  - [SkillEntryResponse](doc/SkillEntryResponse.md)
  - [SpanEntryResponse](doc/SpanEntryResponse.md)
  - [StreamResponse](doc/StreamResponse.md)
@@ -153,9 +198,17 @@ Class | Method | HTTP request | Description
  - [TaskState](doc/TaskState.md)
  - [TaskStatus](doc/TaskStatus.md)
  - [TaskStatusUpdateEvent](doc/TaskStatusUpdateEvent.md)
+ - [TimeSeriesResponse](doc/TimeSeriesResponse.md)
+ - [ToolUsageResponse](doc/ToolUsageResponse.md)
  - [TraceDetailResponse](doc/TraceDetailResponse.md)
  - [TraceSummaryResponse](doc/TraceSummaryResponse.md)
+ - [UpdateAgentRequest](doc/UpdateAgentRequest.md)
  - [UpdateConversationRequest](doc/UpdateConversationRequest.md)
+ - [UpdateSkillRequest](doc/UpdateSkillRequest.md)
+ - [UpdateWebhookRequest](doc/UpdateWebhookRequest.md)
+ - [VerifyWebhookResponse](doc/VerifyWebhookResponse.md)
+ - [WebhookResponse](doc/WebhookResponse.md)
+ - [WritePersonaFileRequest](doc/WritePersonaFileRequest.md)
 
 
 ## Documentation For Authorization
