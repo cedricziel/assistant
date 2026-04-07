@@ -397,8 +397,9 @@ class _InputRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: Colors.black12)),
       ),
