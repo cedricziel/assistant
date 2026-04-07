@@ -258,6 +258,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   focusNode: _inputFocus,
                   isSending: chatState.isSending,
                   onSend: _sendMessage,
+                  onStop: () => ref.read(chatProvider.notifier).cancelStream(),
                 ),
               ],
             ),
@@ -388,12 +389,14 @@ class _InputRow extends StatelessWidget {
     required this.focusNode,
     required this.isSending,
     required this.onSend,
+    required this.onStop,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isSending;
   final VoidCallback onSend;
+  final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
@@ -427,20 +430,18 @@ class _InputRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          IconButton.filled(
-            key: const Key('send_button'),
-            onPressed: isSending ? null : onSend,
-            icon: isSending
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.send),
-          ),
+          if (isSending)
+            IconButton.filled(
+              key: const Key('stop_button'),
+              onPressed: onStop,
+              icon: const Icon(Icons.stop_rounded),
+            )
+          else
+            IconButton.filled(
+              key: const Key('send_button'),
+              onPressed: onSend,
+              icon: const Icon(Icons.send),
+            ),
         ],
       ),
     );

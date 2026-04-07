@@ -197,12 +197,25 @@ class ChatState {
 
 /// Manages the active chat conversation.
 class ChatNotifier extends AsyncNotifier<ChatState> {
+  bool _cancelled = false;
+
   @override
   Future<ChatState> build() async {
     return const ChatState();
   }
 
   ApiClient? get _api => ref.read(apiClientProvider);
+
+  /// Cancel an in-progress streaming response.
+  void cancelStream() {
+    _cancelled = true;
+    final current = state.value ?? const ChatState();
+    final msgs = List<ChatMessage>.from(current.messages)
+      ..removeWhere((m) => m.id == 'assistant-streaming');
+    state = AsyncData(
+      ChatState(conversationId: current.conversationId, messages: msgs),
+    );
+  }
 
   /// Load an existing conversation by ID.
   Future<void> loadConversation(String conversationId) async {
@@ -268,6 +281,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final api = _api;
     if (api == null) return;
 
+    _cancelled = false;
     final current = state.value ?? const ChatState();
     String? conversationId = current.conversationId;
 
@@ -316,6 +330,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // Stream SSE events.
     try {
       await for (final event in api.streamMessages(conversationId, message)) {
+        if (_cancelled) break;
         final chatState = state.value ?? const ChatState();
 
         if (event is TokenEvent) {
