@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.1.85](https://github.com/cedricziel/assistant/compare/v0.1.84...v0.1.85) (2026-04-07)
+
+
+### Features
+
+* **personas:** add search/filter to personas list ([122b44e](https://github.com/cedricziel/assistant/commit/122b44e3237bf721ff0817b018b9e63679ea75b2))
+
+
+### Bug Fixes
+
+* **agents:** guard card parsing with try/catch and fall back to agent ID ([7e01569](https://github.com/cedricziel/assistant/commit/7e01569b8cd767491ed51796b456b0e8cfc48b51))
+* **agents:** show skills list from agent card in detail screen ([ffde799](https://github.com/cedricziel/assistant/commit/ffde7993f56a75d0d4e447f0f7bf75adac627423))
+* **analytics:** wrap DataTables in horizontal scroll to prevent mobile overflow ([63021fa](https://github.com/cedricziel/assistant/commit/63021fa1cbc5beb9c48cbfb612f559c44e90a6dd))
+* **chat:** reduce spacing between consecutive messages from the same sender ([01d4158](https://github.com/cedricziel/assistant/commit/01d4158a043a4ee1d06c48ca0a350dd4e66ffcd5))
+* **connection:** add token visibility toggle to authentication field ([eba3d8c](https://github.com/cedricziel/assistant/commit/eba3d8cdad344585401087264cbfc1987d43fc23))
+* **logs:** show spinner in search field during debounce window ([4391dfa](https://github.com/cedricziel/assistant/commit/4391dfa53361f611458da40558a4de761b0155f2))
+* **logs:** truncate long messages to 2 lines, tap to expand ([c53fcfc](https://github.com/cedricziel/assistant/commit/c53fcfc06ec4897691ce414da80337484278ca57))
+* **personas:** improve file slot tile with displayName, amber missing badge, and tooltip ([348d068](https://github.com/cedricziel/assistant/commit/348d0683e58c5859502b4eed59f44c3f4054c461))
+* **personas:** show success snackbar after creating a persona ([f0f6434](https://github.com/cedricziel/assistant/commit/f0f6434dfadfe3f5cd2e1097e235e14c40b20ac6))
+* **personas:** use monospace font in file editor for readability ([4fafed2](https://github.com/cedricziel/assistant/commit/4fafed278bebe4bdf2c9c3444fe58b678197ae65))
+* **skills:** allow description expand-on-tap in list with detail navigation icon ([92cddb6](https://github.com/cedricziel/assistant/commit/92cddb6917905be1689becc32612ceff6afbe861))
+* **skills:** show checkmark icon for 2s after copying skill body ([cafa45a](https://github.com/cedricziel/assistant/commit/cafa45a4aff2bc2a112e8b4b626d5c8bd4009ce4))
+* **traces:** preserve expanded row state across scroll by lifting to screen level ([88355b6](https://github.com/cedricziel/assistant/commit/88355b63853958666189b5d3805f4e37368d73c3))
+* **traces:** reserve fixed height for span detail loading to prevent layout jank ([3bb40db](https://github.com/cedricziel/assistant/commit/3bb40db957b72d378397d57d5acf0668a7bcd9b5))
+* **webhooks:** add tooltip explaining what webhook verification does ([f81fa3a](https://github.com/cedricziel/assistant/commit/f81fa3abafa32b3fcb92a91924495f07e14f36b3))
+* **webhooks:** require confirmation dialog before rotating webhook secret ([cb96495](https://github.com/cedricziel/assistant/commit/cb9649524f855bf5fb89a430083596594ee0a16f))
+* **workflows:** cap displayed runs at 20 with overflow count label ([1999062](https://github.com/cedricziel/assistant/commit/1999062b9056bd1fd42fd8725647cc0c7366603b))
+* **workflows:** move active/inactive badge into title row to prevent clipping on narrow screens ([49d941e](https://github.com/cedricziel/assistant/commit/49d941e182a58d67576732be9c16f3a3b379e831))
+
 ## [0.1.84](https://github.com/cedricziel/assistant/compare/v0.1.83...v0.1.84) (2026-04-07)
 
 
