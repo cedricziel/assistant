@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,6 +28,21 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
       text: isWebPlatform ? Uri.base.origin : 'http://127.0.0.1:8080',
     );
     _tokenController = TextEditingController();
+
+    // Auto-connect when a `_token` query parameter is present in the URL.
+    // Used by Playwright E2E tests to avoid interacting with the Flutter canvas.
+    // The token is validated via GET /health before being saved — it is not
+    // accepted blindly.
+    if (kIsWeb) {
+      final autoToken = Uri.base.queryParameters['_token'];
+      if (autoToken != null && autoToken.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ref
+              .read(serverProfileProvider.notifier)
+              .connect(Uri.base.origin, autoToken);
+        });
+      }
+    }
   }
 
   @override
