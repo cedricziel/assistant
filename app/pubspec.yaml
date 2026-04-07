@@ -52,6 +52,15 @@ dependencies:
   # Dio HTTP client — needed directly for SSE streaming over the generated client
   dio: ^5.0.0
 
+  # Self-update support
+  collection: ^1.19.1
+  pub_semver: ^2.2.0
+  crypto: ^3.0.7
+  shared_preferences: ^2.5.5
+  path_provider: ^2.1.5
+  url_launcher: ^6.3.2
+  package_info_plus: ^9.0.1
+
   # Generated OpenAPI client (spec-driven, see app/packages/assistant_api)
   assistant_api:
     path: packages/assistant_api
