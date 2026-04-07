@@ -66,59 +66,117 @@ class SkillsScreen extends ConsumerWidget {
   }
 }
 
-/// A single skill list row.
-class _SkillRow extends StatelessWidget {
+/// A single skill list row. Tapping expands the description; the detail
+/// icon opens the full skill detail screen.
+class _SkillRow extends StatefulWidget {
   const _SkillRow({required this.skill});
 
   final SkillEntryResponse skill;
 
   @override
+  State<_SkillRow> createState() => _SkillRowState();
+}
+
+class _SkillRowState extends State<_SkillRow> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
-    return ListTile(
-      onTap: () => context.go('/skills/${skill.name}'),
-      leading: CircleAvatar(
-        backgroundColor:
-            skill.enabled ? Colors.green.shade100 : Colors.grey.shade200,
-        child: Icon(
-          skill.enabled ? Icons.extension : Icons.extension_off_outlined,
-          size: 20,
-          color: skill.enabled ? Colors.green.shade700 : Colors.grey.shade500,
-        ),
-      ),
-      title: Text(
-        skill.name,
-        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-      ),
-      subtitle: skill.description.isNotEmpty
-          ? Text(
-              skill.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
-            )
-          : null,
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: skill.enabled
-              ? Colors.green.shade50
-              : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: skill.enabled
-                ? Colors.green.shade300
-                : Colors.grey.shade400,
-          ),
-        ),
-        child: Text(
-          skill.enabled ? 'Enabled' : 'Disabled',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: skill.enabled
-                ? Colors.green.shade700
-                : Colors.grey.shade600,
-          ),
+    final skill = widget.skill;
+    return InkWell(
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              backgroundColor:
+                  skill.enabled ? Colors.green.shade100 : Colors.grey.shade200,
+              child: Icon(
+                skill.enabled
+                    ? Icons.extension
+                    : Icons.extension_off_outlined,
+                size: 20,
+                color: skill.enabled
+                    ? Colors.green.shade700
+                    : Colors.grey.shade500,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          skill.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: skill.enabled
+                              ? Colors.green.shade50
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: skill.enabled
+                                ? Colors.green.shade300
+                                : Colors.grey.shade400,
+                          ),
+                        ),
+                        child: Text(
+                          skill.enabled ? 'Enabled' : 'Disabled',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: skill.enabled
+                                ? Colors.green.shade700
+                                : Colors.grey.shade600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.arrow_forward_ios, size: 14),
+                        tooltip: 'View detail',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () =>
+                            context.go('/skills/${skill.name}'),
+                      ),
+                    ],
+                  ),
+                  if (skill.description.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      skill.description,
+                      maxLines: _expanded ? null : 2,
+                      overflow:
+                          _expanded ? null : TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    if (!_expanded)
+                      const Text(
+                        'Tap to expand',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.black38,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
