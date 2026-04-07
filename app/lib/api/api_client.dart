@@ -76,37 +76,48 @@ class ApiClient {
 
   // -- SSE parser -------------------------------------------------------------
 
-  Stream<StreamEvent> _parseSse(Stream<List<int>> byteStream) async* {
-    final lines = byteStream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter());
+  Stream<StreamEvent> _parseSse(Stream<List<int>> byteStream) =>
+      parseSseByteStream(byteStream);
+}
 
-    String? eventType;
-    String? dataLine;
+// -- SSE parser (top-level for testability) -----------------------------------
 
-    await for (final line in lines) {
-      if (line.startsWith('event:')) {
-        eventType = line.substring('event:'.length).trim();
-      } else if (line.startsWith('data:')) {
-        dataLine = line.substring('data:'.length).trim();
-      } else if (line.isEmpty) {
-        // Blank line — dispatch the event.
-        if (eventType == 'token' && dataLine != null) {
-          yield TokenEvent(dataLine);
-        } else if (eventType == 'done' && dataLine != null) {
-          try {
-            final json = jsonDecode(dataLine) as Map<String, dynamic>;
-            yield DoneEvent(
-              role: json['role'] as String? ?? 'assistant',
-              content: json['content'] as String? ?? '',
-            );
-          } catch (_) {
-            yield DoneEvent(role: 'assistant', content: dataLine);
-          }
+/// Parses a raw SSE byte stream into [StreamEvent]s.
+///
+/// Accepts [Stream<List<int>>] or [Stream<Uint8List>] (both are [List<int>]).
+/// Uses [utf8.decode] via [Stream.map] instead of [utf8.decoder] to avoid a
+/// runtime type error on iOS where [Utf8Decoder] is not accepted as a
+/// [StreamTransformer<Uint8List, String>].
+Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
+  final lines = byteStream
+      .map(utf8.decode)
+      .transform(const LineSplitter());
+
+  String? eventType;
+  String? dataLine;
+
+  await for (final line in lines) {
+    if (line.startsWith('event:')) {
+      eventType = line.substring('event:'.length).trim();
+    } else if (line.startsWith('data:')) {
+      dataLine = line.substring('data:'.length).trim();
+    } else if (line.isEmpty) {
+      // Blank line — dispatch the event.
+      if (eventType == 'token' && dataLine != null) {
+        yield TokenEvent(dataLine);
+      } else if (eventType == 'done' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield DoneEvent(
+            role: json['role'] as String? ?? 'assistant',
+            content: json['content'] as String? ?? '',
+          );
+        } catch (_) {
+          yield DoneEvent(role: 'assistant', content: dataLine);
         }
-        eventType = null;
-        dataLine = null;
       }
+      eventType = null;
+      dataLine = null;
     }
   }
 }
