@@ -22,6 +22,7 @@ class LogsScreen extends ConsumerStatefulWidget {
 class _LogsScreenState extends ConsumerState<LogsScreen> {
   final _searchController = TextEditingController();
   Timer? _debounce;
+  bool _searching = false;
 
   @override
   void dispose() {
@@ -31,9 +32,11 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
   }
 
   void _onSearchChanged(String query) {
+    setState(() => _searching = true);
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), () {
       ref.read(logsProvider.notifier).setSearch(query);
+      if (mounted) setState(() => _searching = false);
     });
   }
 
@@ -65,11 +68,21 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
             child: TextField(
               key: const Key('log_search_field'),
               controller: _searchController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'Filter by keyword...',
-                prefixIcon: Icon(Icons.search, size: 20),
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(vertical: 8),
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _searching
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : null,
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
                 isDense: true,
               ),
               onChanged: _onSearchChanged,
