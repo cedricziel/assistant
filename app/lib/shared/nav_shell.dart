@@ -105,27 +105,29 @@ class NavShell extends StatelessWidget {
 
     if (isWide) {
       return Scaffold(
-        body: Row(
-          children: [
-            NavigationRail(
-              selectedIndex: selected,
-              labelType: NavigationRailLabelType.all,
-              destinations: _destinations
-                  .map(
-                    (d) => NavigationRailDestination(
-                      icon: Icon(d.icon),
-                      selectedIcon: Icon(d.selectedIcon),
-                      label: Text(d.label),
-                    ),
-                  )
-                  .toList(),
-              onDestinationSelected: (i) {
-                context.go(_destinations[i].path);
-              },
-            ),
-            const VerticalDivider(width: 1, thickness: 1),
-            Expanded(child: UpdateBannerWrapper(child: child)),
-          ],
+        body: SafeArea(
+          child: Row(
+            children: [
+              NavigationRail(
+                selectedIndex: selected,
+                labelType: NavigationRailLabelType.all,
+                destinations: _destinations
+                    .map(
+                      (d) => NavigationRailDestination(
+                        icon: Icon(d.icon),
+                        selectedIcon: Icon(d.selectedIcon),
+                        label: Text(d.label),
+                      ),
+                    )
+                    .toList(),
+                onDestinationSelected: (i) {
+                  context.go(_destinations[i].path);
+                },
+              ),
+              const VerticalDivider(width: 1, thickness: 1),
+              Expanded(child: UpdateBannerWrapper(child: child)),
+            ],
+          ),
         ),
       );
     }
