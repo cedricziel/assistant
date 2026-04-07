@@ -23,7 +23,6 @@ assistant-skills = { path = "../skills" }
 assistant-tool-executor = { path = "../tool-executor" }
 assistant-mcp-client = { path = "../mcp-client" }
 chrono = { workspace = true }
-tokio-stream = { workspace = true }
 async-trait = { workspace = true }
 opentelemetry = { workspace = true }
 tokio = { workspace = true }

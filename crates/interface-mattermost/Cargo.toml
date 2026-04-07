@@ -28,6 +28,9 @@ tokio-stream = { workspace = true }
 # Ensure vendored OpenSSL is used when cross-compiling to musl targets
 openssl = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["openssl"]
+
 [dev-dependencies]
 toml = { workspace = true }
 wiremock = { workspace = true }

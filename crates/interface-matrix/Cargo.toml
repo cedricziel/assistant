@@ -23,7 +23,6 @@ lru = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
-tokio-tungstenite = { workspace = true }
 tokio-stream = { workspace = true }
 urlencoding = "2"
 chrono = { workspace = true }
