@@ -225,7 +225,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           itemCount: chatState.messages.length,
                           itemBuilder: (context, index) {
                             final msg = chatState.messages[index];
-                            return _MessageBubble(message: msg);
+                            final prevMsg = index > 0
+                                ? chatState.messages[index - 1]
+                                : null;
+                            final isGrouped =
+                                prevMsg != null &&
+                                prevMsg.role == msg.role &&
+                                !prevMsg.isStreaming;
+                            return _MessageBubble(
+                              message: msg,
+                              isGrouped: isGrouped,
+                            );
                           },
                         ),
                 ),
@@ -275,9 +285,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 // -- Message bubble ----------------------------------------------------------
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({required this.message, this.isGrouped = false});
 
   final ChatMessage message;
+  final bool isGrouped;
 
   @override
   Widget build(BuildContext context) {
@@ -287,7 +298,10 @@ class _MessageBubble extends StatelessWidget {
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
+        margin: EdgeInsets.only(
+          top: isGrouped ? 2 : 8,
+          bottom: 2,
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: const BoxConstraints(maxWidth: 640),
         decoration: BoxDecoration(
