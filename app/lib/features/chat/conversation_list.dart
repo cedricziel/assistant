@@ -108,6 +108,29 @@ class ConversationList extends ConsumerWidget {
                       child: const Icon(Icons.delete, color: Colors.white),
                     ),
                     confirmDismiss: (_) async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete conversation?'),
+                          content: Text(
+                            '"${conv.title}" will be permanently deleted.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.red,
+                              ),
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm != true) return false;
                       try {
                         await ref
                             .read(conversationListProvider.notifier)
