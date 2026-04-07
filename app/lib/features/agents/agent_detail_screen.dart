@@ -147,13 +147,26 @@ class _AgentDetailBody extends StatelessWidget {
                 ],
                 if (url.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text(
-                    url,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: Colors.black54,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          url,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy, size: 16),
+                        tooltip: 'Copy URL',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: url));
+                        },
+                      ),
+                    ],
                   ),
                 ],
               ],
