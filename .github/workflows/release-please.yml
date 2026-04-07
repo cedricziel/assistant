@@ -154,6 +154,60 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ needs.release-please.outputs.tag_name }} ${{ env.ARCHIVE }}
 
+  build-flutter-desktop:
+    name: Build Flutter desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos
+            runner: macos-latest
+            flutter_target: macos
+            archive_suffix: macos-arm64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.x"
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+        working-directory: app
+
+      - name: Build Flutter macOS app
+        run: flutter build macos --release
+        working-directory: app
+
+      - name: Create ZIP archive
+        shell: bash
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          ARCHIVE_NAME="assistant-app-${TAG}-${{ matrix.archive_suffix }}.zip"
+          cd app/build/macos/Build/Products/Release
+          zip -r "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}" "assistant.app"
+          echo "ARCHIVE=${ARCHIVE_NAME}" >> $GITHUB_ENV
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          shasum -a 256 "${{ env.ARCHIVE }}" > checksums.sha256
+          cat checksums.sha256
+
+      - name: Upload ZIP to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ needs.release-please.outputs.tag_name }} \
+            "${{ env.ARCHIVE }}" checksums.sha256
+
   build-docker:
     name: Build and push Docker image (Alpine)
     runs-on: ubuntu-latest

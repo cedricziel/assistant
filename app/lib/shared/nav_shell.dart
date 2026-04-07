@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/updater/update_banner.dart';
+
 /// Breakpoint above which the navigation rail is shown instead of bottom nav.
 const double _kNavRailBreakpoint = 768;
 
@@ -122,14 +124,14 @@ class NavShell extends StatelessWidget {
               },
             ),
             const VerticalDivider(width: 1, thickness: 1),
-            Expanded(child: child),
+            Expanded(child: UpdateBannerWrapper(child: child)),
           ],
         ),
       );
     }
 
     return Scaffold(
-      body: child,
+      body: UpdateBannerWrapper(child: child),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selected,
         onDestinationSelected: (i) {
