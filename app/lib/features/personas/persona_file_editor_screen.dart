@@ -161,7 +161,8 @@ class _PersonaFileEditorScreenState
             ),
         ],
       ),
-      body: contentAsync.when(
+      body: SafeArea(
+        child: contentAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => Center(
           child: Column(
@@ -239,6 +240,7 @@ class _PersonaFileEditorScreenState
           );
         },
       ),
+      ),  // SafeArea
     ),  // Scaffold
     );  // PopScope
   }
