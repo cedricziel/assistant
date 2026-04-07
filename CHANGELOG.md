@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.83](https://github.com/cedricziel/assistant/compare/v0.1.82...v0.1.83) (2026-04-07)
+
+
+### Bug Fixes
+
+* **ci:** correct macOS app bundle name in zip command ([960c692](https://github.com/cedricziel/assistant/commit/960c692b994a695aa5654382926a1e616e15a1c9))
+* commit podfile.lock ([0e56ce5](https://github.com/cedricziel/assistant/commit/0e56ce539f52225cc3f33d62a3d7b804c5d15b9e))
+* **deps:** optimize Rust workspace dependencies ([#391](https://github.com/cedricziel/assistant/issues/391)) ([e0ddb34](https://github.com/cedricziel/assistant/commit/e0ddb3460fa8037ebd0b4fa130adce91d7274789))
+* **embedded-server:** guard Platform.isMacOS with kIsWeb to prevent crash on web ([2790094](https://github.com/cedricziel/assistant/commit/27900940be394b509028174cfa605870f232e437))
+* **embedded-server:** replace drain&lt;List&lt;int&gt;&gt;() with drain&lt;void&gt;() ([2f42645](https://github.com/cedricziel/assistant/commit/2f42645933af0e93944f46e5879b5db4dcb25d8b))
+* **web:** add crossorigin=use-credentials to manifest link ([d9db26a](https://github.com/cedricziel/assistant/commit/d9db26a734e5e98b076082c4819786b83c2aa177))
+
 ## [0.1.82](https://github.com/cedricziel/assistant/compare/v0.1.81...v0.1.82) (2026-04-07)
 
 
