@@ -52,6 +52,29 @@ class _WorkflowRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final badge = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: workflow.active ? Colors.green.shade50 : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: workflow.active
+              ? Colors.green.shade300
+              : Colors.grey.shade400,
+        ),
+      ),
+      child: Text(
+        workflow.active ? 'Active' : 'Inactive',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: workflow.active
+              ? Colors.green.shade700
+              : Colors.grey.shade600,
+        ),
+      ),
+    );
+
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: workflow.active
@@ -65,9 +88,18 @@ class _WorkflowRow extends StatelessWidget {
               : Colors.grey.shade500,
         ),
       ),
-      title: Text(
-        workflow.name,
-        style: const TextStyle(fontWeight: FontWeight.w600),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              workflow.name,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          badge,
+        ],
       ),
       subtitle: workflow.description.isNotEmpty
           ? Text(
@@ -77,30 +109,6 @@ class _WorkflowRow extends StatelessWidget {
               style: const TextStyle(fontSize: 12),
             )
           : null,
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: workflow.active
-              ? Colors.green.shade50
-              : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: workflow.active
-                ? Colors.green.shade300
-                : Colors.grey.shade400,
-          ),
-        ),
-        child: Text(
-          workflow.active ? 'Active' : 'Inactive',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: workflow.active
-                ? Colors.green.shade700
-                : Colors.grey.shade600,
-          ),
-        ),
-      ),
       onTap: () => context.go('/workflows/${workflow.id}'),
     );
   }
