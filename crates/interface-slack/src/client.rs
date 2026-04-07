@@ -355,6 +355,51 @@ impl SlackApiClient {
             .context("users.info response parse failed")
     }
 
+    // -- private file download ------------------------------------------------
+
+    /// Download a Slack private file URL authenticated with the bot token.
+    ///
+    /// Returns the raw bytes.  Fails if the response exceeds `max_bytes` or
+    /// the HTTP request itself fails.
+    pub async fn download_private_file(&self, url: &str, max_bytes: usize) -> Result<Vec<u8>> {
+        let resp = self
+            .client
+            .get(url)
+            .bearer_auth(&self.bot_token)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .context("slack: file download request failed")?;
+
+        if !resp.status().is_success() {
+            bail!("slack: file download failed with status {}", resp.status());
+        }
+
+        if resp
+            .content_length()
+            .is_some_and(|len| len > max_bytes as u64)
+        {
+            bail!(
+                "slack: file too large ({} bytes, limit {max_bytes})",
+                resp.content_length().unwrap_or(0)
+            );
+        }
+
+        let bytes = resp
+            .bytes()
+            .await
+            .context("slack: failed to read file bytes")?;
+
+        if bytes.len() > max_bytes {
+            bail!(
+                "slack: file too large ({} bytes, limit {max_bytes})",
+                bytes.len()
+            );
+        }
+
+        Ok(bytes.to_vec())
+    }
+
     // -- generic helper -------------------------------------------------------
 
     /// POST a JSON body to a Slack API path using the **bot token**.

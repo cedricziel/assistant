@@ -16,6 +16,7 @@ use assistant_core::{
     SlackConfig, ToolHandler,
 };
 use assistant_storage::StorageLayer;
+use assistant_transcription::{is_audio_mime, TranscriptionProvider, TranscriptionRequest};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream::Stream;
@@ -34,6 +35,9 @@ const BACKOFF_MIN: Duration = Duration::from_secs(1);
 /// Maximum reconnect delay.
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 
+/// Maximum audio file size downloaded for transcription (25 MB — Whisper API limit).
+const MAX_AUDIO_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+
 /// Slack `ChannelAdapter`.  Connects via Socket Mode WebSocket and provides
 /// `send()` / `send_in_thread()` via `chat.postMessage`.
 pub struct SlackAdapter {
@@ -45,6 +49,10 @@ pub struct SlackAdapter {
     storage: Option<Arc<StorageLayer>>,
     /// Set of `platform_id`s for which history has already been seeded.
     seeded_keys: Arc<Mutex<HashSet<String>>>,
+    /// Optional audio transcription provider for voice messages.
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    /// BCP-47 language hint passed to the transcription provider.
+    transcription_language: Option<String>,
 }
 
 impl SlackAdapter {
@@ -65,12 +73,25 @@ impl SlackAdapter {
             stop_rx,
             storage: None,
             seeded_keys: Arc::new(Mutex::new(HashSet::new())),
+            transcription: None,
+            transcription_language: None,
         })
     }
 
     /// Attach a storage layer to enable thread-history seeding on first turn.
     pub fn with_storage(mut self, storage: Arc<StorageLayer>) -> Self {
         self.storage = Some(storage);
+        self
+    }
+
+    /// Attach an audio transcription provider for voice message support.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
         self
     }
 
@@ -95,6 +116,8 @@ impl ChannelAdapter for SlackAdapter {
         let allowed_channels = self.config.allowed_channels.clone();
         let allowed_users = self.config.allowed_users.clone();
         let mut stop_rx = self.stop_rx.clone();
+        let transcription = self.transcription.clone();
+        let transcription_language = self.transcription_language.clone();
 
         let (tx, rx) = mpsc::channel::<ChannelMessage>(64);
 
@@ -188,11 +211,33 @@ impl ChannelAdapter for SlackAdapter {
                                         None => continue,
                                     };
 
-                                    if let Some(msg) = parse_event(
+                                    if let Some(mut msg) = parse_event(
                                         &inner,
                                         &allowed_channels,
                                         &allowed_users,
                                     ) {
+                                        // Transcribe audio attachments on file_share events.
+                                        if let Some(ref provider) = transcription {
+                                            let transcript = transcribe_audio_from_event(
+                                                &inner,
+                                                &client,
+                                                provider.as_ref(),
+                                                transcription_language.as_deref(),
+                                            )
+                                            .await;
+                                            if !transcript.is_empty() {
+                                                if let ChannelContent::Text(ref mut text) =
+                                                    msg.content
+                                                {
+                                                    if text.is_empty() {
+                                                        *text = transcript;
+                                                    } else {
+                                                        *text =
+                                                            format!("{transcript}\n{text}");
+                                                    }
+                                                }
+                                            }
+                                        }
                                         if tx.send(msg).await.is_err() {
                                             break; // receiver dropped
                                         }
@@ -442,6 +487,82 @@ fn parse_event(
         timestamp: Utc::now(),
         metadata,
     })
+}
+
+/// Download and transcribe audio files attached to a Slack `file_share` event.
+///
+/// Returns a combined transcript string (one `[Voice transcription]` block per
+/// audio file) to be prepended to the message text.  Returns an empty string
+/// when no audio files are found or transcription is not possible.
+async fn transcribe_audio_from_event(
+    event: &serde_json::Value,
+    client: &SlackApiClient,
+    provider: &dyn TranscriptionProvider,
+    language: Option<&str>,
+) -> String {
+    let files = match event.get("files").and_then(|f| f.as_array()) {
+        Some(f) if !f.is_empty() => f.clone(),
+        _ => return String::new(),
+    };
+
+    let mut transcripts = Vec::new();
+    for file in &files {
+        let mime = match file.get("mimetype").and_then(|v| v.as_str()) {
+            Some(m) => m,
+            None => continue,
+        };
+        if !is_audio_mime(mime) {
+            continue;
+        }
+
+        let url = file
+            .get("url_private_download")
+            .or_else(|| file.get("url_private"))
+            .and_then(|v| v.as_str());
+        let url = match url {
+            Some(u) => u,
+            None => continue,
+        };
+        let filename = file
+            .get("name")
+            .or_else(|| file.get("title"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let audio_data = match client
+            .download_private_file(url, MAX_AUDIO_ATTACHMENT_BYTES)
+            .await
+        {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                warn!(error = %e, "slack: failed to download audio file");
+                continue;
+            }
+        };
+
+        let request = TranscriptionRequest {
+            audio_data,
+            mime_type: mime.to_string(),
+            filename,
+            language: language.map(|s| s.to_string()),
+        };
+
+        match provider.transcribe(request).await {
+            Ok(result) => {
+                info!(
+                    text_len = result.text.len(),
+                    "slack: audio transcription successful"
+                );
+                transcripts.push(format!("[Voice transcription]: {}", result.text));
+            }
+            Err(e) => {
+                warn!(error = %e, "slack: audio transcription failed");
+                transcripts.push("[Voice message: transcription failed]".to_string());
+            }
+        }
+    }
+
+    transcripts.join("\n")
 }
 
 /// Seed Slack thread messages into the conversation store.

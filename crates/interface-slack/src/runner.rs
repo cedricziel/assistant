@@ -96,9 +96,13 @@ impl SlackInterface {
 
     /// Run the Slack interface: connect, receive messages, dispatch to orchestrator.
     pub async fn run(&self) -> Result<()> {
-        let adapter =
-            Arc::new(SlackAdapter::new(self.config.clone())?.with_storage(self.storage.clone()));
-        ChannelRunner::new(adapter, self.orchestrator.clone())
+        let mut adapter =
+            SlackAdapter::new(self.config.clone())?.with_storage(self.storage.clone());
+        if let Some(ref provider) = self.transcription {
+            adapter =
+                adapter.with_transcription(provider.clone(), self.transcription_language.clone());
+        }
+        ChannelRunner::new(Arc::new(adapter), self.orchestrator.clone())
             .run()
             .await
     }
