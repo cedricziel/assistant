@@ -29,9 +29,6 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
-      - name: Vendor JS dependencies
-        run: make vendor
-
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -67,9 +64,6 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
-      - name: Vendor JS dependencies
-        run: make vendor
-
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -98,9 +92,6 @@ jobs:
 
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
-
-      - name: Vendor JS dependencies
-        run: make vendor
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -151,6 +142,17 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.x"
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        working-directory: app
+        run: flutter pub get
+
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -159,13 +161,10 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', 'app/pubspec.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Vendor JS dependencies
-        run: make vendor
-
-      - name: Build unified assistant binary
+      - name: Build unified assistant binary (embeds Flutter web)
         run: |
           cargo build -p assistant-cli
 
@@ -410,9 +409,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Vendor JS dependencies
-        run: make vendor
 
       - name: Cache cargo
         uses: actions/cache@v5

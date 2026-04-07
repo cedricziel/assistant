@@ -1,11 +1,8 @@
-.PHONY: all build test lint lint-signal format clean check install-hooks vendor run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal
+.PHONY: all build test lint lint-signal format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal
 
 all: build
 
-vendor:
-	@crates/web-ui/vendor.sh
-
-build: vendor
+build:
 	cargo build --workspace
 
 build-release:
