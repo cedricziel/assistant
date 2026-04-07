@@ -99,12 +99,27 @@ class _SkillDetailBody extends StatelessWidget {
           ],
 
           // -- Body -----------------------------------------------------------
-          Text(
-            'Skill Body',
-            style: theme.textTheme.labelLarge
-                ?.copyWith(color: theme.colorScheme.primary),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Skill Body',
+                style: theme.textTheme.labelLarge
+                    ?.copyWith(color: theme.colorScheme.primary),
+              ),
+              IconButton(
+                icon: const Icon(Icons.copy, size: 16),
+                tooltip: 'Copy body',
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: skill.body));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Copied to clipboard')),
+                  );
+                },
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
