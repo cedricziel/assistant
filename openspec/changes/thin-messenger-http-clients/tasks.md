@@ -80,5 +80,5 @@
 - [x] 7.4 Verify `slack-morphism` is absent from `cargo tree` output
 - [x] 7.5 Verify `mattermost_api` is absent from `cargo tree` output
 - [x] 7.6 Verify `matrix-sdk` is absent from `cargo tree` output
-- [ ] 7.7 Run `make build` to confirm the full workspace builds cleanly
-- [ ] 7.8 Update `AGENTS.md` workspace table with any crate changes
+- [x] 7.7 Run `make build` to confirm the full workspace builds cleanly
+- [x] 7.8 Update `AGENTS.md` workspace table with any crate changes

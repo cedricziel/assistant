@@ -118,11 +118,11 @@ Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 | `assistant-mcp-server`           | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                                          |
 | `assistant-mcp-client`           | `crates/mcp-client`                    | MCP client for external MCP server connections                         |
 | `assistant-cli`                  | `crates/interface-cli`                 | Unified binary: REPL + subcommands                                     |
-| `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot library                                                      |
-| `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot library                                                 |
-| `assistant-interface-matrix`     | `crates/interface-matrix`              | Matrix bot interface                                                   |
-| `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot                                             |
-| `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface stub (feature-gated)                                  |
+| `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot (thin reqwest/tokio-tungstenite client, ChannelAdapter)      |
+| `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot (thin reqwest/tokio-tungstenite client, ChannelAdapter) |
+| `assistant-interface-matrix`     | `crates/interface-matrix`              | Matrix bot (thin reqwest long-poll, ChannelAdapter)                    |
+| `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot (axum, ChannelAdapter)                      |
+| `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface (presage, feature-gated, ChannelAdapter stub)         |
 | `assistant-web-ui`               | `crates/web-ui`                        | Web UI/A2A server implementation (invoked via `assistant webui serve`) |
 | `assistant-transcription`        | `crates/transcription`                 | Voice transcription providers (Whisper, Ollama, etc)                   |
 | `assistant-a2a-json-schema`      | `crates/a2a-json-schema`               | A2A protocol JSON Schema types                                         |
