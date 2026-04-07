@@ -48,4 +48,4 @@
 ## 8. CI
 
 - [x] 8.1 Update `.github/workflows/flutter.yml` to run `flutter analyze` and `flutter test` — these already run; verify no new failures from added files
-- [ ] 8.2 (Optional) Add a `build-macos-bundle` CI job with `runs-on: macos-latest` to validate the full bundle build
+- [x] 8.2 Add a `build-macos-bundle` CI job with `runs-on: macos-latest` to validate the full bundle build
