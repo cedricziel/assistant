@@ -1,7 +1,4 @@
-//! `slack-update-message` ambient tool handler.
-//!
-//! Edits the text of a previously posted Slack message via `chat.update`.
-//! The bot can only update messages it originally posted.
+//! `slack-update-message` ambient tool — edit an existing Slack message.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,14 +7,12 @@ use anyhow::Result;
 use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use slack_morphism::prelude::*;
-use tracing::{debug, warn};
+use tracing::warn;
 
-// ── SlackUpdateMessageSkill ───────────────────────────────────────────────────
+use crate::client::SlackApiClient;
 
 pub struct SlackUpdateMessageSkill {
-    pub(crate) client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
-    pub(crate) token: SlackApiToken,
+    pub(crate) client: Arc<SlackApiClient>,
 }
 
 #[async_trait]
@@ -27,29 +22,18 @@ impl ToolHandler for SlackUpdateMessageSkill {
     }
 
     fn description(&self) -> &str {
-        "Edit the text of a Slack message that the bot previously posted. \
-         Required: `channel` (channel ID), `ts` (message timestamp returned \
-         when the message was originally posted), `message` (new text content). \
-         The bot can only update its own messages."
+        "Update (edit) an existing Slack message in-place. \
+         Required: `channel` (channel ID), `ts` (message timestamp), `text` (new text)."
     }
 
     fn params_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["channel", "ts", "message"],
+            "required": ["channel", "ts", "text"],
             "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Slack channel ID (e.g. C01234567)"
-                },
-                "ts": {
-                    "type": "string",
-                    "description": "Timestamp of the message to update"
-                },
-                "message": {
-                    "type": "string",
-                    "description": "New message text (Slack mrkdwn formatting supported)"
-                }
+                "channel": { "type": "string" },
+                "ts": { "type": "string" },
+                "text": { "type": "string" }
             }
         })
     }
@@ -64,33 +48,23 @@ impl ToolHandler for SlackUpdateMessageSkill {
         _ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let channel = match params.get("channel").and_then(|v| v.as_str()) {
-            Some(c) => c.to_string(),
-            None => return Ok(ToolOutput::error("Missing required parameter 'channel'")),
+            Some(c) => c,
+            None => return Ok(ToolOutput::error("Missing 'channel'")),
         };
         let ts = match params.get("ts").and_then(|v| v.as_str()) {
-            Some(t) => SlackTs(t.to_string()),
-            None => return Ok(ToolOutput::error("Missing required parameter 'ts'")),
+            Some(t) => t,
+            None => return Ok(ToolOutput::error("Missing 'ts'")),
         };
-        let message = match params.get("message").and_then(|v| v.as_str()) {
-            Some(m) => m.to_string(),
-            None => return Ok(ToolOutput::error("Missing required parameter 'message'")),
+        let text = match params.get("text").and_then(|v| v.as_str()) {
+            Some(t) => t,
+            None => return Ok(ToolOutput::error("Missing 'text'")),
         };
 
-        let session = self.client.open_session(&self.token);
-        let content = SlackMessageContent::new().with_text(message);
-        let req = SlackApiChatUpdateRequest::new(channel.clone().into(), content, ts.clone());
-
-        match session.chat_update(&req).await {
-            Ok(resp) => {
-                debug!(channel = %resp.channel, ts = %resp.ts.0, "slack-update-message: ok");
-                Ok(ToolOutput::success(format!(
-                    "Message updated (channel={}, ts={})",
-                    resp.channel, resp.ts.0
-                )))
-            }
+        match self.client.update_message(channel, ts, text).await {
+            Ok(()) => Ok(ToolOutput::success("Message updated")),
             Err(e) => {
-                warn!(error = %e, channel = %channel, ts = %ts.0, "slack-update-message: chat.update failed");
-                Ok(ToolOutput::error(format!("Failed to update message: {e}")))
+                warn!(error = %e, "slack-update-message failed");
+                Ok(ToolOutput::error(format!("Failed: {e}")))
             }
         }
     }

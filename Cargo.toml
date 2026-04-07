@@ -166,6 +166,7 @@ slack-morphism = { version = "2", features = ["hyper"] }
 # Force rustls TLS on the same tokio-tungstenite major/minor used by
 # slack-morphism so wss:// support is actually enabled in the Slack client.
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 mattermost_api = "0.8"
 # Apache Iceberg
 iceberg = "0.9"

@@ -1,7 +1,4 @@
-//! `slack-delete-message` ambient tool handler.
-//!
-//! Deletes a Slack message via `chat.delete`.  The bot can only delete its
-//! own messages (unless it has the `chat:write:bot` admin scope).
+//! `slack-delete-message` ambient tool — delete a Slack message.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,14 +7,12 @@ use anyhow::Result;
 use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use slack_morphism::prelude::*;
-use tracing::{debug, warn};
+use tracing::warn;
 
-// ── SlackDeleteMessageSkill ───────────────────────────────────────────────────
+use crate::client::SlackApiClient;
 
 pub struct SlackDeleteMessageSkill {
-    pub(crate) client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
-    pub(crate) token: SlackApiToken,
+    pub(crate) client: Arc<SlackApiClient>,
 }
 
 #[async_trait]
@@ -27,9 +22,7 @@ impl ToolHandler for SlackDeleteMessageSkill {
     }
 
     fn description(&self) -> &str {
-        "Delete a Slack message that the bot previously posted. \
-         Required: `channel` (channel ID), `ts` (message timestamp). \
-         The bot can only delete messages it originally posted."
+        "Delete a Slack message. Required: `channel` (channel ID), `ts` (message timestamp)."
     }
 
     fn params_schema(&self) -> Value {
@@ -37,19 +30,17 @@ impl ToolHandler for SlackDeleteMessageSkill {
             "type": "object",
             "required": ["channel", "ts"],
             "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Slack channel ID (e.g. C01234567)"
-                },
-                "ts": {
-                    "type": "string",
-                    "description": "Timestamp of the message to delete"
-                }
+                "channel": { "type": "string" },
+                "ts": { "type": "string" }
             }
         })
     }
 
     fn is_mutating(&self) -> bool {
+        true
+    }
+
+    fn requires_confirmation(&self) -> bool {
         true
     }
 
@@ -59,28 +50,19 @@ impl ToolHandler for SlackDeleteMessageSkill {
         _ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let channel = match params.get("channel").and_then(|v| v.as_str()) {
-            Some(c) => c.to_string(),
-            None => return Ok(ToolOutput::error("Missing required parameter 'channel'")),
+            Some(c) => c,
+            None => return Ok(ToolOutput::error("Missing 'channel'")),
         };
         let ts = match params.get("ts").and_then(|v| v.as_str()) {
-            Some(t) => SlackTs(t.to_string()),
-            None => return Ok(ToolOutput::error("Missing required parameter 'ts'")),
+            Some(t) => t,
+            None => return Ok(ToolOutput::error("Missing 'ts'")),
         };
 
-        let session = self.client.open_session(&self.token);
-        let req = SlackApiChatDeleteRequest::new(channel.clone().into(), ts.clone());
-
-        match session.chat_delete(&req).await {
-            Ok(resp) => {
-                debug!(channel = %resp.channel, ts = %resp.ts.0, "slack-delete-message: ok");
-                Ok(ToolOutput::success(format!(
-                    "Message deleted (channel={}, ts={})",
-                    resp.channel, resp.ts.0
-                )))
-            }
+        match self.client.delete_message(channel, ts).await {
+            Ok(()) => Ok(ToolOutput::success("Message deleted")),
             Err(e) => {
-                warn!(error = %e, channel = %channel, ts = %ts.0, "slack-delete-message: chat.delete failed");
-                Ok(ToolOutput::error(format!("Failed to delete message: {e}")))
+                warn!(error = %e, "slack-delete-message failed");
+                Ok(ToolOutput::error(format!("Failed: {e}")))
             }
         }
     }
