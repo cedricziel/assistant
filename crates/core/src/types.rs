@@ -104,6 +104,31 @@ pub enum Interface {
     Matrix,
 }
 
+/// Identifies the messaging platform for a `ChannelAdapter`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ChannelType {
+    Slack,
+    Mattermost,
+    Matrix,
+    Nextcloud,
+    Signal,
+    /// Catch-all for future or custom platforms.
+    Custom(String),
+}
+
+impl std::fmt::Display for ChannelType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChannelType::Slack => write!(f, "slack"),
+            ChannelType::Mattermost => write!(f, "mattermost"),
+            ChannelType::Matrix => write!(f, "matrix"),
+            ChannelType::Nextcloud => write!(f, "nextcloud"),
+            ChannelType::Signal => write!(f, "signal"),
+            ChannelType::Custom(name) => write!(f, "{name}"),
+        }
+    }
+}
+
 /// Top-level assistant configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssistantConfig {
@@ -180,10 +205,15 @@ pub struct SignalConfig {
     #[serde(default)]
     pub allowed_senders: Vec<String>,
 
-    /// Path where presage stores its Signal state.  Defaults to
-    /// `~/.assistant/signal-store` (resolved at runtime by the interface
-    /// crate, which has access to the `dirs` crate).
-    pub store_path: Option<String>,
+    /// Base URL of the signal-cli-rest-api daemon.
+    /// Defaults to `http://localhost:8080` if not set.
+    pub api_url: Option<String>,
+
+    /// HTTP Basic Auth username for signal-cli-rest-api (optional).
+    pub api_user: Option<String>,
+
+    /// HTTP Basic Auth password for signal-cli-rest-api (optional).
+    pub api_password: Option<String>,
 }
 
 /// Controls which messages the Slack bot reacts to.

@@ -7,6 +7,8 @@
 //! All tools remain available; use `allowed_channels` / `allowed_users`
 //! and confirmation callbacks to control risky commands.
 
+pub mod adapter;
+pub mod client;
 pub mod config;
 pub mod runner;
 pub mod skills;

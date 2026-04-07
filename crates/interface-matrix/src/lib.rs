@@ -6,6 +6,8 @@
 //! All tools remain available; use `allowed_rooms` / `allowed_users` to
 //! control which rooms and users can trigger the assistant.
 
+pub mod adapter;
+pub mod client;
 pub mod config;
 pub mod runner;
 pub mod tools;

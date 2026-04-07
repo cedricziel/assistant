@@ -37,3 +37,6 @@ assistant-core = { path = "../core" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["async-trait", "futures"]

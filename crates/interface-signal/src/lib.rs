@@ -1,31 +1,13 @@
 //! Signal messenger interface for the AI assistant.
 //!
-//! This is a second full interface (parallel to the CLI REPL) that receives
-//! messages via Signal and replies through the same channel.  It is
-//! **feature-gated**: compile with `--features signal` to include the presage
-//! integration.
-//!
-//! # Architecture
-//!
-//! - Device linking is performed once via `assistant signal link` (see
-//!   [`link_device`]).
-//! - A background tokio task runs a presage listener loop (see
-//!   [`SignalInterface::run`]).
-//! - Each incoming Signal message is routed through
-//!   `Orchestrator::run_turn_streaming`.
-//! - All tools remain available; commands that require confirmation are
-//!   auto-denied by the non-interactive confirmation callback.
-//!
-//! # Feature-gating
-//!
-//! When compiled without `--features signal` this crate compiles to a stub
-//! that returns informative errors, so the rest of the workspace is
-//! unaffected.
+//! Connects to a [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api)
+//! daemon via WebSocket for inbound messages and REST for outbound replies.
+//! Implements the standard [`ChannelAdapter`] / [`ChannelRunner`] pattern.
 
+pub mod adapter;
 pub mod config;
-pub mod linker;
 pub mod runner;
 
+pub use adapter::SignalAdapter;
 pub use assistant_core::SignalConfig;
-pub use linker::link_device;
 pub use runner::SignalInterface;

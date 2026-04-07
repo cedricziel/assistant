@@ -1,4 +1,5 @@
 pub mod bootstrap;
+pub mod channel_runner;
 pub(crate) mod compaction;
 pub(crate) mod conversation_indexer;
 pub(crate) mod history;
@@ -13,6 +14,7 @@ pub mod telemetry;
 pub mod webhook_dispatch;
 
 pub use bootstrap::spawn_memory_indexer;
+pub use channel_runner::ChannelRunner;
 pub use interface_runner::InterfaceRunner;
 pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;

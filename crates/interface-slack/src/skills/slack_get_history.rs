@@ -1,9 +1,4 @@
-//! `slack-get-history` ambient tool handler.
-//!
-//! Reads recent messages from a Slack channel (`conversations.history`) or, when
-//! `thread_ts` is supplied, the replies in a specific thread
-//! (`conversations.replies`).  Useful for the agent to catch up on context
-//! before composing a response.
+//! `slack-get-history` ambient tool — fetch channel or thread history.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,14 +7,12 @@ use anyhow::Result;
 use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use slack_morphism::prelude::*;
-use tracing::{debug, warn};
+use tracing::warn;
 
-// ── SlackGetHistorySkill ──────────────────────────────────────────────────────
+use crate::client::SlackApiClient;
 
 pub struct SlackGetHistorySkill {
-    pub(crate) client: Arc<SlackClient<SlackClientHyperHttpsConnector>>,
-    pub(crate) token: SlackApiToken,
+    pub(crate) client: Arc<SlackApiClient>,
 }
 
 #[async_trait]
@@ -29,11 +22,9 @@ impl ToolHandler for SlackGetHistorySkill {
     }
 
     fn description(&self) -> &str {
-        "Read recent messages from a Slack channel or thread. \
-         Required: `channel` (channel ID, e.g. C01234567). \
-         Optional: `limit` (number of messages to return, default 20, max 100), \
-         `thread_ts` (parent message timestamp — when set, returns thread replies \
-         instead of channel history)."
+        "Fetch recent messages from a Slack channel, or replies in a thread. \
+         Required: `channel` (channel ID). \
+         Optional: `thread_ts` (fetch thread replies), `limit` (max messages, default 20)."
     }
 
     fn params_schema(&self) -> Value {
@@ -41,24 +32,11 @@ impl ToolHandler for SlackGetHistorySkill {
             "type": "object",
             "required": ["channel"],
             "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Slack channel ID (e.g. C01234567)"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Number of messages to return (default: 20, max: 100)"
-                },
-                "thread_ts": {
-                    "type": "string",
-                    "description": "Parent message timestamp — returns thread replies when set"
-                }
+                "channel": { "type": "string" },
+                "thread_ts": { "type": "string" },
+                "limit": { "type": "integer", "default": 20 }
             }
         })
-    }
-
-    fn is_mutating(&self) -> bool {
-        false
     }
 
     async fn run(
@@ -67,77 +45,39 @@ impl ToolHandler for SlackGetHistorySkill {
         _ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let channel = match params.get("channel").and_then(|v| v.as_str()) {
-            Some(c) => c.to_string(),
-            None => return Ok(ToolOutput::error("Missing required parameter 'channel'")),
+            Some(c) => c,
+            None => return Ok(ToolOutput::error("Missing 'channel'")),
         };
         let limit = params
             .get("limit")
             .and_then(|v| v.as_u64())
-            .map(|n| n.min(100))
-            .unwrap_or(20) as u16;
-        let thread_ts = params
-            .get("thread_ts")
-            .and_then(|v| v.as_str())
-            .map(|s| SlackTs(s.to_string()));
+            .unwrap_or(20)
+            .min(1000) as u32;
 
-        let session = self.client.open_session(&self.token);
-
-        let messages: Vec<SlackHistoryMessage> = if let Some(ts) = thread_ts {
-            // Fetch thread replies.
-            let req = SlackApiConversationsRepliesRequest::new(channel.clone().into(), ts)
-                .with_limit(limit);
-            match session.conversations_replies(&req).await {
-                Ok(resp) => resp.messages,
-                Err(e) => {
-                    warn!(error = %e, channel = %channel, "slack-get-history: conversations.replies failed");
-                    return Ok(ToolOutput::error(format!("Failed to fetch thread: {e}")));
-                }
-            }
+        let result = if let Some(ts) = params.get("thread_ts").and_then(|v| v.as_str()) {
+            self.client
+                .conversations_replies(channel, ts, limit)
+                .await
+                .map(serde_json::Value::Array)
         } else {
-            // Fetch channel history (most recent first from the API; we reverse to
-            // present oldest-first to the LLM for readability).
-            let req = SlackApiConversationsHistoryRequest::new()
-                .with_channel(channel.clone().into())
-                .with_limit(limit);
-            match session.conversations_history(&req).await {
-                Ok(resp) => {
-                    let mut msgs = resp.messages;
-                    msgs.reverse();
-                    msgs
-                }
-                Err(e) => {
-                    warn!(error = %e, channel = %channel, "slack-get-history: conversations.history failed");
-                    return Ok(ToolOutput::error(format!("Failed to fetch history: {e}")));
-                }
-            }
+            self.client.conversations_history(channel, limit).await
         };
 
-        debug!(count = messages.len(), channel = %channel, "slack-get-history: fetched messages");
-
-        if messages.is_empty() {
-            return Ok(ToolOutput::success("No messages found.".to_string()));
-        }
-
-        let lines: Vec<String> = messages
-            .iter()
-            .filter_map(|msg| {
-                let text = msg.content.text.as_deref().filter(|t| !t.is_empty())?;
-                let ts = &msg.origin.ts.0;
-                let sender = if let Some(bot_id) = &msg.sender.bot_id {
-                    format!("[bot {}]", bot_id.0)
-                } else if let Some(user_id) = &msg.sender.user {
-                    format!("@{}", user_id.0)
-                } else {
-                    "[unknown]".to_string()
-                };
-                Some(format!("[{ts}] {sender}: {text}"))
-            })
-            .collect();
-
-        if lines.is_empty() {
-            Ok(ToolOutput::success("No text messages found.".to_string()))
-        } else {
-            Ok(ToolOutput::success(lines.join("\n")))
+        match result {
+            Ok(resp) => {
+                let messages = resp
+                    .get("messages")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| serde_json::Value::Array(arr.clone()))
+                    .unwrap_or(resp);
+                Ok(ToolOutput::success(serde_json::to_string_pretty(
+                    &messages,
+                )?))
+            }
+            Err(e) => {
+                warn!(error = %e, channel, "slack-get-history failed");
+                Ok(ToolOutput::error(format!("Failed: {e}")))
+            }
         }
     }
 }

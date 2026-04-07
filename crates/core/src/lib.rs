@@ -1,6 +1,7 @@
 pub mod allowlist;
 pub mod bus;
 pub mod bus_messages;
+pub mod channel;
 pub mod config;
 pub mod context;
 pub mod memory;
@@ -16,6 +17,7 @@ pub use bus_messages::{
     topic, AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase,
     TurnRequest, TurnResult, TurnStatus,
 };
+pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
 pub use config::{default_config_path, load_config};
 pub use context::{
     agent_base_dir, apply_agent_context, default_agent_id, default_workspace_dir,
@@ -29,13 +31,13 @@ pub use subagent::SubagentRunner;
 pub use text::{preview, sanitize_llm_output, strip_cite_tags, strip_think_tags};
 pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
-    AgentConfig, AssistantConfig, BusConfig, BusKind, CompactionConfig, EmbeddingConfig,
-    EmbeddingProviderKind, ExecutionContext, IcebergConfig, Interface, LlmConfig, LlmProviderKind,
-    MatrixConfig, MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig, McpTrustLevel,
-    MemoryConfig, Message, MessageRole, MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions,
-    NextcloudConfig, ObservabilityConfig, OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation,
-    OpenAIWebSearchOptions, OtelExporter, PartitionGranularity, SignalConfig, SkillsConfig,
-    SlackConfig, SlackListenMode, StorageConfig, TranscriptionConfig, TranscriptionProviderKind,
-    DEFAULT_MAX_AGENT_DEPTH,
+    AgentConfig, AssistantConfig, BusConfig, BusKind, ChannelType, CompactionConfig,
+    EmbeddingConfig, EmbeddingProviderKind, ExecutionContext, IcebergConfig, Interface, LlmConfig,
+    LlmProviderKind, MatrixConfig, MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig,
+    McpTrustLevel, MemoryConfig, Message, MessageRole, MirrorConfig, MoonshotOptions,
+    MoonshotWebSearchOptions, NextcloudConfig, ObservabilityConfig, OpenAIAuthMode, OpenAIOptions,
+    OpenAIUserLocation, OpenAIWebSearchOptions, OtelExporter, PartitionGranularity, SignalConfig,
+    SkillsConfig, SlackConfig, SlackListenMode, StorageConfig, TranscriptionConfig,
+    TranscriptionProviderKind, DEFAULT_MAX_AGENT_DEPTH,
 };
 pub use upload::resolve_upload_bytes;
