@@ -96,7 +96,8 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
         : const AsyncData<EmbeddedServerState>(EmbeddedServerStopped());
 
     return Scaffold(
-      body: Center(
+      body: SafeArea(
+        child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 400),
           child: Padding(
@@ -262,6 +263,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
           ),
         ),
       ),
+      ),  // SafeArea
     );
   }
 }
