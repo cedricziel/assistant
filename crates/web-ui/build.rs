@@ -5,9 +5,13 @@
 //! output is then embedded into the binary at compile time via `rust-embed`
 //! (see `src/flutter_assets.rs`).
 //!
-//! If the Flutter SDK is not installed, a minimal placeholder `index.html` is
-//! written instead so the crate still compiles — but the embedded UI will not
-//! be functional until Flutter is installed and the crate is rebuilt.
+//! If the Flutter SDK is not installed:
+//! - If a prior build already exists in `app/build/web/`, it is reused as-is.
+//!   This is the cross-compilation path: the host pre-builds Flutter web before
+//!   invoking `cross`, and the Docker container reuses the output without
+//!   needing Flutter installed.
+//! - Otherwise a minimal placeholder `index.html` is written so the crate
+//!   still compiles, but the embedded UI will not be functional.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -40,20 +44,30 @@ fn main() {
         .unwrap_or(false);
 
     if !flutter_available {
-        println!(
-            "cargo:warning=Flutter SDK not found — skipping `flutter build web`. \
-             Install Flutter (stable channel) and rebuild to embed the web UI."
-        );
-        // Write a placeholder so rust-embed has something to embed.
-        std::fs::create_dir_all(&web_out).unwrap_or_default();
-        std::fs::write(
-            web_out.join("index.html"),
-            b"<!DOCTYPE html><html><head><title>Assistant</title></head>\
-              <body><p>Flutter web UI not built. \
-              Install the Flutter SDK and run <code>cargo build</code> again.</p>\
-              </body></html>",
-        )
-        .unwrap_or_default();
+        if web_out.join("index.html").exists() {
+            // A prior `flutter build web` output is present (e.g. pre-built on
+            // the host before invoking `cross`).  Reuse it rather than
+            // overwriting with the stub.
+            println!(
+                "cargo:warning=Flutter SDK not found — reusing existing build at {}",
+                web_out.display()
+            );
+        } else {
+            println!(
+                "cargo:warning=Flutter SDK not found — skipping `flutter build web`. \
+                 Install Flutter (stable channel) and rebuild to embed the web UI."
+            );
+            // Write a placeholder so rust-embed has something to embed.
+            std::fs::create_dir_all(&web_out).unwrap_or_default();
+            std::fs::write(
+                web_out.join("index.html"),
+                b"<!DOCTYPE html><html><head><title>Assistant</title></head>\
+                  <body><p>Flutter web UI not built. \
+                  Install the Flutter SDK and run <code>cargo build</code> again.</p>\
+                  </body></html>",
+            )
+            .unwrap_or_default();
+        }
         return;
     }
 
