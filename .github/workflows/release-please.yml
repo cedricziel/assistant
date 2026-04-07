@@ -101,8 +101,9 @@ jobs:
         if: matrix.use_cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Vendor JS dependencies
-        run: make vendor
+      - name: Pre-build Flutter web
+        run: flutter build web --release
+        working-directory: app
 
       - name: Preflight check assistant-cli bin
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -181,6 +182,28 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
         working-directory: app
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install protoc (macOS)
+        run: brew install protobuf
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-macos-bundle-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-macos-bundle-cargo-
+
+      - name: Build universal Rust binary for macOS bundle
+        run: make build-macos-binary
 
       - name: Build Flutter macOS app
         run: flutter build macos --release
