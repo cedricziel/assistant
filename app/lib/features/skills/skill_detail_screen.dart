@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -56,14 +58,38 @@ class SkillDetailScreen extends ConsumerWidget {
   }
 }
 
-class _SkillDetailBody extends StatelessWidget {
+class _SkillDetailBody extends StatefulWidget {
   const _SkillDetailBody({required this.skill});
 
   final dynamic skill;
 
   @override
+  State<_SkillDetailBody> createState() => _SkillDetailBodyState();
+}
+
+class _SkillDetailBodyState extends State<_SkillDetailBody> {
+  bool _copied = false;
+  Timer? _resetTimer;
+
+  @override
+  void dispose() {
+    _resetTimer?.cancel();
+    super.dispose();
+  }
+
+  void _copyBody() {
+    Clipboard.setData(ClipboardData(text: widget.skill.body));
+    setState(() => _copied = true);
+    _resetTimer?.cancel();
+    _resetTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skill = widget.skill;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -109,14 +135,13 @@ class _SkillDetailBody extends StatelessWidget {
                     ?.copyWith(color: theme.colorScheme.primary),
               ),
               IconButton(
-                icon: const Icon(Icons.copy, size: 16),
-                tooltip: 'Copy body',
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: skill.body));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Copied to clipboard')),
-                  );
-                },
+                icon: Icon(
+                  _copied ? Icons.check : Icons.copy,
+                  size: 16,
+                  color: _copied ? Colors.green.shade600 : null,
+                ),
+                tooltip: _copied ? 'Copied!' : 'Copy body',
+                onPressed: _copyBody,
               ),
             ],
           ),
