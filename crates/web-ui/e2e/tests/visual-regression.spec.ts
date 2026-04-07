@@ -38,28 +38,35 @@ async function login(page: Page) {
 /**
  * Authenticate for Flutter-rendered pages.
  *
- * Navigates to the root SPA, injects the server profile into localStorage
- * (flutter_secure_storage web key), then navigates to /chat and waits for
- * Flutter to fully initialise.
+ * Navigates to the root SPA, which redirects unauthenticated users to /setup
+ * (the ConnectionScreen). Fills the token field and clicks Connect, which calls
+ * GET /health with the Bearer token and writes the profile to
+ * flutter_secure_storage (AES-GCM encrypted in localStorage). After the health
+ * check succeeds the Flutter router navigates to /chat automatically.
+ *
+ * NOTE: flutter_secure_storage ≥ 9 on web uses SubtleCrypto AES-GCM with a
+ * per-session key stored in localStorage. Injecting a plaintext value directly
+ * into localStorage will never be readable by _storage.read(). The only correct
+ * approach is to use the connection form so the library handles encryption.
  */
 async function loginFlutter(page: Page) {
-  // First authenticate via the HTML login page so the session cookie is set.
-  await login(page);
+  // Navigate to the SPA root — the router redirects to /setup when no profile.
+  await page.goto("/", { waitUntil: "networkidle" });
+  await page.waitForTimeout(FLUTTER_SETTLE_MS);
 
-  // Now inject the server profile so Flutter finds it in localStorage.
-  await page.evaluate((token) => {
-    const profile = JSON.stringify({
-      baseUrl: window.location.origin,
-      token,
-    });
-    localStorage.setItem(
-      "flutter_secure_storage.assistant_server_profile",
-      profile,
-    );
-  }, AUTH_TOKEN);
+  // Fill the token field in the Flutter connection form.
+  // On web the server URL field is pre-populated with window.location.origin.
+  await page
+    .getByRole("textbox", { name: /authentication token/i })
+    .fill(AUTH_TOKEN);
 
-  // Navigate to /chat and wait for Flutter to fully render.
-  await page.goto("/chat", { waitUntil: "networkidle" });
+  // Click Connect — triggers GET /health, then persists the encrypted profile.
+  await page.getByRole("button", { name: /connect/i }).click();
+
+  // Wait for Flutter to navigate away from /setup after a successful connection.
+  await page.waitForURL((url) => !url.pathname.includes("/setup"), {
+    timeout: 10_000,
+  });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
