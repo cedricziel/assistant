@@ -6,14 +6,12 @@
 
 pub mod agent_store;
 pub mod handlers;
-pub mod pages;
 pub mod task_store;
 
 use axum::routing::{get, post};
 use axum::Router;
 
 use crate::a2a::handlers::A2AState;
-use crate::a2a::pages::AgentPagesState;
 
 /// Public A2A routes that do **not** require authentication.
 ///
@@ -56,19 +54,4 @@ pub fn protected_router() -> Router<A2AState> {
             get(handlers::get_push_notification_config)
                 .delete(handlers::delete_push_notification_config),
         )
-}
-
-/// Builds the axum [`Router`] for agent management HTML pages.
-pub fn agent_pages_router() -> Router<AgentPagesState> {
-    Router::new()
-        .route("/agents", get(pages::list_agents).post(pages::create_agent))
-        .route("/agents/new", get(pages::new_agent_form))
-        .route("/agents/{id}", get(pages::show_agent))
-        .route(
-            "/agents/{id}/edit",
-            get(pages::edit_agent_form).post(pages::update_agent),
-        )
-        .route("/agents/{id}/delete", post(pages::delete_agent))
-        .route("/agents/{id}/set-default", post(pages::set_default_agent))
-        .route("/agents/{id}/card.json", get(pages::show_agent_card_json))
 }

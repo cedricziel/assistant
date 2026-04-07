@@ -7,19 +7,16 @@
 
 use std::sync::Arc;
 
-use askama::Template;
 use axum::body::Body;
 use axum::extract::{Extension, Request};
 use axum::http::header::{COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
-
-use crate::common::{render_template, StaticUrls};
 
 // -- Configuration ----------------------------------------------------------
 
@@ -204,26 +201,57 @@ pub async fn require_same_origin_mutation(request: Request, next: Next) -> Respo
     next.run(request).await
 }
 
-// -- Templates --------------------------------------------------------------
-
-/// Askama template for the standalone login page.
-///
-/// This is a self-contained page (does **not** extend `base.html`) because
-/// unauthenticated users must not see the app shell.  It still loads the
-/// fingerprinted app stylesheet for consistent look & feel.
-#[derive(Template)]
-#[template(path = "auth/login.html")]
-pub(crate) struct LoginPageTemplate {
-    error: Option<String>,
-}
-
-impl StaticUrls for LoginPageTemplate {}
-
 // -- Login page -------------------------------------------------------------
 
+fn login_html(error: Option<&str>) -> Html<String> {
+    let error_block = match error {
+        Some(msg) => {
+            format!(r#"<div class="login-error" id="login-error" role="alert">{msg}</div>"#)
+        }
+        None => String::new(),
+    };
+    Html(format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Login - Assistant</title>
+  <style>
+    body{{margin:0;background:#030712;color:#e5e9f0;font-family:system-ui,sans-serif}}
+    .login-container{{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:2rem}}
+    .login-card{{background:#0a1628;border:1px solid #0b1b32;border-radius:12px;padding:2.5rem;width:100%;max-width:400px}}
+    .login-brand p{{text-transform:uppercase;letter-spacing:.2em;color:#7aa2ff;margin:0 0 .2rem;font-size:.75rem}}
+    .login-brand h2{{margin:0;color:#e5e9f0}}
+    .login-error{{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#fca5a5;padding:.75rem 1rem;border-radius:8px;margin-bottom:1.5rem;font-size:.9rem}}
+    .login-form{{display:flex;flex-direction:column;gap:.75rem;margin-top:1.5rem}}
+    .login-form label{{font-size:.85rem;color:#8aa5d8;text-transform:uppercase;letter-spacing:.08em}}
+    .login-form input{{background:#030712;border:1px solid #1a2744;border-radius:8px;padding:.7rem 1rem;color:#e5e9f0;font-size:1rem;outline:none}}
+    .login-form input:focus{{border-color:#6ec6ff}}
+    .login-form button{{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:.7rem;font-size:1rem;cursor:pointer;margin-top:.5rem}}
+    .login-form button:hover{{background:#1d4ed8}}
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-card">
+      <div class="login-brand"><p>assistant</p><h2>Agent Manager</h2></div>
+      {error_block}
+      <form method="POST" action="/login" class="login-form">
+        <label for="token">Auth Token</label>
+        <input type="password" id="token" name="token" placeholder="Enter your token" required autofocus/>
+        <button type="submit">Sign in</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>"#
+    ))
+}
+
 /// `GET /login` — render the login form.
-pub async fn login_page() -> Response {
-    render_template(LoginPageTemplate { error: None })
+pub async fn login_page() -> Html<String> {
+    login_html(None)
 }
 
 /// `POST /login` — validate the submitted token and set a session cookie.
@@ -237,7 +265,6 @@ pub(crate) async fn login_submit(
     Form(form): Form<LoginForm>,
 ) -> Response {
     if constant_time_eq(form.token.as_bytes(), auth.token.as_bytes()) {
-        // Set session cookie and redirect to dashboard.
         let secure = if auth.secure_cookie { "; Secure" } else { "" };
         let cookie = format!(
             "{}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800{}",
@@ -250,9 +277,7 @@ pub(crate) async fn login_submit(
             .body(Body::empty())
             .unwrap()
     } else {
-        render_template(LoginPageTemplate {
-            error: Some("Invalid token.".to_string()),
-        })
+        login_html(Some("Invalid token.")).into_response()
     }
 }
 

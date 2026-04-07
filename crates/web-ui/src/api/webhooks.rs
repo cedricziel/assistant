@@ -173,7 +173,7 @@ pub async fn create_webhook(
             .into_response();
     }
 
-    if let Err(e) = crate::webhooks::pages::validate_webhook_url(&body.url) {
+    if let Err(e) = validate_webhook_url(&body.url) {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": e})),
@@ -184,7 +184,7 @@ pub async fn create_webhook(
     let agent_id = state.agent_id.read().await.clone();
     let store = WebhookStore::for_agent(state.pool, &agent_id);
     let id = uuid::Uuid::new_v4().to_string();
-    let secret = crate::webhooks::pages::generate_secret();
+    let secret = generate_secret();
 
     match store
         .create(&id, &body.name, &body.url, &secret, &body.event_types)
@@ -295,7 +295,7 @@ pub async fn update_webhook(
 
     // Validate the URL if it changed.
     if body.url.is_some() {
-        if let Err(e) = crate::webhooks::pages::validate_webhook_url(new_url) {
+        if let Err(e) = validate_webhook_url(new_url) {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": e})),
@@ -432,7 +432,7 @@ pub async fn rotate_secret(
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
     let store = WebhookStore::for_agent(state.pool, &agent_id);
-    let new_secret = crate::webhooks::pages::generate_secret();
+    let new_secret = generate_secret();
     match store.rotate_secret(&id, &new_secret).await {
         Ok(true) => Json(RotateSecretResponse { secret: new_secret }).into_response(),
         Ok(false) => (
@@ -486,7 +486,7 @@ pub async fn verify_webhook(
     };
 
     // SSRF protection: validate before sending.
-    if let Err(e) = crate::webhooks::pages::validate_webhook_url(&wh.url) {
+    if let Err(e) = validate_webhook_url(&wh.url) {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": e})),
@@ -500,7 +500,7 @@ pub async fn verify_webhook(
         "timestamp": Utc::now().to_rfc3339(),
     });
     let body_str = serde_json::to_string(&payload).unwrap_or_default();
-    let signature = crate::webhooks::pages::compute_signature(&wh.secret, &body_str);
+    let signature = compute_signature(&wh.secret, &body_str);
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -547,6 +547,80 @@ pub async fn verify_webhook(
     };
 
     Json(VerifyWebhookResponse { success, detail }).into_response()
+}
+
+// -- Webhook helpers ---------------------------------------------------------
+
+/// Validate that a webhook URL is a safe, publicly-reachable HTTP(S) endpoint.
+fn validate_webhook_url(url: &str) -> Result<(), String> {
+    use std::net::IpAddr;
+    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(format!(
+                "Unsupported scheme '{other}': only http and https are allowed"
+            ))
+        }
+    }
+    let host = parsed.host_str().ok_or("URL has no host")?;
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost" || lower == "127.0.0.1" || lower == "::1" || lower == "[::1]" {
+        return Err("Loopback addresses are not allowed".to_string());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err(format!("Private/reserved IP address {ip} is not allowed"));
+        }
+    }
+    let trimmed = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = trimmed.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err(format!("Private/reserved IP address {ip} is not allowed"));
+        }
+    }
+    Ok(())
+}
+
+fn is_private_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Generate a 32-byte random hex secret.
+fn generate_secret() -> String {
+    use std::fmt::Write as _;
+    let mut buf = [0u8; 32];
+    getrandom::fill(&mut buf).expect("OS RNG should be available");
+    let mut s = String::with_capacity(64);
+    for b in buf {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+/// Compute HMAC-SHA256 of `body` using `secret`, returning hex.
+fn compute_signature(secret: &str, body: &str) -> String {
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<sha2::Sha256>;
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(body.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
 }
 
 // -- Tests -------------------------------------------------------------------

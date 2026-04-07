@@ -1,18 +1,9 @@
 mod a2a;
-mod analytics;
 pub mod api;
 pub mod auth;
 pub(crate) mod backends;
-mod chat;
-pub mod common;
-mod contexts;
 mod flutter_assets;
 mod openapi;
-mod pwa;
-mod skills;
-pub(crate) mod static_assets;
-mod webhooks;
-mod workflows;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -509,12 +500,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_card,
     };
 
-    // Workflow state is still needed for the public webhook trigger ingress.
-    let workflow_pages_state = workflows::pages::WorkflowPagesState {
-        pool: storage.pool.clone(),
-        agent_id: state.agent_id.clone(),
-    };
-
     let workflows_api_state = api::workflows::WorkflowsApiState {
         pool: storage.pool.clone(),
         agent_id: state.agent_id.clone(),
@@ -563,13 +548,9 @@ async fn run_with_args(args: Args) -> Result<()> {
         // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
         .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))
         // Public workflow webhook trigger ingress.
-        .merge(workflows::workflow_public_router().with_state(workflow_pages_state.clone()))
+        .merge(api::workflows::workflow_public_router().with_state(workflows_api_state.clone()))
         // A2A agent card is public per spec — callers need it to discover auth.
-        .merge(a2a::public_router().with_state(a2a_state.clone()))
-        // PWA assets must be public so the browser can fetch them before auth.
-        .merge(pwa::pwa_router())
-        // Fingerprinted static assets (CSS).
-        .merge(static_assets::static_router());
+        .merge(a2a::public_router().with_state(a2a_state.clone()));
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()

@@ -16,6 +16,16 @@ pub mod traces;
 pub mod webhooks;
 pub mod workflows;
 
+// -- Shared helpers ----------------------------------------------------------
+
+/// Convert any `Display`-able error into an Axum-compatible 500 response pair.
+pub(crate) fn internal_error<E: std::fmt::Display>(err: E) -> (axum::http::StatusCode, String) {
+    (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        err.to_string(),
+    )
+}
+
 // -- Conversation API below --------------------------------------------------
 //
 // Designed for native/external clients (mobile apps, desktop apps, etc.)

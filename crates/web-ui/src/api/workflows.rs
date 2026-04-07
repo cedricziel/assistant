@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 use assistant_storage::{WorkflowGraph, WorkflowStore, WorkflowTriggerKind};
 
-use crate::common::internal_error;
+use crate::api::internal_error;
 
 // -- State -------------------------------------------------------------------
 
@@ -604,6 +604,66 @@ async fn set_active(
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, "Workflow not found".to_string()))?;
     Ok(Json(to_detail(w)))
+}
+
+// -- Public webhook trigger --------------------------------------------------
+
+/// Accepted response for a public webhook trigger.
+#[derive(Serialize)]
+pub struct WorkflowWebhookTriggerAccepted {
+    workflow_id: String,
+    run_id: String,
+    status: String,
+}
+
+/// Public webhook trigger endpoint — no auth required.
+///
+/// Receives an inbound HTTP POST from an external system and queues a workflow
+/// run with trigger type `Webhook`.  The `token` path parameter is the
+/// per-workflow HMAC secret that acts as authentication.
+pub async fn public_webhook_trigger(
+    State(state): State<WorkflowsApiState>,
+    Path((id, token)): Path<(String, String)>,
+    Json(payload): Json<Value>,
+) -> Result<(StatusCode, Json<WorkflowWebhookTriggerAccepted>), (StatusCode, String)> {
+    use tracing::{info, warn};
+    let workflow_id = parse_uuid(&id)?;
+    let store = workflow_store(&state).await;
+    let workflow = store
+        .resolve_by_webhook(workflow_id, &token)
+        .await
+        .map_err(internal_error)?;
+
+    let Some(workflow) = workflow else {
+        warn!(workflow_id = %id, "Rejected workflow webhook trigger due to invalid token/workflow");
+        return Err((
+            StatusCode::NOT_FOUND,
+            "Workflow webhook not found".to_string(),
+        ));
+    };
+
+    let run_id = store
+        .create_run(workflow.id, WorkflowTriggerKind::Webhook, &payload)
+        .await
+        .map_err(internal_error)?;
+    info!(workflow_id = %workflow.id, run_id = %run_id, "Accepted workflow webhook trigger");
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(WorkflowWebhookTriggerAccepted {
+            workflow_id: workflow.id.to_string(),
+            run_id: run_id.to_string(),
+            status: "accepted".to_string(),
+        }),
+    ))
+}
+
+/// Public router for inbound workflow webhook triggers.
+///
+/// Mount this **outside** the auth middleware — the token in the URL path
+/// serves as the authentication credential.
+pub fn workflow_public_router() -> Router<WorkflowsApiState> {
+    Router::new().route("/workflow-hooks/{id}/{token}", post(public_webhook_trigger))
 }
 
 // -- Tests -------------------------------------------------------------------
