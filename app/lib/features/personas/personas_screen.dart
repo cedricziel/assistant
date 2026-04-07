@@ -11,11 +11,25 @@ import 'personas_provider.dart';
 /// Each row shows name, ID, and a default badge.
 /// Tapping a row navigates to the persona detail screen.
 /// The FAB navigates to the create form.
-class PersonasScreen extends ConsumerWidget {
+class PersonasScreen extends ConsumerStatefulWidget {
   const PersonasScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PersonasScreen> createState() => _PersonasScreenState();
+}
+
+class _PersonasScreenState extends ConsumerState<PersonasScreen> {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final personasAsync = ref.watch(personasProvider);
 
     return Scaffold(
@@ -45,16 +59,46 @@ class PersonasScreen extends ConsumerWidget {
               onRetry: () => ref.read(personasProvider.notifier).refresh(),
             );
           }
-          if (state.personas.isEmpty) {
-            return const _EmptyView();
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: state.personas.length,
-            separatorBuilder: (context, index) => const Divider(height: 1, indent: 72),
-            itemBuilder: (context, index) {
-              return _PersonaRow(persona: state.personas[index]);
-            },
+          final filtered = _query.isEmpty
+              ? state.personas
+              : state.personas
+                  .where(
+                    (p) =>
+                        p.name.toLowerCase().contains(_query) ||
+                        p.id.toLowerCase().contains(_query),
+                  )
+                  .toList();
+
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: const InputDecoration(
+                    hintText: 'Search personas...',
+                    prefixIcon: Icon(Icons.search, size: 20),
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(vertical: 8),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => setState(() => _query = v.toLowerCase()),
+                ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? const _EmptyView()
+                    : ListView.separated(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: filtered.length,
+                        separatorBuilder: (context, index) =>
+                            const Divider(height: 1, indent: 72),
+                        itemBuilder: (context, index) {
+                          return _PersonaRow(persona: filtered[index]);
+                        },
+                      ),
+              ),
+            ],
           );
         },
       ),
