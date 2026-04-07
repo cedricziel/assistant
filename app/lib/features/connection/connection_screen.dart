@@ -25,6 +25,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
   late final TextEditingController _urlController;
   late final TextEditingController _tokenController;
   late ServerMode _mode;
+  bool _tokenVisible = false;
 
   @override
   void initState() {
@@ -191,13 +192,23 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                         TextFormField(
                           key: const Key('token_field'),
                           controller: _tokenController,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: 'Authentication Token',
                             hintText: 'Paste your token here',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.key_outlined),
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.key_outlined),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _tokenVisible
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                              ),
+                              onPressed: () => setState(
+                                () => _tokenVisible = !_tokenVisible,
+                              ),
+                            ),
                           ),
-                          obscureText: true,
+                          obscureText: !_tokenVisible,
                           autocorrect: false,
                           validator: (value) {
                             if (value == null || value.trim().isEmpty) {
