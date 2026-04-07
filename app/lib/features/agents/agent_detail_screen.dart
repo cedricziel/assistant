@@ -70,6 +70,7 @@ class _AgentDetailBody extends StatelessWidget {
     String description = '';
     String version = '';
     String url = '';
+    List<Map<String, String>> skills = [];
 
     try {
       if (card != null) {
@@ -79,6 +80,17 @@ class _AgentDetailBody extends StatelessWidget {
           description = raw['description']?.toString() ?? '';
           version = raw['version']?.toString() ?? '';
           url = raw['url']?.toString() ?? '';
+          final rawSkills = raw['skills'];
+          if (rawSkills is List) {
+            for (final s in rawSkills) {
+              if (s is Map) {
+                skills.add({
+                  'name': s['name']?.toString() ?? '',
+                  'description': s['description']?.toString() ?? '',
+                });
+              }
+            }
+          }
         }
       } else {
         name = agent.id;
@@ -180,6 +192,36 @@ class _AgentDetailBody extends StatelessWidget {
             ),
           ),
         ),
+
+        if (skills.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Skills (${skills.length})',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          ...skills.map(
+            (s) => Card(
+              margin: const EdgeInsets.only(bottom: 4),
+              child: ListTile(
+                leading: const Icon(Icons.extension_outlined, size: 20),
+                title: Text(
+                  s['name']!,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                subtitle: s['description']!.isNotEmpty
+                    ? Text(
+                        s['description']!,
+                        style: const TextStyle(fontSize: 12),
+                      )
+                    : null,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
