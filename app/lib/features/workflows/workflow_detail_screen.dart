@@ -130,8 +130,18 @@ class _WorkflowDetailBody extends StatelessWidget {
               ),
             ),
           )
-        else
-          ...runs.map((run) => _RunTile(run: run)),
+        else ...[
+          ...runs.take(20).map((run) => _RunTile(run: run)),
+          if (runs.length > 20)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'Showing 20 of ${runs.length} runs',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: Colors.black38),
+              ),
+            ),
+        ],
       ],
     );
   }
