@@ -218,7 +218,7 @@ jobs:
           TAG="${{ needs.release-please.outputs.tag_name }}"
           ARCHIVE_NAME="assistant-app-${TAG}-${{ matrix.archive_suffix }}.zip"
           cd app/build/macos/Build/Products/Release
-          zip -r "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}" "assistant.app"
+          zip -r "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}" "assistant_app.app"
           echo "ARCHIVE=${ARCHIVE_NAME}" >> $GITHUB_ENV
 
       - name: Generate checksums
