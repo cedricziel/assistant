@@ -1,6 +1,6 @@
 [package]
 name = "assistant-integration-tests"
-version = "0.1.83"
+version = "0.1.84"
 edition.workspace = true
 publish = false
 

@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.1.84](https://github.com/cedricziel/assistant/compare/v0.1.83...v0.1.84) (2026-04-07)
+
+
+### Features
+
+* **chat:** add stop generation button to cancel in-progress streaming ([a01ef1e](https://github.com/cedricziel/assistant/commit/a01ef1ebac15913f0a6cd095810497121ad41346))
+* **ios:** add iOS platform support with Neural Void icon ([#394](https://github.com/cedricziel/assistant/issues/394)) ([05fbf50](https://github.com/cedricziel/assistant/commit/05fbf50abc99d0851f0ccbd83f2f79035e70bdd7))
+
+
+### Bug Fixes
+
+* **agents:** add services import for Clipboard in agent detail ([1f2b763](https://github.com/cedricziel/assistant/commit/1f2b763a07c691cf1bc5657888e9edc46a332b45))
+* **agents:** make agent URL copyable in detail screen ([18a6669](https://github.com/cedricziel/assistant/commit/18a6669f3263795892160109554eebf4e996c788))
+* **app:** fix SSE stream type error on iOS (Utf8Decoder → utf8.decode) ([#392](https://github.com/cedricziel/assistant/issues/392)) ([2dff458](https://github.com/cedricziel/assistant/commit/2dff458e5d1f82fffae18bff307519b45e829ca6))
+* **chat:** dismiss error banner without clearing conversation messages ([e7cd93d](https://github.com/cedricziel/assistant/commit/e7cd93d16d1d82de0d7e5cad45f2f1e9c84dbc4e))
+* **chat:** dismiss keyboard when tapping outside the input field ([969cc59](https://github.com/cedricziel/assistant/commit/969cc59badeb1bb9bc407e661380ae2c0899447e))
+* **chat:** require confirmation before deleting a conversation ([33d6e16](https://github.com/cedricziel/assistant/commit/33d6e16c59d83e3d8dcee206798917a6aa53c984))
+* **chat:** respect iOS home indicator safe area in input row ([39b0ef9](https://github.com/cedricziel/assistant/commit/39b0ef9410949951f90e4b8ab05c2ff5f2e6ee19))
+* **chat:** use fixed max-width for message bubbles instead of screen-width fraction ([e1770b6](https://github.com/cedricziel/assistant/commit/e1770b6e999a78aeaef71d25d4e9723d7d3079ff))
+* **connection:** wrap setup screen body in SafeArea ([4ce4440](https://github.com/cedricziel/assistant/commit/4ce444071d495f6ed61336eec6bbf004d5bd6052))
+* **logs:** dismiss keyboard when tapping outside the search field ([bd97ba1](https://github.com/cedricziel/assistant/commit/bd97ba169b749736133626def4f10765dbfeb5a0))
+* **nav:** wrap wide navigation rail layout in SafeArea ([585aeb5](https://github.com/cedricziel/assistant/commit/585aeb5a364cffca6fe04cdef0a48cbbfa123189))
+* **personas:** add SafeArea to file editor body ([7e34b93](https://github.com/cedricziel/assistant/commit/7e34b93ea7fc895e0e2f036e1e93ef5d37040338))
+* **personas:** add SafeArea to persona create screen ([fa86b49](https://github.com/cedricziel/assistant/commit/fa86b49789a4aa2232530d044b38ffe157a4421e))
+* **personas:** auto-focus ID field and add Cancel button on create screen ([e6a8799](https://github.com/cedricziel/assistant/commit/e6a8799ddb8e5cd852c20cc4b762d6c3c659a559))
+* **personas:** warn before discarding unsaved file editor changes ([70b894b](https://github.com/cedricziel/assistant/commit/70b894b60e6d9c94bee226b6311fca0957022f87))
+* **skills:** add copy button for skill body content ([d79125e](https://github.com/cedricziel/assistant/commit/d79125e2cfc3b4b3bfd55108747a493d701dd87f))
+* **skills:** add missing services import for Clipboard ([44b54bb](https://github.com/cedricziel/assistant/commit/44b54bbbeae6332bb8033ab5d996977e2fc25f14))
+
 ## [0.1.83](https://github.com/cedricziel/assistant/compare/v0.1.82...v0.1.83) (2026-04-07)
 
 
