@@ -135,7 +135,7 @@ pub async fn init_tracing(
         // Let the crate resolve OTEL_EXPORTER_OTLP_TRACES_ENDPOINT (or the
         // generic fallback), headers, timeout, and compression from env vars.
         let otlp_exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
+            .with_http()
             .build()?;
         trace_provider_builder = trace_provider_builder.with_batch_exporter(otlp_exporter);
         have_trace_exporter = true;
@@ -159,7 +159,7 @@ pub async fn init_tracing(
 
         if enable_otlp {
             let otlp_log_exporter = opentelemetry_otlp::LogExporter::builder()
-                .with_tonic()
+                .with_http()
                 .build()?;
             log_builder = log_builder.with_batch_exporter(otlp_log_exporter);
         }
@@ -177,7 +177,7 @@ pub async fn init_tracing(
 
         if enable_otlp {
             let otlp_metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-                .with_tonic()
+                .with_http()
                 .build()?;
             let reader = PeriodicReader::builder(otlp_metric_exporter)
                 .with_interval(Duration::from_secs(60))

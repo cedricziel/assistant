@@ -67,14 +67,13 @@ anyhow = "1.0"
 async-trait = "0.1"
 # IDs and time
 uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 # Encoding
 base64 = "0.22"
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
 # Force vendored OpenSSL for static linking when cross-compiling (e.g. musl targets).
 # openssl-sys builds from source rather than requiring a system installation.
-openssl = { version = "0.10", features = ["vendored"] }
 reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.8"
 reqwest-tracing = "0.5"
@@ -86,8 +85,8 @@ rustls = { version = "0.23", features = ["ring"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 opentelemetry = { version = "0.31", features = ["trace", "logs", "metrics"] }
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "tls-roots", "trace", "logs", "metrics"] }
-opentelemetry_sdk = { version = "0.31", features = ["trace", "logs", "metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-json", "reqwest-client", "trace", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.31", default-features = false, features = ["trace", "logs", "metrics", "rt-tokio"] }
 opentelemetry-appender-tracing = "0.31"
 opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
 # CLI / config
@@ -113,15 +112,15 @@ mime_guess = "2"
 # Type-safe compiled templates
 askama = "0.15"
 # SQL persistence
-sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }
 # cron expression parsing
 cron = "0.16"
 # HTML parsing for web-fetch builtin
-scraper = "0.25"
+scraper = { version = "0.25", default-features = false }
 # Glob pattern matching for file-glob builtin
 glob = "0.3"
 # JSON Schema validation for tool param checking
-jsonschema = "0.45"
+jsonschema = { version = "0.45", default-features = false }
 # SHA-256 hashing for memory chunk change detection
 sha2 = "0.10"
 # tar archive creation/extraction
@@ -154,12 +153,18 @@ lru = "0.16"
 # WebSocket client (used by Slack, Mattermost, Matrix, Signal adapters)
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+# HTTP middleware / testing utilities
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+http-body-util = "0.1"
+# URL percent-encoding
+urlencoding = "2"
 # Apache Iceberg
 iceberg = "0.9"
 iceberg-catalog-rest = "0.9"
 arrow-array = "57.1"
 arrow-schema = "57.1"
-parquet = "57.1"
+parquet = { version = "57.1", default-features = false, features = ["arrow", "async"] }
 # Internal crates
 opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
 opentelemetry-exporter-iceberg = { path = "crates/opentelemetry-exporter-iceberg" }
@@ -170,7 +175,18 @@ storage = { path = "crates/storage" }
 runtime = { path = "crates/runtime" }
 tool-executor = { path = "crates/tool-executor" }
 
+[profile.dev]
+# macOS: avoid dsymutil bottleneck at link time
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+# Compile third-party deps at opt-level 1; dramatically speeds up first build
+# of heavy crates (arrow, parquet, iceberg, tonic) without hurting iteration speed
+opt-level = 1
+
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
+# Strip debug symbols to reduce binary size and link time
+strip = "symbols"
