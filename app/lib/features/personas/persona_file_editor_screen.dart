@@ -226,6 +226,10 @@ class _PersonaFileEditorScreenState
                     maxLines: null,
                     expands: true,
                     textAlignVertical: TextAlignVertical.top,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                    ),
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                       hintText: 'File content...',
