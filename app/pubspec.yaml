@@ -52,6 +52,9 @@ dependencies:
   # Dio HTTP client — needed directly for SSE streaming over the generated client
   dio: ^5.0.0
 
+  # UUID generation for ephemeral embedded-server auth tokens
+  uuid: ^4.0.0
+
   # Self-update support
   collection: ^1.19.1
   pub_semver: ^2.2.0

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 
+import 'features/embedded_server/embedded_server_provider.dart';
 import 'router/app_router.dart';
 import 'tray/platform_init.dart';
 import 'tray/window_handler_platform.dart';
@@ -31,6 +32,10 @@ class AssistantApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Ensure the embedded-server provider is initialised at startup on macOS
+    // so the binary starts before the first frame renders.
+    ref.watch(embeddedServerProvider);
+
     final router = ref.watch(routerProvider);
 
     return MacosWindowCloseHandler(

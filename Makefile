@@ -1,4 +1,4 @@
-.PHONY: all build test lint lint-signal format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal
+.PHONY: all build test lint lint-signal format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal build-macos-binary build-macos-bundle
 
 all: build
 
@@ -72,6 +72,26 @@ run-worker:
 # Requires presage git deps to be resolvable (see crates/interface-signal/README.md).
 build-signal:
 	cargo build -p assistant-interface-signal --features signal
+
+# ── macOS app bundle ─────────────────────────────────────────────────────────
+
+# Compile a universal (arm64 + x86_64) assistant binary for macOS.
+# Copies the result into the Flutter app's macOS bundle resources directory.
+build-macos-binary:
+	rustup target add aarch64-apple-darwin x86_64-apple-darwin 2>/dev/null || true
+	cargo build --release -p assistant-cli --target aarch64-apple-darwin
+	cargo build --release -p assistant-cli --target x86_64-apple-darwin
+	mkdir -p app/macos/Runner/Resources
+	lipo -create \
+	  target/aarch64-apple-darwin/release/assistant \
+	  target/x86_64-apple-darwin/release/assistant \
+	  -output app/macos/Runner/Resources/assistant
+	chmod +x app/macos/Runner/Resources/assistant
+
+# Build the self-contained macOS .app bundle.
+# Compiles the Rust binary first, then builds the Flutter macOS app.
+build-macos-bundle: build-macos-binary
+	cd app && flutter build macos --release
 
 # ── OpenAPI & Flutter client generation ──────────────────────────────────────
 
