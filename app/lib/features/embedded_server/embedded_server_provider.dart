@@ -25,6 +25,9 @@ class EmbeddedServerNotifier
     WidgetsBinding.instance.addObserver(this);
     ref.onDispose(() {
       WidgetsBinding.instance.removeObserver(this);
+      // Best-effort: onDispose does not support async, so the graceful
+      // SIGTERM + 3 s wait in stop() may not complete before the isolate
+      // shuts down. didChangeAppLifecycleState is the primary cleanup path.
       _service.stop();
     });
 

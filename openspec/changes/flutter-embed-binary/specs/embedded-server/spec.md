@@ -25,6 +25,8 @@ The system SHALL select an available loopback port before starting the embedded 
 - **WHEN** `EmbeddedServerService.start()` is called
 - **THEN** a `ServerSocket` is bound to `127.0.0.1:0`, its assigned port is recorded, the socket is closed, and that port is used for `--listen`
 
+> **Note:** A brief TOCTOU race exists between closing the probe socket and the assistant binary binding that port. Another process could claim the port in that window. This is an accepted limitation of the bind-probe approach on loopback; the health-check failure path handles it by emitting `EmbeddedServerError`.
+
 ---
 
 ### Requirement: Generate ephemeral auth token
@@ -35,6 +37,8 @@ The system SHALL generate a cryptographically random UUID v4 auth token per sess
 
 - **WHEN** `EmbeddedServerService.start()` is called
 - **THEN** a UUID v4 string is created in memory and passed as `--auth-token` to the child process
+
+> **Note:** Passing the token via CLI argument exposes it in process listings (e.g. `ps`, Activity Monitor) for the brief window before the server starts. This is accepted because the token is ephemeral, localhost-only, and the app targets single-user desktop use. Future hardening could pass the token via an environment variable or a 0600 temp file.
 
 #### Scenario: Token not persisted
 

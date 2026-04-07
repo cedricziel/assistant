@@ -101,14 +101,16 @@ class EmbeddedServerService {
     _process!.stdout.drain<List<int>>();
     _process!.stderr.drain<List<int>>();
 
-    // Poll /health with exponential backoff.
+    // Poll /health with exponential backoff, capped at 5 s per attempt.
     final baseUrl = 'http://127.0.0.1:$port';
     var delay = const Duration(milliseconds: 200);
+    const maxDelay = Duration(seconds: 5);
     final client = HttpClient();
     try {
       for (int attempt = 0; attempt < 10; attempt++) {
         await Future<void>.delayed(delay);
         delay = delay * 2;
+        if (delay > maxDelay) delay = maxDelay;
 
         try {
           final request =
@@ -148,6 +150,10 @@ class EmbeddedServerService {
       await process.exitCode.timeout(const Duration(seconds: 3));
     } on TimeoutException {
       process.kill(ProcessSignal.sigkill);
+      // Brief wait to allow the OS to clean up after SIGKILL.
+      await process.exitCode
+          .timeout(const Duration(milliseconds: 500))
+          .catchError((_) => -1);
     }
   }
 }

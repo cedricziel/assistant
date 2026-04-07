@@ -30,7 +30,8 @@
 
 ## 5. macOS Entitlements
 
-- [x] 5.1 Add `com.apple.security.inherit` entitlement (or `com.apple.security.app-sandbox` with child-process permission) to `app/macos/Runner/DebugProfile.entitlements` and `Release.entitlements` to allow spawning child processes
+- [x] 5.1 Add `com.apple.security.inherit` entitlement to `app/macos/Runner/DebugProfile.entitlements` and `Release.entitlements` to allow spawning child processes (chosen over `app-sandbox` + child-process permission; `DebugProfile.entitlements` and `Release.entitlements` both updated)
+- [x] 5.2 Add `com.apple.security.network.server` entitlement to `Release.entitlements` so the sandboxed child process can bind a loopback port via `ServerSocket.bind()`
 
 ## 6. Dependencies
 

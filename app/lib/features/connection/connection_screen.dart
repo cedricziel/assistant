@@ -89,8 +89,11 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
     final isConnecting = connectionState.isConnecting;
     final errorMessage = connectionState.error;
 
-    // Watch embedded server state for progress / error feedback.
-    final embeddedState = ref.watch(embeddedServerProvider);
+    // Watch embedded server state only in embedded mode to avoid unnecessary
+    // rebuilds when the user has switched to remote mode.
+    final embeddedState = _mode == ServerMode.embedded
+        ? ref.watch(embeddedServerProvider)
+        : const AsyncData<EmbeddedServerState>(EmbeddedServerStopped());
 
     return Scaffold(
       body: Center(

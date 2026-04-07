@@ -39,43 +39,13 @@ void main() {
       });
     });
 
-    // -- health-check polling logic -------------------------------------------
+    // -- stop() behaviour -----------------------------------------------------
 
-    group('health-check retry loop logic', () {
-      test('stops retrying when a successful status is found', () async {
-        // Test the retry-loop logic in isolation: a list acting as a mock
-        // response sequence.  The loop is the same pattern used in start().
-        final responses = [503, 503, 200]; // succeed on 3rd attempt
-        var attempts = 0;
-        var succeeded = false;
-
-        for (final statusCode in responses) {
-          attempts++;
-          if (statusCode == 200) {
-            succeeded = true;
-            break;
-          }
-        }
-
-        expect(succeeded, isTrue);
-        expect(attempts, equals(3));
-      });
-
-      test('does not succeed after 10 non-200 responses', () async {
-        final responses = List.filled(10, 503);
-        var attempts = 0;
-        var succeeded = false;
-
-        for (final statusCode in responses) {
-          attempts++;
-          if (statusCode == 200) {
-            succeeded = true;
-            break;
-          }
-        }
-
-        expect(succeeded, isFalse);
-        expect(attempts, equals(10));
+    group('stop', () {
+      test('completes without error when no process is running', () async {
+        // Calling stop() before start() should be a no-op.
+        final service = EmbeddedServerService();
+        await expectLater(service.stop(), completes);
       });
     });
   });
