@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 /// States emitted by [EmbeddedServerService] during its lifecycle.
@@ -41,6 +42,7 @@ class EmbeddedServerService {
   /// Returns `true` when the bundled binary is present, non-empty (not a stub),
   /// and this platform supports spawning child processes (macOS only).
   static bool get isAvailable {
+    if (kIsWeb) return false;
     if (!Platform.isMacOS) return false;
     final file = File(_binaryPath);
     return file.existsSync() && file.lengthSync() > 0;
