@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.81](https://github.com/cedricziel/assistant/compare/v0.1.80...v0.1.81) (2026-04-07)
+
+
+### Features
+
+* **app:** add macOS menu bar tray icon ([#385](https://github.com/cedricziel/assistant/issues/385)) ([5d3ea49](https://github.com/cedricziel/assistant/commit/5d3ea493d2f8d252cd925671562903a67dfc6c6b))
+* **app:** Flutter desktop self-update via GitHub Releases ([#386](https://github.com/cedricziel/assistant/issues/386)) ([c740430](https://github.com/cedricziel/assistant/commit/c740430e97a1649c48a39cf79dbb159167ad40a9))
+* Flutter cross-platform frontend (web + macOS) ([#374](https://github.com/cedricziel/assistant/issues/374)) ([ef7f09c](https://github.com/cedricziel/assistant/commit/ef7f09c29617364cef5cf5784703615aa48c559a))
+* **flutter:** embed assistant binary in macOS app bundle ([#383](https://github.com/cedricziel/assistant/issues/383)) ([4a7aff8](https://github.com/cedricziel/assistant/commit/4a7aff8d45e1ea094fe823377a12cdf782a4bbad))
+* migrate to Flutter-only UX with pure REST API backend ([#382](https://github.com/cedricziel/assistant/issues/382)) ([c2bc352](https://github.com/cedricziel/assistant/commit/c2bc352a8dd969fa189f62c24d480df02d8518a5))
+* replace heavy SDK deps with thin reqwest/WS messenger clients ([#384](https://github.com/cedricziel/assistant/issues/384)) ([25f3ebf](https://github.com/cedricziel/assistant/commit/25f3ebfdeebe0bcbf9e1b4380cd7b30f0287e0b2))
+* **web-ui:** replace HTMX/HTML layer with Flutter SPA frontend ([55449da](https://github.com/cedricziel/assistant/commit/55449da728000ec4b2b95cda4426ce5a8a71e340))
+
+
+### Bug Fixes
+
+* **ci:** correct release packaging for web UI embedding and macOS bundle ([#387](https://github.com/cedricziel/assistant/issues/387)) ([2912b81](https://github.com/cedricziel/assistant/commit/2912b81d6483a8675cfe5ff85b1e8ab344e02d92))
+
 ## [0.1.80](https://github.com/cedricziel/assistant/compare/v0.1.79...v0.1.80) (2026-04-04)
 
 
