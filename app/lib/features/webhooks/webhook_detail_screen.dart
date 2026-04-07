@@ -80,6 +80,33 @@ class _WebhookDetailBody extends StatelessWidget {
   final VoidCallback onRotateSecret;
   final String? actionMessage;
 
+  Future<void> _confirmRotate(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rotate secret?'),
+        content: const Text(
+          'This will invalidate the current signing secret. '
+          'Update your endpoint to use the new secret immediately.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.orange.shade700,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Rotate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) onRotateSecret();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isVerified = webhook.verifiedAt != null;
@@ -186,7 +213,7 @@ class _WebhookDetailBody extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
-          onPressed: onRotateSecret,
+          onPressed: () => _confirmRotate(context),
           icon: const Icon(Icons.key_outlined),
           label: const Text('Rotate secret'),
           style: OutlinedButton.styleFrom(
