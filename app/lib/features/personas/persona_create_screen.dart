@@ -87,7 +87,8 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
           onPressed: () => context.go('/contexts'),
         ),
       ),
-      body: SingleChildScrollView(
+      body: SafeArea(
+        child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Form(
           key: _formKey,
@@ -187,6 +188,7 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
             ],
           ),
         ),
+        ),  // SafeArea
       ),
     );
   }
