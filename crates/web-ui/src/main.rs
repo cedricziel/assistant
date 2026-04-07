@@ -509,8 +509,13 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_card,
     };
 
-    // Workflow pages state is still needed for the public webhook trigger ingress.
+    // Workflow state is still needed for the public webhook trigger ingress.
     let workflow_pages_state = workflows::pages::WorkflowPagesState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
+    };
+
+    let workflows_api_state = api::workflows::WorkflowsApiState {
         pool: storage.pool.clone(),
         agent_id: state.agent_id.clone(),
     };
@@ -582,7 +587,8 @@ async fn run_with_args(args: Args) -> Result<()> {
                 .merge(api::skills::skills_router().with_state(skills_api_state))
                 .merge(api::webhooks::webhooks_api_router().with_state(webhooks_api_state))
                 .merge(api::agents::agents_api_router().with_state(agents_api_state))
-                .merge(api::analytics::analytics_api_router().with_state(analytics_api_state)),
+                .merge(api::analytics::analytics_api_router().with_state(analytics_api_state))
+                .merge(api::workflows::workflows_api_router().with_state(workflows_api_state)),
         )
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,

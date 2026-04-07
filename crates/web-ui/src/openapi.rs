@@ -55,6 +55,10 @@ use crate::api::{
         CreateWebhookRequest, RotateSecretResponse, UpdateWebhookRequest, VerifyWebhookResponse,
         WebhookResponse,
     },
+    workflows::{
+        WorkflowDetail, WorkflowRunDetail, WorkflowRunPreview, WorkflowRunStep, WorkflowRunSummary,
+        WorkflowSummary, WorkflowUpsertRequest, WorkflowWebhookSecrets,
+    },
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
     SendMessageRequest as ApiSendMessageRequest, UpdateConversationRequest,
 };
@@ -151,6 +155,17 @@ impl Modify for BearerTokenSecurityAddon {
         crate::api::agents::delete_agent,
         crate::api::agents::set_default_agent,
         crate::api::analytics::get_analytics,
+        crate::api::workflows::list_workflows,
+        crate::api::workflows::create_workflow,
+        crate::api::workflows::get_workflow,
+        crate::api::workflows::update_workflow,
+        crate::api::workflows::delete_workflow,
+        crate::api::workflows::activate_workflow,
+        crate::api::workflows::deactivate_workflow,
+        crate::api::workflows::test_run_workflow,
+        crate::api::workflows::get_workflow_webhook_secrets,
+        crate::api::workflows::list_workflow_runs,
+        crate::api::workflows::get_workflow_run,
         handlers::get_agent_card_well_known,
         handlers::get_extended_agent_card,
         handlers::send_message,
@@ -261,7 +276,16 @@ impl Modify for BearerTokenSecurityAddon {
             ToolUsageResponse,
             TimeSeriesResponse,
             AnalyticsQueryParams,
-        // Local handler types
+            // Workflow API types
+            WorkflowSummary,
+            WorkflowDetail,
+            WorkflowUpsertRequest,
+            WorkflowRunSummary,
+            WorkflowRunStep,
+            WorkflowRunDetail,
+            WorkflowRunPreview,
+            WorkflowWebhookSecrets,
+            // Local handler types
             ApiErrorResponse,
         )
     ),
@@ -286,6 +310,8 @@ impl Modify for BearerTokenSecurityAddon {
          description = "A2A agent registry — register and manage remote agents"),
         (name = "analytics",
          description = "Usage analytics — token consumption, model usage, and tool metrics"),
+        (name = "workflows",
+         description = "Workflow management — create, update, activate, and run workflows"),
     ),
     servers(
         (url = "/", description = "Local assistant server")

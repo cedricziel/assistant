@@ -14,6 +14,7 @@ pub mod personas;
 pub mod skills;
 pub mod traces;
 pub mod webhooks;
+pub mod workflows;
 
 // -- Conversation API below --------------------------------------------------
 //

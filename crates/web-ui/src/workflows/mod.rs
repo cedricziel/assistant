@@ -7,7 +7,10 @@ use axum::Router;
 
 use pages::WorkflowPagesState;
 
-/// Router for auth-protected workflow UI pages and JSON API.
+/// Router for auth-protected workflow HTML pages (kept for reference; no longer mounted).
+///
+/// All JSON API routes have moved to `crate::api::workflows::workflows_api_router`.
+#[allow(dead_code)]
 pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
     Router::new()
         .route(
@@ -31,40 +34,6 @@ pub fn workflow_pages_router() -> Router<WorkflowPagesState> {
             post(pages::rotate_workflow_webhook),
         )
         .route("/workflows/{id}/editor", get(pages::editor_page))
-        .route(
-            "/api/workflows",
-            get(pages::api_list_workflows).post(pages::api_create_workflow),
-        )
-        .route(
-            "/api/workflows/{id}",
-            get(pages::api_get_workflow)
-                .put(pages::api_update_workflow)
-                .delete(pages::api_delete_workflow),
-        )
-        .route(
-            "/api/workflows/{id}/webhook-secrets",
-            get(pages::api_get_workflow_webhook_secrets),
-        )
-        .route(
-            "/api/workflows/{id}/activate",
-            post(pages::api_activate_workflow),
-        )
-        .route(
-            "/api/workflows/{id}/deactivate",
-            post(pages::api_deactivate_workflow),
-        )
-        .route(
-            "/api/workflows/{id}/test-run",
-            post(pages::api_test_run_workflow),
-        )
-        .route(
-            "/api/workflows/{id}/runs",
-            get(pages::api_list_workflow_runs),
-        )
-        .route(
-            "/api/workflows/{id}/runs/{run_id}",
-            get(pages::api_get_workflow_run),
-        )
 }
 
 /// Router for public inbound workflow webhook trigger endpoints.
