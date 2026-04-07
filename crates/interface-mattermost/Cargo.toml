@@ -19,12 +19,15 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-mattermost_api = { workspace = true }
 lru = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
+futures = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-stream = { workspace = true }
 # Ensure vendored OpenSSL is used when cross-compiling to musl targets
 openssl = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }
+wiremock = { workspace = true }

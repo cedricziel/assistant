@@ -13,17 +13,21 @@ path = "src/lib.rs"
 assistant-core = { path = "../core" }
 assistant-runtime = { path = "../runtime" }
 tokio = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
 lru = { workspace = true }
-matrix-sdk = { workspace = true }
 dirs = { workspace = true }
-# Force bundled-sqlcipher-vendored-openssl so libsqlite3-sys can find OpenSSL
-# headers when cross-compiling to musl targets (see workspace Cargo.toml comment).
-rusqlite = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-stream = { workspace = true }
+urlencoding = "2"
+chrono = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }
+wiremock = { workspace = true }

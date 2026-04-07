@@ -1,9 +1,4 @@
 //! Per-turn extension tools for the Mattermost interface.
-//!
-//! These tools are injected into the orchestrator via `run_turn_with_tools`
-//! and capture Mattermost API context (channel, post_id, root_id, api client)
-//! at construction time.  The LLM can call them to post replies, add
-//! emoji reactions, or upload files.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,17 +6,17 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::{resolve_upload_bytes, ExecutionContext, ToolHandler, ToolOutput};
 use async_trait::async_trait;
-use mattermost_api::prelude::*;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
-// ── MattermostReplyHandler ────────────────────────────────────────────────────
+use crate::client::MattermostClient;
+
+// ── mattermost-reply ──────────────────────────────────────────────────────────
 
 struct MattermostReplyHandler {
     channel_id: String,
     root_id: Option<String>,
-    api: Arc<Mattermost>,
+    client: Arc<MattermostClient>,
 }
 
 #[async_trait]
@@ -40,10 +35,7 @@ impl ToolHandler for MattermostReplyHandler {
             "type": "object",
             "required": ["text"],
             "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "Message text to post"
-                }
+                "text": { "type": "string", "description": "Message text to post" }
             }
         })
     }
@@ -58,41 +50,29 @@ impl ToolHandler for MattermostReplyHandler {
         _ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let text = match params.get("text").and_then(|v| v.as_str()) {
-            Some(t) => t.to_string(),
-            None => return Ok(ToolOutput::error("Missing required parameter 'text'")),
+            Some(t) => t,
+            None => return Ok(ToolOutput::error("Missing 'text'")),
         };
-
-        let body = mattermost_api::models::PostBody {
-            channel_id: self.channel_id.clone(),
-            message: text,
-            root_id: self.root_id.clone(),
-        };
-
-        match self.api.create_post(&body).await {
-            Ok(_) => Ok(ToolOutput::success("Message posted successfully")),
-            Err(e) => Ok(ToolOutput::error(format!("Failed to post message: {e}"))),
+        match self
+            .client
+            .create_post(&self.channel_id, text, self.root_id.as_deref())
+            .await
+        {
+            Ok(_) => Ok(ToolOutput::success("Message posted")),
+            Err(e) => {
+                warn!(error = %e, "mattermost-reply failed");
+                Ok(ToolOutput::error(format!("Failed: {e}")))
+            }
         }
     }
 }
 
-// ── MattermostReactHandler ────────────────────────────────────────────────────
-
-/// Minimal reaction body for the Mattermost `POST /reactions` endpoint.
-#[derive(Debug, Serialize, Deserialize)]
-struct ReactionBody {
-    user_id: String,
-    post_id: String,
-    emoji_name: String,
-}
-
-/// Response type for `POST /reactions` — we only care that it succeeded.
-#[derive(Debug, Serialize, Deserialize)]
-struct ReactionResponse {}
+// ── mattermost-react ──────────────────────────────────────────────────────────
 
 struct MattermostReactHandler {
     post_id: String,
     bot_user_id: String,
-    api: Arc<Mattermost>,
+    client: Arc<MattermostClient>,
 }
 
 #[async_trait]
@@ -110,10 +90,7 @@ impl ToolHandler for MattermostReactHandler {
             "type": "object",
             "required": ["emoji"],
             "properties": {
-                "emoji": {
-                    "type": "string",
-                    "description": "Emoji name without colons, e.g. thumbsup"
-                }
+                "emoji": { "type": "string", "description": "Emoji name without colons, e.g. thumbsup" }
             }
         })
     }
@@ -128,74 +105,35 @@ impl ToolHandler for MattermostReactHandler {
         _ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         let emoji = match params.get("emoji").and_then(|v| v.as_str()) {
-            Some(e) => e.to_string(),
-            None => return Ok(ToolOutput::error("Missing required parameter 'emoji'")),
+            Some(e) => e,
+            None => return Ok(ToolOutput::error("Missing 'emoji'")),
         };
-
-        let body = ReactionBody {
-            user_id: self.bot_user_id.clone(),
-            post_id: self.post_id.clone(),
-            emoji_name: emoji,
-        };
-
         match self
-            .api
-            .post::<ReactionBody, ReactionResponse>("reactions", None, &body)
+            .client
+            .add_reaction(&self.bot_user_id, &self.post_id, emoji)
             .await
         {
-            Ok(_) => Ok(ToolOutput::success("Reaction added")),
+            Ok(()) => Ok(ToolOutput::success("Reaction added")),
             Err(e) => {
                 let msg = e.to_string();
-                // Mattermost returns an error if the reaction already exists.
                 if msg.contains("exists") || msg.contains("already") || msg.contains("400") {
                     Ok(ToolOutput::success("Reaction already present"))
                 } else {
-                    warn!(error = %e, "Failed to add Mattermost reaction");
-                    Ok(ToolOutput::error(format!("Failed to add reaction: {e}")))
+                    warn!(error = %e, "mattermost-react failed");
+                    Ok(ToolOutput::error(format!("Failed: {e}")))
                 }
             }
         }
     }
 }
 
-// ── MattermostUploadHandler ───────────────────────────────────────────────────
-
-/// Minimal response for `POST /api/v4/files` — we need the file_infos.
-#[derive(Debug, Deserialize)]
-struct FileUploadResponse {
-    file_infos: Vec<FileInfo>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FileInfo {
-    id: String,
-}
+// ── mattermost-upload ─────────────────────────────────────────────────────────
 
 struct MattermostUploadHandler {
     channel_id: String,
     root_id: Option<String>,
-    /// Base URL of the Mattermost server (e.g. `"https://mattermost.example.com"`).
-    server_url: String,
-    /// Auth token for API calls.
-    auth_token: String,
-    /// Shared Mattermost client for creating posts with file_ids.
-    api: Arc<Mattermost>,
+    client: Arc<MattermostClient>,
 }
-
-/// Post body with optional file_ids for attaching uploaded files.
-#[derive(Debug, Serialize)]
-struct PostBodyWithFiles {
-    channel_id: String,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    root_id: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    file_ids: Vec<String>,
-}
-
-/// Minimal post response — we only care about success.
-#[derive(Debug, Deserialize)]
-struct PostResponse {}
 
 #[async_trait]
 impl ToolHandler for MattermostUploadHandler {
@@ -204,9 +142,8 @@ impl ToolHandler for MattermostUploadHandler {
     }
 
     fn description(&self) -> &str {
-        "Upload a file, image, or document to the current Mattermost channel. \
-         For text content, set `content` directly. \
-         For binary files (images, PDFs, etc.), set `path` to the absolute file path on disk."
+        "Upload a file to the current Mattermost channel. \
+         For text content, set `content`. For binary files, set `path` to an absolute path."
     }
 
     fn params_schema(&self) -> Value {
@@ -214,22 +151,10 @@ impl ToolHandler for MattermostUploadHandler {
             "type": "object",
             "required": ["filename"],
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a local file to upload (for images, PDFs, etc.)"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Text file content (mutually exclusive with path)"
-                },
-                "filename": {
-                    "type": "string",
-                    "description": "Filename including extension (e.g. chart.png, report.pdf)"
-                },
-                "message": {
-                    "type": "string",
-                    "description": "Optional message text to accompany the file"
-                }
+                "path":     { "type": "string" },
+                "content":  { "type": "string" },
+                "filename": { "type": "string" },
+                "message":  { "type": "string" }
             }
         })
     }
@@ -245,7 +170,7 @@ impl ToolHandler for MattermostUploadHandler {
     ) -> Result<ToolOutput> {
         let filename = match params.get("filename").and_then(|v| v.as_str()) {
             Some(f) => f.to_string(),
-            None => return Ok(ToolOutput::error("Missing required parameter 'filename'")),
+            None => return Ok(ToolOutput::error("Missing 'filename'")),
         };
         let message = params
             .get("message")
@@ -253,61 +178,20 @@ impl ToolHandler for MattermostUploadHandler {
             .unwrap_or("")
             .to_string();
 
-        // Accept either text `content` or base64-encoded `content_base64`.
         let bytes = match resolve_upload_bytes(&params) {
             Ok(b) => b,
             Err(msg) => return Ok(ToolOutput::error(msg)),
         };
 
-        // Step 1: Upload file via multipart POST to /api/v4/files
-        let url = format!("{}/api/v4/files", self.server_url.trim_end_matches('/'));
-
-        let http = reqwest::Client::new();
-        let part = reqwest::multipart::Part::bytes(bytes)
-            .file_name(filename.clone())
-            .mime_str("application/octet-stream")
-            .unwrap_or_else(|_| {
-                reqwest::multipart::Part::bytes(Vec::new()).file_name(filename.clone())
-            });
-
-        let form = reqwest::multipart::Form::new()
-            .text("channel_id", self.channel_id.clone())
-            .part("files", part);
-
-        let resp = http
-            .post(&url)
-            .bearer_auth(&self.auth_token)
-            .multipart(form)
-            .send()
-            .await;
-
-        let resp = match resp {
-            Ok(r) => r,
-            Err(e) => return Ok(ToolOutput::error(format!("Failed to upload file: {e}"))),
+        let file_ids = match self
+            .client
+            .upload_file(&self.channel_id, &filename, bytes)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => return Ok(ToolOutput::error(format!("Upload failed: {e}"))),
         };
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Ok(ToolOutput::error(format!(
-                "File upload failed ({status}): {body}"
-            )));
-        }
-
-        let upload_resp: FileUploadResponse = match resp.json().await {
-            Ok(r) => r,
-            Err(e) => {
-                return Ok(ToolOutput::error(format!(
-                    "Failed to parse upload response: {e}"
-                )))
-            }
-        };
-
-        let file_ids: Vec<String> = upload_resp
-            .file_infos
-            .iter()
-            .map(|f| f.id.clone())
-            .collect();
         if file_ids.is_empty() {
             return Ok(ToolOutput::error(
                 "Upload succeeded but no file IDs returned",
@@ -316,64 +200,46 @@ impl ToolHandler for MattermostUploadHandler {
 
         debug!(file_ids = ?file_ids, "File uploaded to Mattermost");
 
-        // Step 2: Create a post with the file_ids attached.
-        let post_body = PostBodyWithFiles {
-            channel_id: self.channel_id.clone(),
-            message,
-            root_id: self.root_id.clone(),
-            file_ids,
-        };
-
         match self
-            .api
-            .post::<PostBodyWithFiles, PostResponse>("posts", None, &post_body)
+            .client
+            .create_post_with_files(
+                &self.channel_id,
+                &message,
+                self.root_id.as_deref(),
+                file_ids,
+            )
             .await
         {
-            Ok(_) => Ok(ToolOutput::success("File uploaded and posted successfully")),
-            Err(e) => Ok(ToolOutput::error(format!(
-                "File uploaded but failed to create post: {e}"
-            ))),
+            Ok(()) => Ok(ToolOutput::success("File uploaded and posted")),
+            Err(e) => Ok(ToolOutput::error(format!("Post with file failed: {e}"))),
         }
     }
 }
 
 // ── Public factory ────────────────────────────────────────────────────────────
 
-/// Build the set of Mattermost-specific extension tools for one turn.
-///
-/// * `channel_id` — the channel to post in
-/// * `post_id` — the `id` of the triggering post (used for reactions)
-/// * `root_id` — the root post ID for threading (`None` for top-level replies)
-/// * `bot_user_id` — the bot's own Mattermost user ID (required for reactions)
-/// * `server_url` — base URL of the Mattermost server
-/// * `auth_token` — bot auth token for API calls
-/// * `api` — shared Mattermost client
 pub fn build_mattermost_tools(
     channel_id: String,
     post_id: String,
     root_id: Option<String>,
     bot_user_id: String,
-    server_url: String,
-    auth_token: String,
-    api: Arc<Mattermost>,
+    client: Arc<MattermostClient>,
 ) -> Vec<Arc<dyn ToolHandler>> {
     vec![
         Arc::new(MattermostReplyHandler {
             channel_id: channel_id.clone(),
             root_id: root_id.clone(),
-            api: api.clone(),
+            client: client.clone(),
         }) as Arc<dyn ToolHandler>,
         Arc::new(MattermostReactHandler {
             post_id,
             bot_user_id,
-            api: api.clone(),
-        }) as Arc<dyn ToolHandler>,
+            client: client.clone(),
+        }),
         Arc::new(MattermostUploadHandler {
             channel_id,
             root_id,
-            server_url,
-            auth_token,
-            api,
-        }) as Arc<dyn ToolHandler>,
+            client,
+        }),
     ]
 }
