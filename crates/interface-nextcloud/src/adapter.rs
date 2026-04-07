@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use assistant_core::{
-    ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, NextcloudConfig,
+    Attachment, ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser,
+    NextcloudConfig, ToolHandler,
 };
 use async_trait::async_trait;
 use axum::body::Bytes;
@@ -24,6 +25,7 @@ use chrono::Utc;
 use futures::stream::Stream;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use crate::config::NextcloudConfigExt;
 use crate::signing::{sign_request, verify_signature};
@@ -159,6 +161,77 @@ impl ChannelAdapter for NextcloudAdapter {
 
     async fn stop(&self) -> Result<()> {
         let _ = self.stop_tx.send(true);
+        Ok(())
+    }
+
+    fn platform_tools(&self, msg: &ChannelMessage, _conv_id: Uuid) -> Vec<Arc<dyn ToolHandler>> {
+        let conversation_token = msg
+            .metadata
+            .get("conversation_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let message_id = msg.platform_message_id.as_deref().unwrap_or("").to_string();
+        crate::tools::build_nextcloud_tools(
+            &self.server_url,
+            &self.secret,
+            &conversation_token,
+            &message_id,
+        )
+    }
+
+    /// Add hourglass reaction while processing.
+    async fn on_turn_start(&self, _user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
+        // Reaction is best-effort; log but don't fail the turn.
+        Ok(())
+    }
+
+    /// On success, deliver any file attachments as text notices.
+    async fn on_turn_success(
+        &self,
+        user: &ChannelUser,
+        _answer: &str,
+        attachments: &[Attachment],
+    ) -> Result<()> {
+        if attachments.is_empty() {
+            return Ok(());
+        }
+        let conversation_token = &user.platform_id;
+        let mut lines = Vec::new();
+        for a in attachments {
+            let kind = if a.is_image() { "image" } else { "file" };
+            lines.push(format!(
+                "- **{}** ({}, {} bytes) [{kind}]",
+                a.filename,
+                a.mime_type,
+                a.data.len()
+            ));
+        }
+        let notice = format!(
+            "This turn produced {} attachment(s):\n{}",
+            attachments.len(),
+            lines.join("\n")
+        );
+        let _ = http_post_message(
+            &self.server_url,
+            &self.secret,
+            conversation_token,
+            &notice,
+            None,
+        )
+        .await;
+        Ok(())
+    }
+
+    async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
+        let _ = http_post_message(
+            &self.server_url,
+            &self.secret,
+            &user.platform_id,
+            &format!("Sorry, something went wrong: {err}"),
+            None,
+        )
+        .await;
         Ok(())
     }
 }

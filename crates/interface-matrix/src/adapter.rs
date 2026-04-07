@@ -12,12 +12,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser};
+use assistant_core::{
+    ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, ToolHandler,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream::Stream;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use crate::client::MatrixClient;
 
@@ -221,6 +224,34 @@ impl ChannelAdapter for MatrixAdapter {
 
     async fn stop(&self) -> Result<()> {
         let _ = self.stop_tx.send(true);
+        Ok(())
+    }
+
+    /// Matrix conversations are per-room; use room_id as the key.
+    fn conversation_key(&self, msg: &ChannelMessage) -> String {
+        msg.metadata
+            .get("room_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&msg.sender.platform_id)
+            .to_string()
+    }
+
+    fn platform_tools(&self, msg: &ChannelMessage, _conv_id: Uuid) -> Vec<Arc<dyn ToolHandler>> {
+        let room_id = msg
+            .metadata
+            .get("room_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        crate::tools::build_matrix_tools(room_id, self.client.clone())
+    }
+
+    async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
+        let room_id = &user.platform_id;
+        let _ = self
+            .client
+            .send_message(room_id, &format!("Sorry, I encountered an error: {err}"))
+            .await;
         Ok(())
     }
 }

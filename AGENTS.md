@@ -113,7 +113,7 @@ Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 | `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins                           |
 | `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus             |
 | `assistant-bus-nats`             | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)                    |
-| `assistant-runtime`              | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler                  |
+| `assistant-runtime`              | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler, ChannelRunner   |
 | `assistant-tool-executor`        | `crates/tool-executor`                 | ToolHandler registry, builtin tools, dispatch                          |
 | `assistant-mcp-server`           | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                                          |
 | `assistant-mcp-client`           | `crates/mcp-client`                    | MCP client for external MCP server connections                         |

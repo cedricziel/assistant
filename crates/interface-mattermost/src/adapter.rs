@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser};
+use assistant_core::{
+    ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, ToolHandler,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream::Stream;
@@ -18,6 +20,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::client::MattermostClient;
 
@@ -200,6 +203,39 @@ impl ChannelAdapter for MattermostAdapter {
 
     async fn stop(&self) -> Result<()> {
         let _ = self.stop_tx.send(true);
+        Ok(())
+    }
+
+    fn platform_tools(&self, msg: &ChannelMessage, _conv_id: Uuid) -> Vec<Arc<dyn ToolHandler>> {
+        let channel_id = msg
+            .metadata
+            .get("channel_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let post_id = msg.platform_message_id.clone().unwrap_or_default();
+        let thread_id = msg.thread_id.clone();
+        // Best-effort bot user ID for reaction tools — fallback to token.
+        let bot_user_id = self.client.token.clone();
+        crate::tools::build_mattermost_tools(
+            channel_id,
+            post_id,
+            thread_id,
+            bot_user_id,
+            self.client.clone(),
+        )
+    }
+
+    async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
+        let (channel_id, thread_id) = parse_platform_id(&user.platform_id);
+        let _ = self
+            .client
+            .create_post(
+                &channel_id,
+                &format!("Sorry, I encountered an error: {err}"),
+                thread_id.as_deref(),
+            )
+            .await;
         Ok(())
     }
 }

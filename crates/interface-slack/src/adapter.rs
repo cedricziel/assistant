@@ -5,22 +5,26 @@
 //! reconnection.  Inbound events are yielded as [`ChannelMessage`]s via a
 //! `futures::Stream`.
 
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, SlackConfig,
+    ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, Message, MessageRole,
+    SlackConfig, ToolHandler,
 };
+use assistant_storage::StorageLayer;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream::Stream;
 use futures::SinkExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::client::SlackApiClient;
 use crate::config::SlackConfigExt;
@@ -37,6 +41,10 @@ pub struct SlackAdapter {
     client: Arc<SlackApiClient>,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
+    /// Optional storage layer for seeding thread history on first turn.
+    storage: Option<Arc<StorageLayer>>,
+    /// Set of `platform_id`s for which history has already been seeded.
+    seeded_keys: Arc<Mutex<HashSet<String>>>,
 }
 
 impl SlackAdapter {
@@ -55,7 +63,15 @@ impl SlackAdapter {
             client,
             stop_tx,
             stop_rx,
+            storage: None,
+            seeded_keys: Arc::new(Mutex::new(HashSet::new())),
         })
+    }
+
+    /// Attach a storage layer to enable thread-history seeding on first turn.
+    pub fn with_storage(mut self, storage: Arc<StorageLayer>) -> Self {
+        self.storage = Some(storage);
+        self
     }
 
     /// Expose the underlying API client (for tools / skills).
@@ -243,6 +259,101 @@ impl ChannelAdapter for SlackAdapter {
         }
         Ok(())
     }
+
+    fn platform_tools(&self, msg: &ChannelMessage, _conv_id: Uuid) -> Vec<Arc<dyn ToolHandler>> {
+        let channel_id = msg
+            .metadata
+            .get("channel_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let thread_ts = msg.thread_id.clone();
+        let message_ts = msg
+            .platform_message_id
+            .clone()
+            .unwrap_or_else(|| thread_ts.clone().unwrap_or_default());
+        crate::tools::build_slack_tools(channel_id, thread_ts, message_ts, self.client.clone())
+            .into_iter()
+            .map(Arc::from)
+            .collect()
+    }
+
+    /// Add 👀 reaction and seed thread history on the first turn for a conversation.
+    async fn on_turn_start(&self, user: &ChannelUser, conv_id: Uuid) -> Result<()> {
+        let (channel, thread_ts) = parse_platform_id(&user.platform_id);
+
+        // Add 👀 reaction to signal the bot is processing.
+        if !channel.is_empty() {
+            let ts = thread_ts.as_deref().unwrap_or("").to_string();
+            if !ts.is_empty() {
+                let _ = self.client.add_reaction(&channel, &ts, "eyes").await;
+            }
+        }
+
+        // Seed thread history into the conversation store on first touch.
+        if let Some(storage) = &self.storage {
+            let platform_id = user.platform_id.clone();
+            let already_seeded = {
+                let mut seeded = self.seeded_keys.lock().await;
+                !seeded.insert(platform_id.clone())
+            };
+            if !already_seeded {
+                let thread_key = thread_ts.as_deref().unwrap_or("").to_string();
+                if !channel.is_empty() && !thread_key.is_empty() {
+                    match self
+                        .client
+                        .conversations_replies(&channel, &thread_key)
+                        .await
+                    {
+                        Ok(msgs) => {
+                            let _ = seed_thread_history(conv_id, &msgs, storage).await;
+                        }
+                        Err(e) => {
+                            debug!(error = %e, "slack: failed to fetch thread history for seeding");
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Add ✅ reaction on successful turn.
+    async fn on_turn_success(
+        &self,
+        user: &ChannelUser,
+        _answer: &str,
+        _attachments: &[assistant_core::Attachment],
+    ) -> Result<()> {
+        let (channel, thread_ts) = parse_platform_id(&user.platform_id);
+        if !channel.is_empty() {
+            let ts = thread_ts.unwrap_or_default();
+            if !ts.is_empty() {
+                let _ = self
+                    .client
+                    .add_reaction(&channel, &ts, "white_check_mark")
+                    .await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Post an error message to the channel.
+    async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
+        let (channel, thread_ts) = parse_platform_id(&user.platform_id);
+        if !channel.is_empty() {
+            let _ = self
+                .client
+                .post_message(
+                    &channel,
+                    &format!("Sorry, I encountered an error: {err}"),
+                    thread_ts.as_deref(),
+                )
+                .await;
+        }
+        Ok(())
+    }
 }
 
 // -- Helpers ------------------------------------------------------------------
@@ -331,6 +442,55 @@ fn parse_event(
         timestamp: Utc::now(),
         metadata,
     })
+}
+
+/// Seed Slack thread messages into the conversation store.
+///
+/// Called once per new thread the first time the adapter handles a message in
+/// that thread.  Seeds both user and bot messages so the LLM has context from
+/// prior exchanges.
+async fn seed_thread_history(
+    conv_id: Uuid,
+    messages: &[serde_json::Value],
+    storage: &Arc<StorageLayer>,
+) -> Result<()> {
+    for msg in messages {
+        let subtype = msg.get("subtype").and_then(|v| v.as_str());
+        if let Some(st) = subtype {
+            if st != "file_share" {
+                continue;
+            }
+        }
+
+        let is_bot = msg.get("bot_id").is_some()
+            || msg
+                .get("display_as_bot")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+        let role = if is_bot {
+            MessageRole::Assistant
+        } else if msg.get("user").is_some() {
+            MessageRole::User
+        } else {
+            continue;
+        };
+
+        let text = msg
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if text.is_empty() {
+            continue;
+        }
+
+        let m = Message::new(conv_id, role, text);
+        let _ = storage
+            .conversation_store_for_agent("default")
+            .save_message(&m)
+            .await;
+    }
+    Ok(())
 }
 
 /// Sleep for the current backoff duration (with ±10% jitter), then double it.

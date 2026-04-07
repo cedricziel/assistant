@@ -26,6 +26,7 @@ pub struct WebhookEvent {
     /// The conversation the event occurred in.
     pub target: Option<Target>,
     /// For reaction events (`Like`), the emoji that was added.
+    #[allow(dead_code)]
     pub content: Option<String>,
 }
 

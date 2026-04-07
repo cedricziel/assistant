@@ -6,13 +6,16 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::types::ChannelType;
+use crate::tool::{Attachment, ToolHandler};
+use crate::types::{ChannelType, Interface};
 
 // -- Types --
 
@@ -121,6 +124,67 @@ pub trait ChannelAdapter: Send + Sync {
         _thread_id: &str,
     ) -> anyhow::Result<()> {
         self.send(user, content).await
+    }
+
+    // -- ChannelRunner hooks (all default no-ops) --
+
+    /// Derive a stable conversation key from this message.
+    ///
+    /// The key is used to group messages into the same conversation UUID.
+    /// The default encodes `sender.platform_id`, which adapters encode to
+    /// include the channel/room/thread context (e.g. `"{channel_id}/{thread_ts}"`).
+    fn conversation_key(&self, msg: &ChannelMessage) -> String {
+        msg.sender.platform_id.clone()
+    }
+
+    /// Return the runtime [`Interface`] variant for this adapter.
+    ///
+    /// Used by [`ChannelRunner`] when calling `run_turn_with_tools`.  Derived
+    /// automatically from `channel_type()` — override only if needed.
+    fn interface(&self) -> Interface {
+        match self.channel_type() {
+            ChannelType::Slack => Interface::Slack,
+            ChannelType::Mattermost => Interface::Mattermost,
+            ChannelType::Matrix => Interface::Matrix,
+            ChannelType::Nextcloud => Interface::Nextcloud,
+            ChannelType::Signal => Interface::Signal,
+            ChannelType::Custom(_) => Interface::Web,
+        }
+    }
+
+    /// Return platform-specific tool handlers for this message's context.
+    ///
+    /// Called once per turn, before `run_turn_with_tools`.  Adapters override
+    /// this to inject reply tools, reaction tools, etc. scoped to the message.
+    fn platform_tools(&self, _msg: &ChannelMessage, _conv_id: Uuid) -> Vec<Arc<dyn ToolHandler>> {
+        vec![]
+    }
+
+    /// Called before dispatching a turn (e.g. add a "thinking" reaction).
+    ///
+    /// `conv_id` is the stable conversation UUID assigned by [`ChannelRunner`].
+    /// Adapters that seed thread history (e.g. Slack) use it to associate
+    /// historical messages with the right conversation.
+    async fn on_turn_start(&self, _user: &ChannelUser, _conv_id: Uuid) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Called after a successful turn.
+    ///
+    /// `answer` is the assistant's final text.  `attachments` are any file
+    /// outputs produced by tools during the turn.
+    async fn on_turn_success(
+        &self,
+        _user: &ChannelUser,
+        _answer: &str,
+        _attachments: &[Attachment],
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Called after a failed turn (e.g. post an error message to the channel).
+    async fn on_turn_error(&self, _user: &ChannelUser, _err: &anyhow::Error) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 
