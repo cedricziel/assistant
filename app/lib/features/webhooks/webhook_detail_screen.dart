@@ -206,10 +206,13 @@ class _WebhookDetailBody extends StatelessWidget {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: onVerify,
-          icon: const Icon(Icons.verified_outlined),
-          label: const Text('Verify webhook'),
+        Tooltip(
+          message: 'Sends a test ping to your endpoint to confirm it responds correctly.',
+          child: OutlinedButton.icon(
+            onPressed: onVerify,
+            icon: const Icon(Icons.verified_outlined),
+            label: const Text('Verify webhook'),
+          ),
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
