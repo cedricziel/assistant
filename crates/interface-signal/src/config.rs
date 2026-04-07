@@ -2,30 +2,46 @@
 //!
 //! [`SignalConfig`] is defined in `assistant-core` so it can be embedded in
 //! [`AssistantConfig`][assistant_core::AssistantConfig].  This module
-//! re-exports it and adds runtime helpers (e.g. `resolved_store_path`) that
-//! depend on the `dirs` crate, which is not a dependency of `assistant-core`.
-
-use std::path::PathBuf;
+//! re-exports it and adds runtime helpers (e.g. `resolved_api_url`) that
+//! resolve defaults and environment-variable overrides.
 
 pub use assistant_core::SignalConfig;
 
-/// Extension methods for [`SignalConfig`] that require the `dirs` crate.
+/// Extension methods for [`SignalConfig`].
 pub trait SignalConfigExt {
-    /// Resolve the store path.
+    /// Resolve the signal-cli-rest-api base URL.
     ///
-    /// Falls back to `~/.assistant/signal-store` if no path is configured,
-    /// and to `.signal-store` relative to the working directory as a last
-    /// resort.
-    fn resolved_store_path(&self) -> PathBuf;
+    /// Returns the configured `api_url` or falls back to
+    /// `http://localhost:8080`.
+    fn resolved_api_url(&self) -> String;
+
+    /// Return the configured phone number, if any.
+    fn resolved_phone_number(&self) -> Option<String>;
+
+    /// Return the HTTP Basic Auth username, if configured.
+    fn resolved_api_user(&self) -> Option<String>;
+
+    /// Return the HTTP Basic Auth password, if configured.
+    fn resolved_api_password(&self) -> Option<String>;
 }
 
 impl SignalConfigExt for SignalConfig {
-    fn resolved_store_path(&self) -> PathBuf {
-        self.store_path
-            .as_ref()
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".assistant").join("signal-store")))
-            .unwrap_or_else(|| PathBuf::from(".signal-store"))
+    fn resolved_api_url(&self) -> String {
+        self.api_url
+            .clone()
+            .unwrap_or_else(|| "http://localhost:8080".to_string())
+    }
+
+    fn resolved_phone_number(&self) -> Option<String> {
+        self.phone_number.clone()
+    }
+
+    fn resolved_api_user(&self) -> Option<String> {
+        self.api_user.clone()
+    }
+
+    fn resolved_api_password(&self) -> Option<String> {
+        self.api_password.clone()
     }
 }
 
@@ -34,27 +50,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn custom_store_path_is_used_verbatim() {
-        let cfg = SignalConfig {
-            store_path: Some("/tmp/my-signal-store".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.resolved_store_path(),
-            std::path::PathBuf::from("/tmp/my-signal-store")
-        );
+    fn default_api_url_is_localhost_8080() {
+        let cfg = SignalConfig::default();
+        assert_eq!(cfg.resolved_api_url(), "http://localhost:8080");
     }
 
     #[test]
-    fn default_store_path_falls_back_to_home() {
-        let cfg = SignalConfig::default();
-        let path = cfg.resolved_store_path();
-        // dirs::home_dir() may return None in CI/container environments.
-        // Accept both the home-dir path and the last-resort fallback.
-        assert!(
-            path.ends_with(".assistant/signal-store") || path.ends_with(".signal-store"),
-            "unexpected path: {path:?}"
-        );
+    fn custom_api_url_is_used_verbatim() {
+        let cfg = SignalConfig {
+            api_url: Some("http://signal.example.com:8080".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(cfg.resolved_api_url(), "http://signal.example.com:8080");
     }
 
     #[test]
@@ -68,15 +75,12 @@ mod tests {
         let toml_str = r#"
             phone_number = "+14155550123"
             allowed_senders = ["uuid-a", "uuid-b"]
-            store_path = "/var/lib/signal"
+            api_url = "http://localhost:8080"
         "#;
         let cfg: SignalConfig = toml::from_str(toml_str).expect("parse");
         assert_eq!(cfg.phone_number.as_deref(), Some("+14155550123"));
         assert_eq!(cfg.allowed_senders, ["uuid-a", "uuid-b"]);
-        assert_eq!(
-            cfg.resolved_store_path(),
-            std::path::PathBuf::from("/var/lib/signal")
-        );
+        assert_eq!(cfg.resolved_api_url(), "http://localhost:8080");
     }
 
     #[test]

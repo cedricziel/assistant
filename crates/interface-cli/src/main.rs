@@ -37,9 +37,6 @@ use assistant_storage::{
 };
 use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
 
-#[cfg(feature = "signal")]
-use assistant_interface_signal::config::SignalConfigExt;
-
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -119,12 +116,6 @@ enum Command {
         #[command(subcommand)]
         command: WebUiCommand,
     },
-    /// Manage Signal device linking through the unified assistant CLI.
-    #[cfg(feature = "signal")]
-    Signal {
-        #[command(subcommand)]
-        command: SignalCommand,
-    },
     /// Back up the assistant installation to a .tar.gz archive.
     Backup(cmd_backup::BackupArgs),
     /// Restore the assistant installation from a backup archive.
@@ -151,17 +142,6 @@ enum WebUiCommand {
         /// Additional web UI flags (e.g. --listen, --auth-token).
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
-    },
-}
-
-#[cfg(feature = "signal")]
-#[derive(Subcommand)]
-enum SignalCommand {
-    /// Link this machine as a Signal secondary device.
-    Link {
-        /// Name shown for this device in the Signal app.
-        #[arg(long, default_value = "Assistant")]
-        device_name: String,
     },
 }
 
@@ -406,17 +386,6 @@ async fn cmd_webui(command: &WebUiCommand) -> Result<()> {
         .chain(args.iter().cloned())
         .collect::<Vec<_>>();
     assistant_web_ui::run_from_iter(argv).await
-}
-
-#[cfg(feature = "signal")]
-async fn cmd_signal(command: &SignalCommand, config: &AssistantConfig) -> Result<()> {
-    match command {
-        SignalCommand::Link { device_name } => {
-            let signal_cfg = config.signal.clone().unwrap_or_default();
-            let store_path = signal_cfg.resolved_store_path();
-            assistant_interface_signal::link_device(&store_path, device_name).await
-        }
-    }
 }
 
 // ── /review command ───────────────────────────────────────────────────────────
@@ -1265,11 +1234,6 @@ async fn main() -> Result<()> {
         return cmd_webui(command).await;
     }
 
-    #[cfg(feature = "signal")]
-    if let Some(Command::Signal { command }) = &cli.command {
-        return cmd_signal(command, &config).await;
-    }
-
     let (orchestrator_interfaces, orchestrator_no_repl) =
         if let Some(Command::Orchestrator { command }) = &cli.command {
             match command {
@@ -1709,18 +1673,16 @@ async fn main() -> Result<()> {
         let sig_cfg = bs.config.signal.clone().unwrap_or_default();
         let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
 
-        let worker_orch = bs.orchestrator.clone();
-        let _signal_worker = tokio::spawn(async move {
-            worker_orch
-                .run_worker_filtered("signal-worker", Some("Signal"))
-                .await;
-        });
-
         if orchestrator_no_repl {
             info!("Running Signal interface in foreground (--no-repl)");
             return iface.run().await;
         }
-        warn!("Signal interface requires --no-repl in unified orchestrator mode; skipping startup");
+
+        tokio::spawn(async move {
+            if let Err(e) = iface.run().await {
+                tracing::error!("Signal interface error: {e}");
+            }
+        });
     }
 
     // Spawn a scheduler worker when running in interface-filtered orchestrator

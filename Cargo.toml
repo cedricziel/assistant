@@ -73,14 +73,8 @@ base64 = "0.22"
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
 # Force vendored OpenSSL for static linking when cross-compiling (e.g. musl targets).
-# mattermost_api pulls in native-tls via feature unification; vendored ensures
 # openssl-sys builds from source rather than requiring a system installation.
 openssl = { version = "0.10", features = ["vendored"] }
-# matrix-sdk-sqlite uses rusqlite with bundled-sqlcipher, which requires OpenSSL
-# headers. The bundled-sqlcipher-vendored-openssl feature adds openssl-sys as a
-# build-dependency of libsqlite3-sys so the vendored headers are found during
-# cross-compilation (e.g. musl targets without a system OpenSSL).
-rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.8"
 reqwest-tracing = "0.5"
@@ -106,8 +100,6 @@ axum = { version = "0.8", features = ["macros"] }
 futures = "0.3"
 # Terminal line editor
 reedline = "0.46"
-# QR code terminal rendering
-qr2term = "0.3"
 # YAML frontmatter parser
 gray_matter = "0.3"
 # YAML serialization (for writing agent card frontmatter)
@@ -157,17 +149,11 @@ utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
 testcontainers-modules = { version = "0.15", features = ["nats"] }
 wiremock = "0.6"
 tempfile = "3"
-# LRU cache (bounded conversation map in Mattermost/Slack runners)
+# LRU cache (bounded conversation map in ChannelRunner)
 lru = "0.16"
-# Matrix interface
-matrix-sdk = { version = "0.10", features = ["sqlite", "rustls-tls"], default-features = false }
-# Slack / Mattermost interfaces
-slack-morphism = { version = "2", features = ["hyper"] }
-# Force rustls TLS on the same tokio-tungstenite major/minor used by
-# slack-morphism so wss:// support is actually enabled in the Slack client.
+# WebSocket client (used by Slack, Mattermost, Matrix, Signal adapters)
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-mattermost_api = "0.8"
 # Apache Iceberg
 iceberg = "0.9"
 iceberg-catalog-rest = "0.9"
@@ -183,13 +169,6 @@ llm = { path = "crates/llm" }
 storage = { path = "crates/storage" }
 runtime = { path = "crates/runtime" }
 tool-executor = { path = "crates/tool-executor" }
-
-# Force all crates to use the same curve25519-dalek as libsignal/presage.
-# Without this patch, two versions coexist (crates.io 4.1.3 vs signalapp git fork
-# 4.1.3), causing type-mismatch errors when building with --features signal.
-# The signalapp fork is API-compatible; the patch is a no-op for non-signal builds.
-[patch.crates-io]
-curve25519-dalek = { git = "https://github.com/signalapp/curve25519-dalek", tag = "signal-curve25519-4.1.3" }
 
 [profile.release]
 opt-level = 3

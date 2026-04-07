@@ -26,7 +26,7 @@ Run targets: `make run` (orchestrator), `make run-mcp` (MCP stdio), `make run-sl
 enforce `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo machete --with-metadata`.
 Install hooks after cloning: `make install-hooks`.
 
-**Note:** `cargo check --all-features` and the `signal` feature require `protoc` (protobuf compiler).
+**Note:** `cargo check --all-features` may require `protoc` (protobuf compiler) for certain features.
 
 ## Flutter App (`app/`)
 
@@ -102,32 +102,32 @@ GitHub Actions runs `flutter analyze --fatal-infos` and `flutter test` on every 
 
 Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 
-| Crate (package name)             | Path                                   | Purpose                                                                |
-| -------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
-| `assistant-core`                 | `crates/core`                          | Shared types, ToolHandler trait, MessageBus trait                      |
-| `assistant-llm`                  | `crates/llm`                           | LlmProvider trait, EmbeddingProvider, LlmClient                        |
-| `assistant-provider-ollama`      | `crates/provider-ollama`               | Ollama LlmProvider implementation                                      |
-| `assistant-provider-anthropic`   | `crates/provider-anthropic`            | Anthropic LlmProvider implementation                                   |
-| `assistant-provider-openai`      | `crates/provider-openai`               | OpenAI LlmProvider implementation                                      |
-| `assistant-provider-moonshot`    | `crates/provider-moonshot`             | Moonshot/Kimi LlmProvider (OpenAI-compatible)                          |
-| `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins                           |
-| `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus             |
-| `assistant-bus-nats`             | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)                    |
-| `assistant-runtime`              | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler, ChannelRunner   |
-| `assistant-tool-executor`        | `crates/tool-executor`                 | ToolHandler registry, builtin tools, dispatch                          |
-| `assistant-mcp-server`           | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                                          |
-| `assistant-mcp-client`           | `crates/mcp-client`                    | MCP client for external MCP server connections                         |
-| `assistant-cli`                  | `crates/interface-cli`                 | Unified binary: REPL + subcommands                                     |
-| `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot (thin reqwest/tokio-tungstenite client, ChannelAdapter)      |
-| `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot (thin reqwest/tokio-tungstenite client, ChannelAdapter) |
-| `assistant-interface-matrix`     | `crates/interface-matrix`              | Matrix bot (thin reqwest long-poll, ChannelAdapter)                    |
-| `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot (axum, ChannelAdapter)                      |
-| `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface (presage, feature-gated, ChannelAdapter stub)         |
-| `assistant-web-ui`               | `crates/web-ui`                        | Web UI/A2A server implementation (invoked via `assistant webui serve`) |
-| `assistant-transcription`        | `crates/transcription`                 | Voice transcription providers (Whisper, Ollama, etc)                   |
-| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`               | A2A protocol JSON Schema types                                         |
-| `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite` | SQLite exporter for OpenTelemetry spans/logs                           |
-| `assistant-integration-tests`    | `crates/integration-tests`             | End-to-end smoke tests                                                 |
+| Crate (package name)             | Path                                   | Purpose                                                                     |
+| -------------------------------- | -------------------------------------- | --------------------------------------------------------------------------- |
+| `assistant-core`                 | `crates/core`                          | Shared types, ToolHandler trait, MessageBus trait                           |
+| `assistant-llm`                  | `crates/llm`                           | LlmProvider trait, EmbeddingProvider, LlmClient                             |
+| `assistant-provider-ollama`      | `crates/provider-ollama`               | Ollama LlmProvider implementation                                           |
+| `assistant-provider-anthropic`   | `crates/provider-anthropic`            | Anthropic LlmProvider implementation                                        |
+| `assistant-provider-openai`      | `crates/provider-openai`               | OpenAI LlmProvider implementation                                           |
+| `assistant-provider-moonshot`    | `crates/provider-moonshot`             | Moonshot/Kimi LlmProvider (OpenAI-compatible)                               |
+| `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins                                |
+| `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus                  |
+| `assistant-bus-nats`             | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)                         |
+| `assistant-runtime`              | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler, ChannelRunner        |
+| `assistant-tool-executor`        | `crates/tool-executor`                 | ToolHandler registry, builtin tools, dispatch                               |
+| `assistant-mcp-server`           | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                                               |
+| `assistant-mcp-client`           | `crates/mcp-client`                    | MCP client for external MCP server connections                              |
+| `assistant-cli`                  | `crates/interface-cli`                 | Unified binary: REPL + subcommands                                          |
+| `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot (thin reqwest/tokio-tungstenite client, ChannelAdapter)           |
+| `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot (thin reqwest/tokio-tungstenite client, ChannelAdapter)      |
+| `assistant-interface-matrix`     | `crates/interface-matrix`              | Matrix bot (thin reqwest long-poll, ChannelAdapter)                         |
+| `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot (axum, ChannelAdapter)                           |
+| `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface via signal-cli-rest-api (WebSocket + REST, ChannelAdapter) |
+| `assistant-web-ui`               | `crates/web-ui`                        | Web UI/A2A server implementation (invoked via `assistant webui serve`)      |
+| `assistant-transcription`        | `crates/transcription`                 | Voice transcription providers (Whisper, Ollama, etc)                        |
+| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`               | A2A protocol JSON Schema types                                              |
+| `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite` | SQLite exporter for OpenTelemetry spans/logs                                |
+| `assistant-integration-tests`    | `crates/integration-tests`             | End-to-end smoke tests                                                      |
 
 Dependency order (no cycles):
 
@@ -152,7 +152,7 @@ All messenger interface crates (`interface-slack`, `interface-mattermost`, `inte
 - **Matrix**: uses plain long-poll `/sync` via `reqwest`, _not_ `matrix-sdk`. The old `matrix-sdk` dep was removed to eliminate its 80k+ line transitive footprint and SQLite state store. The workspace still has a `matrix-sdk` entry in `Cargo.toml` for future reference but the interface crate does not use it.
 - **Slack**: uses `reqwest` + `tokio-tungstenite` Socket Mode, _not_ `slack-morphism`.
 - **Mattermost**: uses `reqwest` + `tokio-tungstenite`, _not_ `mattermost_api`.
-- **Signal**: still uses `presage` internally via `SignalInterface::run()`; the `SignalAdapter` stub is unsupported at runtime until presage is replaced with a signal-cli REST client.
+- **Signal**: uses a thin `reqwest` + `tokio-tungstenite` client against [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api). Receives messages via WebSocket `GET /v1/receive/{number}` and sends via `POST /v1/send`. No `presage` dependency; no feature flag required. Operators must run the signal-cli daemon separately.
 
 ## Terminology
 
@@ -262,5 +262,5 @@ Prefixes: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.
 ## CI
 
 GitHub Actions runs on push to `main` and PRs: check, test, lint (clippy), format.
-CI also lints the `signal` feature separately: `cargo clippy -p assistant-interface-signal --features signal`.
+The `interface-signal` crate no longer has a feature gate — it compiles unconditionally as part of the workspace lint.
 Integration tests run with `continue-on-error: true` (require Ollama).

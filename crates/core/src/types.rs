@@ -205,10 +205,15 @@ pub struct SignalConfig {
     #[serde(default)]
     pub allowed_senders: Vec<String>,
 
-    /// Path where presage stores its Signal state.  Defaults to
-    /// `~/.assistant/signal-store` (resolved at runtime by the interface
-    /// crate, which has access to the `dirs` crate).
-    pub store_path: Option<String>,
+    /// Base URL of the signal-cli-rest-api daemon.
+    /// Defaults to `http://localhost:8080` if not set.
+    pub api_url: Option<String>,
+
+    /// HTTP Basic Auth username for signal-cli-rest-api (optional).
+    pub api_user: Option<String>,
+
+    /// HTTP Basic Auth password for signal-cli-rest-api (optional).
+    pub api_password: Option<String>,
 }
 
 /// Controls which messages the Slack bot reacts to.

@@ -227,6 +227,10 @@ trace_enabled = true
 # boot_path = "~/.assistant/agents/default/BOOT.md"
 
 [signal]
-# Signal interface settings (only used if compiled with --features signal)
-# phone_number = "+1234567890"
-# allowed_senders = []   # If set, only these numbers can interact with the bot
+# Signal interface settings — requires a running signal-cli-rest-api daemon.
+# See: https://github.com/bbernhard/signal-cli-rest-api
+# phone_number = "+1234567890"      # Bot's registered Signal number (required)
+# api_url = "http://localhost:8080" # signal-cli-rest-api base URL (default)
+# api_user = ""                     # HTTP Basic Auth username (optional)
+# api_password = ""                 # HTTP Basic Auth password (optional)
+# allowed_senders = []              # If set, only these numbers can interact with the bot
