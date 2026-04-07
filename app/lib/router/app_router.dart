@@ -13,6 +13,7 @@ import '../features/personas/persona_create_screen.dart';
 import '../features/personas/persona_detail_screen.dart';
 import '../features/personas/persona_file_editor_screen.dart';
 import '../features/personas/personas_screen.dart';
+import '../features/skills/skill_detail_screen.dart';
 import '../features/skills/skills_screen.dart';
 import '../features/traces/traces_screen.dart';
 import '../features/webhooks/webhook_detail_screen.dart';
@@ -29,6 +30,7 @@ class AppRoutes {
   static const traces = '/traces';
   static const logs = '/logs';
   static const skills = '/skills';
+  static const skillDetail = '/skills/:name';
   static const contexts = '/contexts';
   static const contextsNew = '/contexts/new';
   static const contextsDetail = '/contexts/:id';
@@ -105,6 +107,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.skills,
             builder: (context, state) => const SkillsScreen(),
+            routes: [
+              GoRoute(
+                path: ':name',
+                builder: (context, state) {
+                  final name = state.pathParameters['name']!;
+                  return SkillDetailScreen(skillName: name);
+                },
+              ),
+            ],
           ),
 
           // -- Personas / Contexts ------------------------------------------
