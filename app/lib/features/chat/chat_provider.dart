@@ -248,6 +248,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     state = const AsyncData(ChatState());
   }
 
+  /// Dismiss the current error without affecting messages or conversation.
+  void dismissError() {
+    final current = state.value ?? const ChatState();
+    state = AsyncData(current.copyWith(clearError: true));
+  }
+
   /// Set the active conversation ID without loading history.
   void setConversationId(String id) {
     state = AsyncData(

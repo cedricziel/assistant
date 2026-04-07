@@ -198,10 +198,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           IconButton(
                             icon: const Icon(Icons.close, size: 18),
                             onPressed: () {
-                              // Dismiss error — reset state.
-                              ref
-                                  .read(chatProvider.notifier)
-                                  .clearConversation();
+                              ref.read(chatProvider.notifier).dismissError();
                             },
                           ),
                         ],
