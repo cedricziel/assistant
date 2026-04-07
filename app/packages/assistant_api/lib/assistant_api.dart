@@ -22,6 +22,7 @@ export 'package:assistant_api/src/api/skills_api.dart';
 export 'package:assistant_api/src/api/tasks_api.dart';
 export 'package:assistant_api/src/api/traces_api.dart';
 export 'package:assistant_api/src/api/webhooks_api.dart';
+export 'package:assistant_api/src/api/workflows_api.dart';
 
 export 'package:assistant_api/src/model/add_skill_access_request.dart';
 export 'package:assistant_api/src/model/agent_capabilities.dart';
@@ -108,5 +109,13 @@ export 'package:assistant_api/src/model/update_skill_request.dart';
 export 'package:assistant_api/src/model/update_webhook_request.dart';
 export 'package:assistant_api/src/model/verify_webhook_response.dart';
 export 'package:assistant_api/src/model/webhook_response.dart';
+export 'package:assistant_api/src/model/workflow_detail.dart';
+export 'package:assistant_api/src/model/workflow_run_detail.dart';
+export 'package:assistant_api/src/model/workflow_run_preview.dart';
+export 'package:assistant_api/src/model/workflow_run_step.dart';
+export 'package:assistant_api/src/model/workflow_run_summary.dart';
+export 'package:assistant_api/src/model/workflow_summary.dart';
+export 'package:assistant_api/src/model/workflow_upsert_request.dart';
+export 'package:assistant_api/src/model/workflow_webhook_secrets.dart';
 export 'package:assistant_api/src/model/write_persona_file_request.dart';
 

@@ -119,6 +119,17 @@ Class | Method | HTTP request | Description
 [*WebhooksApi*](doc/WebhooksApi.md) | [**toggleWebhook**](doc/WebhooksApi.md#togglewebhook) | **POST** /api/webhooks/{id}/toggle | &#x60;POST /api/webhooks/{id}/toggle&#x60; — toggle a webhook&#39;s active state.
 [*WebhooksApi*](doc/WebhooksApi.md) | [**updateWebhook**](doc/WebhooksApi.md#updatewebhook) | **PATCH** /api/webhooks/{id} | &#x60;PATCH /api/webhooks/{id}&#x60; — update a webhook.
 [*WebhooksApi*](doc/WebhooksApi.md) | [**verifyWebhook**](doc/WebhooksApi.md#verifywebhook) | **POST** /api/webhooks/{id}/verify | &#x60;POST /api/webhooks/{id}/verify&#x60; — send a signed test payload to the webhook URL.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**activateWorkflow**](doc/WorkflowsApi.md#activateworkflow) | **POST** /api/workflows/{id}/activate | &#x60;POST /api/workflows/{id}/activate&#x60; — activate a workflow.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**createWorkflow**](doc/WorkflowsApi.md#createworkflow) | **POST** /api/workflows | &#x60;POST /api/workflows&#x60; — create a new workflow.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**deactivateWorkflow**](doc/WorkflowsApi.md#deactivateworkflow) | **POST** /api/workflows/{id}/deactivate | &#x60;POST /api/workflows/{id}/deactivate&#x60; — deactivate a workflow.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**deleteWorkflow**](doc/WorkflowsApi.md#deleteworkflow) | **DELETE** /api/workflows/{id} | &#x60;DELETE /api/workflows/{id}&#x60; — delete a workflow.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**getWorkflow**](doc/WorkflowsApi.md#getworkflow) | **GET** /api/workflows/{id} | &#x60;GET /api/workflows/{id}&#x60; — fetch a workflow.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**getWorkflowRun**](doc/WorkflowsApi.md#getworkflowrun) | **GET** /api/workflows/{id}/runs/{run_id} | &#x60;GET /api/workflows/{id}/runs/{run_id}&#x60; — workflow run detail with steps.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**getWorkflowWebhookSecrets**](doc/WorkflowsApi.md#getworkflowwebhooksecrets) | **GET** /api/workflows/{id}/webhook-secrets | &#x60;GET /api/workflows/{id}/webhook-secrets&#x60; — reveal webhook URL and token.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**listWorkflowRuns**](doc/WorkflowsApi.md#listworkflowruns) | **GET** /api/workflows/{id}/runs | &#x60;GET /api/workflows/{id}/runs&#x60; — list recent runs (up to 50).
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**listWorkflows**](doc/WorkflowsApi.md#listworkflows) | **GET** /api/workflows | &#x60;GET /api/workflows&#x60; — list all workflows.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**testRunWorkflow**](doc/WorkflowsApi.md#testrunworkflow) | **POST** /api/workflows/{id}/test-run | &#x60;POST /api/workflows/{id}/test-run&#x60; — queue a manual test run.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**updateWorkflow**](doc/WorkflowsApi.md#updateworkflow) | **PUT** /api/workflows/{id} | &#x60;PUT /api/workflows/{id}&#x60; — update a workflow.
 
 
 ## Documentation For Models
@@ -208,6 +219,14 @@ Class | Method | HTTP request | Description
  - [UpdateWebhookRequest](doc/UpdateWebhookRequest.md)
  - [VerifyWebhookResponse](doc/VerifyWebhookResponse.md)
  - [WebhookResponse](doc/WebhookResponse.md)
+ - [WorkflowDetail](doc/WorkflowDetail.md)
+ - [WorkflowRunDetail](doc/WorkflowRunDetail.md)
+ - [WorkflowRunPreview](doc/WorkflowRunPreview.md)
+ - [WorkflowRunStep](doc/WorkflowRunStep.md)
+ - [WorkflowRunSummary](doc/WorkflowRunSummary.md)
+ - [WorkflowSummary](doc/WorkflowSummary.md)
+ - [WorkflowUpsertRequest](doc/WorkflowUpsertRequest.md)
+ - [WorkflowWebhookSecrets](doc/WorkflowWebhookSecrets.md)
  - [WritePersonaFileRequest](doc/WritePersonaFileRequest.md)
 
 

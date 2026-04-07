@@ -92,6 +92,14 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(UpdateWebhookRequest.serializer)
       ..add(VerifyWebhookResponse.serializer)
       ..add(WebhookResponse.serializer)
+      ..add(WorkflowDetail.serializer)
+      ..add(WorkflowRunDetail.serializer)
+      ..add(WorkflowRunPreview.serializer)
+      ..add(WorkflowRunStep.serializer)
+      ..add(WorkflowRunSummary.serializer)
+      ..add(WorkflowSummary.serializer)
+      ..add(WorkflowUpsertRequest.serializer)
+      ..add(WorkflowWebhookSecrets.serializer)
       ..add(WritePersonaFileRequest.serializer)
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(AgentExtension)]),
@@ -223,6 +231,9 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(
               BuiltList, const [const FullType(TaskPushNotificationConfig)]),
           () => ListBuilder<TaskPushNotificationConfig>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(WorkflowRunStep)]),
+          () => ListBuilder<WorkflowRunStep>())
       ..addBuilderFactory(
           const FullType(
               BuiltMap, const [const FullType(String), const FullType(String)]),

@@ -99,6 +99,14 @@ import 'package:assistant_api/src/model/update_skill_request.dart';
 import 'package:assistant_api/src/model/update_webhook_request.dart';
 import 'package:assistant_api/src/model/verify_webhook_response.dart';
 import 'package:assistant_api/src/model/webhook_response.dart';
+import 'package:assistant_api/src/model/workflow_detail.dart';
+import 'package:assistant_api/src/model/workflow_run_detail.dart';
+import 'package:assistant_api/src/model/workflow_run_preview.dart';
+import 'package:assistant_api/src/model/workflow_run_step.dart';
+import 'package:assistant_api/src/model/workflow_run_summary.dart';
+import 'package:assistant_api/src/model/workflow_summary.dart';
+import 'package:assistant_api/src/model/workflow_upsert_request.dart';
+import 'package:assistant_api/src/model/workflow_webhook_secrets.dart';
 import 'package:assistant_api/src/model/write_persona_file_request.dart';
 
 part 'serializers.g.dart';
@@ -189,12 +197,24 @@ part 'serializers.g.dart';
   UpdateWebhookRequest,
   VerifyWebhookResponse,
   WebhookResponse,
+  WorkflowDetail,
+  WorkflowRunDetail,
+  WorkflowRunPreview,
+  WorkflowRunStep,
+  WorkflowRunSummary,
+  WorkflowSummary,
+  WorkflowUpsertRequest,
+  WorkflowWebhookSecrets,
   WritePersonaFileRequest,
 ])
 Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(ConversationSummary)]),
         () => ListBuilder<ConversationSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(WorkflowSummary)]),
+        () => ListBuilder<WorkflowSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(PersonaSummary)]),
@@ -207,6 +227,10 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(LogEntryResponse)]),
         () => ListBuilder<LogEntryResponse>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(WorkflowRunSummary)]),
+        () => ListBuilder<WorkflowRunSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(AgentSummary)]),
