@@ -22,13 +22,23 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
   final _formKey = GlobalKey<FormState>();
   final _idController = TextEditingController();
   final _nameController = TextEditingController();
+  final _idFocus = FocusNode();
   bool _submitting = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _idFocus.requestFocus();
+    });
+  }
 
   @override
   void dispose() {
     _idController.dispose();
     _nameController.dispose();
+    _idFocus.dispose();
     super.dispose();
   }
 
@@ -113,6 +123,7 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
                 ),
               TextFormField(
                 controller: _idController,
+                focusNode: _idFocus,
                 decoration: const InputDecoration(
                   labelText: 'ID',
                   hintText: 'e.g. my-persona',
@@ -147,18 +158,31 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
                 enabled: !_submitting,
               ),
               const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _submitting ? null : _submit,
-                child: _submitting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text('Create Persona'),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _submitting ? null : () => context.go('/contexts'),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _submitting ? null : _submit,
+                      child: _submitting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Create Persona'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
