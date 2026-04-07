@@ -1,3 +1,4 @@
+import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -28,23 +29,15 @@ class WorkflowsScreen extends ConsumerWidget {
           error: err.toString(),
           onRetry: () => ref.read(workflowsProvider.notifier).refresh(),
         ),
-        data: (state) {
-          if (state.error != null) {
-            return _ErrorView(
-              error: state.error!,
-              onRetry: () => ref.read(workflowsProvider.notifier).refresh(),
-            );
-          }
-          if (state.workflows.isEmpty) {
-            return const _EmptyView();
-          }
+        data: (workflows) {
+          if (workflows.isEmpty) return const _EmptyView();
           return ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: state.workflows.length,
-            separatorBuilder: (context, index) => const Divider(height: 1, indent: 72),
-            itemBuilder: (context, index) {
-              return _WorkflowRow(workflow: state.workflows[index]);
-            },
+            itemCount: workflows.length,
+            separatorBuilder: (_, _) =>
+                const Divider(height: 1, indent: 72),
+            itemBuilder: (context, index) =>
+                _WorkflowRow(workflow: workflows[index]),
           );
         },
       ),
@@ -87,7 +80,9 @@ class _WorkflowRow extends StatelessWidget {
       trailing: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: workflow.active ? Colors.green.shade50 : Colors.grey.shade100,
+          color: workflow.active
+              ? Colors.green.shade50
+              : Colors.grey.shade100,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: workflow.active

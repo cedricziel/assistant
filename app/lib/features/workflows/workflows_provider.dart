@@ -1,212 +1,91 @@
-import 'package:dio/dio.dart';
+import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/api_client.dart';
 import '../connection/connection_provider.dart';
 
-/// Simple data class for a workflow summary.
-class WorkflowSummary {
-  const WorkflowSummary({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.active,
-  });
+// ---------------------------------------------------------------------------
+// API client helper
 
-  final String id;
-  final String name;
-  final String description;
-  final bool active;
-
-  factory WorkflowSummary.fromJson(Map<String, dynamic> json) {
-    return WorkflowSummary(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      description: json['description'] as String? ?? '',
-      active: json['active'] as bool? ?? false,
-    );
-  }
+ApiClient? _apiClient(Ref ref) {
+  final profile = ref.read(activeProfileProvider);
+  if (profile == null) return null;
+  return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
 }
 
-/// State for the workflows list screen.
-class WorkflowsState {
-  const WorkflowsState({
-    this.workflows = const [],
-    this.isLoading = false,
-    this.error,
-  });
-
-  final List<WorkflowSummary> workflows;
-  final bool isLoading;
-  final String? error;
-}
+// ---------------------------------------------------------------------------
+// Workflows list
 
 /// Notifier for the workflows list.
-class WorkflowsNotifier extends AsyncNotifier<WorkflowsState> {
+class WorkflowsNotifier extends AsyncNotifier<List<WorkflowSummary>> {
   @override
-  Future<WorkflowsState> build() async {
-    return _fetchWorkflows();
-  }
+  Future<List<WorkflowSummary>> build() => _fetch();
 
-  Dio? get _dio {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return Dio(
-      BaseOptions(
-        baseUrl: profile.baseUrl,
-        headers: {'Authorization': 'Bearer ${profile.token}'},
-      ),
-    );
-  }
-
-  Future<WorkflowsState> _fetchWorkflows() async {
-    final dio = _dio;
-    if (dio == null) return const WorkflowsState();
-
-    try {
-      final response = await dio.get<List<dynamic>>('/api/workflows');
-      final data = response.data ?? [];
-      final workflows = data
-          .whereType<Map<String, dynamic>>()
-          .map(WorkflowSummary.fromJson)
-          .toList();
-      return WorkflowsState(workflows: workflows);
-    } catch (e) {
-      return WorkflowsState(error: e.toString());
-    }
+  Future<List<WorkflowSummary>> _fetch() async {
+    final client = _apiClient(ref);
+    if (client == null) return [];
+    final response = await client.workflows.listWorkflows();
+    return response.data?.toList() ?? [];
   }
 
   Future<void> refresh() async {
     state = const AsyncLoading();
-    state = AsyncData(await _fetchWorkflows());
+    state = await AsyncValue.guard(_fetch);
   }
 }
 
 /// Provider for [WorkflowsNotifier].
 final workflowsProvider =
-    AsyncNotifierProvider.autoDispose<WorkflowsNotifier, WorkflowsState>(
+    AsyncNotifierProvider.autoDispose<WorkflowsNotifier, List<WorkflowSummary>>(
   WorkflowsNotifier.new,
 );
 
 // ---------------------------------------------------------------------------
 // Workflow detail
 
-/// Simple data class for a workflow detail.
-class WorkflowDetail {
-  const WorkflowDetail({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.active,
-    this.webhookUrl,
-    this.runs = const [],
-  });
-
-  final String id;
-  final String name;
-  final String description;
-  final bool active;
-  final String? webhookUrl;
-  final List<WorkflowRun> runs;
-
-  factory WorkflowDetail.fromJson(Map<String, dynamic> json) {
-    return WorkflowDetail(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      description: json['description'] as String? ?? '',
-      active: json['active'] as bool? ?? false,
-      webhookUrl: json['webhook_url'] as String?,
-    );
-  }
-}
-
-/// Simple data class for a workflow run.
-class WorkflowRun {
-  const WorkflowRun({
-    required this.id,
-    required this.status,
-    required this.startedAt,
-  });
-
-  final String id;
-  final String status;
-  final String startedAt;
-
-  factory WorkflowRun.fromJson(Map<String, dynamic> json) {
-    return WorkflowRun(
-      id: json['id'] as String? ?? '',
-      status: json['status'] as String? ?? '',
-      startedAt: json['started_at'] as String? ?? '',
-    );
-  }
-}
-
-/// State for the workflow detail screen.
+/// Combined detail + runs state.
 class WorkflowDetailState {
   const WorkflowDetailState({
-    this.detail,
-    this.runs = const [],
-    this.isLoading = false,
-    this.error,
+    required this.detail,
+    required this.runs,
   });
 
-  final WorkflowDetail? detail;
-  final List<WorkflowRun> runs;
-  final bool isLoading;
-  final String? error;
+  final WorkflowDetail detail;
+  final List<WorkflowRunSummary> runs;
 }
 
-/// Notifier for a single workflow detail.
-class WorkflowDetailNotifier extends AsyncNotifier<WorkflowDetailState> {
+/// Notifier for a single workflow detail (detail + recent runs).
+class WorkflowDetailNotifier
+    extends AsyncNotifier<WorkflowDetailState> {
   WorkflowDetailNotifier(this._workflowId);
 
   final String _workflowId;
 
   @override
-  Future<WorkflowDetailState> build() async {
-    return _fetchDetail(_workflowId);
-  }
+  Future<WorkflowDetailState> build() => _fetch();
 
-  Dio? get _dio {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return Dio(
-      BaseOptions(
-        baseUrl: profile.baseUrl,
-        headers: {'Authorization': 'Bearer ${profile.token}'},
-      ),
-    );
-  }
+  Future<WorkflowDetailState> _fetch() async {
+    final client = _apiClient(ref);
+    if (client == null) throw Exception('Not connected');
+    final api = client.workflows;
 
-  Future<WorkflowDetailState> _fetchDetail(String workflowId) async {
-    final dio = _dio;
-    if (dio == null) return const WorkflowDetailState();
+    final detailRes = await api.getWorkflow(id: _workflowId);
+    final detail = detailRes.data!;
 
+    List<WorkflowRunSummary> runs = [];
     try {
-      final detailResponse =
-          await dio.get<Map<String, dynamic>>('/api/workflows/$workflowId');
-      final detail = WorkflowDetail.fromJson(detailResponse.data!);
-
-      List<WorkflowRun> runs = [];
-      try {
-        final runsResponse = await dio
-            .get<List<dynamic>>('/api/workflows/$workflowId/runs');
-        runs = (runsResponse.data ?? [])
-            .whereType<Map<String, dynamic>>()
-            .map(WorkflowRun.fromJson)
-            .toList();
-      } catch (_) {
-        // Runs endpoint may not exist — ignore.
-      }
-
-      return WorkflowDetailState(detail: detail, runs: runs);
-    } catch (e) {
-      return WorkflowDetailState(error: e.toString());
+      final runsRes = await api.listWorkflowRuns(id: _workflowId);
+      runs = runsRes.data?.toList() ?? [];
+    } catch (_) {
+      // Runs are best-effort.
     }
+
+    return WorkflowDetailState(detail: detail, runs: runs);
   }
 
   Future<void> refresh() async {
     state = const AsyncLoading();
-    state = AsyncData(await _fetchDetail(_workflowId));
+    state = await AsyncValue.guard(_fetch);
   }
 }
 

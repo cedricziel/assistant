@@ -1,3 +1,4 @@
+import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,9 +17,7 @@ class WorkflowDetailScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          detailAsync.value?.detail?.name ?? 'Workflow',
-        ),
+        title: Text(detailAsync.value?.detail.name ?? 'Workflow'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/workflows'),
@@ -38,34 +37,18 @@ class WorkflowDetailScreen extends ConsumerWidget {
           onRetry: () =>
               ref.read(workflowDetailProvider(workflowId).notifier).refresh(),
         ),
-        data: (state) {
-          if (state.error != null) {
-            return _ErrorView(
-              error: state.error!,
-              onRetry: () => ref
-                  .read(workflowDetailProvider(workflowId).notifier)
-                  .refresh(),
-            );
-          }
-          final detail = state.detail;
-          if (detail == null) {
-            return const Center(child: Text('Workflow not found'));
-          }
-          return _WorkflowDetailBody(detail: detail, runs: state.runs);
-        },
+        data: (state) =>
+            _WorkflowDetailBody(detail: state.detail, runs: state.runs),
       ),
     );
   }
 }
 
 class _WorkflowDetailBody extends StatelessWidget {
-  const _WorkflowDetailBody({
-    required this.detail,
-    required this.runs,
-  });
+  const _WorkflowDetailBody({required this.detail, required this.runs});
 
   final WorkflowDetail detail;
-  final List<WorkflowRun> runs;
+  final List<WorkflowRunSummary> runs;
 
   @override
   Widget build(BuildContext context) {
@@ -123,17 +106,6 @@ class _WorkflowDetailBody extends StatelessWidget {
                     style: const TextStyle(color: Colors.black54),
                   ),
                 ],
-                if (detail.webhookUrl != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Webhook: ${detail.webhookUrl}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: Colors.black54,
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
@@ -168,12 +140,13 @@ class _WorkflowDetailBody extends StatelessWidget {
 class _RunTile extends StatelessWidget {
   const _RunTile({required this.run});
 
-  final WorkflowRun run;
+  final WorkflowRunSummary run;
 
   @override
   Widget build(BuildContext context) {
-    final isSuccess = run.status == 'completed' || run.status == 'success';
-    final isError = run.status == 'failed' || run.status == 'error';
+    final status = run.status;
+    final isSuccess = status == 'completed' || status == 'success';
+    final isError = status == 'failed' || status == 'error';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 4),
@@ -191,11 +164,11 @@ class _RunTile extends StatelessWidget {
                   : Colors.orange.shade600,
         ),
         title: Text(
-          'Run ${run.id.length > 8 ? run.id.substring(0, 8) : run.id}...',
+          'Run ${run.id.length > 8 ? run.id.substring(0, 8) : run.id}…',
           style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
         ),
         subtitle: Text(
-          run.startedAt,
+          run.startedAt.toIso8601String(),
           style: const TextStyle(fontSize: 11, color: Colors.black54),
         ),
         trailing: Container(
@@ -216,7 +189,7 @@ class _RunTile extends StatelessWidget {
             ),
           ),
           child: Text(
-            run.status,
+            status,
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w600,
