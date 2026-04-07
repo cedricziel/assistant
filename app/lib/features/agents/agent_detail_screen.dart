@@ -71,14 +71,20 @@ class _AgentDetailBody extends StatelessWidget {
     String version = '';
     String url = '';
 
-    if (card != null) {
-      final raw = card.value;
-      if (raw is Map) {
-        name = raw['name']?.toString() ?? 'Agent';
-        description = raw['description']?.toString() ?? '';
-        version = raw['version']?.toString() ?? '';
-        url = raw['url']?.toString() ?? '';
+    try {
+      if (card != null) {
+        final raw = card.value;
+        if (raw is Map) {
+          name = raw['name']?.toString() ?? agent.id;
+          description = raw['description']?.toString() ?? '';
+          version = raw['version']?.toString() ?? '';
+          url = raw['url']?.toString() ?? '';
+        }
+      } else {
+        name = agent.id;
       }
+    } catch (_) {
+      name = agent.id;
     }
 
     return ListView(
