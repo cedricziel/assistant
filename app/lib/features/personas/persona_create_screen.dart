@@ -65,6 +65,12 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
       // Invalidate personas list so it reloads.
       ref.invalidate(personasProvider);
       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Persona "$personaName" created'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
         context.go('/contexts/${_idController.text.trim()}');
       }
     } catch (e) {
