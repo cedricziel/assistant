@@ -152,7 +152,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
             ),
 
-      body: Row(
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Row(
         children: [
           // Conversation list sidebar (wide screens only).
           if (isWide)
@@ -265,6 +267,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
         ],
       ),
+      ),  // GestureDetector
     );
   }
 }
