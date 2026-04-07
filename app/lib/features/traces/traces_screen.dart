@@ -177,9 +177,15 @@ class _SpanDetail extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       child: detailAsync.when(
-        loading: () => const Padding(
-          padding: EdgeInsets.all(8),
-          child: Center(child: CircularProgressIndicator()),
+        loading: () => const SizedBox(
+          height: 64,
+          child: Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
         ),
         error: (e, _) => Text(
           'Failed to load spans: $e',
