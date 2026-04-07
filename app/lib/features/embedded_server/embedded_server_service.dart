@@ -98,8 +98,8 @@ class EmbeddedServerService {
     );
 
     // Drain stdout/stderr to prevent the pipe buffer from blocking the child.
-    _process!.stdout.drain<List<int>>();
-    _process!.stderr.drain<List<int>>();
+    _process!.stdout.drain<void>();
+    _process!.stderr.drain<void>();
 
     // Poll /health with exponential backoff, capped at 5 s per attempt.
     final baseUrl = 'http://127.0.0.1:$port';
@@ -116,7 +116,7 @@ class EmbeddedServerService {
           final request =
               await client.getUrl(Uri.parse('$baseUrl/health'));
           final response = await request.close();
-          await response.drain<List<int>>();
+          await response.drain<void>();
           if (response.statusCode == 200) {
             yield EmbeddedServerReady(baseUrl: baseUrl, token: token);
             return;
