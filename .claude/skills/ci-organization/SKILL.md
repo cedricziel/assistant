@@ -22,19 +22,10 @@ Jobs run in parallel. Order of gates (fast → slow):
 2. **check** — `cargo check --workspace --all-features`. Requires `protobuf-compiler ffmpeg`.
 3. **lint** — `cargo clippy --workspace -- -D warnings` + separate `signal` feature clippy.
 4. **test** — `cargo test --workspace`.
-5. **visual-regression** — Playwright screenshot tests. `continue-on-error: true`.
+5. **visual-regression** — Playwright screenshot tests against the Flutter SPA served by the embedded binary. Requires Flutter SDK (`subosito/flutter-action@v2`) and `flutter pub get` before the cargo build step. `continue-on-error: true`.
 6. **integration** — Smoke tests against live Ollama. `continue-on-error: true`, `timeout-minutes: 45`.
 
 ## Principles
-
-### Always required before any build
-
-```yaml
-- name: Vendor JS dependencies
-  run: make vendor
-```
-
-Every job that compiles Rust must run `make vendor` first (web-ui templates are embedded).
 
 ### Cargo cache key
 

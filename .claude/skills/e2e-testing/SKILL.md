@@ -1,18 +1,22 @@
 ---
 name: e2e-testing
 description: >
-  Playwright visual regression testing for the assistant web UI. Covers
+  Playwright visual regression testing for the assistant Flutter SPA. Covers
   test structure, screenshot baselines, cross-platform diff tolerance,
   CI workflow with inline diff comments, and baseline management.
-  Use when adding pages, changing layouts, or debugging visual test failures.
+  Use when adding screens, changing layouts, or debugging visual test failures.
 license: MIT
 ---
 
 # E2E Testing (Playwright Visual Regression)
 
-The assistant web UI uses Playwright for screenshot-based visual regression
-testing. Every page is captured at three viewport sizes (desktop, tablet,
-mobile) and compared against committed baselines.
+The assistant frontend is a Flutter web app embedded in the Rust binary.
+Playwright captures screenshots of the compiled Flutter SPA at three viewport
+sizes (desktop, tablet, mobile) and compares them against committed baselines.
+
+The binary serves the Flutter web build at `/`. The `webServer` config in
+`playwright.config.ts` builds the binary (which embeds `flutter build web`)
+and starts it with `--auth-token test-token --listen 127.0.0.1:8787`.
 
 ## Directory Layout
 
@@ -148,14 +152,15 @@ Three projects in `playwright.config.ts` match the app's responsive breakpoints:
 
 The `visual-regression` job in `.github/workflows/ci.yml`:
 
-1. Builds the web-ui binary
-2. Installs Playwright + Chromium
-3. Runs `npx playwright test`
-4. Uploads the HTML report as an artifact (always)
-5. On failure + PR: uploads diff images as artifact
-6. On failure + PR: pushes diff PNGs to an orphan `visual-diffs/pr-N` branch
+1. Installs Flutter SDK (`subosito/flutter-action@v2`, flutter 3.x stable) and runs `flutter pub get` in `app/`
+2. Builds the unified assistant binary (`cargo build -p assistant-cli`), which embeds the Flutter web app via `build.rs`
+3. Installs Playwright + Chromium
+4. Runs `npx playwright test`
+5. Uploads the HTML report as an artifact (always)
+6. On failure + PR: uploads diff images as artifact
+7. On failure + PR: pushes diff PNGs to an orphan `visual-diffs/pr-N` branch
    and posts an inline comment with embedded image comparisons
-7. On PR close: a cleanup job deletes the `visual-diffs/pr-N` branch
+8. On PR close: a cleanup job deletes the `visual-diffs/pr-N` branch
 
 ### Reading Diff Comments
 
@@ -191,21 +196,16 @@ Font rendering differences. The 3% tolerance should absorb this. If not:
 2. For font-only diffs: consider bumping tolerance for that specific test
 3. For structural diffs: there's a real bug — investigate
 
-### Tests fail after adding `app_css_url` to a template
-
-The CSS is identical whether inline or external. If tests fail, ensure:
-
-1. The `static_assets` router is mounted _before_ the auth middleware
-2. The fingerprinted URL is being served correctly (check `/static/app.css`)
-
 ### Server doesn't start in time
 
-The `webServer.timeout` is 120 seconds (enough for a fresh `cargo build`).
+The `webServer.timeout` is 120 seconds. The first build is slow because
+`cargo build` triggers `flutter build web --release` (via `build.rs`).
 If it still times out:
 
-1. Pre-build: `cargo build -p assistant-web-ui` before running tests
-2. Check if port 8787 is already in use
-3. Set `E2E_BASE_URL` to point to a manually started server
+1. Pre-build manually: `cargo build -p assistant-cli` from the repo root
+2. Ensure Flutter SDK is on `$PATH` (run `flutter doctor`)
+3. Check if port 8787 is already in use
+4. Set `E2E_BASE_URL` to point to a manually started server
 
 ### Screenshot dimensions changed
 

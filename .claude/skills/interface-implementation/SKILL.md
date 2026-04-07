@@ -210,11 +210,10 @@ The orchestrator's `prepare_history()` saves the user message and the
 ReAct loop saves all assistant / tool messages. Interfaces MUST NOT
 duplicate this by saving user or assistant messages themselves.
 
-For web interfaces where the user expects to see their message
-immediately, render the HTML from the form data in memory — do not
-round-trip through the database. Use a shared pending-message map
-(`Arc<RwLock<HashMap<Uuid, String>>>`) to pass user text from the
-message-send endpoint to the streaming endpoint.
+For the Flutter web frontend, the client optimistically renders the
+user's message immediately in the UI (before the SSE response arrives).
+The server does not need to echo the user message back — the SSE stream
+delivers only assistant tokens.
 
 ---
 
@@ -233,6 +232,6 @@ to `Interface::Cli`.
 - **Slack** — `crates/interface-slack/src/runner.rs` (extension tools mode)
 - **Mattermost** — `crates/interface-mattermost/src/runner.rs` (extension tools)
 - **Signal** — `crates/interface-signal/src/runner.rs` (streaming mode)
-- **Web UI** — `crates/web-ui/src/main.rs` + `crates/web-ui/src/chat/mod.rs` (streaming mode, SSE)
+- **Web UI / Flutter** — `crates/web-ui/src/api/chat.rs` (SSE streaming endpoint consumed by the Flutter app at `app/lib/features/chat/`)
 
 All five go through `orchestrator.submit_turn()`.
