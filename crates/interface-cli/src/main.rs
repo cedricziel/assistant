@@ -87,6 +87,12 @@ enum Command {
     #[cfg(feature = "matrix")]
     #[command(about = "Start the Matrix bot (requires [matrix] in config.toml)")]
     Matrix,
+    /// Run only the Signal interface (no interactive REPL).
+    ///
+    /// Requires a running signal-cli-rest-api daemon and [signal] section in
+    /// ~/.assistant/config.toml.
+    #[cfg(feature = "signal")]
+    Signal,
     /// Manage Persona contexts.
     Persona {
         #[command(subcommand)]
@@ -1272,10 +1278,16 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "nextcloud"))]
     let is_nextcloud_only = false;
 
+    #[cfg(feature = "signal")]
+    let is_signal_only = matches!(cli.command, Some(Command::Signal));
+    #[cfg(not(feature = "signal"))]
+    let is_signal_only = false;
+
     let confirmation_cb: Arc<dyn ConfirmationCallback> = if is_mcp
         || is_slack_only
         || is_mattermost_only
         || is_nextcloud_only
+        || is_signal_only
         || orchestrator_no_repl
     {
         Arc::new(assistant_runtime::bootstrap::AutoDenyConfirmation {
@@ -1556,6 +1568,33 @@ async fn main() -> Result<()> {
         });
 
         info!("Starting Matrix-only mode");
+        return iface.run().await;
+    }
+
+    // 9d. Signal-only mode.
+    #[cfg(feature = "signal")]
+    if let Some(Command::Signal) = &cli.command {
+        use assistant_interface_signal::SignalInterface;
+        let sig_cfg = bs.config.signal.clone().context(
+            "Signal is not configured. Add a [signal] section to ~/.assistant/config.toml",
+        )?;
+        let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+
+        let worker_orch = bs.orchestrator.clone();
+        let _worker = tokio::spawn(async move {
+            worker_orch
+                .run_worker_filtered("signal-worker", Some("Signal"))
+                .await;
+        });
+
+        let sched_orch = bs.orchestrator.clone();
+        let _sched_worker = tokio::spawn(async move {
+            sched_orch
+                .run_worker_filtered("scheduler-worker", Some("Scheduler"))
+                .await;
+        });
+
+        info!("Starting Signal-only mode");
         return iface.run().await;
     }
 
