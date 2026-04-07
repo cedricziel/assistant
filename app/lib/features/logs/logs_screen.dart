@@ -119,63 +119,76 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
   }
 }
 
-/// A single log entry row.
-class _LogRow extends StatelessWidget {
+/// A single log entry row. Tapping expands long messages.
+class _LogRow extends StatefulWidget {
   const _LogRow({required this.entry});
 
   final LogEntryResponse entry;
 
   @override
+  State<_LogRow> createState() => _LogRowState();
+}
+
+class _LogRowState extends State<_LogRow> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Timestamp
-          SizedBox(
-            width: 68,
-            child: Text(
-              _formatTime(entry.timestamp),
-              style: const TextStyle(
-                fontSize: 11,
-                color: Colors.black54,
-                fontFamily: 'monospace',
+    final entry = widget.entry;
+    return InkWell(
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Timestamp
+            SizedBox(
+              width: 68,
+              child: Text(
+                _formatTime(entry.timestamp),
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Colors.black54,
+                  fontFamily: 'monospace',
+                ),
               ),
             ),
-          ),
 
-          const SizedBox(width: 8),
+            const SizedBox(width: 8),
 
-          // Severity chip
-          _SeverityChip(severity: entry.severity),
+            // Severity chip
+            _SeverityChip(severity: entry.severity),
 
-          const SizedBox(width: 8),
+            const SizedBox(width: 8),
 
-          // Message + target
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  entry.message,
-                  style: const TextStyle(fontSize: 13),
-                ),
-                if (entry.target.isNotEmpty) ...[
-                  const SizedBox(height: 2),
+            // Message + target
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    entry.target,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.black38,
-                      fontFamily: 'monospace',
-                    ),
+                    entry.message,
+                    style: const TextStyle(fontSize: 13),
+                    maxLines: _expanded ? null : 2,
+                    overflow: _expanded ? null : TextOverflow.ellipsis,
                   ),
+                  if (entry.target.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      entry.target,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.black38,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
