@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.82](https://github.com/cedricziel/assistant/compare/v0.1.81...v0.1.82) (2026-04-07)
+
+
+### Bug Fixes
+
+* **app:** sync Flutter app version with release-please and Rust workspace ([#388](https://github.com/cedricziel/assistant/issues/388)) ([ad1f91d](https://github.com/cedricziel/assistant/commit/ad1f91d16bc993bfdc34de2c9408e446b2bff15d))
+
 ## [0.1.81](https://github.com/cedricziel/assistant/compare/v0.1.80...v0.1.81) (2026-04-07)
 
 
