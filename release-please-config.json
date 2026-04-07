@@ -14,6 +14,11 @@
           "type": "toml",
           "path": "/Cargo.toml",
           "jsonpath": "$.workspace.package.version"
+        },
+        {
+          "type": "yaml",
+          "path": "app/pubspec.yaml",
+          "jsonpath": "$.version"
         }
       ]
     }
