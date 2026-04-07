@@ -101,12 +101,51 @@ class _PersonaFileEditorScreenState
       ),
     );
 
-    return Scaffold(
+    Future<bool> confirmDiscard() async {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Discard changes?'),
+          content: const Text('You have unsaved changes. Leave without saving?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Keep editing'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Discard'),
+            ),
+          ],
+        ),
+      );
+      return confirm ?? false;
+    }
+
+    return PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final leave = await confirmDiscard();
+        if (leave && context.mounted) {
+          context.go('/contexts/${widget.personaId}');
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(widget.filename),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/contexts/${widget.personaId}'),
+          onPressed: () async {
+            if (_dirty) {
+              final leave = await confirmDiscard();
+              if (leave && context.mounted) {
+                context.go('/contexts/${widget.personaId}');
+              }
+            } else {
+              context.go('/contexts/${widget.personaId}');
+            }
+          },
         ),
         actions: [
           if (_dirty)
@@ -200,6 +239,7 @@ class _PersonaFileEditorScreenState
           );
         },
       ),
-    );
+    ),  // Scaffold
+    );  // PopScope
   }
 }
