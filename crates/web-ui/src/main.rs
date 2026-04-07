@@ -1,16 +1,9 @@
 mod a2a;
-mod analytics;
 pub mod api;
 pub mod auth;
 pub(crate) mod backends;
-pub mod common;
-mod contexts;
 mod flutter_assets;
 mod openapi;
-mod pwa;
-pub(crate) mod static_assets;
-mod webhooks;
-mod workflows;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -65,7 +58,6 @@ use auth::AuthConfig;
 
 use a2a::agent_store::AgentStore;
 use a2a::handlers::{build_default_agent_card, A2AState};
-use a2a::pages::AgentPagesState;
 use a2a::task_store::TaskStore;
 
 #[derive(Parser, Debug)]
@@ -487,6 +479,8 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     // -- Persona-scoped A2A profile store (filesystem-backed) --
     let agent_store = AgentStore::for_persona(&selected_agent)?;
+    // Clone for the agents REST API — AgentStore is Clone (wraps a PathBuf).
+    let agents_api_store = agent_store.clone();
 
     // -- A2A protocol state --
     let base_url = format!("http://{}", args.listen);
@@ -506,17 +500,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_card,
     };
 
-    let agent_pages_state = AgentPagesState {
-        agent_store,
-        base_url: base_url.clone(),
-    };
-
-    let webhook_pages_state = webhooks::pages::WebhookPagesState {
-        pool: storage.pool.clone(),
-        agent_id: state.agent_id.clone(),
-    };
-
-    let workflow_pages_state = workflows::pages::WorkflowPagesState {
+    let workflows_api_state = api::workflows::WorkflowsApiState {
         pool: storage.pool.clone(),
         agent_id: state.agent_id.clone(),
     };
@@ -541,45 +525,52 @@ async fn run_with_args(args: Args) -> Result<()> {
         registry: state.registry.clone(),
     };
 
+    let webhooks_api_state = api::webhooks::WebhooksApiState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
+    };
+
+    let agents_api_state = api::agents::AgentsApiState {
+        agent_store: agents_api_store,
+    };
+
+    let analytics_api_state = api::analytics::AnalyticsApiState {
+        pool: storage.pool.clone(),
+        agent_id: state.agent_id.clone(),
+    };
+
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
+        .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
         // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
         .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))
         // Public workflow webhook trigger ingress.
-        .merge(workflows::workflow_public_router().with_state(workflow_pages_state.clone()))
+        .merge(api::workflows::workflow_public_router().with_state(workflows_api_state.clone()))
         // A2A agent card is public per spec — callers need it to discover auth.
-        .merge(a2a::public_router().with_state(a2a_state.clone()))
-        // PWA assets must be public so the browser can fetch them before auth.
-        .merge(pwa::pwa_router())
-        // Fingerprinted static assets (CSS).
-        .merge(static_assets::static_router());
+        .merge(a2a::public_router().with_state(a2a_state.clone()));
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()
-        .merge(analytics::analytics_router())
-        .merge(contexts::contexts_router())
         .with_state(state)
         // A2A protocol routes (auth-protected endpoints only).
         .merge(a2a::protected_router().with_state(a2a_state))
-        // Agent management UI pages.
-        .merge(a2a::agent_pages_router().with_state(agent_pages_state))
-        // Webhook management UI pages.
-        .merge(webhooks::webhook_pages_router().with_state(webhook_pages_state))
-        // Workflow graph management pages + JSON API.
-        .merge(workflows::workflow_pages_router().with_state(workflow_pages_state))
-        // Conversation REST API.
-        .merge(api::api_router().with_state(api_state))
-        // Persona REST API (GET /api/personas, POST /api/personas/active).
-        .merge(api::personas::personas_router().with_state(persona_api_state))
-        // Traces REST API (GET /api/traces, GET /api/traces/{id}).
-        .merge(api::traces::traces_router().with_state(traces_api_state))
-        // Logs REST API (GET /api/logs).
-        .merge(api::logs::logs_router().with_state(logs_api_state))
-        // Skills REST API (GET /api/personas/{id}/skills).
-        .merge(api::skills::skills_router().with_state(skills_api_state))
+        // REST API — all page routes are now handled by the Flutter SPA fallback.
+        .nest(
+            "/api",
+            api::api_router()
+                .with_state(api_state)
+                .merge(api::personas::personas_router().with_state(persona_api_state))
+                .merge(api::traces::traces_router().with_state(traces_api_state))
+                .merge(api::logs::logs_router().with_state(logs_api_state))
+                .merge(api::skills::skills_router().with_state(skills_api_state))
+                .merge(api::webhooks::webhooks_api_router().with_state(webhooks_api_state))
+                .merge(api::agents::agents_api_router().with_state(agents_api_state))
+                .merge(api::analytics::analytics_api_router().with_state(analytics_api_state))
+                .merge(api::workflows::workflows_api_router().with_state(workflows_api_state)),
+        )
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,
         ))

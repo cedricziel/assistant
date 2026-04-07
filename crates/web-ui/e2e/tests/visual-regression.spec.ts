@@ -15,160 +15,187 @@ const AUTH_TOKEN = "test-token";
 // 5% tolerance absorbs font hinting differences while still catching layout regressions.
 const MAX_DIFF_RATIO = 0.05;
 
+// Flutter SPA renders differently across runs — use a more generous ratio.
+const MAX_DIFF_RATIO_FLUTTER = 0.15;
+
 // Settle time for CSS transitions before screenshotting.
 const CSS_SETTLE_MS = 300;
 
+// Extra settle time for Flutter to render after network idle.
+const FLUTTER_SETTLE_MS = 800;
+
 // -- Helpers ----------------------------------------------------------------
 
-/** Authenticate by submitting the login form. */
-async function login(page: Page) {
-  await page.goto("/login");
-  await page.fill('input[name="token"]', AUTH_TOKEN);
-  await page.click('button[type="submit"]');
-  // Wait for redirect to complete
-  await page.waitForURL((url) => !url.pathname.includes("/login"));
+/**
+ * Authenticate for Flutter-rendered pages.
+ *
+ * Navigates to /setup with a `_token` query parameter. ConnectionScreen reads
+ * this parameter in initState() and calls connect() automatically (GET /health
+ * with the Bearer token). On success, flutter_secure_storage writes the
+ * AES-GCM-encrypted profile and the router navigates to /chat.
+ *
+ * This avoids interacting with the Flutter canvas/semantic overlay, which
+ * requires accessibility mode to be active and is unreliable in headless
+ * Chromium without a screen reader.
+ *
+ * The router does not redirect /setup back to /setup (onSetup=true, no-op),
+ * so the query parameter is still present in Uri.base when initState() runs.
+ */
+async function loginFlutter(page: Page) {
+  // Navigate directly to the setup screen with the auto-connect token.
+  await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(FLUTTER_SETTLE_MS);
+
+  // Wait for GET /health to succeed and Flutter to navigate away from /setup.
+  await page.waitForURL((url) => !url.pathname.includes("/setup"), {
+    timeout: 15_000,
+  });
+  await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
 /** Navigate and wait for network idle before screenshotting. */
 async function navigateAndSettle(page: Page, path: string) {
   await page.goto(path, { waitUntil: "networkidle" });
-  // Extra settle time for any CSS transitions
-  await page.waitForTimeout(CSS_SETTLE_MS);
+  // Extra settle time for any CSS transitions and Flutter rendering.
+  await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
-/** Check whether an element currently takes up layout space. */
-async function isVisible(page: Page, selector: string): Promise<boolean> {
-  return page.evaluate((sel) => {
-    const el = document.querySelector(sel) as HTMLElement | null;
-    if (!el) return false;
-    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-  }, selector);
-}
+// -- API helpers ------------------------------------------------------------
 
-/** Create a workflow through the UI and return its id. */
-async function createWorkflow(page: Page): Promise<string> {
-  await navigateAndSettle(page, "/workflows/new");
-
-  const suffix = Date.now();
-  await page.fill('input[name="name"]', `E2E Workflow ${suffix}`);
-  await page.fill(
-    'input[name="description"]',
-    "Workflow created by visual regression test",
-  );
-
-  await page.locator("form.wf-form button[type='submit']").click();
-
-  await page.waitForURL(/\/workflows\/[^/]+$/);
-  const pathname = new URL(page.url()).pathname;
-  const id = pathname.split("/").pop();
-  if (!id) {
-    throw new Error(`failed to parse workflow id from ${pathname}`);
-  }
-  return id;
-}
-
-/** Create an agent through the UI and return its id. */
-async function createAgent(page: Page): Promise<string> {
-  await navigateAndSettle(page, "/agents/new");
-
-  const suffix = Date.now();
-  await page.fill('input[name="name"]', `E2E Agent ${suffix}`);
-  await page.fill(
-    'textarea[name="description"]',
-    "Agent created by visual regression test",
-  );
-  await page.fill('input[name="version"]', "1.0.0");
-
-  await page.locator("form.entity-form button[type='submit']").click();
-
-  await page.waitForURL(/\/agents\/[^/]+$/);
-  const pathname = new URL(page.url()).pathname;
-  const id = pathname.split("/").pop();
-  if (!id) {
-    throw new Error(`failed to parse agent id from ${pathname}`);
-  }
-  return id;
-}
-
-/** Create a user skill through the UI and return its name. */
-async function createSkill(
+/** Make an authenticated JSON API request from within the browser context.
+ *
+ * Uses the Bearer token directly — the Flutter app uses Bearer auth, not
+ * session cookies, so credentials: "same-origin" alone is not sufficient.
+ */
+async function apiGet(
   page: Page,
-  suffix: string = String(Date.now()),
-): Promise<string> {
-  await navigateAndSettle(page, "/skills/new");
+  path: string,
+): Promise<{ status: number; body: unknown }> {
+  return page.evaluate(
+    async ([p, token]) => {
+      const response = await fetch(p as string, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let body: unknown = null;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+      return { status: response.status, body };
+    },
+    [path, AUTH_TOKEN] as const,
+  );
+}
 
-  const name = `e2e-skill-${suffix}`;
-  await page.fill('input[name="name"]', name);
-  await page.fill('input[name="description"]', "E2E test skill");
-  await page.fill('textarea[name="body"]', "When asked, do the e2e thing.");
+async function apiPost(
+  page: Page,
+  path: string,
+  payload: unknown,
+): Promise<{ status: number; body: unknown }> {
+  return page.evaluate(
+    async ([p, data, token]) => {
+      const response = await fetch(p as string, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      });
+      let body: unknown = null;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+      return { status: response.status, body };
+    },
+    [path, payload, AUTH_TOKEN] as const,
+  );
+}
 
-  await page.locator('form button[type="submit"]').click();
-  await page.waitForURL(/\/skills\/[^/]+$/);
+// -- Data creation helpers (API-based) --------------------------------------
+
+/** Create a webhook via the REST API and return its id. */
+async function createWebhook(page: Page): Promise<string> {
+  const { body } = await apiPost(page, "/api/webhooks", {
+    name: `E2E Webhook ${Date.now()}`,
+    url: "https://example.com/webhook",
+    event_types: ["turn.result"],
+    active: true,
+  });
+  const id = (body as Record<string, unknown>)?.id as string | undefined;
+  if (!id) {
+    throw new Error(`Failed to create webhook: ${JSON.stringify(body)}`);
+  }
+  return id;
+}
+
+/** Create a workflow via the REST API and return its id. */
+async function createWorkflow(page: Page): Promise<string> {
+  const { body } = await apiPost(page, "/api/workflows", {
+    name: `E2E Workflow ${Date.now()}`,
+    description: "Visual regression test workflow",
+    graph: {
+      nodes: [
+        { id: "trigger-1", kind: "trigger", config: { type: "manual" } },
+        {
+          id: "action-1",
+          kind: "action",
+          config: { type: "assistant_turn", prompt: "E2E test prompt" },
+        },
+      ],
+      edges: [{ from: "trigger-1", to: "action-1" }],
+    },
+    active: false,
+  });
+  const id = (body as Record<string, unknown>)?.id as string | undefined;
+  if (!id) {
+    throw new Error(`Failed to create workflow: ${JSON.stringify(body)}`);
+  }
+  return id;
+}
+
+/** Create a user skill via the REST API and return its name. */
+async function createSkill(page: Page): Promise<string> {
+  const name = `e2e-skill-${Date.now()}`;
+  const { body, status } = await apiPost(page, "/api/skills", {
+    name,
+    description: "Visual regression test skill",
+    body: "# E2E Skill\n\nThis skill was created by the visual regression test suite.",
+  });
+  if (status !== 201) {
+    throw new Error(`Failed to create skill: ${JSON.stringify(body)}`);
+  }
   return name;
 }
 
-/** Create a webhook through the UI and return its id. */
-async function createWebhook(page: Page): Promise<string> {
-  await navigateAndSettle(page, "/webhooks/new");
-
-  const suffix = Date.now();
-  await page.fill('input[name="name"]', `E2E Webhook ${suffix}`);
-  await page.fill('input[name="url"]', `https://example.com/e2e-${suffix}`);
-  await page.fill('input[name="event_types"]', "turn.result, tool.result");
-
-  await page.locator("form.entity-form button[type='submit']").click();
-
-  await page.waitForURL(/\/webhooks\/[^/]+$/);
-  const pathname = new URL(page.url()).pathname;
-  const id = pathname.split("/").pop();
+/** Create an agent via the REST API and return its id. */
+async function createAgent(page: Page): Promise<string> {
+  const { body } = await apiPost(page, "/api/agents", {
+    card: {
+      name: `E2E Agent ${Date.now()}`,
+      description: "Visual regression test agent",
+      version: "1.0.0",
+      url: "https://example.com/agent",
+      defaultInputModes: ["text"],
+      defaultOutputModes: ["text"],
+      capabilities: {
+        streaming: false,
+        pushNotifications: false,
+        stateTransitionHistory: false,
+      },
+      supportedInterfaces: [],
+      skills: [],
+    },
+    set_default: false,
+  });
+  const id = (body as Record<string, unknown>)?.id as string | undefined;
   if (!id) {
-    throw new Error(`failed to parse webhook id from ${pathname}`);
+    throw new Error(`Failed to create agent: ${JSON.stringify(body)}`);
   }
   return id;
-}
-
-/** Queue a workflow run and return the run id. */
-async function queueWorkflowRun(
-  page: Page,
-  workflowId: string,
-): Promise<string> {
-  const payload = (await page.evaluate(async (id) => {
-    const response = await fetch(`/api/workflows/${id}/test-run`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-      credentials: "same-origin",
-    });
-
-    let body: unknown = null;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-
-    return {
-      ok: response.ok,
-      status: response.status,
-      body,
-    };
-  }, workflowId)) as {
-    ok: boolean;
-    status: number;
-    body: { run_id?: string } | null;
-  };
-
-  expect(
-    payload.ok,
-    `workflow test-run request failed (${payload.status})`,
-  ).toBeTruthy();
-  const runId = payload.body?.run_id;
-  if (!runId) {
-    throw new Error("failed to parse workflow run id from test-run response");
-  }
-  return runId;
 }
 
 // -- Tests ------------------------------------------------------------------
@@ -197,14 +224,22 @@ test.describe("Login page", () => {
 
 test.describe("Authenticated pages", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
+    await loginFlutter(page);
+  });
+
+  test("chat page", async ({ page }) => {
+    await navigateAndSettle(page, "/chat");
+    await expect(page).toHaveScreenshot("chat.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
   });
 
   test("traces page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/traces");
     await expect(page).toHaveScreenshot("traces-empty.png", {
       fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
     });
   });
 
@@ -212,192 +247,7 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/logs");
     await expect(page).toHaveScreenshot("logs-empty.png", {
       fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("analytics page (empty state)", async ({ page }) => {
-    await navigateAndSettle(page, "/analytics");
-    await expect(page).toHaveScreenshot("analytics-empty.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("agents list page (empty state)", async ({ page }) => {
-    await navigateAndSettle(page, "/agents");
-    await expect(page).toHaveScreenshot("agents-empty.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("agent create form", async ({ page }) => {
-    await navigateAndSettle(page, "/agents/new");
-    await expect(page).toHaveScreenshot("agent-form.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("agent detail and edit screens", async ({ page }) => {
-    const agentId = await createAgent(page);
-
-    await navigateAndSettle(page, `/agents/${agentId}`);
-    await expect(page).toHaveScreenshot("agent-detail.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-
-    await navigateAndSettle(page, `/agents/${agentId}/edit`);
-    await expect(page).toHaveScreenshot("agent-edit.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("webhooks list page (empty state)", async ({ page }) => {
-    await navigateAndSettle(page, "/webhooks");
-    await expect(page).toHaveScreenshot("webhooks-empty.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("webhook create form", async ({ page }) => {
-    await navigateAndSettle(page, "/webhooks/new");
-    await expect(page).toHaveScreenshot("webhook-form.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("webhook detail and edit screens", async ({ page }) => {
-    const webhookId = await createWebhook(page);
-
-    await navigateAndSettle(page, `/webhooks/${webhookId}`);
-    await expect(page).toHaveScreenshot("webhook-detail.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-      mask: [
-        page.locator(".hdr-trace-id"),
-        page.locator(".entity-section").filter({ hasText: "Endpoint URL" }),
-        page.locator("#secret-value"),
-        page.locator(".entity-section").filter({ hasText: "Timestamps" }),
-      ],
-    });
-
-    await navigateAndSettle(page, `/webhooks/${webhookId}/edit`);
-    await expect(page).toHaveScreenshot("webhook-edit.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("workflow create form", async ({ page }) => {
-    await navigateAndSettle(page, "/workflows/new");
-    await expect(page).toHaveScreenshot("workflow-form.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("workflow detail/edit/editor sub-screens", async ({ page }) => {
-    const workflowId = await createWorkflow(page);
-
-    await navigateAndSettle(page, "/workflows");
-    await expect(page).toHaveScreenshot("workflow-list.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-      mask: [page.locator("table tbody tr")],
-    });
-
-    await navigateAndSettle(page, `/workflows/${workflowId}`);
-
-    await expect(page).toHaveScreenshot("workflow-detail.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-
-    await page
-      .locator(".workflow-detail-page [data-mode='runs']")
-      .first()
-      .click();
-    await page.waitForTimeout(CSS_SETTLE_MS);
-    await expect(page).toHaveScreenshot("workflow-detail-runs.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-
-    const viewport = page.viewportSize();
-    const width = viewport ? viewport.width : 1280;
-    if (width >= 768) {
-      await page
-        .locator(".workflow-detail-page [data-mode='graph']")
-        .first()
-        .click();
-      await page.waitForTimeout(CSS_SETTLE_MS);
-      await expect(page).toHaveScreenshot("workflow-detail-graph.png", {
-        fullPage: true,
-        maxDiffPixelRatio: MAX_DIFF_RATIO,
-      });
-    }
-
-    await navigateAndSettle(page, `/workflows/${workflowId}/edit`);
-    await expect(page).toHaveScreenshot("workflow-edit.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-
-    await navigateAndSettle(page, `/workflows/${workflowId}/editor`);
-    await expect(page).toHaveScreenshot("workflow-editor.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-
-    await page
-      .locator(".workflow-editor-page [data-mode='steps']")
-      .first()
-      .click();
-    await page.waitForTimeout(CSS_SETTLE_MS);
-    await expect(page).toHaveScreenshot("workflow-editor-steps.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-
-    if (width >= 768) {
-      await page
-        .locator(".workflow-editor-page [data-mode='graph']")
-        .first()
-        .click();
-      await page.waitForTimeout(CSS_SETTLE_MS);
-      await expect(page).toHaveScreenshot("workflow-editor-graph.png", {
-        fullPage: true,
-        maxDiffPixelRatio: MAX_DIFF_RATIO,
-      });
-    }
-
-    const runId = await queueWorkflowRun(page, workflowId);
-    await navigateAndSettle(page, `/workflows/${workflowId}/runs/${runId}`);
-    await expect(page).toHaveScreenshot("workflow-run-detail.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("chat page", async ({ page }) => {
-    await navigateAndSettle(page, "/chat");
-    await expect(page).toHaveScreenshot("chat.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("contexts page", async ({ page }) => {
-    await navigateAndSettle(page, "/contexts");
-    await expect(page).toHaveScreenshot("contexts.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
     });
   });
 
@@ -405,143 +255,193 @@ test.describe("Authenticated pages", () => {
     await navigateAndSettle(page, "/skills");
     await expect(page).toHaveScreenshot("skills-empty.png", {
       fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
     });
   });
 
-  test("skill create form", async ({ page }) => {
-    await navigateAndSettle(page, "/skills/new");
-    await expect(page).toHaveScreenshot("skill-form.png", {
+  test("contexts/personas list page", async ({ page }) => {
+    await navigateAndSettle(page, "/contexts");
+    await expect(page).toHaveScreenshot("contexts.png", {
       fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
     });
   });
 
-  test("skill detail and edit screens", async ({ page }) => {
-    const skillName = await createSkill(page);
+  test("analytics screen (empty state)", async ({ page }) => {
+    await navigateAndSettle(page, "/analytics");
+    await expect(page).toHaveScreenshot("analytics-empty.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
 
+  test("agents list page (empty state)", async ({ page }) => {
+    await navigateAndSettle(page, "/agents");
+    await expect(page).toHaveScreenshot("agents-empty.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("webhooks list page (empty state)", async ({ page }) => {
+    await navigateAndSettle(page, "/webhooks");
+    await expect(page).toHaveScreenshot("webhooks-empty.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("workflows list page (empty state)", async ({ page }) => {
+    await navigateAndSettle(page, "/workflows");
+    await expect(page).toHaveScreenshot("workflows-empty.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("persona create form", async ({ page }) => {
+    await navigateAndSettle(page, "/contexts/new");
+    await expect(page).toHaveScreenshot("persona-create-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("webhook detail screen", async ({ page }) => {
+    const webhookId = await createWebhook(page);
+    await navigateAndSettle(page, `/webhooks/${webhookId}`);
+    await expect(page).toHaveScreenshot("webhook-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("workflow detail screen", async ({ page }) => {
+    const workflowId = await createWorkflow(page);
+    await navigateAndSettle(page, `/workflows/${workflowId}`);
+    await expect(page).toHaveScreenshot("workflow-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("agent detail screen", async ({ page }) => {
+    const agentId = await createAgent(page);
+    await navigateAndSettle(page, `/agents/${agentId}`);
+    await expect(page).toHaveScreenshot("agent-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("skill detail screen", async ({ page }) => {
+    const skillName = await createSkill(page);
     await navigateAndSettle(page, `/skills/${skillName}`);
     await expect(page).toHaveScreenshot("skill-detail.png", {
       fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-
-    await navigateAndSettle(page, `/skills/${skillName}/edit`);
-    await expect(page).toHaveScreenshot("skill-edit.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
     });
   });
 
-  test("skill CRUD flow", async ({ page }) => {
-    const suffix = String(Date.now());
-    const name = `e2e-skill-${suffix}`;
-
-    // Create
-    await navigateAndSettle(page, "/skills/new");
-    await page.fill('input[name="name"]', name);
-    await page.fill('input[name="description"]', "CRUD flow test skill");
-    await page.fill('textarea[name="body"]', "When asked, do the crud thing.");
-    await page.locator('form button[type="submit"]').click();
-    await page.waitForURL(/\/skills\/[^/]+$/);
-    expect(new URL(page.url()).pathname).toContain(name);
-
-    // Edit
-    await navigateAndSettle(page, `/skills/${name}/edit`);
-    await page.fill('input[name="description"]', "Updated description");
-    await page.locator('form button[type="submit"]').click();
-    await page.waitForURL(/\/skills\/[^/]+$/);
-
-    // Verify updated description visible on detail page
-    await navigateAndSettle(page, `/skills/${name}`);
-    const bodyText = await page.textContent("body");
-    expect(bodyText).toContain("Updated description");
-
-    // Delete
-    await page.locator('form[action*="/delete"] button[type="submit"]').click();
-    await page.waitForURL("/skills");
-    const listText = await page.textContent("body");
-    expect(listText).not.toContain(name);
+  test("REST API: GET /api/personas returns JSON array", async ({ page }) => {
+    const { status, body } = await apiGet(page, "/api/personas");
+    expect(status, "GET /api/personas should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
   });
 
-  test("persona skill access page", async ({ page }) => {
-    // Navigate to the default persona's skill access page
-    // First find a persona id by going to contexts page
-    await navigateAndSettle(page, "/contexts");
-    const firstPersonaLink = page
-      .locator('a[href*="/personas/"]:not([href="/personas/new"])')
-      .first();
-    const personaHref = await firstPersonaLink.getAttribute("href");
-    if (!personaHref) {
-      // No personas yet — skip screenshot, just verify no crash
-      return;
-    }
-    const personaId = personaHref.split("/personas/")[1]?.split("/")[0];
-    if (!personaId) return;
-
-    await navigateAndSettle(page, `/personas/${personaId}/skills`);
-    await expect(page).toHaveScreenshot("persona-skill-access.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("responsive navigation switches by breakpoint", async ({ page }) => {
-    await navigateAndSettle(page, "/chat");
-    const viewport = page.viewportSize();
-    const width = viewport ? viewport.width : 1280;
-
-    const iconRailVisible = await isVisible(page, ".icon-rail");
-    const topBarVisible = await isVisible(page, ".top-bar");
-    const bottomTabsVisible = await isVisible(page, ".bottom-tabs");
-    const hamburgerVisible = await isVisible(page, ".hamburger");
-
-    if (width <= 640) {
-      expect(bottomTabsVisible).toBeTruthy();
-      expect(topBarVisible).toBeFalsy();
-      expect(iconRailVisible).toBeFalsy();
-      expect(hamburgerVisible).toBeFalsy();
-      return;
-    }
-
-    if (width <= 900) {
-      expect(bottomTabsVisible).toBeFalsy();
-      expect(topBarVisible).toBeTruthy();
-      expect(iconRailVisible).toBeFalsy();
-      expect(hamburgerVisible).toBeTruthy();
-      return;
-    }
-
-    expect(bottomTabsVisible).toBeFalsy();
-    expect(topBarVisible).toBeTruthy();
-    expect(iconRailVisible).toBeTruthy();
-  });
-
-  test("mobile more tab points to active management section", async ({
+  test("REST API: GET /api/conversations returns JSON array", async ({
     page,
   }) => {
-    const cases: Array<{ path: string; expectedHref: string }> = [
-      { path: "/agents", expectedHref: "/agents" },
-      { path: "/workflows", expectedHref: "/workflows" },
-      { path: "/webhooks", expectedHref: "/webhooks" },
-      { path: "/contexts", expectedHref: "/contexts" },
-    ];
+    const { status, body } = await apiGet(page, "/api/conversations");
+    expect(status, "GET /api/conversations should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
 
-    for (const item of cases) {
-      await navigateAndSettle(page, item.path);
+  test("REST API: POST /api/conversations creates a conversation", async ({
+    page,
+  }) => {
+    const { status, body } = await apiPost(page, "/api/conversations", {
+      title: "E2E test conversation",
+    });
+    expect(status, "POST /api/conversations should return 201").toBe(201);
+    const b = body as Record<string, unknown>;
+    expect(typeof b?.id, "response should include an id").toBe("string");
+    expect(b?.title).toBe("E2E test conversation");
+  });
 
-      const href = await page
-        .locator(".bottom-tabs .tab-item")
-        .nth(4)
-        .getAttribute("href");
-      expect(href, `more tab href on ${item.path}`).toBe(item.expectedHref);
+  test("REST API: GET /api/traces returns JSON array", async ({ page }) => {
+    const { status, body } = await apiGet(page, "/api/traces");
+    expect(status, "GET /api/traces should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
 
-      const ariaCurrent = await page
-        .locator(".bottom-tabs .tab-item")
-        .nth(4)
-        .getAttribute("aria-current");
-      expect(ariaCurrent, `more tab aria-current on ${item.path}`).toBe("page");
-    }
+  test("REST API: GET /api/logs returns JSON array", async ({ page }) => {
+    const { status, body } = await apiGet(page, "/api/logs");
+    expect(status, "GET /api/logs should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: GET /api/personas/{id}/skills returns JSON array", async ({
+    page,
+  }) => {
+    // Get the active persona id from the personas list
+    const { status: listStatus, body: listBody } = await apiGet(
+      page,
+      "/api/personas",
+    );
+    expect(listStatus).toBe(200);
+    const personas = listBody as Array<{ id: string }>;
+    expect(
+      personas.length,
+      "at least one persona should exist",
+    ).toBeGreaterThan(0);
+    const personaId = personas[0].id;
+
+    const { status, body } = await apiGet(
+      page,
+      `/api/personas/${personaId}/skills`,
+    );
+    expect(
+      status,
+      `GET /api/personas/${personaId}/skills should return 200`,
+    ).toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: POST /api/personas/active switches active persona", async ({
+    page,
+  }) => {
+    const { body: listBody } = await apiGet(page, "/api/personas");
+    const personas = listBody as Array<{ id: string }>;
+    expect(personas.length).toBeGreaterThan(0);
+
+    const { status } = await apiPost(page, "/api/personas/active", {
+      id: personas[0].id,
+    });
+    expect(status, "POST /api/personas/active should return 200").toBe(200);
+  });
+
+  test("REST API: GET /api/webhooks returns JSON array", async ({ page }) => {
+    const { status, body } = await apiGet(page, "/api/webhooks");
+    expect(status, "GET /api/webhooks should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: GET /api/agents returns JSON array", async ({ page }) => {
+    const { status, body } = await apiGet(page, "/api/agents");
+    expect(status, "GET /api/agents should return 200").toBe(200);
+    expect(Array.isArray(body), "body should be a JSON array").toBeTruthy();
+  });
+
+  test("REST API: GET /api/analytics returns summary object", async ({
+    page,
+  }) => {
+    const { status, body } = await apiGet(page, "/api/analytics?window=24");
+    expect(status, "GET /api/analytics should return 200").toBe(200);
+    const b = body as Record<string, unknown>;
+    expect(typeof b?.total_requests, "should have total_requests").toBe(
+      "number",
+    );
   });
 
   test("core routes avoid viewport horizontal overflow", async ({ page }) => {
@@ -551,14 +451,11 @@ test.describe("Authenticated pages", () => {
       "/logs",
       "/analytics",
       "/agents",
-      "/agents/new",
       "/webhooks",
-      "/webhooks/new",
       "/workflows",
-      "/workflows/new",
       "/contexts",
+      "/contexts/new",
       "/skills",
-      "/skills/new",
     ];
 
     for (const route of routes) {

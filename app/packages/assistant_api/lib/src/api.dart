@@ -10,6 +10,8 @@ import 'package:assistant_api/src/auth/basic_auth.dart';
 import 'package:assistant_api/src/auth/bearer_auth.dart';
 import 'package:assistant_api/src/auth/oauth.dart';
 import 'package:assistant_api/src/api/agent_card_api.dart';
+import 'package:assistant_api/src/api/agents_api.dart';
+import 'package:assistant_api/src/api/analytics_api.dart';
 import 'package:assistant_api/src/api/conversations_api.dart';
 import 'package:assistant_api/src/api/logs_api.dart';
 import 'package:assistant_api/src/api/messages_api.dart';
@@ -18,6 +20,8 @@ import 'package:assistant_api/src/api/push_notifications_api.dart';
 import 'package:assistant_api/src/api/skills_api.dart';
 import 'package:assistant_api/src/api/tasks_api.dart';
 import 'package:assistant_api/src/api/traces_api.dart';
+import 'package:assistant_api/src/api/webhooks_api.dart';
+import 'package:assistant_api/src/api/workflows_api.dart';
 
 class AssistantApi {
   static const String basePath = r'http://localhost';
@@ -79,6 +83,18 @@ class AssistantApi {
     return AgentCardApi(dio, serializers);
   }
 
+  /// Get AgentsApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  AgentsApi getAgentsApi() {
+    return AgentsApi(dio, serializers);
+  }
+
+  /// Get AnalyticsApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  AnalyticsApi getAnalyticsApi() {
+    return AnalyticsApi(dio, serializers);
+  }
+
   /// Get ConversationsApi instance, base route and serializer can be overridden by a given but be careful,
   /// by doing that all interceptors will not be executed
   ConversationsApi getConversationsApi() {
@@ -125,5 +141,17 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   TracesApi getTracesApi() {
     return TracesApi(dio, serializers);
+  }
+
+  /// Get WebhooksApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  WebhooksApi getWebhooksApi() {
+    return WebhooksApi(dio, serializers);
+  }
+
+  /// Get WorkflowsApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  WorkflowsApi getWorkflowsApi() {
+    return WorkflowsApi(dio, serializers);
   }
 }

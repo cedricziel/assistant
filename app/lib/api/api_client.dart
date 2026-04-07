@@ -39,6 +39,10 @@ class ApiClient {
   SkillsApi get skills => _generatedApi.getSkillsApi();
   LogsApi get logs => _generatedApi.getLogsApi();
   TracesApi get traces => _generatedApi.getTracesApi();
+  WebhooksApi get webhooks => _generatedApi.getWebhooksApi();
+  AgentsApi get agents => _generatedApi.getAgentsApi();
+  AnalyticsApi get analytics => _generatedApi.getAnalyticsApi();
+  WorkflowsApi get workflows => _generatedApi.getWorkflowsApi();
 
   /// Stream assistant tokens for a conversation message.
   ///

@@ -75,6 +75,7 @@ class _SkillRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
+      onTap: () => context.go('/skills/${skill.name}'),
       leading: CircleAvatar(
         backgroundColor:
             skill.enabled ? Colors.green.shade100 : Colors.grey.shade200,
