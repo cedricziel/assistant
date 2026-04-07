@@ -10,11 +10,28 @@ import 'traces_provider.dart';
 ///
 /// Each row shows timestamp, persona, duration, and status.
 /// Expanding a row reveals the span breakdown.
-class TracesScreen extends ConsumerWidget {
+class TracesScreen extends ConsumerStatefulWidget {
   const TracesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TracesScreen> createState() => _TracesScreenState();
+}
+
+class _TracesScreenState extends ConsumerState<TracesScreen> {
+  final _expandedIds = <String>{};
+
+  void _toggle(String traceId) {
+    setState(() {
+      if (_expandedIds.contains(traceId)) {
+        _expandedIds.remove(traceId);
+      } else {
+        _expandedIds.add(traceId);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final tracesAsync = ref.watch(tracesProvider);
 
     return Scaffold(
@@ -50,7 +67,12 @@ class TracesScreen extends ConsumerWidget {
           return ListView.builder(
             itemCount: state.traces.length,
             itemBuilder: (context, index) {
-              return _TraceRow(trace: state.traces[index]);
+              final trace = state.traces[index];
+              return _TraceRow(
+                trace: trace,
+                expanded: _expandedIds.contains(trace.traceId),
+                onToggle: () => _toggle(trace.traceId),
+              );
             },
           );
         },
@@ -60,21 +82,19 @@ class TracesScreen extends ConsumerWidget {
 }
 
 /// Expandable row for a single trace summary.
-class _TraceRow extends ConsumerStatefulWidget {
-  const _TraceRow({required this.trace});
+class _TraceRow extends StatelessWidget {
+  const _TraceRow({
+    required this.trace,
+    required this.expanded,
+    required this.onToggle,
+  });
 
   final TraceSummaryResponse trace;
-
-  @override
-  ConsumerState<_TraceRow> createState() => _TraceRowState();
-}
-
-class _TraceRowState extends ConsumerState<_TraceRow> {
-  bool _expanded = false;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
-    final trace = widget.trace;
     final isError = trace.status == 'error';
 
     return Card(
@@ -84,7 +104,7 @@ class _TraceRowState extends ConsumerState<_TraceRow> {
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(8),
-            onTap: () => setState(() => _expanded = !_expanded),
+            onTap: onToggle,
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -133,7 +153,7 @@ class _TraceRowState extends ConsumerState<_TraceRow> {
 
                   // Expand chevron
                   Icon(
-                    _expanded
+                    expanded
                         ? Icons.keyboard_arrow_up
                         : Icons.keyboard_arrow_down,
                     size: 20,
@@ -145,7 +165,7 @@ class _TraceRowState extends ConsumerState<_TraceRow> {
           ),
 
           // Expandable span detail
-          if (_expanded) _SpanDetail(traceId: trace.traceId),
+          if (expanded) _SpanDetail(traceId: trace.traceId),
         ],
       ),
     );
