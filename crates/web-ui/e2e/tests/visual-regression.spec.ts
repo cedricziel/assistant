@@ -26,46 +26,29 @@ const FLUTTER_SETTLE_MS = 800;
 
 // -- Helpers ----------------------------------------------------------------
 
-/** Authenticate by submitting the HTML login form. */
-async function login(page: Page) {
-  await page.goto("/login");
-  await page.fill('input[name="token"]', AUTH_TOKEN);
-  await page.click('button[type="submit"]');
-  // Wait for redirect to complete
-  await page.waitForURL((url) => !url.pathname.includes("/login"));
-}
-
 /**
  * Authenticate for Flutter-rendered pages.
  *
- * Navigates to the root SPA, which redirects unauthenticated users to /setup
- * (the ConnectionScreen). Fills the token field and clicks Connect, which calls
- * GET /health with the Bearer token and writes the profile to
- * flutter_secure_storage (AES-GCM encrypted in localStorage). After the health
- * check succeeds the Flutter router navigates to /chat automatically.
+ * Navigates to /setup with a `_token` query parameter. ConnectionScreen reads
+ * this parameter in initState() and calls connect() automatically (GET /health
+ * with the Bearer token). On success, flutter_secure_storage writes the
+ * AES-GCM-encrypted profile and the router navigates to /chat.
  *
- * NOTE: flutter_secure_storage ≥ 9 on web uses SubtleCrypto AES-GCM with a
- * per-session key stored in localStorage. Injecting a plaintext value directly
- * into localStorage will never be readable by _storage.read(). The only correct
- * approach is to use the connection form so the library handles encryption.
+ * This avoids interacting with the Flutter canvas/semantic overlay, which
+ * requires accessibility mode to be active and is unreliable in headless
+ * Chromium without a screen reader.
+ *
+ * The router does not redirect /setup back to /setup (onSetup=true, no-op),
+ * so the query parameter is still present in Uri.base when initState() runs.
  */
 async function loginFlutter(page: Page) {
-  // Navigate to the SPA root — the router redirects to /setup when no profile.
-  await page.goto("/", { waitUntil: "networkidle" });
+  // Navigate directly to the setup screen with the auto-connect token.
+  await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "networkidle" });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 
-  // Fill the token field in the Flutter connection form.
-  // On web the server URL field is pre-populated with window.location.origin.
-  await page
-    .getByRole("textbox", { name: /authentication token/i })
-    .fill(AUTH_TOKEN);
-
-  // Click Connect — triggers GET /health, then persists the encrypted profile.
-  await page.getByRole("button", { name: /connect/i }).click();
-
-  // Wait for Flutter to navigate away from /setup after a successful connection.
+  // Wait for GET /health to succeed and Flutter to navigate away from /setup.
   await page.waitForURL((url) => !url.pathname.includes("/setup"), {
-    timeout: 10_000,
+    timeout: 15_000,
   });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
@@ -77,46 +60,21 @@ async function navigateAndSettle(page: Page, path: string) {
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
-/** Check whether an element currently takes up layout space. */
-async function isVisible(page: Page, selector: string): Promise<boolean> {
-  return page.evaluate((sel) => {
-    const el = document.querySelector(sel) as HTMLElement | null;
-    if (!el) return false;
-    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-  }, selector);
-}
-
 // -- API helpers ------------------------------------------------------------
 
-/** Make an authenticated JSON API request from within the browser context. */
+/** Make an authenticated JSON API request from within the browser context.
+ *
+ * Uses the Bearer token directly — the Flutter app uses Bearer auth, not
+ * session cookies, so credentials: "same-origin" alone is not sufficient.
+ */
 async function apiGet(
   page: Page,
   path: string,
 ): Promise<{ status: number; body: unknown }> {
-  return page.evaluate(async (p) => {
-    const response = await fetch(p, { credentials: "same-origin" });
-    let body: unknown = null;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-    return { status: response.status, body };
-  }, path);
-}
-
-async function apiPost(
-  page: Page,
-  path: string,
-  payload: unknown,
-): Promise<{ status: number; body: unknown }> {
   return page.evaluate(
-    async ([p, data]) => {
+    async ([p, token]) => {
       const response = await fetch(p as string, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-        credentials: "same-origin",
+        headers: { Authorization: `Bearer ${token}` },
       });
       let body: unknown = null;
       try {
@@ -126,7 +84,34 @@ async function apiPost(
       }
       return { status: response.status, body };
     },
-    [path, payload] as const,
+    [path, AUTH_TOKEN] as const,
+  );
+}
+
+async function apiPost(
+  page: Page,
+  path: string,
+  payload: unknown,
+): Promise<{ status: number; body: unknown }> {
+  return page.evaluate(
+    async ([p, data, token]) => {
+      const response = await fetch(p as string, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      });
+      let body: unknown = null;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+      return { status: response.status, body };
+    },
+    [path, payload, AUTH_TOKEN] as const,
   );
 }
 
@@ -152,12 +137,38 @@ async function createWorkflow(page: Page): Promise<string> {
   const { body } = await apiPost(page, "/api/workflows", {
     name: `E2E Workflow ${Date.now()}`,
     description: "Visual regression test workflow",
+    graph: {
+      nodes: [
+        { id: "trigger-1", kind: "trigger", config: { type: "manual" } },
+        {
+          id: "action-1",
+          kind: "action",
+          config: { type: "assistant_turn", prompt: "E2E test prompt" },
+        },
+      ],
+      edges: [{ from: "trigger-1", to: "action-1" }],
+    },
+    active: false,
   });
   const id = (body as Record<string, unknown>)?.id as string | undefined;
   if (!id) {
     throw new Error(`Failed to create workflow: ${JSON.stringify(body)}`);
   }
   return id;
+}
+
+/** Create a user skill via the REST API and return its name. */
+async function createSkill(page: Page): Promise<string> {
+  const name = `e2e-skill-${Date.now()}`;
+  const { body, status } = await apiPost(page, "/api/skills", {
+    name,
+    description: "Visual regression test skill",
+    body: "# E2E Skill\n\nThis skill was created by the visual regression test suite.",
+  });
+  if (status !== 201) {
+    throw new Error(`Failed to create skill: ${JSON.stringify(body)}`);
+  }
+  return name;
 }
 
 /** Create an agent via the REST API and return its id. */
@@ -175,6 +186,7 @@ async function createAgent(page: Page): Promise<string> {
         pushNotifications: false,
         stateTransitionHistory: false,
       },
+      supportedInterfaces: [],
       skills: [],
     },
     set_default: false,
@@ -184,61 +196,6 @@ async function createAgent(page: Page): Promise<string> {
     throw new Error(`Failed to create agent: ${JSON.stringify(body)}`);
   }
   return id;
-}
-
-/** Create a user skill via the REST API and return its name. */
-async function createSkill(page: Page): Promise<string> {
-  const name = `e2e-skill-${Date.now()}`;
-  await apiPost(page, "/api/skills", {
-    name,
-    description: "E2E test skill",
-    body: "When asked, do the e2e thing.",
-  });
-  return name;
-}
-
-/** Queue a workflow test-run and return the run id. */
-async function queueWorkflowRun(
-  page: Page,
-  workflowId: string,
-): Promise<string> {
-  const payload = (await page.evaluate(async (id) => {
-    const response = await fetch(`/api/workflows/${id}/test-run`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-      credentials: "same-origin",
-    });
-
-    let body: unknown = null;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-
-    return {
-      ok: response.ok,
-      status: response.status,
-      body,
-    };
-  }, workflowId)) as {
-    ok: boolean;
-    status: number;
-    body: { run_id?: string } | null;
-  };
-
-  expect(
-    payload.ok,
-    `workflow test-run request failed (${payload.status})`,
-  ).toBeTruthy();
-  const runId = payload.body?.run_id;
-  if (!runId) {
-    throw new Error("failed to parse workflow run id from test-run response");
-  }
-  return runId;
 }
 
 // -- Tests ------------------------------------------------------------------
