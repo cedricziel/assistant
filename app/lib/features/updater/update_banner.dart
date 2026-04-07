@@ -19,7 +19,7 @@ class UpdateBannerWrapper extends ConsumerWidget {
 
     return updateAsync.when(
       loading: () => child,
-      error: (_, __) => child,
+      error: (_, _) => child,
       data: (info) {
         if (info == null) return child;
         return _WithBanner(info: info, child: child);

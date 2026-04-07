@@ -132,12 +132,8 @@ class ArtifactDownloader {
   ) async {
     final expected = checksumMap[filename];
     if (expected == null) return false;
-    final output = AccumulatorSink<Digest>();
-    final input = sha256.startChunkedConversion(output);
-    await File(path).openRead().forEach(input.add);
-    input.close();
-    final actual = output.events.single.toString();
-    return actual == expected;
+    final digest = await sha256.bind(File(path).openRead()).first;
+    return digest.toString() == expected;
   }
 
   Future<void> _openBrowser(String url) async {
