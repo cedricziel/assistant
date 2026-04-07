@@ -260,7 +260,9 @@ class _ModelTable extends StatelessWidget {
     }
 
     return Card(
-      child: DataTable(
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
         columnSpacing: 16,
         columns: const [
           DataColumn(label: Text('Model')),
@@ -284,6 +286,7 @@ class _ModelTable extends StatelessWidget {
               ]),
             )
             .toList(),
+        ),
       ),
     );
   }
@@ -304,7 +307,9 @@ class _ToolTable extends StatelessWidget {
     }
 
     return Card(
-      child: DataTable(
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
         columnSpacing: 16,
         columns: const [
           DataColumn(label: Text('Tool')),
@@ -324,6 +329,7 @@ class _ToolTable extends StatelessWidget {
               ]),
             )
             .toList(),
+        ),
       ),
     );
   }
