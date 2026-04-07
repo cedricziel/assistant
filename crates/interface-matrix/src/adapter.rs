@@ -94,6 +94,10 @@ impl ChannelAdapter for MatrixAdapter {
                     break;
                 }
 
+                // Track whether this is the very first (bootstrap) sync so we
+                // can seed the `since` token without emitting old messages.
+                let is_bootstrap = since.is_none();
+
                 let sync_result = tokio::select! {
                     r = client.sync(since.as_deref(), 30_000) => r,
                     _ = stop_rx.changed() => {
@@ -116,10 +120,17 @@ impl ChannelAdapter for MatrixAdapter {
 
                 let next = sync_resp.next_batch.clone();
 
-                // Handle room invites — auto-join.
+                // Handle room invites — auto-join (respecting the allowlist).
                 if let Some(rooms) = &sync_resp.rooms {
                     if let Some(invites) = &rooms.invite {
                         for room_id in invites.keys() {
+                            if !allowed_rooms.is_empty() && !allowed_rooms.contains(room_id) {
+                                debug!(
+                                    room_id,
+                                    "Matrix: ignoring invite from room not in allowlist"
+                                );
+                                continue;
+                            }
                             info!(room_id, "Matrix: auto-joining invited room");
                             if let Err(e) = client.join_room(room_id).await {
                                 warn!(error = %e, room_id, "Matrix: failed to join room");
@@ -127,6 +138,11 @@ impl ChannelAdapter for MatrixAdapter {
                         }
                     }
 
+                    // Skip processing events from the bootstrap sync — they
+                    // represent historical state and should not be dispatched.
+                    if is_bootstrap {
+                        // Fall through to persist next_batch, then continue.
+                    } else
                     // Process joined room timeline events.
                     if let Some(joined) = &rooms.join {
                         for (room_id, joined_room) in joined {

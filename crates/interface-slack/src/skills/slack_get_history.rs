@@ -48,11 +48,15 @@ impl ToolHandler for SlackGetHistorySkill {
             Some(c) => c,
             None => return Ok(ToolOutput::error("Missing 'channel'")),
         };
-        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+        let limit = params
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(1000) as u32;
 
         let result = if let Some(ts) = params.get("thread_ts").and_then(|v| v.as_str()) {
             self.client
-                .conversations_replies(channel, ts)
+                .conversations_replies(channel, ts, limit)
                 .await
                 .map(serde_json::Value::Array)
         } else {

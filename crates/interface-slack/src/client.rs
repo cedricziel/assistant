@@ -254,6 +254,7 @@ impl SlackApiClient {
         &self,
         channel: &str,
         ts: &str,
+        limit: u32,
     ) -> Result<Vec<serde_json::Value>> {
         #[derive(Deserialize)]
         struct Resp {
@@ -266,7 +267,11 @@ impl SlackApiClient {
             .client
             .get(format!("{}/api/conversations.replies", self.base_url))
             .bearer_auth(&self.bot_token)
-            .query(&[("channel", channel), ("ts", ts)])
+            .query(&[
+                ("channel", channel.to_string()),
+                ("ts", ts.to_string()),
+                ("limit", limit.to_string()),
+            ])
             .send()
             .await
             .context("conversations.replies request failed")?

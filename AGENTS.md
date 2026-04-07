@@ -145,6 +145,15 @@ interface-cli -> runtime -> llm -> core
 - ADRs live in `docs/adr/`.
 - When making architectural changes, add or update an ADR in `docs/adr/`.
 
+### Messenger Interface Clients
+
+All messenger interface crates (`interface-slack`, `interface-mattermost`, `interface-matrix`, `interface-nextcloud`) use **thin `reqwest` + `tokio-tungstenite` HTTP/WebSocket clients** — not heavy platform SDKs. This was a deliberate decision (see `openspec/changes/thin-messenger-http-clients/design.md`):
+
+- **Matrix**: uses plain long-poll `/sync` via `reqwest`, _not_ `matrix-sdk`. The old `matrix-sdk` dep was removed to eliminate its 80k+ line transitive footprint and SQLite state store. The workspace still has a `matrix-sdk` entry in `Cargo.toml` for future reference but the interface crate does not use it.
+- **Slack**: uses `reqwest` + `tokio-tungstenite` Socket Mode, _not_ `slack-morphism`.
+- **Mattermost**: uses `reqwest` + `tokio-tungstenite`, _not_ `mattermost_api`.
+- **Signal**: still uses `presage` internally via `SignalInterface::run()`; the `SignalAdapter` stub is unsupported at runtime until presage is replaced with a signal-cli REST client.
+
 ## Terminology
 
 - Canonical domain terms are defined in `docs/glossary.md`.

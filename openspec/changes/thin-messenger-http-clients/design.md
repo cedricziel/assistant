@@ -92,7 +92,8 @@ OpenFang's `ChannelAdapter` trait (RightNow-AI/openfang) demonstrates that a sim
 - [Slack Socket Mode reconnection logic is non-trivial] → Mitigation: implement exponential backoff (1s → 60s cap, jitter) with a background reconnect task, matching OpenFang's pattern.
 - [tokio-tungstenite adds a direct dep where it was previously transitive] → Mitigation: low risk; it is stable and already in the dep graph.
 - [Mattermost WebSocket token refresh] → Mitigation: re-authenticate on 401 responses and reconnect.
-- [Signal presage coupling remains] → Mitigation: Signal adapter implements `ChannelAdapter` via a thin wrapper; no change to presage usage.
+- [Signal presage coupling remains] → Mitigation: `SignalInterface::run()` stays the public entry point. The `SignalAdapter` stub returns `Err(unsupported)` from `start()` and `send()` at runtime; callers must go through `SignalInterface::run()` directly. The `ChannelAdapter` trait therefore over-promises for Signal until the presage dependency is replaced with a signal-cli REST client (tracked as a separate change).
+- [Destination encoding in `ChannelUser.platform_id`] → Each adapter encodes the reply target (channel ID, room ID, thread timestamp) into `sender.platform_id` so `send()` has a routing key. This conflates sender identity with delivery target and is a known limitation. A future `ConversationTarget` field on `ChannelMessage` would separate the concerns; deferred until multiple adapters require it.
 
 ## Migration Plan
 

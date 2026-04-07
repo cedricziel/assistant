@@ -29,6 +29,8 @@ impl MattermostClient {
         );
         let client = reqwest::Client::builder()
             .default_headers(headers)
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .context("failed to build reqwest client")?;
         Ok(Self {

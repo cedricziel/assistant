@@ -302,7 +302,7 @@ impl ChannelAdapter for SlackAdapter {
                 if !channel.is_empty() && !thread_key.is_empty() {
                     match self
                         .client
-                        .conversations_replies(&channel, &thread_key)
+                        .conversations_replies(&channel, &thread_key, 100)
                         .await
                     {
                         Ok(msgs) => {

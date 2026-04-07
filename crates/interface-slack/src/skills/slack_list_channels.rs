@@ -48,6 +48,11 @@ impl ToolHandler for SlackListChannelsSkill {
                     .and_then(|v| v.as_array())
                     .cloned()
                     .unwrap_or_default();
+                let truncated = resp
+                    .pointer("/response_metadata/next_cursor")
+                    .and_then(|v| v.as_str())
+                    .map(|c| !c.is_empty())
+                    .unwrap_or(false);
                 let summary: Vec<serde_json::Value> = channels
                     .iter()
                     .map(|ch| {
@@ -59,7 +64,12 @@ impl ToolHandler for SlackListChannelsSkill {
                         })
                     })
                     .collect();
-                Ok(ToolOutput::success(serde_json::to_string_pretty(&summary)?))
+                let mut output = json!({ "channels": summary });
+                if truncated {
+                    output["truncated"] = json!(true);
+                    output["note"] = json!("(results truncated, more channels exist)");
+                }
+                Ok(ToolOutput::success(serde_json::to_string_pretty(&output)?))
             }
             Err(e) => {
                 warn!(error = %e, "slack-list-channels failed");

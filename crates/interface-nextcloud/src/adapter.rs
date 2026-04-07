@@ -94,6 +94,12 @@ impl ChannelAdapter for NextcloudAdapter {
             tx,
         });
 
+        // Bind before spawning so failures propagate as errors from start().
+        let listener = tokio::net::TcpListener::bind(&listen_addr)
+            .await
+            .with_context(|| format!("Nextcloud: failed to bind to {listen_addr}"))?;
+        info!(addr = %listen_addr, "Nextcloud: webhook server listening");
+
         let mut stop_rx = self.stop_rx.clone();
 
         tokio::spawn(async move {
@@ -101,16 +107,6 @@ impl ChannelAdapter for NextcloudAdapter {
                 .route("/", post(webhook_handler))
                 .route("/webhook", post(webhook_handler))
                 .with_state(state);
-
-            let listener = match tokio::net::TcpListener::bind(&listen_addr).await {
-                Ok(l) => l,
-                Err(e) => {
-                    warn!(error = %e, addr = %listen_addr, "Nextcloud: failed to bind");
-                    return;
-                }
-            };
-
-            info!(addr = %listen_addr, "Nextcloud: webhook server listening");
 
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {

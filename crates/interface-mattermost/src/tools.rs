@@ -116,7 +116,7 @@ impl ToolHandler for MattermostReactHandler {
             Ok(()) => Ok(ToolOutput::success("Reaction added")),
             Err(e) => {
                 let msg = e.to_string();
-                if msg.contains("exists") || msg.contains("already") || msg.contains("400") {
+                if msg.contains("exists") || msg.contains("already") {
                     Ok(ToolOutput::success("Reaction already present"))
                 } else {
                     warn!(error = %e, "mattermost-react failed");

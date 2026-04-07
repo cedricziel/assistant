@@ -53,7 +53,6 @@ impl ToolHandler for SlackLookupUserSkill {
                     "name": user.get("name"),
                     "real_name": user.pointer("/profile/real_name"),
                     "display_name": user.pointer("/profile/display_name"),
-                    "email": user.pointer("/profile/email"),
                     "is_bot": user.get("is_bot"),
                 });
                 Ok(ToolOutput::success(serde_json::to_string_pretty(&summary)?))

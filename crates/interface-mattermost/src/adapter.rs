@@ -32,6 +32,8 @@ pub struct MattermostAdapter {
     client: Arc<MattermostClient>,
     allowed_channels: Vec<String>,
     allowed_users: Vec<String>,
+    /// Resolved bot user ID (set after a successful `get_me()` call in `start()`).
+    bot_user_id: Arc<tokio::sync::RwLock<Option<String>>>,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
 }
@@ -47,6 +49,7 @@ impl MattermostAdapter {
             client,
             allowed_channels,
             allowed_users,
+            bot_user_id: Arc::new(tokio::sync::RwLock::new(None)),
             stop_tx,
             stop_rx,
         }
@@ -72,10 +75,22 @@ impl ChannelAdapter for MattermostAdapter {
         let allowed_channels = self.allowed_channels.clone();
         let allowed_users = self.allowed_users.clone();
         let mut stop_rx = self.stop_rx.clone();
+        let bot_user_id_store = self.bot_user_id.clone();
 
         // Fetch bot's own user ID so we can filter self-messages.
-        let bot_user_id = client.get_me().await?.id;
-        info!(user_id = %bot_user_id, "Mattermost: resolved bot user ID");
+        // Treat failure as non-fatal: self-message filtering is best-effort.
+        let bot_user_id = match client.get_me().await {
+            Ok(me) => {
+                info!(user_id = %me.id, "Mattermost: resolved bot user ID");
+                let uid = me.id.clone();
+                *bot_user_id_store.write().await = Some(me.id);
+                uid
+            }
+            Err(e) => {
+                warn!(error = %e, "Mattermost: get_me() failed; self-message filtering disabled");
+                String::new()
+            }
+        };
 
         let (tx, rx) = mpsc::channel::<ChannelMessage>(64);
 
@@ -215,8 +230,13 @@ impl ChannelAdapter for MattermostAdapter {
             .to_string();
         let post_id = msg.platform_message_id.clone().unwrap_or_default();
         let thread_id = msg.thread_id.clone();
-        // Best-effort bot user ID for reaction tools — fallback to token.
-        let bot_user_id = self.client.token.clone();
+        // Use the resolved bot user ID; fall back to empty string if not yet known.
+        let bot_user_id = self
+            .bot_user_id
+            .try_read()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_default();
         crate::tools::build_mattermost_tools(
             channel_id,
             post_id,
