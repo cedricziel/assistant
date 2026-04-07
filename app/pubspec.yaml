@@ -53,6 +53,7 @@ dependencies:
   dio: ^5.0.0
 
   # Self-update support
+  collection: ^1.19.1
   pub_semver: ^2.2.0
   crypto: ^3.0.7
   shared_preferences: ^2.5.5

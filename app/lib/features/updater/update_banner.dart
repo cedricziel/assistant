@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -157,12 +158,21 @@ class _ProgressDialog extends StatefulWidget {
 class _ProgressDialogState extends State<_ProgressDialog> {
   double? _progress;
   String _status = 'Starting download…';
-  bool _cancelled = false;
+  final CancelToken _cancelToken = CancelToken();
 
   @override
   void initState() {
     super.initState();
     _run();
+  }
+
+  @override
+  void dispose() {
+    // Cancel any in-flight download when the dialog is removed from the tree.
+    if (!_cancelToken.isCancelled) {
+      _cancelToken.cancel();
+    }
+    super.dispose();
   }
 
   Future<void> _run() async {
@@ -171,7 +181,7 @@ class _ProgressDialogState extends State<_ProgressDialog> {
       await downloader.downloadAndInstall(
         widget.info.release,
         onProgress: (received, total) {
-          if (!mounted || _cancelled) return;
+          if (!mounted) return;
           setState(() {
             _progress = total > 0 ? received / total : null;
             _status = total > 0
@@ -180,10 +190,17 @@ class _ProgressDialogState extends State<_ProgressDialog> {
           });
         },
         onStatus: (msg) {
-          if (!mounted || _cancelled) return;
+          if (!mounted) return;
           setState(() => _status = msg);
         },
-        context: context,
+        cancelToken: _cancelToken,
+      );
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) return; // User cancelled — silent.
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed: ${e.message}')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -209,7 +226,7 @@ class _ProgressDialogState extends State<_ProgressDialog> {
       actions: [
         TextButton(
           onPressed: () {
-            _cancelled = true;
+            _cancelToken.cancel();
             Navigator.of(context).pop();
           },
           child: const Text('Cancel'),
@@ -218,4 +235,3 @@ class _ProgressDialogState extends State<_ProgressDialog> {
     );
   }
 }
-

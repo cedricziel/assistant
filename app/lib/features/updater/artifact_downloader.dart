@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -21,7 +20,7 @@ class ArtifactDownloader {
     ReleaseInfo release, {
     required void Function(int received, int total) onProgress,
     required void Function(String status) onStatus,
-    required BuildContext context,
+    required CancelToken cancelToken,
   }) async {
     // 1. Resolve platform asset.
     final asset = _selectAsset(release.assets);
@@ -34,8 +33,15 @@ class ArtifactDownloader {
     // 2. Fetch checksums file (optional — fall back to browser if absent).
     final checksumMap = await _fetchChecksums(release.assets);
 
-    final tempDir = await getTemporaryDirectory();
-    final destPath = '${tempDir.path}/${asset.name}';
+    // Write to the app-support directory (user-private, not world-writable).
+    final supportDir = await getApplicationSupportDirectory();
+    final destPath = '${supportDir.path}/${asset.name}';
+
+    // Enforce HTTPS on the download URL.
+    final downloadUri = Uri.parse(asset.browserDownloadUrl);
+    if (downloadUri.scheme != 'https') {
+      throw Exception('Refusing to download over non-HTTPS URL: ${downloadUri.scheme}');
+    }
 
     // 3. Download the artifact.
     onStatus('Downloading ${asset.name}…');
@@ -43,6 +49,7 @@ class ArtifactDownloader {
       asset.browserDownloadUrl,
       destPath,
       onReceiveProgress: onProgress,
+      cancelToken: cancelToken,
     );
 
     // 4. Verify checksum (or fall back to browser when no manifest).
@@ -96,6 +103,8 @@ class ArtifactDownloader {
     );
     if (asset == null) return null;
     try {
+      final checksumUri = Uri.parse(asset.browserDownloadUrl);
+      if (checksumUri.scheme != 'https') return null;
       final response = await _dio.get<String>(
         asset.browserDownloadUrl,
         options: Options(responseType: ResponseType.plain),
@@ -114,6 +123,8 @@ class ArtifactDownloader {
     }
   }
 
+  /// Computes the SHA-256 of [path] in a streaming fashion to avoid
+  /// loading the entire artifact into memory.
   Future<bool> _verifyChecksum(
     String path,
     Map<String, String> checksumMap,
@@ -121,8 +132,11 @@ class ArtifactDownloader {
   ) async {
     final expected = checksumMap[filename];
     if (expected == null) return false;
-    final bytes = await File(path).readAsBytes();
-    final actual = sha256.convert(bytes).toString();
+    final output = AccumulatorSink<Digest>();
+    final input = sha256.startChunkedConversion(output);
+    await File(path).openRead().forEach(input.add);
+    input.close();
+    final actual = output.events.single.toString();
     return actual == expected;
   }
 
@@ -131,14 +145,5 @@ class ArtifactDownloader {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
-  }
-}
-
-extension _FirstWhereOrNull<T> on List<T> {
-  T? firstWhereOrNull(bool Function(T) test) {
-    for (final element in this) {
-      if (test(element)) return element;
-    }
-    return null;
   }
 }

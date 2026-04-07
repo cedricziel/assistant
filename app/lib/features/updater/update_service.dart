@@ -91,7 +91,10 @@ class UpdateService {
   Future<ReleaseInfo?> fetchLatestRelease() async {
     try {
       final response = await _dio.get<Map<String, dynamic>>(
-        'https://api.github.com/repos/$kGitHubOwner/$kGitHubRepo/releases/latest',
+        Uri.https(
+          'api.github.com',
+          '/repos/$kGitHubOwner/$kGitHubRepo/releases/latest',
+        ).toString(),
         options: Options(
           headers: {'Accept': 'application/vnd.github+json'},
           receiveTimeout: const Duration(seconds: 10),
@@ -145,9 +148,11 @@ class UpdateService {
     if (await _alreadyCheckedToday()) return null;
 
     final release = await fetchLatestRelease();
-    await _recordCheckDate();
 
+    // Only record the check date when a valid release was fetched.
+    // A network failure should not suppress tomorrow's check.
     if (release == null) return null;
+    await _recordCheckDate();
 
     final info = await PackageInfo.fromPlatform();
     final current = info.version;
