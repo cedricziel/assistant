@@ -55,7 +55,9 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Column(
         children: [
           // Keyword filter
           Padding(
@@ -112,6 +114,7 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
           ),
         ],
       ),
+      ),  // GestureDetector
     );
   }
 }
