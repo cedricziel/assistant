@@ -1,3 +1,4 @@
+pub mod adapter;
 mod config;
 mod runner;
 mod signing;

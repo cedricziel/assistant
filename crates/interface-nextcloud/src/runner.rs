@@ -361,15 +361,16 @@ async fn handle_message(state: Arc<AppState>, event: WebhookEvent) -> Result<()>
         &message_id,
     );
 
-    // Register extension tools and submit the turn.
-    state
-        .orchestrator
-        .register_extensions(conversation_id, tools, vec![])
-        .await;
-
     let result = state
         .orchestrator
-        .submit_turn(&text, conversation_id, Interface::Nextcloud, None)
+        .run_turn_with_tools(
+            &text,
+            conversation_id,
+            Interface::Nextcloud,
+            tools,
+            None,
+            vec![],
+        )
         .await;
 
     // Remove the thinking reaction (fire-and-forget).

@@ -22,6 +22,7 @@
 //! that returns informative errors, so the rest of the workspace is
 //! unaffected.
 
+pub mod adapter;
 pub mod config;
 pub mod linker;
 pub mod runner;
