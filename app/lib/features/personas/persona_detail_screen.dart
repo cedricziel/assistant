@@ -185,45 +185,64 @@ class _FileSlotTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final badge = Tooltip(
+      message: slot.exists
+          ? 'File is present'
+          : 'File has not been created yet — tap to edit',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: slot.exists ? Colors.green.shade50 : Colors.amber.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color:
+                slot.exists ? Colors.green.shade300 : Colors.amber.shade400,
+          ),
+        ),
+        child: Text(
+          slot.exists ? 'Exists' : 'Missing',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: slot.exists
+                ? Colors.green.shade700
+                : Colors.amber.shade800,
+          ),
+        ),
+      ),
+    );
+
     return Card(
       margin: const EdgeInsets.only(bottom: 4),
       child: ListTile(
         leading: Icon(
           slot.exists ? Icons.description : Icons.description_outlined,
-          color: slot.exists ? Colors.green.shade600 : Colors.black38,
+          color: slot.exists ? Colors.green.shade600 : Colors.amber.shade700,
         ),
         title: Text(
-          slot.filename,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+          slot.displayName.isNotEmpty ? slot.displayName : slot.filename,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
         ),
-        subtitle: Text(
-          slot.description,
-          style: const TextStyle(fontSize: 12),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (slot.displayName.isNotEmpty)
+              Text(
+                slot.filename,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  color: Colors.black45,
+                ),
+              ),
+            if (slot.description.isNotEmpty)
+              Text(
+                slot.description,
+                style: const TextStyle(fontSize: 12),
+              ),
+          ],
         ),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: slot.exists
-                ? Colors.green.shade50
-                : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: slot.exists
-                  ? Colors.green.shade300
-                  : Colors.grey.shade400,
-            ),
-          ),
-          child: Text(
-            slot.exists ? 'Exists' : 'Missing',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: slot.exists
-                  ? Colors.green.shade700
-                  : Colors.grey.shade600,
-            ),
-          ),
-        ),
+        trailing: badge,
         onTap: () => context.go(
           '/contexts/$personaId/files/${slot.filename}',
         ),
