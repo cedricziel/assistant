@@ -6,29 +6,96 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'skill_detail_provider.dart';
+import 'skills_provider.dart';
 
-/// Read-only detail view for a single skill.
-class SkillDetailScreen extends ConsumerWidget {
+/// Detail view for a single skill. Allows editing and deleting user-created skills.
+class SkillDetailScreen extends ConsumerStatefulWidget {
   const SkillDetailScreen({super.key, required this.skillName});
 
   final String skillName;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final detailAsync = ref.watch(skillDetailProvider(skillName));
+  ConsumerState<SkillDetailScreen> createState() => _SkillDetailScreenState();
+}
+
+class _SkillDetailScreenState extends ConsumerState<SkillDetailScreen> {
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete skill?'),
+        content: Text(
+          'This will permanently delete "${widget.skillName}". This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red.shade600,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final error = await ref
+        .read(skillsProvider.notifier)
+        .deleteSkill(widget.skillName);
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Delete failed: $error'),
+          backgroundColor: Colors.red.shade600,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Skill deleted'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    context.go('/skills');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final detailAsync = ref.watch(skillDetailProvider(widget.skillName));
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(detailAsync.value?.skill?.name ?? skillName),
+        title: Text(detailAsync.value?.skill?.name ?? widget.skillName),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/skills'),
         ),
         actions: [
+          if (detailAsync.value?.skill != null &&
+              detailAsync.value!.skill!.isBuiltin == false) ...[
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit skill',
+              onPressed: () => context.go('/skills/${widget.skillName}/edit'),
+            ),
+            IconButton(
+              icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
+              tooltip: 'Delete skill',
+              onPressed: _confirmDelete,
+            ),
+          ],
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () =>
-                ref.read(skillDetailProvider(skillName).notifier).refresh(),
+                ref.read(skillDetailProvider(widget.skillName).notifier).refresh(),
           ),
         ],
       ),
@@ -37,14 +104,14 @@ class SkillDetailScreen extends ConsumerWidget {
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () =>
-              ref.read(skillDetailProvider(skillName).notifier).refresh(),
+              ref.read(skillDetailProvider(widget.skillName).notifier).refresh(),
         ),
         data: (state) {
           if (state.error != null) {
             return _ErrorView(
               error: state.error!,
               onRetry: () =>
-                  ref.read(skillDetailProvider(skillName).notifier).refresh(),
+                  ref.read(skillDetailProvider(widget.skillName).notifier).refresh(),
             );
           }
           final skill = state.skill;

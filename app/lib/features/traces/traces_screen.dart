@@ -10,28 +10,11 @@ import 'traces_provider.dart';
 ///
 /// Each row shows timestamp, persona, duration, and status.
 /// Expanding a row reveals the span breakdown.
-class TracesScreen extends ConsumerStatefulWidget {
+class TracesScreen extends ConsumerWidget {
   const TracesScreen({super.key});
 
   @override
-  ConsumerState<TracesScreen> createState() => _TracesScreenState();
-}
-
-class _TracesScreenState extends ConsumerState<TracesScreen> {
-  final _expandedIds = <String>{};
-
-  void _toggle(String traceId) {
-    setState(() {
-      if (_expandedIds.contains(traceId)) {
-        _expandedIds.remove(traceId);
-      } else {
-        _expandedIds.add(traceId);
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tracesAsync = ref.watch(tracesProvider);
 
     return Scaffold(
@@ -68,11 +51,7 @@ class _TracesScreenState extends ConsumerState<TracesScreen> {
             itemCount: state.traces.length,
             itemBuilder: (context, index) {
               final trace = state.traces[index];
-              return _TraceRow(
-                trace: trace,
-                expanded: _expandedIds.contains(trace.traceId),
-                onToggle: () => _toggle(trace.traceId),
-              );
+              return _TraceRow(trace: trace);
             },
           );
         },
@@ -81,17 +60,11 @@ class _TracesScreenState extends ConsumerState<TracesScreen> {
   }
 }
 
-/// Expandable row for a single trace summary.
+/// Tappable row for a single trace summary — navigates to full detail on tap.
 class _TraceRow extends StatelessWidget {
-  const _TraceRow({
-    required this.trace,
-    required this.expanded,
-    required this.onToggle,
-  });
+  const _TraceRow({required this.trace});
 
   final TraceSummaryResponse trace;
-  final bool expanded;
-  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -99,49 +72,58 @@ class _TraceRow extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => context.go('/traces/${trace.traceId}'),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Status indicator dot
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: isError ? Colors.red : Colors.green,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 10),
+
+              // Main info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      trace.personaId,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatTimestamp(trace.startTime),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                    ),
+                    if (trace.skillName != null)
+                      Text(
+                        trace.skillName!,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.black38,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+              // Duration + chevron
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Status indicator
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: isError ? Colors.red : Colors.green,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-
-                  // Main info
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          trace.personaId,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _formatTimestamp(trace.startTime),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.black54,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Duration
                   Text(
                     _formatDuration(trace.durationMs),
                     style: const TextStyle(
@@ -149,24 +131,17 @@ class _TraceRow extends StatelessWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(width: 8),
-
-                  // Expand chevron
-                  Icon(
-                    expanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    size: 20,
-                    color: Colors.black45,
+                  const SizedBox(height: 2),
+                  const Icon(
+                    Icons.arrow_forward_ios,
+                    size: 12,
+                    color: Colors.black38,
                   ),
                 ],
               ),
-            ),
+            ],
           ),
-
-          // Expandable span detail
-          if (expanded) _SpanDetail(traceId: trace.traceId),
-        ],
+        ),
       ),
     );
   }
@@ -181,90 +156,6 @@ class _TraceRow extends StatelessWidget {
   String _formatDuration(int ms) {
     if (ms < 1000) return '${ms}ms';
     return '${(ms / 1000).toStringAsFixed(1)}s';
-  }
-}
-
-/// Span detail widget loaded on demand.
-class _SpanDetail extends ConsumerWidget {
-  const _SpanDetail({required this.traceId});
-
-  final String traceId;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final detailAsync = ref.watch(traceDetailProvider(traceId));
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      child: detailAsync.when(
-        loading: () => const SizedBox(
-          height: 64,
-          child: Center(
-            child: SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
-        ),
-        error: (e, _) => Text(
-          'Failed to load spans: $e',
-          style: TextStyle(color: Colors.red.shade700, fontSize: 12),
-        ),
-        data: (state) {
-          if (state.error != null) {
-            return Text(
-              state.error!,
-              style: TextStyle(color: Colors.red.shade700, fontSize: 12),
-            );
-          }
-          final spans = state.detail?.spans.toList() ?? [];
-          if (spans.isEmpty) {
-            return const Text(
-              'No spans recorded',
-              style: TextStyle(color: Colors.black45, fontSize: 12),
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Divider(),
-              ...spans.map((span) => _SpanRow(span: span)),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SpanRow extends StatelessWidget {
-  const _SpanRow({required this.span});
-
-  final SpanEntryResponse span;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          const SizedBox(width: 4),
-          const Icon(Icons.subdirectory_arrow_right, size: 14, color: Colors.black38),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              span.name,
-              style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
-            ),
-          ),
-          Text(
-            '${span.durationMs}ms',
-            style: const TextStyle(fontSize: 12, color: Colors.black54),
-          ),
-        ],
-      ),
-    );
   }
 }
 

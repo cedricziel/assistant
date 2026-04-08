@@ -87,6 +87,63 @@ class SkillsNotifier extends AsyncNotifier<SkillsState> {
     state = const AsyncLoading();
     state = AsyncData(await _fetchSkills());
   }
+
+  /// Creates a new user skill. Returns an error string on failure, null on success.
+  Future<String?> createSkill({
+    required String name,
+    required String description,
+    required String body,
+  }) async {
+    final api = _api;
+    if (api == null) return 'Not connected';
+    try {
+      final request = CreateSkillRequestBuilder()
+        ..name = name
+        ..description = description
+        ..body = body;
+      await api.skills.createSkill(createSkillRequest: request.build());
+      await refresh();
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  /// Updates an existing skill. Returns an error string on failure, null on success.
+  Future<String?> updateSkill({
+    required String name,
+    required String description,
+    required String body,
+  }) async {
+    final api = _api;
+    if (api == null) return 'Not connected';
+    try {
+      final request = UpdateSkillRequestBuilder()
+        ..description = description
+        ..body = body;
+      await api.skills.updateSkill(
+        name: name,
+        updateSkillRequest: request.build(),
+      );
+      await refresh();
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  /// Deletes a skill by name. Returns an error string on failure, null on success.
+  Future<String?> deleteSkill(String name) async {
+    final api = _api;
+    if (api == null) return 'Not connected';
+    try {
+      await api.skills.deleteSkill(name: name);
+      await refresh();
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
 }
 
 /// Provider for [SkillsNotifier].

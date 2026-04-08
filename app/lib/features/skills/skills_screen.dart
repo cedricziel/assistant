@@ -35,6 +35,11 @@ class SkillsScreen extends ConsumerWidget {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => context.go('/skills/new'),
+        tooltip: 'New skill',
+        child: const Icon(Icons.add),
+      ),
       body: skillsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => _ErrorView(

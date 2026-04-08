@@ -13,12 +13,16 @@ import '../features/personas/persona_create_screen.dart';
 import '../features/personas/persona_detail_screen.dart';
 import '../features/personas/persona_file_editor_screen.dart';
 import '../features/personas/personas_screen.dart';
+import '../features/skills/skill_create_edit_screen.dart';
 import '../features/skills/skill_detail_screen.dart';
 import '../features/skills/skills_screen.dart';
+import '../features/traces/trace_detail_screen.dart';
 import '../features/traces/traces_screen.dart';
 import '../features/webhooks/webhook_detail_screen.dart';
 import '../features/webhooks/webhooks_screen.dart';
 import '../features/workflows/workflow_detail_screen.dart';
+import '../features/workflows/workflow_editor_screen.dart';
+import '../features/workflows/workflow_run_detail_screen.dart';
 import '../features/workflows/workflows_screen.dart';
 import '../shared/nav_shell.dart';
 
@@ -28,15 +32,21 @@ class AppRoutes {
   static const chat = '/chat';
   static const chatConversation = '/chat/:id';
   static const traces = '/traces';
+  static const traceDetail = '/traces/:traceId';
   static const logs = '/logs';
   static const skills = '/skills';
+  static const skillNew = '/skills/new';
   static const skillDetail = '/skills/:name';
+  static const skillEdit = '/skills/:name/edit';
   static const contexts = '/contexts';
   static const contextsNew = '/contexts/new';
   static const contextsDetail = '/contexts/:id';
   static const contextsFile = '/contexts/:id/files/:filename';
   static const workflows = '/workflows';
+  static const workflowNew = '/workflows/new';
   static const workflowDetail = '/workflows/:id';
+  static const workflowEdit = '/workflows/:id/edit';
+  static const workflowRunDetail = '/workflows/:id/runs/:runId';
   static const webhooks = '/webhooks';
   static const webhookDetail = '/webhooks/:id';
   static const agents = '/agents';
@@ -95,6 +105,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.traces,
             builder: (context, state) => const TracesScreen(),
+            routes: [
+              GoRoute(
+                path: ':traceId',
+                builder: (context, state) {
+                  final traceId = state.pathParameters['traceId']!;
+                  return TraceDetailScreen(traceId: traceId);
+                },
+              ),
+            ],
           ),
 
           // -- Observability: Logs -------------------------------------------
@@ -109,11 +128,25 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (context, state) => const SkillsScreen(),
             routes: [
               GoRoute(
+                path: 'new',
+                builder: (context, state) =>
+                    const SkillCreateEditScreen(),
+              ),
+              GoRoute(
                 path: ':name',
                 builder: (context, state) {
                   final name = state.pathParameters['name']!;
                   return SkillDetailScreen(skillName: name);
                 },
+                routes: [
+                  GoRoute(
+                    path: 'edit',
+                    builder: (context, state) {
+                      final name = state.pathParameters['name']!;
+                      return SkillCreateEditScreen(skillName: name);
+                    },
+                  ),
+                ],
               ),
             ],
           ),
@@ -156,11 +189,36 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (context, state) => const WorkflowsScreen(),
             routes: [
               GoRoute(
+                path: 'new',
+                builder: (context, state) =>
+                    const WorkflowEditorScreen(),
+              ),
+              GoRoute(
                 path: ':id',
                 builder: (context, state) {
                   final id = state.pathParameters['id']!;
                   return WorkflowDetailScreen(workflowId: id);
                 },
+                routes: [
+                  GoRoute(
+                    path: 'edit',
+                    builder: (context, state) {
+                      final id = state.pathParameters['id']!;
+                      return WorkflowEditorScreen(workflowId: id);
+                    },
+                  ),
+                  GoRoute(
+                    path: 'runs/:runId',
+                    builder: (context, state) {
+                      final id = state.pathParameters['id']!;
+                      final runId = state.pathParameters['runId']!;
+                      return WorkflowRunDetailScreen(
+                        workflowId: id,
+                        runId: runId,
+                      );
+                    },
+                  ),
+                ],
               ),
             ],
           ),

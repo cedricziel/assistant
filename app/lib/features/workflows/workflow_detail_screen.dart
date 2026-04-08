@@ -6,14 +6,81 @@ import 'package:go_router/go_router.dart';
 import 'workflows_provider.dart';
 
 /// Screen that shows the full detail of a single workflow.
-class WorkflowDetailScreen extends ConsumerWidget {
+class WorkflowDetailScreen extends ConsumerStatefulWidget {
   const WorkflowDetailScreen({super.key, required this.workflowId});
 
   final String workflowId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final detailAsync = ref.watch(workflowDetailProvider(workflowId));
+  ConsumerState<WorkflowDetailScreen> createState() =>
+      _WorkflowDetailScreenState();
+}
+
+class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete workflow?'),
+        content: const Text(
+          'This will permanently delete the workflow and all its run history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade600),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final error = await ref
+        .read(workflowsProvider.notifier)
+        .deleteWorkflow(widget.workflowId);
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Delete failed: $error'),
+          backgroundColor: Colors.red.shade600,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    context.go('/workflows');
+  }
+
+  Future<void> _toggleActive(bool currentlyActive) async {
+    final notifier = ref.read(workflowsProvider.notifier);
+    final error = currentlyActive
+        ? await notifier.deactivateWorkflow(widget.workflowId)
+        : await notifier.activateWorkflow(widget.workflowId);
+
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed: $error'),
+          backgroundColor: Colors.red.shade600,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    ref.read(workflowDetailProvider(widget.workflowId).notifier).refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final detailAsync = ref.watch(workflowDetailProvider(widget.workflowId));
 
     return Scaffold(
       appBar: AppBar(
@@ -24,9 +91,23 @@ class WorkflowDetailScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Edit workflow',
+            onPressed: () =>
+                context.go('/workflows/${widget.workflowId}/edit'),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.delete_outline,
+              color: Colors.red.shade400,
+            ),
+            tooltip: 'Delete workflow',
+            onPressed: _confirmDelete,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () =>
-                ref.read(workflowDetailProvider(workflowId).notifier).refresh(),
+                ref.read(workflowDetailProvider(widget.workflowId).notifier).refresh(),
           ),
         ],
       ),
@@ -35,20 +116,31 @@ class WorkflowDetailScreen extends ConsumerWidget {
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () =>
-              ref.read(workflowDetailProvider(workflowId).notifier).refresh(),
+              ref.read(workflowDetailProvider(widget.workflowId).notifier).refresh(),
         ),
-        data: (state) =>
-            _WorkflowDetailBody(detail: state.detail, runs: state.runs),
+        data: (state) => _WorkflowDetailBody(
+          workflowId: widget.workflowId,
+          detail: state.detail,
+          runs: state.runs,
+          onToggleActive: () => _toggleActive(state.detail.active),
+        ),
       ),
     );
   }
 }
 
 class _WorkflowDetailBody extends StatelessWidget {
-  const _WorkflowDetailBody({required this.detail, required this.runs});
+  const _WorkflowDetailBody({
+    required this.workflowId,
+    required this.detail,
+    required this.runs,
+    required this.onToggleActive,
+  });
 
+  final String workflowId;
   final WorkflowDetail detail;
   final List<WorkflowRunSummary> runs;
+  final VoidCallback onToggleActive;
 
   @override
   Widget build(BuildContext context) {
@@ -70,30 +162,49 @@ class _WorkflowDetailBody extends StatelessWidget {
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: detail.active
-                            ? Colors.green.shade50
-                            : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: detail.active
-                              ? Colors.green.shade300
-                              : Colors.grey.shade400,
+                    // Active toggle chip
+                    GestureDetector(
+                      onTap: onToggleActive,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
                         ),
-                      ),
-                      child: Text(
-                        detail.active ? 'Active' : 'Inactive',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                        decoration: BoxDecoration(
                           color: detail.active
-                              ? Colors.green.shade700
-                              : Colors.grey.shade600,
+                              ? Colors.green.shade50
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: detail.active
+                                ? Colors.green.shade300
+                                : Colors.grey.shade400,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              detail.active
+                                  ? Icons.pause_circle_outline
+                                  : Icons.play_circle_outline,
+                              size: 12,
+                              color: detail.active
+                                  ? Colors.green.shade700
+                                  : Colors.grey.shade600,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              detail.active ? 'Active' : 'Inactive',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: detail.active
+                                    ? Colors.green.shade700
+                                    : Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -131,7 +242,7 @@ class _WorkflowDetailBody extends StatelessWidget {
             ),
           )
         else ...[
-          ...runs.take(20).map((run) => _RunTile(run: run)),
+          ...runs.take(20).map((run) => _RunTile(workflowId: workflowId, run: run)),
           if (runs.length > 20)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -148,8 +259,9 @@ class _WorkflowDetailBody extends StatelessWidget {
 }
 
 class _RunTile extends StatelessWidget {
-  const _RunTile({required this.run});
+  const _RunTile({required this.workflowId, required this.run});
 
+  final String workflowId;
   final WorkflowRunSummary run;
 
   @override
@@ -161,6 +273,9 @@ class _RunTile extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 4),
       child: ListTile(
+        onTap: () => context.go(
+          '/workflows/$workflowId/runs/${run.id}',
+        ),
         leading: Icon(
           isSuccess
               ? Icons.check_circle_outline

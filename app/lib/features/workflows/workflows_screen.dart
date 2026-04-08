@@ -23,6 +23,11 @@ class WorkflowsScreen extends ConsumerWidget {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => context.go('/workflows/new'),
+        tooltip: 'New workflow',
+        child: const Icon(Icons.add),
+      ),
       body: workflowsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => _ErrorView(
