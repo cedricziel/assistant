@@ -18,21 +18,67 @@
 
     <meta charset="UTF-8" />
     <meta content="IE=Edge" http-equiv="X-UA-Compatible" />
-    <meta name="description" content="A new Flutter project." />
+    <meta
+      name="description"
+      content="AI assistant with chat, skills, and workflow automation."
+    />
 
     <!-- iOS meta tags & icons -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-    <meta name="apple-mobile-web-app-title" content="assistant_app" />
+    <meta name="apple-mobile-web-app-title" content="Assistant" />
     <link rel="apple-touch-icon" href="icons/Icon-192.png" />
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="favicon.png" />
 
-    <title>assistant_app</title>
+    <title>Assistant</title>
     <link rel="manifest" href="manifest.json" crossorigin="use-credentials" />
   </head>
   <body>
+    <!-- PWA install prompt support (required by the pwa_install Dart package).
+         Captures the browser's beforeinstallprompt event so Dart can trigger
+         it later via promptInstall().  Also exposes getLaunchMode() which the
+         Dart package calls to detect how the app was launched. -->
+    <script>
+      let deferredPrompt;
+
+      window.addEventListener("beforeinstallprompt", (e) => {
+        deferredPrompt = e;
+        // If Dart has already registered its hasPrompt callback (i.e. setup()
+        // was called before this event fired), notify it immediately so the
+        // install button can appear without waiting for a page reload.
+        if (typeof hasPrompt === "function") hasPrompt();
+      });
+
+      function promptInstall() {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+      }
+
+      // Fired by the browser once the user has installed the app.
+      window.addEventListener("appinstalled", () => {
+        deferredPrompt = null;
+        if (typeof appInstalled === "function") appInstalled();
+      });
+
+      // Called by pwa_install Dart code to determine how the app was launched.
+      function getLaunchMode() {
+        const isStandalone = window.matchMedia(
+          "(display-mode: standalone)",
+        ).matches;
+        if (deferredPrompt && typeof hasPrompt === "function") hasPrompt();
+        if (document.referrer.startsWith("android-app://")) {
+          if (typeof appLaunchedAsTWA === "function") appLaunchedAsTWA();
+        } else if (navigator.standalone || isStandalone) {
+          if (typeof appLaunchedAsPWA === "function") appLaunchedAsPWA();
+        } else {
+          if (typeof appLaunchedInBrowser === "function")
+            appLaunchedInBrowser();
+        }
+      }
+    </script>
+
     <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
