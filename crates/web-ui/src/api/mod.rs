@@ -72,7 +72,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use assistant_core::{Interface, MessageRole};
-use assistant_runtime::AssistantInterface;
+use assistant_runtime::{AssistantInterface, OrchestratorEvent};
 use assistant_storage::ConversationStore;
 use axum::{
     extract::{Path, State},
@@ -146,6 +146,14 @@ pub struct MessageSummary {
     pub content: String,
     pub turn: i64,
     pub created_at: DateTime<Utc>,
+    /// Tool names called in this message (present when `role == "assistant"`
+    /// and the message contains tool invocations).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<String>>,
+    /// Name of the tool or skill that produced this result (present when
+    /// `role == "tool"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_name: Option<String>,
 }
 
 // -- Request types -----------------------------------------------------------
@@ -303,12 +311,29 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
     let messages = history
         .into_iter()
         .filter(|m| !matches!(m.role, MessageRole::System | MessageRole::Tool))
-        .map(|m| MessageSummary {
-            id: m.id,
-            role: m.role.to_string(),
-            content: m.content,
-            turn: m.turn,
-            created_at: m.created_at,
+        .map(|m| {
+            let tool_calls = m.tool_calls_json.as_deref().and_then(|json| {
+                serde_json::from_str::<Vec<serde_json::Value>>(json)
+                    .ok()
+                    .map(|items| {
+                        items
+                            .into_iter()
+                            .filter_map(|v| {
+                                v.get("name").and_then(|n| n.as_str()).map(str::to_string)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|v: &Vec<_>| !v.is_empty())
+            });
+            MessageSummary {
+                id: m.id,
+                role: m.role.to_string(),
+                content: m.content,
+                turn: m.turn,
+                created_at: m.created_at,
+                tool_calls,
+                skill_name: m.skill_name,
+            }
         })
         .collect();
 
@@ -488,11 +513,11 @@ pub async fn send_message(
     }
 
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
-    let (token_tx, mut token_rx) = mpsc::channel::<String>(64);
+    let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(64);
 
     state
         .orchestrator
-        .register_token_sink(conv_id, token_tx)
+        .register_token_sink(conv_id, event_tx)
         .await;
 
     let orchestrator = state.orchestrator.clone();
@@ -511,10 +536,24 @@ pub async fn send_message(
     tokio::spawn(async move {
         let mut full_text = String::new();
 
-        while let Some(token) = token_rx.recv().await {
-            full_text.push_str(&token);
-            let event = Event::default().event("token").data(token);
-            if sse_tx.send(Ok(event)).await.is_err() {
+        while let Some(orch_event) = event_rx.recv().await {
+            let sse_event = match orch_event {
+                OrchestratorEvent::Token(token) => {
+                    full_text.push_str(&token);
+                    Event::default().event("token").data(token)
+                }
+                OrchestratorEvent::Status(msg) => {
+                    Event::default().event("status").data(msg)
+                }
+                OrchestratorEvent::ToolResult { tool_name, status } => {
+                    let data = serde_json::json!({
+                        "tool_name": tool_name,
+                        "status": status,
+                    });
+                    Event::default().event("tool_result").data(data.to_string())
+                }
+            };
+            if sse_tx.send(Ok(sse_event)).await.is_err() {
                 return;
             }
         }

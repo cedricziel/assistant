@@ -18,6 +18,38 @@ class TokenEvent extends StreamEvent {
   final String token;
 }
 
+/// A status update emitted while the assistant is processing.
+///
+/// Corresponds to `event:status` in the SSE stream.  The caller may display
+/// this as a transient status indicator (e.g. "Calling tool: web-search").
+class StatusEvent extends StreamEvent {
+  const StatusEvent(this.message);
+
+  /// Human-readable status message.
+  final String message;
+}
+
+/// A tool execution completed.
+///
+/// Corresponds to `event:tool_result` in the SSE stream.  The JSON body is
+/// `{"tool_name":"...","status":"ok"|"error"|"denied"}`.
+class ToolResultEvent extends StreamEvent {
+  const ToolResultEvent({required this.toolName, required this.status});
+
+  /// The name of the tool that was called.
+  final String toolName;
+
+  /// `"ok"` on success, `"error"` or `"denied"` otherwise.
+  final String status;
+
+  factory ToolResultEvent.fromJson(Map<String, dynamic> json) {
+    return ToolResultEvent(
+      toolName: json['tool_name'] as String? ?? '',
+      status: json['status'] as String? ?? 'ok',
+    );
+  }
+}
+
 /// The stream is complete; contains the full, canonical reply.
 ///
 /// Corresponds to `event:done` in the SSE stream.  The JSON body is

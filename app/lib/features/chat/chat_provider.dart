@@ -159,6 +159,7 @@ class ChatState {
     this.isSending = false,
     this.isLoadingHistory = false,
     this.streamingContent = '',
+    this.statusMessage,
     this.error,
   });
 
@@ -169,6 +170,10 @@ class ChatState {
 
   /// Accumulated token content during streaming (before DoneEvent).
   final String streamingContent;
+
+  /// Transient status text from the assistant (e.g. "Calling tool: web-search").
+  /// Cleared when the stream completes.
+  final String? statusMessage;
   final String? error;
 
   bool get isStreaming => isSending && streamingContent.isNotEmpty;
@@ -179,9 +184,11 @@ class ChatState {
     bool? isSending,
     bool? isLoadingHistory,
     String? streamingContent,
+    String? statusMessage,
     String? error,
     bool clearError = false,
     bool clearConversation = false,
+    bool clearStatusMessage = false,
   }) {
     return ChatState(
       conversationId:
@@ -190,6 +197,8 @@ class ChatState {
       isSending: isSending ?? this.isSending,
       isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
       streamingContent: streamingContent ?? this.streamingContent,
+      statusMessage:
+          clearStatusMessage ? null : (statusMessage ?? this.statusMessage),
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -344,8 +353,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             chatState.copyWith(
               messages: msgs,
               streamingContent: newContent,
+              clearStatusMessage: true,
             ),
           );
+        } else if (event is StatusEvent) {
+          state = AsyncData(
+            chatState.copyWith(statusMessage: event.message),
+          );
+        } else if (event is ToolResultEvent) {
+          // Tool finished — clear the status indicator.
+          state = AsyncData(chatState.copyWith(clearStatusMessage: true));
         } else if (event is DoneEvent) {
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
@@ -357,10 +374,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             );
           }
           state = AsyncData(
-            ChatState(
-              conversationId: conversationId,
-              messages: msgs,
-            ),
+            ChatState(conversationId: conversationId, messages: msgs),
           );
           // Refresh conversation list to update timestamps/titles.
           ref.read(conversationListProvider.notifier).refresh();

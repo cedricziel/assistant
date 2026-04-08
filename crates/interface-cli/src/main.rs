@@ -550,12 +550,17 @@ fn deliver_attachments(attachments: &[assistant_core::Attachment], assistant_dir
 /// Spawn a background task that prints tokens from `rx` to stdout as they
 /// arrive.  Returns a join handle; the task exits when the channel is closed
 /// (i.e. when the orchestrator drops its `Sender`).
-fn start_token_printer(mut rx: mpsc::Receiver<String>) -> tokio::task::JoinHandle<()> {
+fn start_token_printer(
+    mut rx: mpsc::Receiver<assistant_runtime::OrchestratorEvent>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        use assistant_runtime::OrchestratorEvent;
         let mut stdout = io::stdout();
-        while let Some(token) = rx.recv().await {
-            print!("{token}");
-            let _ = stdout.flush();
+        while let Some(event) = rx.recv().await {
+            if let OrchestratorEvent::Token(token) = event {
+                print!("{token}");
+                let _ = stdout.flush();
+            }
         }
         // Trailing newline so the next prompt appears on its own line.
         println!("\n");
@@ -1891,8 +1896,8 @@ async fn main() -> Result<()> {
                 }
 
                 // Normal user input — submit through the message bus with
-                // live token streaming via a registered side-channel.
-                let (tx, rx) = mpsc::channel::<String>(64);
+                // live event streaming via a registered side-channel.
+                let (tx, rx) = mpsc::channel::<assistant_runtime::OrchestratorEvent>(64);
                 let printer = start_token_printer(rx);
 
                 // Register the token sink so the worker streams to it.

@@ -105,6 +105,15 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
       // Blank line — dispatch the event.
       if (eventType == 'token' && dataLine != null) {
         yield TokenEvent(dataLine);
+      } else if (eventType == 'status' && dataLine != null) {
+        yield StatusEvent(dataLine);
+      } else if (eventType == 'tool_result' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield ToolResultEvent.fromJson(json);
+        } catch (_) {
+          // ignore malformed tool_result events
+        }
       } else if (eventType == 'done' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;

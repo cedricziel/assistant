@@ -26,13 +26,17 @@ use crate::webhook_dispatch;
 impl Orchestrator {
     // ── Bus-based turn processing ────────────────────────────────────────────
 
-    /// Register a token sink for a streaming turn.
+    /// Register an event sink for a streaming turn.
     ///
     /// Call this *before* publishing the [`TurnRequest`](bus_messages::TurnRequest)
     /// to the bus.  The worker will consume (remove) the sink when it processes
-    /// the request, routing tokens through it via
+    /// the request, routing [`OrchestratorEvent`]s through it via
     /// [`run_turn_streaming`](Self::run_turn_streaming).
-    pub async fn register_token_sink(&self, conversation_id: Uuid, sink: mpsc::Sender<String>) {
+    pub async fn register_token_sink(
+        &self,
+        conversation_id: Uuid,
+        sink: mpsc::Sender<super::OrchestratorEvent>,
+    ) {
         self.token_sinks.write().await.insert(conversation_id, sink);
     }
 

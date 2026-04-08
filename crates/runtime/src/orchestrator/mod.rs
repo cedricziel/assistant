@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 mod dispatch;
 mod prompt;
+pub mod stream_event;
 mod turn_control;
 
 mod subagent;
@@ -37,6 +38,8 @@ mod worker;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+pub use stream_event::OrchestratorEvent;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -175,9 +178,9 @@ pub struct Orchestrator {
     pub(crate) memory_loader: MemoryLoader,
     /// When true, record full message content on LLM spans (PII-sensitive).
     pub(crate) trace_content: bool,
-    /// Per-conversation token sinks for streaming turns dispatched through
+    /// Per-conversation event sinks for streaming turns dispatched through
     /// the bus.  Consumed (removed) by the worker when processing.
-    pub(crate) token_sinks: tokio::sync::RwLock<HashMap<Uuid, mpsc::Sender<String>>>,
+    pub(crate) token_sinks: tokio::sync::RwLock<HashMap<Uuid, mpsc::Sender<OrchestratorEvent>>>,
     /// Per-conversation extension tool registrations for interface-specific
     /// turns dispatched through the bus.  Consumed by the worker.
     pub(crate) extension_registrations: tokio::sync::RwLock<HashMap<Uuid, ExtensionRegistration>>,
@@ -364,7 +367,7 @@ impl Orchestrator {
         extensions: Vec<Arc<dyn ToolHandler>>,
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
-        token_sink: mpsc::Sender<String>,
+        token_sink: mpsc::Sender<OrchestratorEvent>,
     ) -> Result<TurnResult> {
         let turn_span = info_span!(
             "conversation_turn",
@@ -404,7 +407,7 @@ impl Orchestrator {
         user_message: &str,
         conversation_id: Uuid,
         interface: Interface,
-        token_sink: mpsc::Sender<String>,
+        token_sink: mpsc::Sender<OrchestratorEvent>,
         trace_cx: Option<&OtelContext>,
     ) -> Result<TurnResult> {
         self.run_turn_core(
@@ -428,7 +431,7 @@ impl Orchestrator {
         extensions: Vec<Arc<dyn ToolHandler>>,
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
-        token_sink: Option<mpsc::Sender<String>>,
+        token_sink: Option<mpsc::Sender<OrchestratorEvent>>,
     ) -> Result<TurnResult> {
         self.metrics
             .record_turn(&self.agent_id, None, &format!("{interface:?}"));
@@ -526,9 +529,17 @@ impl Orchestrator {
                 &all_specs,
             );
             let llm_start = std::time::Instant::now();
-            let response = if let Some(ref sink) = token_sink {
+            let response = if let Some(ref oe_sink) = token_sink {
+                // Adapt OrchestratorEvent sink → String sink expected by chat_streaming.
+                let (str_tx, mut str_rx) = mpsc::channel::<String>(64);
+                let oe_sink_clone = oe_sink.clone();
+                tokio::spawn(async move {
+                    while let Some(t) = str_rx.recv().await {
+                        let _ = oe_sink_clone.send(OrchestratorEvent::Token(t)).await;
+                    }
+                });
                 self.llm
-                    .chat_streaming(&system_prompt, &history, &all_specs, Some(sink.clone()))
+                    .chat_streaming(&system_prompt, &history, &all_specs, Some(str_tx))
                     .await
             } else {
                 self.llm.chat(&system_prompt, &history, &all_specs).await
@@ -656,6 +667,14 @@ impl Orchestrator {
                         if let Some(handler) = ext_map.get(&name) {
                             debug!(tool = %name, "Dispatching to extension handler");
 
+                            if let Some(sink) = token_sink.as_ref() {
+                                let _ = sink
+                                    .send(OrchestratorEvent::Status(format!(
+                                        "Calling tool: {name}"
+                                    )))
+                                    .await;
+                            }
+
                             let params_map = value_to_params_map(&params);
 
                             let start = std::time::Instant::now();
@@ -672,6 +691,7 @@ impl Orchestrator {
                                 conversation_id,
                                 turn_index,
                                 &mut turn_attachments,
+                                token_sink.as_ref(),
                             )
                             .await;
                         } else {
@@ -694,6 +714,7 @@ impl Orchestrator {
                                     &mut turn_attachments,
                                     &tool_handlers,
                                     &builtin_span,
+                                    token_sink.as_ref(),
                                 )
                                 .await;
                             if matches!(outcome, DispatchOutcome::Denied) {
@@ -763,7 +784,7 @@ impl Orchestrator {
         user_message: &str,
         conversation_id: Uuid,
         interface: Interface,
-        token_sink: Option<mpsc::Sender<String>>,
+        token_sink: Option<mpsc::Sender<OrchestratorEvent>>,
         trace_cx: Option<&OtelContext>,
     ) -> Result<TurnResult> {
         let streaming = token_sink.is_some();
@@ -832,9 +853,17 @@ impl Orchestrator {
                 &tool_specs,
             );
             let llm_start = std::time::Instant::now();
-            let response = if let Some(ref sink) = token_sink {
+            let response = if let Some(ref oe_sink) = token_sink {
+                // Adapt OrchestratorEvent sink → String sink expected by chat_streaming.
+                let (str_tx, mut str_rx) = mpsc::channel::<String>(64);
+                let oe_sink_clone = oe_sink.clone();
+                tokio::spawn(async move {
+                    while let Some(t) = str_rx.recv().await {
+                        let _ = oe_sink_clone.send(OrchestratorEvent::Token(t)).await;
+                    }
+                });
                 self.llm
-                    .chat_streaming(&system_prompt, &history, &tool_specs, Some(sink.clone()))
+                    .chat_streaming(&system_prompt, &history, &tool_specs, Some(str_tx))
                     .instrument(iteration_span.clone())
                     .await
             } else {
@@ -962,6 +991,7 @@ impl Orchestrator {
                                 &mut turn_attachments,
                                 &tool_handlers,
                                 &iteration_span,
+                                token_sink.as_ref(),
                             )
                             .await;
                         if matches!(outcome, DispatchOutcome::Denied) {

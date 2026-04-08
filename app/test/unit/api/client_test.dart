@@ -27,19 +27,44 @@ void main() {
       expect(event.message, equals('Connection failed'));
     });
 
+    test('StatusEvent stores message', () {
+      const event = StatusEvent('Calling tool: web-search');
+      expect(event.message, equals('Calling tool: web-search'));
+    });
+
+    test('ToolResultEvent parses JSON correctly', () {
+      final json = {'tool_name': 'web-search', 'status': 'ok'};
+      final event = ToolResultEvent.fromJson(json);
+      expect(event.toolName, equals('web-search'));
+      expect(event.status, equals('ok'));
+    });
+
+    test('ToolResultEvent handles missing fields gracefully', () {
+      final event = ToolResultEvent.fromJson({});
+      expect(event.toolName, equals(''));
+      expect(event.status, equals('ok'));
+    });
+
     test('StreamEvent sealed class hierarchy', () {
       // Verify pattern matching works correctly.
-      const events = <StreamEvent>[
-        TokenEvent('token'),
-        DoneEvent(role: 'assistant', content: 'full'),
-        ErrorEvent('error'),
+      final events = <StreamEvent>[
+        const TokenEvent('token'),
+        const StatusEvent('status'),
+        ToolResultEvent.fromJson({'tool_name': 'tool', 'status': 'ok'}),
+        const DoneEvent(role: 'assistant', content: 'full'),
+        const ErrorEvent('error'),
       ];
 
-      int tokenCount = 0, doneCount = 0, errorCount = 0;
+      int tokenCount = 0, statusCount = 0, toolCount = 0, doneCount = 0,
+          errorCount = 0;
       for (final e in events) {
         switch (e) {
           case TokenEvent():
             tokenCount++;
+          case StatusEvent():
+            statusCount++;
+          case ToolResultEvent():
+            toolCount++;
           case DoneEvent():
             doneCount++;
           case ErrorEvent():
@@ -48,6 +73,8 @@ void main() {
       }
 
       expect(tokenCount, equals(1));
+      expect(statusCount, equals(1));
+      expect(toolCount, equals(1));
       expect(doneCount, equals(1));
       expect(errorCount, equals(1));
     });

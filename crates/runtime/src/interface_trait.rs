@@ -23,11 +23,16 @@ use crate::orchestrator::{Orchestrator, TurnResult};
 /// than the concrete [`Orchestrator`], enabling lightweight mock implementations.
 #[async_trait]
 pub trait AssistantInterface: Send + Sync {
-    /// Register a streaming token sink for the given conversation.
+    /// Register a streaming event sink for the given conversation.
     ///
-    /// Tokens emitted during the turn are forwarded to `sink` as they are
-    /// produced.  Call this *before* [`submit_turn`](Self::submit_turn).
-    async fn register_token_sink(&self, conversation_id: Uuid, sink: mpsc::Sender<String>);
+    /// [`OrchestratorEvent`]s emitted during the turn are forwarded to `sink`
+    /// as they are produced.  Call this *before*
+    /// [`submit_turn`](Self::submit_turn).
+    async fn register_token_sink(
+        &self,
+        conversation_id: Uuid,
+        sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
+    );
 
     /// Submit a user turn and wait for the assistant's reply.
     async fn submit_turn(
@@ -47,7 +52,11 @@ pub trait AssistantInterface: Send + Sync {
 
 #[async_trait]
 impl AssistantInterface for Orchestrator {
-    async fn register_token_sink(&self, conversation_id: Uuid, sink: mpsc::Sender<String>) {
+    async fn register_token_sink(
+        &self,
+        conversation_id: Uuid,
+        sink: mpsc::Sender<crate::orchestrator::OrchestratorEvent>,
+    ) {
         self.register_token_sink(conversation_id, sink).await;
     }
 

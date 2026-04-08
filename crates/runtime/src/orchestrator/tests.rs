@@ -1174,9 +1174,9 @@ async fn run_turn_streaming_collects_attachments() {
         assistant_core::Attachment::new("report.pdf", "application/pdf", vec![0x25, 0x50]),
     ])));
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<super::OrchestratorEvent>(64);
 
-    // Drain tokens in background.
+    // Drain events in background.
     tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
     let result = orch
@@ -2554,7 +2554,7 @@ async fn run_turn_with_tools_streaming_emits_tokens_through_sink() {
         .await;
 
     let (orch, _) = build(&server.uri()).await;
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<super::OrchestratorEvent>(64);
 
     orch.run_turn_with_tools_streaming(
         "hi",
@@ -2570,8 +2570,10 @@ async fn run_turn_with_tools_streaming_emits_tokens_through_sink() {
 
     // Drain all received tokens.
     let mut received = String::new();
-    while let Ok(token) = rx.try_recv() {
-        received.push_str(&token);
+    while let Ok(event) = rx.try_recv() {
+        if let super::OrchestratorEvent::Token(t) = event {
+            received.push_str(&t);
+        }
     }
 
     assert_eq!(
@@ -2593,7 +2595,7 @@ async fn run_turn_with_tools_streaming_tokens_arrive_in_order() {
         .await;
 
     let (orch, _) = build(&server.uri()).await;
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<super::OrchestratorEvent>(64);
 
     orch.run_turn_with_tools_streaming(
         "tell me something",
@@ -2608,8 +2610,10 @@ async fn run_turn_with_tools_streaming_tokens_arrive_in_order() {
     .unwrap();
 
     let mut received_tokens: Vec<String> = Vec::new();
-    while let Ok(t) = rx.try_recv() {
-        received_tokens.push(t);
+    while let Ok(event) = rx.try_recv() {
+        if let super::OrchestratorEvent::Token(t) = event {
+            received_tokens.push(t);
+        }
     }
 
     let joined: String = received_tokens.join("");
@@ -2647,7 +2651,7 @@ async fn worker_routes_ext_plus_sink_to_streaming_path() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Register BOTH a token_sink AND extension tools (the Slack pattern).
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<super::OrchestratorEvent>(64);
     orch.register_token_sink(conv_id, tx).await;
     orch.register_extensions(conv_id, vec![], vec![]).await;
 
@@ -2660,8 +2664,10 @@ async fn worker_routes_ext_plus_sink_to_streaming_path() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let mut received = String::new();
-    while let Ok(token) = rx.try_recv() {
-        received.push_str(&token);
+    while let Ok(event) = rx.try_recv() {
+        if let super::OrchestratorEvent::Token(t) = event {
+            received.push_str(&t);
+        }
     }
 
     assert_eq!(

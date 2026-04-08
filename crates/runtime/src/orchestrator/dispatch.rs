@@ -10,10 +10,11 @@ use assistant_llm::{Capabilities, ChatHistoryMessage, HostedTool, ToolCallItem, 
 use assistant_storage::conversations::ConversationStore;
 use opentelemetry::trace::Span as _;
 use opentelemetry::KeyValue;
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn, Instrument};
 use uuid::Uuid;
 
-use super::{value_to_params_map, DispatchOutcome, Orchestrator};
+use super::{value_to_params_map, DispatchOutcome, Orchestrator, OrchestratorEvent};
 use crate::webhook_dispatch;
 
 impl Orchestrator {
@@ -101,6 +102,7 @@ impl Orchestrator {
         conversation_id: Uuid,
         turn_index: i64,
         turn_attachments: &mut Vec<Attachment>,
+        event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
     ) -> String {
         let duration_ms = elapsed.as_millis() as i64;
         let span_name = format!("execute_tool {tool_name}");
@@ -166,6 +168,15 @@ impl Orchestrator {
             warn!(tool = %tool_name, error = %e, "Failed to dispatch tool.result webhooks");
         }
 
+        if let Some(sink) = event_sink {
+            let _ = sink
+                .send(OrchestratorEvent::ToolResult {
+                    tool_name: tool_name.to_string(),
+                    status: tool_status.to_string(),
+                })
+                .await;
+        }
+
         observation
     }
 
@@ -189,6 +200,7 @@ impl Orchestrator {
         turn_attachments: &mut Vec<Attachment>,
         tool_handlers: &[Arc<dyn ToolHandler>],
         instrument_span: &tracing::Span,
+        event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
     ) -> DispatchOutcome {
         // Confirmation gate.
         let requires_confirm = tool_handlers
@@ -219,9 +231,23 @@ impl Orchestrator {
                         warn!("Failed to persist tool-result message: {e}");
                     }
                     otel_span.end();
+                    if let Some(sink) = event_sink {
+                        let _ = sink
+                            .send(OrchestratorEvent::ToolResult {
+                                tool_name: name.to_string(),
+                                status: "denied".to_string(),
+                            })
+                            .await;
+                    }
                     return DispatchOutcome::Denied;
                 }
             }
+        }
+
+        if let Some(sink) = event_sink {
+            let _ = sink
+                .send(OrchestratorEvent::Status(format!("Calling tool: {name}")))
+                .await;
         }
 
         let params_map = value_to_params_map(params);
@@ -244,6 +270,7 @@ impl Orchestrator {
             conversation_id,
             turn_index,
             turn_attachments,
+            event_sink,
         )
         .await;
 

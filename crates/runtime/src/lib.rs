@@ -18,7 +18,7 @@ pub use channel_runner::ChannelRunner;
 pub use interface_runner::InterfaceRunner;
 pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;
-pub use orchestrator::{Orchestrator, TurnResult};
+pub use orchestrator::{Orchestrator, OrchestratorEvent, TurnResult};
 pub use otel_spans::start_conversation_context;
 pub use scheduler::spawn_scheduler;
 pub use telemetry::{init_tracing, OtelGuard};

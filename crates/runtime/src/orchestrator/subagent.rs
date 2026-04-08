@@ -377,6 +377,7 @@ impl SubagentRunner for Orchestrator {
                                 conversation_id,
                                 turn_index,
                                 &mut scratch_attachments,
+                                None,
                             )
                             .await;
                         }

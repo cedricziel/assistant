@@ -241,22 +241,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ),
                 ),
 
-                // Tool call progress indicator (shown while streaming).
+                // Progress indicator (shown while streaming).
                 if (chatState.isSending && chatState.streamingContent.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 4),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        SizedBox(
+                        const SizedBox(
                           width: 14,
                           height: 14,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Text(
-                          'Thinking...',
-                          style: TextStyle(
+                          chatState.statusMessage ?? 'Thinking...',
+                          style: const TextStyle(
                             color: Colors.black54,
                             fontSize: 13,
                           ),
