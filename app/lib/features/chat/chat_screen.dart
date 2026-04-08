@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -319,14 +320,24 @@ class _MessageBubble extends StatelessWidget {
         ),
         child: message.isStreaming && message.content.isEmpty
             ? _streamingDotsIndicator()
-            : SelectableText(
-                message.content,
-                style: TextStyle(
-                  color: isUser
-                      ? colorScheme.onPrimary
-                      : colorScheme.onSurface,
-                ),
-              ),
+            : isUser
+                ? SelectableText(
+                    message.content,
+                    style: TextStyle(color: colorScheme.onPrimary),
+                  )
+                : MarkdownBody(
+                    data: message.content,
+                    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
+                        .copyWith(
+                      p: TextStyle(color: colorScheme.onSurface),
+                      code: TextStyle(
+                        color: colorScheme.onSurface,
+                        backgroundColor:
+                            colorScheme.surfaceContainerLowest,
+                      ),
+                    ),
+                    selectable: true,
+                  ),
       ),
     );
   }
