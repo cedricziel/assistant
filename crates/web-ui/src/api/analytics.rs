@@ -81,6 +81,7 @@ pub struct TimeSeriesResponse {
 #[derive(Debug, Deserialize, utoipa::ToSchema, utoipa::IntoParams)]
 pub struct AnalyticsQueryParams {
     /// Window in hours. Valid values: 1, 6, 24, 72, 168. Defaults to 24.
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub window: Option<i64>,
 }
 
