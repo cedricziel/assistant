@@ -4,7 +4,7 @@
   "start_url": ".",
   "display": "standalone",
   "background_color": "#0175C2",
-  "theme_color": "#1A73E8",
+  "theme_color": "#0175C2",
   "description": "AI assistant with chat, skills, and workflow automation.",
   "orientation": "portrait-primary",
   "prefer_related_applications": false,

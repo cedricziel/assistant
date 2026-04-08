@@ -159,10 +159,10 @@ class NavShell extends ConsumerWidget {
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (isInstallable) _InstallBanner(
-            onInstall: () =>
-                ref.read(pwaInstallProvider.notifier).install(),
-          ),
+          if (isInstallable)
+            _InstallBanner(
+              onInstall: () => ref.read(pwaInstallProvider.notifier).install(),
+            ),
           NavigationBar(
             selectedIndex: selected,
             onDestinationSelected: (i) {

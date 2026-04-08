@@ -29,7 +29,7 @@ dependencies:
   tray_manager: ^0.2.3
   window_manager: ^0.4.3
   flutter_markdown: ^0.7.6
-  pwa_install: ^0.0.6
+  pwa_install: 0.0.6
 dev_dependencies:
   flutter_test:
     sdk: flutter
