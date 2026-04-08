@@ -44,13 +44,21 @@ pub struct LogEntryResponse {
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct LogsQueryParams {
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub limit: Option<i64>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub offset: Option<i64>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub search: Option<String>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub severity: Option<String>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub since: Option<DateTime<Utc>>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub until: Option<DateTime<Utc>>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub trace_id: Option<String>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub conversation: Option<String>,
 }
 
@@ -235,6 +243,45 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/logs?search=test&limit=10")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // -- Empty-string query param tolerance (generated client sends "" for null) --
+
+    #[tokio::test]
+    async fn list_logs_with_empty_string_params_returns_200() {
+        // Simulates the real Dart/Dio request:
+        // GET /api/logs?limit=100&offset=&search=&severity=&since=&until=&trace_id=&conversation=
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/logs?limit=100&offset=&search=&severity=&since=&until=&trace_id=&conversation=")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert!(json.is_array());
+    }
+
+    #[tokio::test]
+    async fn list_logs_with_empty_search_treated_as_no_filter() {
+        // An empty search= should be treated as no filter (not "search for empty string").
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/logs?search=")
                     .body(Body::empty())
                     .unwrap(),
             )

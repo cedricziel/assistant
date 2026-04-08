@@ -26,6 +26,28 @@ pub(crate) fn internal_error<E: std::fmt::Display>(err: E) -> (axum::http::Statu
     )
 }
 
+/// Serde deserializer that maps an absent **or** empty-string query parameter
+/// to `None`, and parses non-empty strings via `FromStr`.
+///
+/// The generated Dart/Dio client sends `""` for every `null` optional query
+/// parameter (e.g. `?limit=50&since=&until=`).  Without this helper, axum's
+/// `Query` extractor rejects `since=` because `""` is not a valid
+/// `DateTime<Utc>`, returning 400.  Applying this to all optional query-param
+/// fields makes the server tolerate the generated client's serialisation.
+pub(crate) fn empty_string_as_none<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    let opt: Option<String> = serde::Deserialize::deserialize(d)?;
+    match opt {
+        None => Ok(None),
+        Some(ref s) if s.is_empty() => Ok(None),
+        Some(s) => s.parse::<T>().map(Some).map_err(serde::de::Error::custom),
+    }
+}
+
 // -- Conversation API below --------------------------------------------------
 //
 // Designed for native/external clients (mobile apps, desktop apps, etc.)

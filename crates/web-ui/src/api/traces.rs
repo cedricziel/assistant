@@ -64,12 +64,19 @@ pub struct TraceDetailResponse {
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct TracesQueryParams {
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub limit: Option<i64>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub offset: Option<i64>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub since: Option<DateTime<Utc>>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub until: Option<DateTime<Utc>>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub skill: Option<String>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub status: Option<String>,
+    #[serde(default, deserialize_with = "super::empty_string_as_none")]
     pub conversation: Option<String>,
 }
 
@@ -308,5 +315,59 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // -- Empty-string query param tolerance (generated client sends "" for null) --
+
+    #[tokio::test]
+    async fn list_traces_with_empty_string_params_returns_200() {
+        // The Dart/Dio generated client sends every null optional param as "".
+        // This simulates the real request: GET /api/traces?limit=50&offset=&since=&until=&skill=&status=&conversation=
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/traces?limit=50&offset=&since=&until=&skill=&status=&conversation=")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert!(json.is_array());
+    }
+
+    #[tokio::test]
+    async fn list_traces_with_valid_limit_returns_200() {
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/traces?limit=10")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn list_traces_with_skill_filter_returns_200() {
+        let (state, _) = test_state().await;
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/traces?skill=my-skill")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }
