@@ -30,6 +30,7 @@ dependencies:
   window_manager: ^0.4.3
   flutter_markdown: ^0.7.6
   pwa_install: 0.0.6
+  pwa_update_listener: ^0.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
