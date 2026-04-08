@@ -11,9 +11,10 @@ description = "Apache Iceberg exporter for OpenTelemetry spans, logs, and metric
 # Apache Iceberg
 iceberg.workspace = true
 iceberg-catalog-rest.workspace = true
-arrow-array.workspace = true
-arrow-schema.workspace = true
-parquet.workspace = true
+# iceberg 0.9 requires arrow/parquet 57.x; pin explicitly until iceberg upgrades
+arrow-array = "57"
+arrow-schema = "57"
+parquet = { version = "57", default-features = false, features = ["arrow", "async"] }
 # OpenTelemetry
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
