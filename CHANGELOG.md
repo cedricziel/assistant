@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.86](https://github.com/cedricziel/assistant/compare/v0.1.85...v0.1.86) (2026-04-08)
+
+
+### Features
+
+* **app:** add skill CRUD, workflow CRUD, trace detail, and workflow run detail screens ([10574fe](https://github.com/cedricziel/assistant/commit/10574fea67b87f0a7d009eb45a96a00c1734e04e))
+
+
+### Bug Fixes
+
+* **web-ui:** apply empty_string_as_none to AnalyticsQueryParams.window ([3899b2b](https://github.com/cedricziel/assistant/commit/3899b2bedffba029478763175b16f235dd2b09bc))
+* **web-ui:** tolerate empty-string query params from generated Dart client ([082eeb8](https://github.com/cedricziel/assistant/commit/082eeb8633795a6ea02e1ffda412c492b39c3ec7))
+
 ## [0.1.85](https://github.com/cedricziel/assistant/compare/v0.1.84...v0.1.85) (2026-04-07)
 
 
