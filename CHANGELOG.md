@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.87](https://github.com/cedricziel/assistant/compare/v0.1.86...v0.1.87) (2026-04-08)
+
+
+### Features
+
+* **chat:** render assistant messages as markdown ([eaca94b](https://github.com/cedricziel/assistant/commit/eaca94b5856254da86b7c3070763fe34c4cb35cb))
+
 ## [0.1.86](https://github.com/cedricziel/assistant/compare/v0.1.85...v0.1.86) (2026-04-08)
 
 
