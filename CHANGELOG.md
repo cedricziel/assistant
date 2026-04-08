@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.88](https://github.com/cedricziel/assistant/compare/v0.1.87...v0.1.88) (2026-04-08)
+
+
+### Features
+
+* comprehensive SSE event streaming for tool calls and turn lifecycle ([a207e37](https://github.com/cedricziel/assistant/commit/a207e375ef1423655087a7963c77c105864eeb56))
+
 ## [0.1.87](https://github.com/cedricziel/assistant/compare/v0.1.86...v0.1.87) (2026-04-08)
 
 
