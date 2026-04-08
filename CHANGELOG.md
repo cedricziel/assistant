@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.89](https://github.com/cedricziel/assistant/compare/v0.1.88...v0.1.89) (2026-04-08)
+
+
+### Features
+
+* **app:** PWA install prompt ([#400](https://github.com/cedricziel/assistant/issues/400)) ([8ef9606](https://github.com/cedricziel/assistant/commit/8ef9606cb8c04bcdfbf26dbc48d9b7c396670a29))
+
 ## [0.1.88](https://github.com/cedricziel/assistant/compare/v0.1.87...v0.1.88) (2026-04-08)
 
 
