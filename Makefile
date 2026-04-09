@@ -75,17 +75,13 @@ build-signal:
 
 # ── macOS app bundle ─────────────────────────────────────────────────────────
 
-# Compile a universal (arm64 + x86_64) assistant binary for macOS.
-# Copies the result into the Flutter app's macOS bundle resources directory.
+# Compile the assistant binary for Apple Silicon and copy it into the Flutter
+# app's macOS bundle resources directory.
 build-macos-binary:
-	rustup target add aarch64-apple-darwin x86_64-apple-darwin 2>/dev/null || true
+	rustup target add aarch64-apple-darwin 2>/dev/null || true
 	cargo build --release -p assistant-cli --target aarch64-apple-darwin
-	cargo build --release -p assistant-cli --target x86_64-apple-darwin
 	mkdir -p app/macos/Runner/Resources
-	lipo -create \
-	  target/aarch64-apple-darwin/release/assistant \
-	  target/x86_64-apple-darwin/release/assistant \
-	  -output app/macos/Runner/Resources/assistant
+	cp target/aarch64-apple-darwin/release/assistant app/macos/Runner/Resources/assistant
 	chmod +x app/macos/Runner/Resources/assistant
 
 # Build the self-contained macOS .app bundle.
