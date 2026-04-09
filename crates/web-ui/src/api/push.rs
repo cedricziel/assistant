@@ -78,6 +78,7 @@ pub struct VapidKeyResponse {
     tag = "web-push",
     responses(
         (status = 200, description = "VAPID public key", body = VapidKeyResponse),
+        (status = 401, description = "Unauthorized"),
     ),
     security(("bearer_token" = [])),
 )]
@@ -98,6 +99,7 @@ pub async fn vapid_public_key(State(state): State<PushApiState>) -> Json<VapidKe
     request_body = SubscribeRequest,
     responses(
         (status = 201, description = "Subscription registered"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error"),
     ),
     security(("bearer_token" = [])),
@@ -126,6 +128,7 @@ pub async fn subscribe(
     request_body = UnsubscribeRequest,
     responses(
         (status = 204, description = "Subscription removed"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error"),
     ),
     security(("bearer_token" = [])),
