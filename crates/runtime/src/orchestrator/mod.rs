@@ -533,14 +533,19 @@ impl Orchestrator {
                 // Adapt OrchestratorEvent sink → String sink expected by chat_streaming.
                 let (str_tx, mut str_rx) = mpsc::channel::<String>(64);
                 let oe_sink_clone = oe_sink.clone();
-                tokio::spawn(async move {
+                let forward_handle = tokio::spawn(async move {
                     while let Some(t) = str_rx.recv().await {
                         let _ = oe_sink_clone.send(OrchestratorEvent::Token(t)).await;
                     }
                 });
-                self.llm
+                let result = self
+                    .llm
                     .chat_streaming(&system_prompt, &history, &all_specs, Some(str_tx))
-                    .await
+                    .await;
+                // Wait for the forwarding task to drain any buffered tokens before
+                // continuing — ensures callers see all Token events after this await.
+                forward_handle.await.ok();
+                result
             } else {
                 self.llm.chat(&system_prompt, &history, &all_specs).await
             };
@@ -857,15 +862,20 @@ impl Orchestrator {
                 // Adapt OrchestratorEvent sink → String sink expected by chat_streaming.
                 let (str_tx, mut str_rx) = mpsc::channel::<String>(64);
                 let oe_sink_clone = oe_sink.clone();
-                tokio::spawn(async move {
+                let forward_handle = tokio::spawn(async move {
                     while let Some(t) = str_rx.recv().await {
                         let _ = oe_sink_clone.send(OrchestratorEvent::Token(t)).await;
                     }
                 });
-                self.llm
+                let result = self
+                    .llm
                     .chat_streaming(&system_prompt, &history, &tool_specs, Some(str_tx))
                     .instrument(iteration_span.clone())
-                    .await
+                    .await;
+                // Wait for the forwarding task to drain any buffered tokens before
+                // continuing — ensures callers see all Token events after this await.
+                forward_handle.await.ok();
+                result
             } else {
                 self.llm
                     .chat(&system_prompt, &history, &tool_specs)
