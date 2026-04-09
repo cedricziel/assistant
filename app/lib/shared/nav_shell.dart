@@ -23,24 +23,14 @@ class _NavDest {
   final String label;
 }
 
-const List<_NavDest> _destinations = [
+// -- Primary destinations (always visible on mobile bottom bar) --
+
+const List<_NavDest> _primaryDestinations = [
   _NavDest(
     path: '/chat',
     icon: Icons.chat_bubble_outline,
     selectedIcon: Icons.chat_bubble,
     label: 'Chat',
-  ),
-  _NavDest(
-    path: '/traces',
-    icon: Icons.timeline_outlined,
-    selectedIcon: Icons.timeline,
-    label: 'Traces',
-  ),
-  _NavDest(
-    path: '/logs',
-    icon: Icons.article_outlined,
-    selectedIcon: Icons.article,
-    label: 'Logs',
   ),
   _NavDest(
     path: '/contexts',
@@ -59,6 +49,23 @@ const List<_NavDest> _destinations = [
     icon: Icons.account_tree_outlined,
     selectedIcon: Icons.account_tree,
     label: 'Workflows',
+  ),
+];
+
+// -- Overflow destinations (in "More" sheet on mobile; below divider on desktop rail) --
+
+const List<_NavDest> _overflowDestinations = [
+  _NavDest(
+    path: '/traces',
+    icon: Icons.timeline_outlined,
+    selectedIcon: Icons.timeline,
+    label: 'Traces',
+  ),
+  _NavDest(
+    path: '/logs',
+    icon: Icons.article_outlined,
+    selectedIcon: Icons.article,
+    label: 'Logs',
   ),
   _NavDest(
     path: '/webhooks',
@@ -80,10 +87,21 @@ const List<_NavDest> _destinations = [
   ),
 ];
 
+/// Returns true when [currentPath] belongs to any overflow destination.
+bool _isOverflowRouteActive(String currentPath) {
+  return _overflowDestinations.any((d) => currentPath.startsWith(d.path));
+}
+
 /// Shell widget that wraps all main screens with persistent navigation.
 ///
 /// Uses a [NavigationRail] on tablet/desktop (>= 768px wide) and a
-/// [BottomNavigationBar] on mobile (< 768px wide).
+/// [NavigationBar] on mobile (< 768px wide).
+///
+/// **Mobile**: Shows 4 primary destinations + a "More" item that opens a
+/// [ModalBottomSheet] listing overflow/developer destinations.
+///
+/// **Desktop**: Shows all destinations in a single [NavigationRail] with a
+/// visual divider between primary and overflow groups.
 ///
 /// When the PWA install prompt is available (web only), an "Install App"
 /// button is shown: in the [NavigationRail] trailing area on wide screens,
@@ -93,26 +111,83 @@ class NavShell extends ConsumerWidget {
 
   final Widget child;
 
-  int _selectedIndex(BuildContext context) {
+  /// Index for the mobile [NavigationBar].
+  ///
+  /// Primary destinations occupy indices 0–3; index 4 is the "More" item.
+  /// When the current route is an overflow destination "More" is active (4).
+  int _mobileSelectedIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
-    for (var i = 0; i < _destinations.length; i++) {
-      if (location.startsWith(_destinations[i].path)) {
-        return i;
+    for (var i = 0; i < _primaryDestinations.length; i++) {
+      if (location.startsWith(_primaryDestinations[i].path)) return i;
+    }
+    if (_isOverflowRouteActive(location)) return _primaryDestinations.length;
+    return 0;
+  }
+
+  /// Index for the desktop [NavigationRail].
+  ///
+  /// Primary destinations: 0–3. Divider sentinel: 4 (disabled, not selectable).
+  /// Overflow destinations: 5–9.
+  int _railSelectedIndex(BuildContext context) {
+    final location = GoRouterState.of(context).uri.toString();
+    for (var i = 0; i < _primaryDestinations.length; i++) {
+      if (location.startsWith(_primaryDestinations[i].path)) return i;
+    }
+    for (var i = 0; i < _overflowDestinations.length; i++) {
+      if (location.startsWith(_overflowDestinations[i].path)) {
+        // +1 to skip the divider sentinel at index _primaryDestinations.length
+        return _primaryDestinations.length + 1 + i;
       }
     }
     return 0;
+  }
+
+  /// Shows the "More" bottom sheet listing all overflow destinations.
+  void _showMoreSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) {
+        return Semantics(
+          label: 'More destinations',
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'More',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              ..._overflowDestinations.map(
+                (d) => ListTile(
+                  leading: Icon(d.icon),
+                  title: Text(d.label),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    context.go(d.path);
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final width = MediaQuery.of(context).size.width;
     final isWide = width >= _kNavRailBreakpoint;
-    final selected = _selectedIndex(context);
 
     // Watch install-prompt availability (false on non-web platforms).
     final isInstallable = ref.watch(pwaInstallProvider);
 
     if (isWide) {
+      final selected = _railSelectedIndex(context);
       return Scaffold(
         body: SafeArea(
           child: Row(
@@ -120,17 +195,42 @@ class NavShell extends ConsumerWidget {
               NavigationRail(
                 selectedIndex: selected,
                 labelType: NavigationRailLabelType.all,
-                destinations: _destinations
-                    .map(
-                      (d) => NavigationRailDestination(
-                        icon: Icon(d.icon),
-                        selectedIcon: Icon(d.selectedIcon),
-                        label: Text(d.label),
-                      ),
-                    )
-                    .toList(),
+                destinations: [
+                  // Primary destinations (0–3)
+                  ..._primaryDestinations.map(
+                    (d) => NavigationRailDestination(
+                      icon: Icon(d.icon),
+                      selectedIcon: Icon(d.selectedIcon),
+                      label: Text(d.label),
+                    ),
+                  ),
+                  // Divider sentinel (index 4) — non-interactive
+                  const NavigationRailDestination(
+                    disabled: true,
+                    icon: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 4),
+                      child: Divider(thickness: 1),
+                    ),
+                    label: SizedBox.shrink(),
+                  ),
+                  // Overflow / developer destinations (5–9)
+                  ..._overflowDestinations.map(
+                    (d) => NavigationRailDestination(
+                      icon: Icon(d.icon),
+                      selectedIcon: Icon(d.selectedIcon),
+                      label: Text(d.label),
+                    ),
+                  ),
+                ],
                 onDestinationSelected: (i) {
-                  context.go(_destinations[i].path);
+                  if (i < _primaryDestinations.length) {
+                    context.go(_primaryDestinations[i].path);
+                  } else if (i > _primaryDestinations.length) {
+                    // Skip divider at index _primaryDestinations.length
+                    final overflowIndex = i - _primaryDestinations.length - 1;
+                    context.go(_overflowDestinations[overflowIndex].path);
+                  }
+                  // i == _primaryDestinations.length is the divider — ignore
                 },
                 // Show the install button at the bottom of the rail when the
                 // browser's install prompt is available.
@@ -152,8 +252,10 @@ class NavShell extends ConsumerWidget {
       );
     }
 
-    // Mobile layout: show an install-app banner above the NavigationBar when
-    // the install prompt is available.
+    // Mobile layout: 4 primary destinations + "More" overflow item.
+    // Show an install-app banner above the NavigationBar when the install
+    // prompt is available.
+    final selected = _mobileSelectedIndex(context);
     return Scaffold(
       body: UpdateBannerWrapper(child: child),
       bottomNavigationBar: Column(
@@ -166,17 +268,26 @@ class NavShell extends ConsumerWidget {
           NavigationBar(
             selectedIndex: selected,
             onDestinationSelected: (i) {
-              context.go(_destinations[i].path);
+              if (i == _primaryDestinations.length) {
+                _showMoreSheet(context);
+              } else {
+                context.go(_primaryDestinations[i].path);
+              }
             },
-            destinations: _destinations
-                .map(
-                  (d) => NavigationDestination(
-                    icon: Icon(d.icon),
-                    selectedIcon: Icon(d.selectedIcon),
-                    label: d.label,
-                  ),
-                )
-                .toList(),
+            destinations: [
+              ..._primaryDestinations.map(
+                (d) => NavigationDestination(
+                  icon: Icon(d.icon),
+                  selectedIcon: Icon(d.selectedIcon),
+                  label: d.label,
+                ),
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.more_horiz_outlined),
+                selectedIcon: Icon(Icons.more_horiz),
+                label: 'More',
+              ),
+            ],
           ),
         ],
       ),
