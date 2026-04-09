@@ -93,6 +93,16 @@ Future<String?> getCurrentPushEndpoint() async {
 
 // -- Helpers -----------------------------------------------------------------
 
+/// Typed numeric indexing for [JSUint8Array].
+///
+/// Dart's JS interop does not expose `operator[]=` on `JSUint8Array` by
+/// default; the standard `setProperty` call uses string-key semantics and is
+/// incorrect for typed-array indices.  This extension wires up the proper
+/// numeric `[]` / `[]=` operators via `external`.
+extension _Uint8ArrayIndexing on JSUint8Array {
+  external void operator []=(int index, int value);
+}
+
 bool _isSecureContext() => web.window.isSecureContext;
 
 /// Decode a base64url string to a [JSUint8Array] as `JSAny` for
@@ -107,7 +117,7 @@ JSAny _base64UrlToJSAny(String input) {
   final binaryStr = web.window.atob(padded);
   final bytes = JSUint8Array.withLength(binaryStr.length);
   for (var i = 0; i < binaryStr.length; i++) {
-    bytes.setProperty(i.toJS, binaryStr.codeUnitAt(i).toJS);
+    bytes[i] = binaryStr.codeUnitAt(i);
   }
   return bytes;
 }

@@ -584,10 +584,13 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
-    let push_api_state = PushApiState {
+    // Only mount the push API when a real VAPID keypair was provisioned.
+    // An empty key means key generation failed; exposing the endpoints in that
+    // state would let clients subscribe but never receive any delivery.
+    let push_api_state = (!vapid_public_key.is_empty()).then(|| PushApiState {
         store: push_store_for_state,
         vapid_public_key: Arc::new(vapid_public_key),
-    };
+    });
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
@@ -620,7 +623,11 @@ async fn run_with_args(args: Args) -> Result<()> {
                 .merge(api::agents::agents_api_router().with_state(agents_api_state))
                 .merge(api::analytics::analytics_api_router().with_state(analytics_api_state))
                 .merge(api::workflows::workflows_api_router().with_state(workflows_api_state))
-                .merge(push_api_router().with_state(push_api_state)),
+                .merge(
+                    push_api_state
+                        .map(|s| push_api_router().with_state(s))
+                        .unwrap_or_else(Router::new),
+                ),
         )
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,

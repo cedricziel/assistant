@@ -1,6 +1,6 @@
 ## 1. Dependencies & Platform Setup
 
-- [x] 1.1 Add `flutter_local_notifications ^18.x` to `app/pubspec.yaml` and run `flutter pub get`
+- [x] 1.1 Add `flutter_local_notifications: ^21.0.0` to `app/pubspec.yaml` and run `flutter pub get`
 - [x] 1.2 Add macOS entitlement for user notifications in `app/macos/Runner/DebugProfile.entitlements` and `Release.entitlements`
 - [x] 1.3 Add `web_push` crate to `crates/web-ui/Cargo.toml` (workspace dep) for VAPID-signed Web Push dispatch
 - [x] 1.4 Verify `flutter_local_notifications` initializes without error on macOS and web (smoke test in a dev build)
@@ -65,8 +65,8 @@
 
 ## 9. macOS Tray Badge
 
-- [ ] 9.1 Create `NotificationBadgeNotifier` (Riverpod `Notifier<int>`) tracking unread count
-- [ ] 9.2 Increment in `NotificationService.show()` on macOS
+- [x] 9.1 Create `NotificationBadgeNotifier` (Riverpod `Notifier<int>`) tracking unread count
+- [x] 9.2 Increment in `NotificationService.show()` on macOS
 - [x] 9.3 Add `WidgetsBindingObserver` in root widget to clear badge on `AppLifecycleState.resumed`
 - [ ] 9.4 Call `tray_manager` to update badge label (investigate `setBadgeLabel` availability in 0.2.x; fall back to composite icon if needed)
 

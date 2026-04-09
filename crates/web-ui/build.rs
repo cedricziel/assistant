@@ -52,6 +52,11 @@ fn main() {
                 "cargo:warning=Flutter SDK not found — reusing existing build at {}",
                 web_out.display()
             );
+            // Still inject the version so sw.js forces a browser update on
+            // every release even when Flutter isn't available.
+            if web_out.join("sw.js").exists() {
+                inject_sw_version(&app_dir, &web_out);
+            }
         } else {
             println!(
                 "cargo:warning=Flutter SDK not found — skipping `flutter build web`. \
