@@ -212,6 +212,68 @@ jobs:
           flutter build macos --release --build-name "${VERSION}"
         working-directory: app
 
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 20)
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $RUNNER_TEMP/certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+
+      - name: Sign macOS app
+        run: |
+          APP="app/build/macos/Build/Products/Release/assistant_app.app"
+          IDENTITY="${{ secrets.APPLE_SIGNING_IDENTITY }}"
+          # Bottom-up signing: frameworks first, then the bundle
+          find "$APP/Contents/Frameworks" \( -name "*.framework" -o -name "*.dylib" \) 2>/dev/null | while read f; do
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
+          done
+          codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
+
+      - name: Notarize macOS app
+        run: |
+          APP="app/build/macos/Build/Products/Release/assistant_app.app"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/assistant_app_notarize.zip"
+          SUBMISSION=$(xcrun notarytool submit "$RUNNER_TEMP/assistant_app_notarize.zip" \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --output-format json)
+          SUBMISSION_ID=$(echo "$SUBMISSION" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          echo "Notarization submission ID: $SUBMISSION_ID"
+          # Poll until complete
+          while true; do
+            STATUS=$(xcrun notarytool info "$SUBMISSION_ID" \
+              --apple-id "${{ secrets.APPLE_ID }}" \
+              --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+              --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+              --output-format json | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+            echo "Status: $STATUS"
+            if [ "$STATUS" = "Accepted" ]; then break; fi
+            if [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "Rejected" ]; then
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --apple-id "${{ secrets.APPLE_ID }}" \
+                --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+                --team-id "${{ secrets.APPLE_TEAM_ID }}"
+              exit 1
+            fi
+            sleep 15
+          done
+          xcrun stapler staple "$APP"
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN_PATH" || true
+
       - name: Create ZIP archive
         shell: bash
         run: |
