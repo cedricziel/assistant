@@ -76,6 +76,20 @@ fn main() {
         return;
     }
 
+    // Skip the Flutter build if the output is already up-to-date.  Cargo
+    // runs build.rs once per compilation target (e.g. aarch64-apple-darwin
+    // and x86_64-apple-darwin both get separate executions).  The first
+    // target does the full build; subsequent targets reuse the output.
+    if web_out.join("index.html").exists() && !any_source_newer_than(&app_dir, &web_out) {
+        println!(
+            "cargo:warning=Flutter web output already up-to-date — skipping rebuild for this target"
+        );
+        if web_out.join("sw.js").exists() {
+            inject_sw_version(&app_dir, &web_out);
+        }
+        return;
+    }
+
     let status = Command::new("flutter")
         .args(["build", "web", "--release"])
         .current_dir(&app_dir)
@@ -90,6 +104,61 @@ fn main() {
     }
 
     inject_sw_version(&app_dir, &web_out);
+}
+
+/// Returns `true` if any Flutter source file is newer than the built output,
+/// meaning a rebuild is needed.  Returns `true` on any I/O error so we always
+/// rebuild when in doubt.
+fn any_source_newer_than(app_dir: &Path, web_out: &Path) -> bool {
+    let out_time = match web_out
+        .join("index.html")
+        .metadata()
+        .and_then(|m| m.modified())
+    {
+        Ok(t) => t,
+        Err(_) => return true,
+    };
+
+    for path in &[app_dir.join("pubspec.yaml"), app_dir.join("pubspec.lock")] {
+        if path
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t > out_time)
+            .unwrap_or(true)
+        {
+            return true;
+        }
+    }
+
+    for dir in &[app_dir.join("lib"), app_dir.join("web")] {
+        if dir_has_newer(dir, out_time) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn dir_has_newer(dir: &Path, than: std::time::SystemTime) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if dir_has_newer(&path, than) {
+                return true;
+            }
+        } else if path
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t > than)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Read the `version:` field from `pubspec.yaml` and substitute the
