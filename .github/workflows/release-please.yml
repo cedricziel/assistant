@@ -54,10 +54,6 @@ jobs:
             runner: macos-latest
             use_cross: false
             archive_suffix: macos-arm64
-          - target: x86_64-apple-darwin
-            runner: macos-latest
-            use_cross: false
-            archive_suffix: macos-x86_64
 
     steps:
       - uses: actions/checkout@v6
@@ -186,7 +182,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - name: Install protoc (macOS)
         run: brew install protobuf
@@ -630,7 +626,7 @@ jobs:
           sudo apk add --allow-untrusted assistant</pre>
 
             <h2>Tarball</h2>
-            <p>Pre-built tarballs for Linux (x86_64, aarch64) and macOS (arm64, x86_64) are available on the
+            <p>Pre-built tarballs for Linux (x86_64, aarch64) and macOS (arm64) are available on the
               <a href="https://github.com/cedricziel/assistant/releases">GitHub Releases</a> page.</p>
           </body>
           </html>
