@@ -35,6 +35,8 @@ jobs:
       - name: Run tests
         run: flutter test
 
+  # On PRs: single-arch debug build to verify compilation quickly (~5 min).
+  # On main: full universal release build + flutter build macos (~25 min).
   build-macos-bundle:
     name: Build macOS Bundle
     runs-on: macos-latest
@@ -48,7 +50,11 @@ jobs:
           cache: true
 
       - name: Install Rust targets
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+        run: |
+          rustup target add aarch64-apple-darwin
+          if [ "${{ github.event_name }}" = "push" ]; then
+            rustup target add x86_64-apple-darwin
+          fi
 
       - name: Cache Rust build artifacts
         uses: actions/cache@v4
@@ -57,9 +63,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-macos-bundle-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-macos-${{ github.event_name }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-macos-bundle-
+            ${{ runner.os }}-cargo-macos-${{ github.event_name }}-
+            ${{ runner.os }}-cargo-macos-
 
-      - name: Build macOS bundle
+      - name: Build macOS bundle (PR — single arch, debug)
+        if: github.event_name == 'pull_request'
+        run: cargo build -p assistant-cli --target aarch64-apple-darwin
+
+      - name: Build macOS bundle (main — universal release)
+        if: github.event_name == 'push'
         run: make build-macos-bundle
