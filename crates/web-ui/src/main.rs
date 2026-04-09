@@ -158,7 +158,7 @@ impl AssistantTurnClient for OrchestratorTurnClient {
 async fn run_with_args(args: Args) -> Result<()> {
     // -- OpenAPI spec dump (no server required) -------------------------------
     if args.print_openapi {
-        let spec = openapi::ApiDoc::openapi().to_json()?;
+        let spec = openapi::ApiDoc::openapi().to_pretty_json()?;
         println!("{spec}");
         return Ok(());
     }
