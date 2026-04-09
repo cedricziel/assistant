@@ -20,6 +20,7 @@ import 'package:assistant_api/src/api/push_notifications_api.dart';
 import 'package:assistant_api/src/api/skills_api.dart';
 import 'package:assistant_api/src/api/tasks_api.dart';
 import 'package:assistant_api/src/api/traces_api.dart';
+import 'package:assistant_api/src/api/web_push_api.dart';
 import 'package:assistant_api/src/api/webhooks_api.dart';
 import 'package:assistant_api/src/api/workflows_api.dart';
 
@@ -141,6 +142,12 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   TracesApi getTracesApi() {
     return TracesApi(dio, serializers);
+  }
+
+  /// Get WebPushApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  WebPushApi getWebPushApi() {
+    return WebPushApi(dio, serializers);
   }
 
   /// Get WebhooksApi instance, base route and serializer can be overridden by a given but be careful,

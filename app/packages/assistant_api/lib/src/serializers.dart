@@ -82,6 +82,7 @@ import 'package:assistant_api/src/model/skill_entry_response.dart';
 import 'package:assistant_api/src/model/span_entry_response.dart';
 import 'package:assistant_api/src/model/stream_response.dart';
 import 'package:assistant_api/src/model/string_list.dart';
+import 'package:assistant_api/src/model/subscribe_request.dart';
 import 'package:assistant_api/src/model/subscribe_to_task_request.dart';
 import 'package:assistant_api/src/model/task.dart';
 import 'package:assistant_api/src/model/task_artifact_update_event.dart';
@@ -93,10 +94,12 @@ import 'package:assistant_api/src/model/time_series_response.dart';
 import 'package:assistant_api/src/model/tool_usage_response.dart';
 import 'package:assistant_api/src/model/trace_detail_response.dart';
 import 'package:assistant_api/src/model/trace_summary_response.dart';
+import 'package:assistant_api/src/model/unsubscribe_request.dart';
 import 'package:assistant_api/src/model/update_agent_request.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
 import 'package:assistant_api/src/model/update_skill_request.dart';
 import 'package:assistant_api/src/model/update_webhook_request.dart';
+import 'package:assistant_api/src/model/vapid_key_response.dart';
 import 'package:assistant_api/src/model/verify_webhook_response.dart';
 import 'package:assistant_api/src/model/webhook_response.dart';
 import 'package:assistant_api/src/model/workflow_detail.dart';
@@ -180,6 +183,7 @@ part 'serializers.g.dart';
   SpanEntryResponse,
   StreamResponse,
   StringList,
+  SubscribeRequest,
   SubscribeToTaskRequest,
   Task,
   TaskArtifactUpdateEvent,
@@ -191,10 +195,12 @@ part 'serializers.g.dart';
   ToolUsageResponse,
   TraceDetailResponse,
   TraceSummaryResponse,
+  UnsubscribeRequest,
   UpdateAgentRequest,
   UpdateConversationRequest,
   UpdateSkillRequest,
   UpdateWebhookRequest,
+  VapidKeyResponse,
   VerifyWebhookResponse,
   WebhookResponse,
   WorkflowDetail,

@@ -37,6 +37,7 @@ use utoipa::{
 };
 
 use crate::a2a::handlers;
+use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::{
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
     analytics::{
@@ -178,6 +179,9 @@ impl Modify for BearerTokenSecurityAddon {
         handlers::create_push_notification_config,
         handlers::get_push_notification_config,
         handlers::delete_push_notification_config,
+        crate::api::push::vapid_public_key,
+        crate::api::push::subscribe,
+        crate::api::push::unsubscribe,
     ),
     components(
         schemas(
@@ -285,6 +289,10 @@ impl Modify for BearerTokenSecurityAddon {
             WorkflowRunDetail,
             WorkflowRunPreview,
             WorkflowWebhookSecrets,
+            // Web Push types
+            VapidKeyResponse,
+            SubscribeRequest,
+            UnsubscribeRequest,
             // Local handler types
             ApiErrorResponse,
         )
@@ -312,6 +320,8 @@ impl Modify for BearerTokenSecurityAddon {
          description = "Usage analytics — token consumption, model usage, and tool metrics"),
         (name = "workflows",
          description = "Workflow management — create, update, activate, and run workflows"),
+        (name = "web-push",
+         description = "Web Push — VAPID key retrieval and push subscription management for PWA notifications"),
     ),
     servers(
         (url = "/", description = "Local assistant server")

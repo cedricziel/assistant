@@ -3,6 +3,7 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:built_collection/built_collection.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -15,6 +16,8 @@ part 'message_summary.g.dart';
 /// * [createdAt] 
 /// * [id] 
 /// * [role] 
+/// * [skillName] - Name of the tool or skill that produced this result (present when `role == \"tool\"`).
+/// * [toolCalls] - Tool names called in this message (present when `role == \"assistant\"` and the message contains tool invocations).
 /// * [turn] 
 @BuiltValue()
 abstract class MessageSummary implements Built<MessageSummary, MessageSummaryBuilder> {
@@ -29,6 +32,14 @@ abstract class MessageSummary implements Built<MessageSummary, MessageSummaryBui
 
   @BuiltValueField(wireName: r'role')
   String get role;
+
+  /// Name of the tool or skill that produced this result (present when `role == \"tool\"`).
+  @BuiltValueField(wireName: r'skill_name')
+  String? get skillName;
+
+  /// Tool names called in this message (present when `role == \"assistant\"` and the message contains tool invocations).
+  @BuiltValueField(wireName: r'tool_calls')
+  BuiltList<String>? get toolCalls;
 
   @BuiltValueField(wireName: r'turn')
   int get turn;
@@ -76,6 +87,20 @@ class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> 
       object.role,
       specifiedType: const FullType(String),
     );
+    if (object.skillName != null) {
+      yield r'skill_name';
+      yield serializers.serialize(
+        object.skillName,
+        specifiedType: const FullType.nullable(String),
+      );
+    }
+    if (object.toolCalls != null) {
+      yield r'tool_calls';
+      yield serializers.serialize(
+        object.toolCalls,
+        specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
+      );
+    }
     yield r'turn';
     yield serializers.serialize(
       object.turn,
@@ -131,6 +156,22 @@ class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> 
             specifiedType: const FullType(String),
           ) as String;
           result.role = valueDes;
+          break;
+        case r'skill_name':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(String),
+          ) as String?;
+          if (valueDes == null) continue;
+          result.skillName = valueDes;
+          break;
+        case r'tool_calls':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
+          ) as BuiltList<String>?;
+          if (valueDes == null) continue;
+          result.toolCalls.replace(valueDes);
           break;
         case r'turn':
           final valueDes = serializers.deserialize(
