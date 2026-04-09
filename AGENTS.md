@@ -2,6 +2,18 @@
 
 Guidance for AI coding agents working in this Rust workspace.
 
+## Development Discipline
+
+**You must follow Test Driven Development. We always start with a failing test.**
+
+See `.claude/skills/tdd/SKILL.md` for the full TDD workflow, rules, and Rust-specific
+guidance. In short:
+
+1. Write a failing test first.
+2. Confirm it is **red** before writing any implementation.
+3. Write the minimum code to make it **green**.
+4. Refactor under green.
+
 ## Build, Lint, Test
 
 ```sh
