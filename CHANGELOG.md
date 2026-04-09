@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.90](https://github.com/cedricziel/assistant/compare/v0.1.89...v0.1.90) (2026-04-09)
+
+
+### Features
+
+* **app:** push notifications via VAPID Web Push and flutter_local_notifications ([#402](https://github.com/cedricziel/assistant/issues/402)) ([b596c5e](https://github.com/cedricziel/assistant/commit/b596c5efe32fb685712865f5541b93c21f582280))
+
 ## [0.1.89](https://github.com/cedricziel/assistant/compare/v0.1.88...v0.1.89) (2026-04-08)
 
 
