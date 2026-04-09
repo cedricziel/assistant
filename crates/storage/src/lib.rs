@@ -6,6 +6,7 @@ pub mod message_bus;
 pub mod metrics;
 pub mod persona_skill_access;
 pub mod personas;
+pub mod push_subscriptions;
 pub mod refinements;
 pub mod registry;
 pub mod scheduled_tasks;
@@ -24,6 +25,7 @@ pub use metrics::{
 };
 pub use persona_skill_access::PersonaSkillAccessStore;
 pub use personas::{PersonaRecord, PersonaStore};
+pub use push_subscriptions::{PushSubscription, PushSubscriptionStore};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
@@ -143,6 +145,11 @@ impl StorageLayer {
     /// Convenience: build a [`WebhookStore`] backed by this pool.
     pub fn webhook_store(&self) -> WebhookStore {
         WebhookStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`PushSubscriptionStore`] backed by this pool.
+    pub fn push_subscription_store(&self) -> PushSubscriptionStore {
+        PushSubscriptionStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`WorkflowStore`] backed by this pool.
@@ -314,6 +321,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "030_persona_turn_timeout",
             include_str!("../../../migrations/030_persona_turn_timeout.sql"),
+        ),
+        (
+            "031_push_subscriptions",
+            include_str!("../../../migrations/031_push_subscriptions.sql"),
         ),
     ];
 

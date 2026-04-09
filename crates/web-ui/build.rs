@@ -83,4 +83,50 @@ fn main() {
              Check the Flutter installation and the sources under app/."
         );
     }
+
+    inject_sw_version(&app_dir, &web_out);
+}
+
+/// Read the `version:` field from `pubspec.yaml` and substitute the
+/// `__APP_VERSION__` placeholder in the built `sw.js`.
+///
+/// This causes the browser to detect a new service worker script on every
+/// version bump rather than waiting for its 24-hour byte-diff check.
+fn inject_sw_version(app_dir: &Path, web_out: &Path) {
+    let pubspec = match std::fs::read_to_string(app_dir.join("pubspec.yaml")) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("cargo:warning=Could not read pubspec.yaml for sw.js version injection: {e}");
+            return;
+        }
+    };
+
+    // Parse `version: 1.2.3` or `version: 1.2.3+4` (strip build metadata).
+    let version = pubspec
+        .lines()
+        .find_map(|line| {
+            let line = line.trim();
+            line.strip_prefix("version:").map(|v| {
+                let v = v.trim();
+                // Drop the `+<build-number>` suffix if present.
+                v.split('+').next().unwrap_or(v).trim().to_owned()
+            })
+        })
+        .unwrap_or_else(|| "unknown".to_owned());
+
+    let sw_path = web_out.join("sw.js");
+    let sw_src = match std::fs::read_to_string(&sw_path) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("cargo:warning=Could not read built sw.js for version injection: {e}");
+            return;
+        }
+    };
+
+    let injected = sw_src.replace("__APP_VERSION__", &version);
+    if let Err(e) = std::fs::write(&sw_path, injected) {
+        println!("cargo:warning=Could not write sw.js after version injection: {e}");
+    } else {
+        println!("cargo:warning=sw.js version injected: {version}");
+    }
 }

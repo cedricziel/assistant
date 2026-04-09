@@ -11,6 +11,7 @@ pub mod agents;
 pub mod analytics;
 pub mod logs;
 pub mod personas;
+pub mod push;
 pub mod skills;
 pub mod traces;
 pub mod webhooks;
@@ -101,6 +102,8 @@ pub struct ApiState {
     /// Shared live agent ID — updated when the user switches personas at runtime.
     pub agent_id: Arc<RwLock<String>>,
     pub orchestrator: Arc<dyn AssistantInterface>,
+    /// Optional Web Push dispatcher — absent when VAPID keys are not configured.
+    pub push_dispatcher: Option<Arc<crate::push::PushDispatcher>>,
 }
 
 impl ApiState {
@@ -113,7 +116,13 @@ impl ApiState {
             pool,
             agent_id,
             orchestrator,
+            push_dispatcher: None,
         }
+    }
+
+    pub fn with_push_dispatcher(mut self, dispatcher: Arc<crate::push::PushDispatcher>) -> Self {
+        self.push_dispatcher = Some(dispatcher);
+        self
     }
 }
 
@@ -533,6 +542,8 @@ pub async fn send_message(
         rx
     };
 
+    let push_dispatcher_for_sse = state.push_dispatcher.clone();
+    let conv_id_for_push = conv_id;
     tokio::spawn(async move {
         let mut full_text = String::new();
 
@@ -542,15 +553,60 @@ pub async fn send_message(
                     full_text.push_str(&token);
                     Event::default().event("token").data(token)
                 }
-                OrchestratorEvent::Status(msg) => {
-                    Event::default().event("status").data(msg)
-                }
+                OrchestratorEvent::Status(msg) => Event::default().event("status").data(msg),
                 OrchestratorEvent::ToolResult { tool_name, status } => {
                     let data = serde_json::json!({
                         "tool_name": tool_name,
                         "status": status,
                     });
                     Event::default().event("tool_result").data(data.to_string())
+                }
+                OrchestratorEvent::SkillComplete {
+                    skill_name,
+                    success,
+                    summary,
+                } => {
+                    // Fire push notification for skill completion (task 4.4).
+                    if let Some(ref dispatcher) = push_dispatcher_for_sse {
+                        let title = if success {
+                            "Skill complete".to_string()
+                        } else {
+                            "Skill failed".to_string()
+                        };
+                        let body = format!("{skill_name}: {summary}");
+                        let conv_id_str = conv_id_for_push.to_string();
+                        let d = dispatcher.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = d.send_to_all(&title, &body, Some(&conv_id_str)).await {
+                                warn!("Push (skill) failed: {e}");
+                            }
+                        });
+                    }
+                    let data = serde_json::json!({
+                        "skill_name": skill_name,
+                        "success": success,
+                        "summary": summary,
+                    });
+                    Event::default()
+                        .event("skill_complete")
+                        .data(data.to_string())
+                }
+                OrchestratorEvent::AgentError { message } => {
+                    // Fire push notification for agent critical error (task 4.5).
+                    if let Some(ref dispatcher) = push_dispatcher_for_sse {
+                        let body = message.chars().take(80).collect::<String>();
+                        let conv_id_str = conv_id_for_push.to_string();
+                        let d = dispatcher.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = d
+                                .send_to_all("Assistant error", &body, Some(&conv_id_str))
+                                .await
+                            {
+                                warn!("Push (agent error) failed: {e}");
+                            }
+                        });
+                    }
+                    Event::default().event("agent_error").data(message)
                 }
             };
             if sse_tx.send(Ok(sse_event)).await.is_err() {
@@ -569,6 +625,18 @@ pub async fn send_message(
         });
         let done = Event::default().event("done").data(done_data.to_string());
         let _ = sse_tx.send(Ok(done)).await;
+
+        // Fire Web Push notification after emitting the SSE done event.
+        if let Some(dispatcher) = push_dispatcher_for_sse {
+            let body = reply_text.chars().take(80).collect::<String>();
+            let conv_id_str = conv_id_for_push.to_string();
+            if let Err(e) = dispatcher
+                .send_to_all("New message", &body, Some(&conv_id_str))
+                .await
+            {
+                warn!("Push dispatch failed: {e}");
+            }
+        }
     });
 
     Sse::new(ReceiverStream::new(sse_rx)).into_response()
@@ -654,6 +722,7 @@ mod tests {
             pool: storage.pool.clone(),
             agent_id: Arc::new(RwLock::new("default".to_string())),
             orchestrator,
+            push_dispatcher: None,
         };
         (state, storage)
     }

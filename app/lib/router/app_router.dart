@@ -6,6 +6,7 @@ import '../features/agents/agent_detail_screen.dart';
 import '../features/agents/agents_screen.dart';
 import '../features/analytics/analytics_screen.dart';
 import '../features/chat/chat_screen.dart';
+import '../features/settings/settings_screen.dart';
 import '../features/connection/connection_provider.dart';
 import '../features/connection/connection_screen.dart';
 import '../features/logs/logs_screen.dart';
@@ -52,6 +53,7 @@ class AppRoutes {
   static const agents = '/agents';
   static const agentDetail = '/agents/:id';
   static const analytics = '/analytics';
+  static const settings = '/settings';
 }
 
 /// Provider that creates a single [GoRouter] instance for the application
@@ -257,6 +259,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.analytics,
             builder: (context, state) => const AnalyticsScreen(),
+          ),
+
+          // -- Settings -----------------------------------------------------
+          GoRoute(
+            path: AppRoutes.settings,
+            builder: (context, state) => const SettingsScreen(),
           ),
         ],
       ),

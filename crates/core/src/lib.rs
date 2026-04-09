@@ -35,9 +35,9 @@ pub use types::{
     EmbeddingConfig, EmbeddingProviderKind, ExecutionContext, IcebergConfig, Interface, LlmConfig,
     LlmProviderKind, MatrixConfig, MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig,
     McpTrustLevel, MemoryConfig, Message, MessageRole, MirrorConfig, MoonshotOptions,
-    MoonshotWebSearchOptions, NextcloudConfig, ObservabilityConfig, OpenAIAuthMode, OpenAIOptions,
-    OpenAIUserLocation, OpenAIWebSearchOptions, OtelExporter, PartitionGranularity, SignalConfig,
-    SkillsConfig, SlackConfig, SlackListenMode, StorageConfig, TranscriptionConfig,
-    TranscriptionProviderKind, DEFAULT_MAX_AGENT_DEPTH,
+    MoonshotWebSearchOptions, NextcloudConfig, NotificationsConfig, ObservabilityConfig,
+    OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation, OpenAIWebSearchOptions, OtelExporter,
+    PartitionGranularity, SignalConfig, SkillsConfig, SlackConfig, SlackListenMode, StorageConfig,
+    TranscriptionConfig, TranscriptionProviderKind, DEFAULT_MAX_AGENT_DEPTH,
 };
 pub use upload::resolve_upload_bytes;

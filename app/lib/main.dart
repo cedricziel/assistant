@@ -4,6 +4,7 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:pwa_update_listener/pwa_update_listener.dart';
 
 import 'features/embedded_server/embedded_server_provider.dart';
+import 'features/notifications/notification_badge_notifier.dart';
 import 'router/app_router.dart';
 import 'tray/platform_init.dart';
 import 'tray/window_handler_platform.dart';
@@ -48,11 +49,36 @@ Future<void> main() async {
 }
 
 /// Root application widget.
-class AssistantApp extends ConsumerWidget {
+class AssistantApp extends ConsumerStatefulWidget {
   const AssistantApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AssistantApp> createState() => _AssistantAppState();
+}
+
+class _AssistantAppState extends ConsumerState<AssistantApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.read(notificationBadgeProvider.notifier).clear();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // Ensure the embedded-server provider is initialised at startup on macOS
     // so the binary starts before the first frame renders.
     ref.watch(embeddedServerProvider);
