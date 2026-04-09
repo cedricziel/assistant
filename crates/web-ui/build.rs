@@ -107,17 +107,19 @@ fn inject_sw_version(app_dir: &Path, web_out: &Path) {
     };
 
     // Parse `version: 1.2.3` or `version: 1.2.3+4` (strip build metadata).
-    let version = pubspec
-        .lines()
-        .find_map(|line| {
-            let line = line.trim();
-            line.strip_prefix("version:").map(|v| {
-                let v = v.trim();
-                // Drop the `+<build-number>` suffix if present.
-                v.split('+').next().unwrap_or(v).trim().to_owned()
-            })
+    let Some(version) = pubspec.lines().find_map(|line| {
+        let line = line.trim();
+        line.strip_prefix("version:").map(|v| {
+            let v = v.trim();
+            // Drop the `+<build-number>` suffix if present.
+            v.split('+').next().unwrap_or(v).trim().to_owned()
         })
-        .unwrap_or_else(|| "unknown".to_owned());
+    }) else {
+        println!(
+            "cargo:warning=Could not parse `version:` from pubspec.yaml — skipping sw.js version injection"
+        );
+        return;
+    };
 
     let sw_path = web_out.join("sw.js");
     let sw_src = match std::fs::read_to_string(&sw_path) {
