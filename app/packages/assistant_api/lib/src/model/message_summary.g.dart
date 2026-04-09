@@ -16,6 +16,10 @@ class _$MessageSummary extends MessageSummary {
   @override
   final String role;
   @override
+  final String? skillName;
+  @override
+  final BuiltList<String>? toolCalls;
+  @override
   final int turn;
 
   factory _$MessageSummary([void Function(MessageSummaryBuilder)? updates]) =>
@@ -26,6 +30,8 @@ class _$MessageSummary extends MessageSummary {
       required this.createdAt,
       required this.id,
       required this.role,
+      this.skillName,
+      this.toolCalls,
       required this.turn})
       : super._();
   @override
@@ -43,6 +49,8 @@ class _$MessageSummary extends MessageSummary {
         createdAt == other.createdAt &&
         id == other.id &&
         role == other.role &&
+        skillName == other.skillName &&
+        toolCalls == other.toolCalls &&
         turn == other.turn;
   }
 
@@ -53,6 +61,8 @@ class _$MessageSummary extends MessageSummary {
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
     _$hash = $jc(_$hash, role.hashCode);
+    _$hash = $jc(_$hash, skillName.hashCode);
+    _$hash = $jc(_$hash, toolCalls.hashCode);
     _$hash = $jc(_$hash, turn.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -65,6 +75,8 @@ class _$MessageSummary extends MessageSummary {
           ..add('createdAt', createdAt)
           ..add('id', id)
           ..add('role', role)
+          ..add('skillName', skillName)
+          ..add('toolCalls', toolCalls)
           ..add('turn', turn))
         .toString();
   }
@@ -90,6 +102,16 @@ class MessageSummaryBuilder
   String? get role => _$this._role;
   set role(String? role) => _$this._role = role;
 
+  String? _skillName;
+  String? get skillName => _$this._skillName;
+  set skillName(String? skillName) => _$this._skillName = skillName;
+
+  ListBuilder<String>? _toolCalls;
+  ListBuilder<String> get toolCalls =>
+      _$this._toolCalls ??= ListBuilder<String>();
+  set toolCalls(ListBuilder<String>? toolCalls) =>
+      _$this._toolCalls = toolCalls;
+
   int? _turn;
   int? get turn => _$this._turn;
   set turn(int? turn) => _$this._turn = turn;
@@ -105,6 +127,8 @@ class MessageSummaryBuilder
       _createdAt = $v.createdAt;
       _id = $v.id;
       _role = $v.role;
+      _skillName = $v.skillName;
+      _toolCalls = $v.toolCalls?.toBuilder();
       _turn = $v.turn;
       _$v = null;
     }
@@ -125,19 +149,34 @@ class MessageSummaryBuilder
   MessageSummary build() => _build();
 
   _$MessageSummary _build() {
-    final _$result = _$v ??
-        _$MessageSummary._(
-          content: BuiltValueNullFieldError.checkNotNull(
-              content, r'MessageSummary', 'content'),
-          createdAt: BuiltValueNullFieldError.checkNotNull(
-              createdAt, r'MessageSummary', 'createdAt'),
-          id: BuiltValueNullFieldError.checkNotNull(
-              id, r'MessageSummary', 'id'),
-          role: BuiltValueNullFieldError.checkNotNull(
-              role, r'MessageSummary', 'role'),
-          turn: BuiltValueNullFieldError.checkNotNull(
-              turn, r'MessageSummary', 'turn'),
-        );
+    _$MessageSummary _$result;
+    try {
+      _$result = _$v ??
+          _$MessageSummary._(
+            content: BuiltValueNullFieldError.checkNotNull(
+                content, r'MessageSummary', 'content'),
+            createdAt: BuiltValueNullFieldError.checkNotNull(
+                createdAt, r'MessageSummary', 'createdAt'),
+            id: BuiltValueNullFieldError.checkNotNull(
+                id, r'MessageSummary', 'id'),
+            role: BuiltValueNullFieldError.checkNotNull(
+                role, r'MessageSummary', 'role'),
+            skillName: skillName,
+            toolCalls: _toolCalls?.build(),
+            turn: BuiltValueNullFieldError.checkNotNull(
+                turn, r'MessageSummary', 'turn'),
+          );
+    } catch (_) {
+      late String _$failedField;
+      try {
+        _$failedField = 'toolCalls';
+        _toolCalls?.build();
+      } catch (e) {
+        throw BuiltValueNestedFieldError(
+            r'MessageSummary', _$failedField, e.toString());
+      }
+      rethrow;
+    }
     replace(_$result);
     return _$result;
   }

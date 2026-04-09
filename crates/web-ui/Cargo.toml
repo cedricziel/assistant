@@ -48,6 +48,11 @@ reqwest = { workspace = true }
 hex = { workspace = true }
 url = { workspace = true }
 getrandom = { workspace = true }
+aes-gcm = { workspace = true }
+hkdf = { workspace = true }
+base64 = { workspace = true }
+toml_edit = { workspace = true }
+p256 = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true }
 rust-embed = { workspace = true }

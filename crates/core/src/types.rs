@@ -173,6 +173,9 @@ pub struct AssistantConfig {
     /// Populated from the `[transcription]` section of `config.toml`.
     #[serde(default)]
     pub transcription: Option<TranscriptionConfig>,
+    /// Push notification / VAPID configuration (`[notifications]` section).
+    #[serde(default)]
+    pub notifications: NotificationsConfig,
 }
 
 /// Active assistant agent configuration.
@@ -1079,6 +1082,21 @@ impl Default for CompactionConfig {
             keep_recent_turns: default_keep_recent_turns(),
         }
     }
+}
+
+/// Push notification / VAPID configuration (`[notifications]` section).
+///
+/// VAPID keys are generated on first `assistant webui serve` startup and
+/// written back to `~/.assistant/config.toml`. Keeping them stable ensures
+/// all existing browser push subscriptions remain valid.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NotificationsConfig {
+    /// Base64url-encoded VAPID private key (P-256). Auto-generated if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vapid_private_key: Option<String>,
+    /// Base64url-encoded VAPID public key (P-256). Auto-generated if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vapid_public_key: Option<String>,
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

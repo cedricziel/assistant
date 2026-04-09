@@ -28,4 +28,25 @@ pub enum OrchestratorEvent {
         /// `"ok"` on success, `"error"` or `"denied"` otherwise.
         status: String,
     },
+
+    /// A skill run completed (success or failure).
+    ///
+    /// Emitted after a skill tool invocation finishes so that notification
+    /// handlers can fire a "Skill complete" push without needing to know
+    /// which tool names map to skills.
+    SkillComplete {
+        /// The skill name (matches the skill's `name` field).
+        skill_name: String,
+        /// Whether the skill succeeded (`true`) or failed (`false`).
+        success: bool,
+        /// Short human-readable description of the outcome (first 120 chars).
+        summary: String,
+    },
+
+    /// The orchestrator encountered a critical error that prevented it from
+    /// producing a response (e.g. LLM timeout, safety gate block).
+    AgentError {
+        /// Human-readable description of the error.
+        message: String,
+    },
 }

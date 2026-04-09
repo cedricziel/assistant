@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/notifications/agent_event_listener.dart';
 import '../features/pwa/pwa_provider.dart';
 import '../features/updater/update_banner.dart';
 
@@ -78,6 +79,12 @@ const List<_NavDest> _destinations = [
     selectedIcon: Icons.bar_chart,
     label: 'Analytics',
   ),
+  _NavDest(
+    path: '/settings',
+    icon: Icons.settings_outlined,
+    selectedIcon: Icons.settings,
+    label: 'Settings',
+  ),
 ];
 
 /// Shell widget that wraps all main screens with persistent navigation.
@@ -145,7 +152,11 @@ class NavShell extends ConsumerWidget {
                     : null,
               ),
               const VerticalDivider(width: 1, thickness: 1),
-              Expanded(child: UpdateBannerWrapper(child: child)),
+              Expanded(
+        child: AgentEventListener(
+          child: UpdateBannerWrapper(child: child),
+        ),
+      ),
             ],
           ),
         ),
@@ -155,7 +166,7 @@ class NavShell extends ConsumerWidget {
     // Mobile layout: show an install-app banner above the NavigationBar when
     // the install prompt is available.
     return Scaffold(
-      body: UpdateBannerWrapper(child: child),
+      body: AgentEventListener(child: UpdateBannerWrapper(child: child)),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

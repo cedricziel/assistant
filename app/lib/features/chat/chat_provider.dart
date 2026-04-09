@@ -151,6 +151,19 @@ class ChatMessage {
   bool get isAssistant => role == 'assistant';
 }
 
+/// A completed tool result recorded during streaming — used by
+/// [AgentEventListener] to fire skill notifications.
+class ChatToolResult {
+  const ChatToolResult({required this.toolName, required this.status});
+
+  final String toolName;
+
+  /// `"ok"` on success, `"error"` or `"denied"` otherwise.
+  final String status;
+
+  bool get isSuccess => status == 'ok';
+}
+
 /// State for the active chat.
 class ChatState {
   const ChatState({
@@ -160,6 +173,7 @@ class ChatState {
     this.isLoadingHistory = false,
     this.streamingContent = '',
     this.statusMessage,
+    this.lastToolResult,
     this.error,
   });
 
@@ -174,6 +188,11 @@ class ChatState {
   /// Transient status text from the assistant (e.g. "Calling tool: web-search").
   /// Cleared when the stream completes.
   final String? statusMessage;
+
+  /// The most recent tool result received during streaming; changes trigger
+  /// skill completion notifications via [AgentEventListener].
+  final ChatToolResult? lastToolResult;
+
   final String? error;
 
   bool get isStreaming => isSending && streamingContent.isNotEmpty;
@@ -185,6 +204,7 @@ class ChatState {
     bool? isLoadingHistory,
     String? streamingContent,
     String? statusMessage,
+    ChatToolResult? lastToolResult,
     String? error,
     bool clearError = false,
     bool clearConversation = false,
@@ -199,6 +219,7 @@ class ChatState {
       streamingContent: streamingContent ?? this.streamingContent,
       statusMessage:
           clearStatusMessage ? null : (statusMessage ?? this.statusMessage),
+      lastToolResult: lastToolResult ?? this.lastToolResult,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -361,8 +382,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             chatState.copyWith(statusMessage: event.message),
           );
         } else if (event is ToolResultEvent) {
-          // Tool finished — clear the status indicator.
-          state = AsyncData(chatState.copyWith(clearStatusMessage: true));
+          // Tool finished — record result for notification listener.
+          state = AsyncData(chatState.copyWith(
+            clearStatusMessage: true,
+            lastToolResult: ChatToolResult(
+              toolName: event.toolName,
+              status: event.status,
+            ),
+          ));
         } else if (event is DoneEvent) {
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');

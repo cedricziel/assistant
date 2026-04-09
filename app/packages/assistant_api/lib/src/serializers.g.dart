@@ -75,6 +75,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SpanEntryResponse.serializer)
       ..add(StreamResponse.serializer)
       ..add(StringList.serializer)
+      ..add(SubscribeRequest.serializer)
       ..add(SubscribeToTaskRequest.serializer)
       ..add(Task.serializer)
       ..add(TaskArtifactUpdateEvent.serializer)
@@ -86,10 +87,12 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ToolUsageResponse.serializer)
       ..add(TraceDetailResponse.serializer)
       ..add(TraceSummaryResponse.serializer)
+      ..add(UnsubscribeRequest.serializer)
       ..add(UpdateAgentRequest.serializer)
       ..add(UpdateConversationRequest.serializer)
       ..add(UpdateSkillRequest.serializer)
       ..add(UpdateWebhookRequest.serializer)
+      ..add(VapidKeyResponse.serializer)
       ..add(VerifyWebhookResponse.serializer)
       ..add(WebhookResponse.serializer)
       ..add(WorkflowDetail.serializer)
@@ -140,6 +143,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpanEntryResponse)]),
           () => ListBuilder<SpanEntryResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

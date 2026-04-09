@@ -4,6 +4,7 @@ pub mod auth;
 pub(crate) mod backends;
 mod flutter_assets;
 mod openapi;
+pub(crate) mod push;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -59,6 +60,8 @@ use auth::AuthConfig;
 use a2a::agent_store::AgentStore;
 use a2a::handlers::{build_default_agent_card, A2AState};
 use a2a::task_store::TaskStore;
+use api::push::{push_api_router, PushApiState};
+use push::PushDispatcher;
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -134,6 +137,7 @@ pub(crate) struct AppState {
     pub(crate) nats_token: Option<String>,
     pub(crate) trace_backend: Arc<dyn TraceBackend>,
     pub(crate) log_backend: Arc<dyn LogBackend>,
+    pub(crate) push_dispatcher: Option<Arc<PushDispatcher>>,
 }
 
 struct OrchestratorTurnClient {
@@ -154,7 +158,7 @@ impl AssistantTurnClient for OrchestratorTurnClient {
 async fn run_with_args(args: Args) -> Result<()> {
     // -- OpenAPI spec dump (no server required) -------------------------------
     if args.print_openapi {
-        let spec = openapi::ApiDoc::openapi().to_json()?;
+        let spec = openapi::ApiDoc::openapi().to_pretty_json()?;
         println!("{spec}");
         return Ok(());
     }
@@ -213,6 +217,28 @@ async fn run_with_args(args: Args) -> Result<()> {
     }
 
     let _otel_guard = init_tracing(storage.pool.clone(), &config.observability).await?;
+
+    // -- VAPID key provisioning (once, at startup) ---------------------------
+    //
+    // If `[notifications]` is absent or incomplete, generate a new P-256 key
+    // pair and write it back to the config file.  This is done before anything
+    // else so all subsequent handlers can read stable VAPID keys.
+    let config_path = assistant_core::default_config_path();
+    let (vapid_private_key, vapid_public_key) = if let Some(ref path) = config_path {
+        push::ensure_vapid_keys(
+            path,
+            config.notifications.vapid_private_key.as_deref(),
+            config.notifications.vapid_public_key.as_deref(),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            warn!("VAPID key provisioning failed: {e}; push notifications will be unavailable");
+            (String::new(), String::new())
+        })
+    } else {
+        warn!("Cannot determine config path; VAPID key provisioning skipped");
+        (String::new(), String::new())
+    };
 
     let cli_agent_override = args.agent.clone();
     let mut selected_agent = cli_agent_override
@@ -319,6 +345,17 @@ async fn run_with_args(args: Args) -> Result<()> {
             ),
         };
 
+    // -- Push dispatcher (built here so AppState can hold a reference) -------
+    let push_store_for_state = Arc::new(storage.push_subscription_store());
+    let push_dispatcher_for_state = if !vapid_private_key.is_empty() {
+        Some(Arc::new(PushDispatcher::new(
+            vapid_private_key.clone(),
+            push_store_for_state.clone(),
+        )))
+    } else {
+        None
+    };
+
     let state = AppState {
         pool: storage.pool.clone(),
         agent_id: Arc::new(RwLock::new(selected_agent.clone())),
@@ -338,6 +375,7 @@ async fn run_with_args(args: Args) -> Result<()> {
             .or_else(|| std::env::var("NATS_TOKEN").ok()),
         trace_backend,
         log_backend,
+        push_dispatcher: push_dispatcher_for_state,
     };
 
     // 2. LLM provider
@@ -505,7 +543,14 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
-    let api_state = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
+    let api_state = {
+        let s = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
+        if let Some(ref d) = state.push_dispatcher {
+            s.with_push_dispatcher(d.clone())
+        } else {
+            s
+        }
+    };
 
     let persona_api_state = api::personas::PersonaApiState {
         pool: storage.pool.clone(),
@@ -539,6 +584,14 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
+    // Only mount the push API when a real VAPID keypair was provisioned.
+    // An empty key means key generation failed; exposing the endpoints in that
+    // state would let clients subscribe but never receive any delivery.
+    let push_api_state = (!vapid_public_key.is_empty()).then(|| PushApiState {
+        store: push_store_for_state,
+        vapid_public_key: Arc::new(vapid_public_key),
+    });
+
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
         .route("/health", get(health))
@@ -569,7 +622,12 @@ async fn run_with_args(args: Args) -> Result<()> {
                 .merge(api::webhooks::webhooks_api_router().with_state(webhooks_api_state))
                 .merge(api::agents::agents_api_router().with_state(agents_api_state))
                 .merge(api::analytics::analytics_api_router().with_state(analytics_api_state))
-                .merge(api::workflows::workflows_api_router().with_state(workflows_api_state)),
+                .merge(api::workflows::workflows_api_router().with_state(workflows_api_state))
+                .merge(
+                    push_api_state
+                        .map(|s| push_api_router().with_state(s))
+                        .unwrap_or_else(Router::new),
+                ),
         )
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,
