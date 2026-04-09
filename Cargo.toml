@@ -139,9 +139,10 @@ url = "2"
 # OS-level CSPRNG
 getrandom = "0.4"
 # VAPID-signed Web Push dispatch
-web-push = { version = "0.11", default-features = false, features = ["hyper-client"] }
 # P-256 elliptic curve (for VAPID key generation)
 p256 = { version = "0.13", features = ["arithmetic", "ecdh"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
 # Lossless TOML editing (preserves comments and whitespace)
 toml_edit = "0.22"
 # NATS message bus
