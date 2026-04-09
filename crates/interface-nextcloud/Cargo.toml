@@ -1,6 +1,6 @@
 [package]
 name = "assistant-interface-nextcloud"
-version = "0.1.89"
+version = "0.1.90"
 license.workspace = true
 edition.workspace = true
 description = "Nextcloud Talk webhook-based bot interface for the AI assistant"
