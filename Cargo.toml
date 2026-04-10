@@ -158,7 +158,7 @@ tempfile = "3"
 # LRU cache (bounded conversation map in ChannelRunner)
 lru = "0.16"
 # WebSocket client (used by Slack, Mattermost, Matrix, Signal adapters)
-tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 # HTTP middleware / testing utilities
 tower = { version = "0.5", features = ["util"] }
