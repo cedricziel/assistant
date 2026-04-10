@@ -17,9 +17,20 @@
 
 ## 3. AgentBus (agent-loop-bus)
 
-- [ ] 3.1 Define `AgentEvent` enum with all variants (`SessionStarted`, `SessionEnded`, `TurnStarted`, `TurnEnded`, `ToolCallStarted`, `ToolCallCompleted`, `MessageChunk`, `LoopError`) — all `Clone + Debug`
-- [ ] 3.2 Implement `AgentBus` struct: `broadcast::Sender<AgentEvent>`, capacity 1024, `new()`, `subscribe() -> Receiver<AgentEvent>`, `send()` (discards `SendError`), `Clone` impl
-- [ ] 3.3 Write unit tests: subscriber receives events in order, dropped receiver is no-op, two cloned buses share channel, lagged receiver gets `RecvError::Lagged`
+- [ ] 3.1 Define `ToolCallStatus` enum: `Ok`, `Error`, `Denied` — `Clone + Debug`
+- [ ] 3.2 Define `AgentEvent` enum with all variants — all `Clone + Debug`:
+  - `SessionStarted { session_id: Uuid }`
+  - `SessionEnded { session_id: Uuid }`
+  - `TurnStarted { session_id: Uuid, turn: u32 }`
+  - `TurnCompleted { session_id: Uuid, turn: u32, answer: String, attachments: Vec<Attachment> }`
+  - `ToolCallStarted { session_id: Uuid, tool: String, call_id: String }`
+  - `ToolCallCompleted { session_id: Uuid, tool: String, call_id: String, status: ToolCallStatus }`
+  - `MessageChunk { session_id: Uuid, chunk: String }`
+  - `StatusUpdate { session_id: Uuid, message: String }`
+  - `SkillCompleted { session_id: Uuid, skill_name: String, success: bool, summary: String }`
+  - `LoopError { session_id: Uuid, error: String }`
+- [ ] 3.3 Implement `AgentBus` struct: `broadcast::Sender<AgentEvent>`, capacity 1024, `new()`, `subscribe() -> Receiver<AgentEvent>`, `send()` (discards `SendError`), `Clone` impl
+- [ ] 3.4 Write unit tests: subscriber receives events in order, `TurnCompleted` carries answer and attachments, dropped receiver is no-op, two cloned buses share channel, lagged receiver gets `RecvError::Lagged`
 
 ## 4. Plugin Trait System (agent-loop-hooks)
 
@@ -36,16 +47,17 @@
 - [ ] 5.2 Define `AgentLoopConfig` struct with public fields: `provider`, `tools`, `plugins`, `bus` (required), `max_turns` (default 25), `tool_mode` (default `Sequential`), `cancel`
 - [ ] 5.3 Implement `AgentLoopConfig::new(provider, tools) -> Self` constructor with defaults for remaining fields
 
-## 6. AgentLoop Core Implementation
+## 6. AgentLoopConfigTemplate and AgentLoop Core Implementation
 
-- [ ] 6.1 Implement `AgentLoop::new(config: AgentLoopConfig) -> Self`
-- [ ] 6.2 Implement inner turn: `plugins.transform_context` → `plugins.before_llm_request` → LLM call → `plugins.after_llm_response` → parse tool calls
-- [ ] 6.3 Implement tool dispatch: for each call, emit `ToolCallStarted`, call `plugins.before_tool_call` (gate), execute or skip, call `plugins.after_tool_call`, emit `ToolCallCompleted`
-- [ ] 6.4 Implement `Parallel` dispatch with `futures::future::join_all`
-- [ ] 6.5 Implement outer ReAct loop: repeat while tool calls returned; stop on no-tools, max-turns, or cancellation
-- [ ] 6.6 Emit `SessionStarted`/`SessionEnded`/`TurnStarted`/`TurnEnded`/`LoopError` on bus at correct lifecycle points; emit `MessageChunk` for each streamed text token
-- [ ] 6.7 `AgentLoop::run()` takes no mpsc sender — bus is the only channel
-- [ ] 6.8 Write unit tests with mock `LlmProvider`: single-turn, multi-turn, max-turns error, cancellation, parallel dispatch, bus events in order, before_tool_call block prevents execution
+- [ ] 6.1 Define `AgentLoopConfigTemplate` struct holding `Arc`-shared fields: `provider`, `tools`, `plugins`; add `fn config(&self) -> AgentLoopConfig` that clones into a fresh `AgentLoopConfig` with new `AgentBus` + `CancellationToken` and `depth: 0`
+- [ ] 6.2 Implement `AgentLoop::new(config: AgentLoopConfig) -> Self`
+- [ ] 6.3 Implement inner turn: emit `StatusUpdate` before each tool dispatch; `plugins.transform_context` → `plugins.before_llm_request` → LLM call → `plugins.after_llm_response` → parse tool calls
+- [ ] 6.4 Implement tool dispatch: emit `ToolCallStarted`, call `plugins.before_tool_call` (gate — emit `ToolCallCompleted { status: Denied }` on block), execute, call `plugins.after_tool_call`, emit `ToolCallCompleted { status: Ok|Error }`
+- [ ] 6.5 Implement `Parallel` dispatch with `futures::future::join_all`
+- [ ] 6.6 Implement outer ReAct loop: repeat while tool calls returned; stop on no-tools, max-turns, or cancellation
+- [ ] 6.7 Emit `SessionStarted`, `TurnStarted`, `TurnCompleted { answer, attachments }`, `SessionEnded`, `LoopError` at correct lifecycle points; emit `MessageChunk` per streamed text token
+- [ ] 6.8 `AgentLoop::run()` takes no mpsc sender — bus is the only channel
+- [ ] 6.9 Write unit tests: single-turn (check `TurnCompleted.answer`), multi-turn, max-turns error, cancellation, parallel dispatch, `StatusUpdate` before each tool, `ToolCallCompleted::Denied` on block
 
 ## 7. StoragePlugin (feature: storage-plugin)
 
@@ -78,16 +90,18 @@
 - [ ] 9.9 Delete `crates/runtime/src/orchestrator/subagent.rs` and `SubagentRunner` trait from `assistant-core` (replaced by `SubagentPlugin` + `AgentLoopFactory`)
 - [ ] 9.10 Write unit tests: depth guard returns error at limit, depth increments across generations, parallel task calls run child loops concurrently, resume with task_id loads prior messages, resume without storage returns error
 
-## 10. Migrate Interface Crates
+## 10. Update ChannelRunner and Migrate Interface Crates
 
-- [ ] 10.1 Migrate `crates/interface-cli`: remove `assistant-runtime` dep, add `assistant-agent-loop` with `storage-plugin,skill-plugin,subagent-plugin` features; construct `AgentLoopConfig` + `StoragePlugin` + `SkillPlugin` + `SubagentPlugin`; subscribe to `AgentBus` for streaming output; remove all `Orchestrator`/`OrchestratorEvent`/`ChannelRunner` references
-- [ ] 10.2 Migrate `crates/interface-slack`: replace `assistant-runtime` with `assistant-agent-loop`; subscribe to `AgentBus`; match on `AgentEvent`
-- [ ] 10.3 Migrate `crates/interface-mattermost`: same pattern as Slack
-- [ ] 10.4 Migrate `crates/interface-matrix`: same pattern
-- [ ] 10.5 Migrate `crates/interface-nextcloud`: same pattern
-- [ ] 10.6 Migrate `crates/interface-signal`: same pattern
-- [ ] 10.7 Migrate `crates/web-ui`: replace `assistant-runtime` with `assistant-agent-loop`; adapt SSE streaming to `AgentBus` events
-- [ ] 10.8 Run `make check` after each crate migration; fix compile errors before proceeding to next crate
+- [ ] 10.1 Add `AgentLoopConfigTemplate` field to `ChannelRunner` replacing `Arc<Orchestrator>`; update `ChannelRunner::dispatch()` to: construct `AgentLoopConfig` from template, subscribe to bus, spawn `AgentLoop::run()`, drive `ChannelAdapter` hooks from bus events (`TurnCompleted` → `on_turn_success`, `LoopError` → `on_turn_error`)
+- [ ] 10.2 Update `SkillPlugin::after_tool_call` to detect file-read of a skill path and emit `SkillCompleted` on the bus
+- [ ] 10.3 Migrate `crates/interface-cli`: remove `assistant-runtime` dep, add `assistant-agent-loop` with `storage-plugin,skill-plugin,subagent-plugin` features; construct `AgentLoopConfigTemplate`; subscribe to `AgentBus` for streaming output; match `MessageChunk` for token printing, `StatusUpdate` for status line, `TurnCompleted` for final answer
+- [ ] 10.4 Migrate `crates/interface-slack`: update `ChannelRunner` construction — swap `Arc<Orchestrator>` for `Arc<AgentLoopConfigTemplate>`; remove `OrchestratorEvent` imports
+- [ ] 10.5 Migrate `crates/interface-mattermost`: same pattern as Slack
+- [ ] 10.6 Migrate `crates/interface-matrix`: same pattern
+- [ ] 10.7 Migrate `crates/interface-nextcloud`: same pattern
+- [ ] 10.8 Migrate `crates/interface-signal`: same pattern
+- [ ] 10.9 Migrate `crates/web-ui`: replace `Orchestrator` + `register_token_sink` with `AgentLoopConfigTemplate`; adapt SSE endpoint to subscribe to `AgentBus` and map `AgentEvent` variants to SSE event names (`MessageChunk` → `token`, `StatusUpdate` → `status`, `ToolCallCompleted` → `tool_result`, `SkillCompleted` → `skill_complete`, `LoopError` → `error`)
+- [ ] 10.10 Run `make check` after each crate change; fix compile errors before proceeding
 
 ## 11. Delete assistant-runtime
 

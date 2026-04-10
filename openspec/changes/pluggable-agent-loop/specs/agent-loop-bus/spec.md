@@ -7,7 +7,7 @@
 #### Scenario: Interface crate receives all event types from one subscriber
 
 - **WHEN** an interface crate calls `bus.subscribe()` before `AgentLoop::run()`
-- **THEN** the receiver delivers `SessionStarted`, `TurnStarted`, `MessageChunk`, `ToolCallStarted`, `ToolCallCompleted`, `TurnEnded`, and `SessionEnded` events in order for a single turn with one tool call
+- **THEN** the receiver delivers `SessionStarted`, `TurnStarted`, `MessageChunk`, `ToolCallStarted`, `ToolCallCompleted`, `TurnCompleted`, and `SessionEnded` events in order for a single turn with one tool call
 
 #### Scenario: Multiple independent subscribers each receive all events
 
@@ -19,30 +19,64 @@
 - **WHEN** a caller creates an `AgentBus` and immediately drops the `Receiver` returned by `subscribe()`
 - **THEN** `AgentLoop::run()` completes successfully; `SendError` from `broadcast::send()` is discarded
 
-### Requirement: AgentEvent enum unifies all loop lifecycle events
+### Requirement: AgentBus is turn-scoped for messenger interfaces; session-scoped for web/CLI
+
+For messenger interfaces (Slack, Mattermost, Matrix, etc.) `AgentLoop` and `AgentBus` SHALL be constructed once per inbound turn, not shared across concurrent conversations. This ensures each turn's subscriber receives only that turn's events with no cross-conversation noise. For web-ui SSE streams and CLI, `AgentLoop` MAY be longer-lived; in that case all events carry `session_id` and subscribers filter by it.
+
+#### Scenario: Slack turn produces isolated events
+
+- **WHEN** two Slack messages arrive concurrently, each dispatched in their own `AgentLoop::run()` call with separate `AgentBus` instances
+- **THEN** the subscriber for conversation A receives no events from conversation B
+
+#### Scenario: Web-ui SSE subscriber filters by session_id
+
+- **WHEN** a long-lived `AgentLoop` handles two concurrent web sessions and a subscriber only wants session `abc`
+- **THEN** the subscriber discards events where `session_id != "abc"` and processes only the matching ones
+
+### Requirement: AgentEvent enum covers all events consumed by current interfaces
 
 The `AgentEvent` enum SHALL define:
 
 - `SessionStarted   { session_id: Uuid }`
 - `SessionEnded     { session_id: Uuid }`
 - `TurnStarted      { session_id: Uuid, turn: u32 }`
-- `TurnEnded        { session_id: Uuid, turn: u32 }`
+- `TurnCompleted    { session_id: Uuid, turn: u32, answer: String, attachments: Vec<Attachment> }`
 - `ToolCallStarted  { session_id: Uuid, tool: String, call_id: String }`
-- `ToolCallCompleted{ session_id: Uuid, tool: String, call_id: String, success: bool }`
+- `ToolCallCompleted{ session_id: Uuid, tool: String, call_id: String, status: ToolCallStatus }`
 - `MessageChunk     { session_id: Uuid, chunk: String }`
+- `StatusUpdate     { session_id: Uuid, message: String }`
+- `SkillCompleted   { session_id: Uuid, skill_name: String, success: bool, summary: String }`
 - `LoopError        { session_id: Uuid, error: String }`
 
-All variants SHALL derive `Clone` and `Debug`.
+`ToolCallStatus` SHALL be an enum: `Ok`, `Error`, `Denied`.
 
-#### Scenario: Tool call events bracket execution
+All variants SHALL derive `Clone` and `Debug`. `session_id` SHALL be a `uuid::Uuid`. `Attachment` is re-exported from `assistant-core`.
 
-- **WHEN** the LLM calls tool `bash` and it completes successfully
-- **THEN** `ToolCallStarted { tool: "bash", .. }` is emitted before execution and `ToolCallCompleted { tool: "bash", success: true, .. }` after
+`TurnCompleted` (not `TurnEnded`) carries the final answer and attachments so messenger interfaces can send the reply without inspecting the full message history.
 
-#### Scenario: LoopError on max-turns
+`StatusUpdate` maps to the existing `OrchestratorEvent::Status` — human-readable progress strings like `"Calling tool: web-search"`.
 
-- **WHEN** the loop exceeds `max_turns`
-- **THEN** `LoopError` is emitted with a descriptive message before the loop returns `Err`
+`SkillCompleted` maps to `OrchestratorEvent::SkillComplete` — consumed by the push-notification hook in `web-ui`.
+
+#### Scenario: Messenger interface drives reply from TurnCompleted
+
+- **WHEN** a Slack adapter subscribes to the bus and the turn finishes
+- **THEN** the subscriber receives `TurnCompleted { answer, .. }` and calls `adapter.send(user, answer)` — no separate answer extraction needed
+
+#### Scenario: Tool denial surfaces in ToolCallCompleted
+
+- **WHEN** a tool call is blocked by a `before_tool_call` plugin returning `Block`
+- **THEN** `ToolCallCompleted { status: ToolCallStatus::Denied, .. }` is emitted
+
+#### Scenario: SkillCompleted fires after skill body is loaded and acted upon
+
+- **WHEN** the model reads a `SKILL.md` via `file-read` and the skill's instructions lead to a completed sub-task
+- **THEN** `SkillCompleted` is emitted by `SkillPlugin` via `after_tool_call` when it detects a file-read of a skill path
+
+#### Scenario: StatusUpdate emitted before each tool dispatch
+
+- **WHEN** the loop is about to call tool `bash`
+- **THEN** `StatusUpdate { message: "Calling tool: bash" }` is emitted on the bus before `ToolCallStarted`
 
 ### Requirement: AgentBus is cheaply clonable; the loop holds an internal clone
 

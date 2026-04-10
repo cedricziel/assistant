@@ -38,46 +38,64 @@ Reference: pi (badlogic/pi-mono) and opencode (sst/opencode) — both achieve ri
 
 ---
 
-### D2: `AgentBus` is required in `AgentLoopConfig`; mpsc sender is removed
+### D2: `AgentBus` is required in `AgentLoopConfig`; mpsc sender is removed; lifetime is caller-determined
 
-**Decision:** `AgentBus` is a required field (not `Option<AgentBus>`). The old `mpsc::Sender<OrchestratorEvent>` parameter on `run()` is gone. Interface crates call `bus.subscribe()` to receive events.
+**Decision:** `AgentBus` is a required field (not `Option<AgentBus>`). The old `mpsc::Sender<OrchestratorEvent>` parameter on `run()` is gone. Interface crates call `bus.subscribe()` to receive events. The lifetime of `AgentLoop` (and therefore `AgentBus`) is determined by the caller — not mandated by the library.
 
-**Rationale:** Making the bus required ensures every caller gets a uniform event stream. The dual-channel system (mpsc for streaming + broadcast for observation) existed only to preserve the old `Orchestrator` API; without BC, one channel suffices. Callers that don't care about events can create a bus and drop the receiver.
+- **Messenger interfaces** (Slack, Mattermost, etc.) construct one `AgentLoop` + `AgentBus` **per inbound turn**, tear them down on `TurnCompleted`. The bus is turn-scoped; each conversation's subscriber receives only its own events with no cross-conversation noise.
+- **Web-ui / CLI** MAY use a longer-lived `AgentLoop` and filter the shared bus by `session_id`.
+
+This is the critical difference from the previous design: `AgentLoop` is cheap to construct (all heavy deps are `Arc`-shared via the config) so per-turn construction adds negligible overhead while eliminating cross-session event routing complexity.
 
 ```rust
 pub struct AgentLoopConfig {
     pub provider:  Arc<dyn LlmProvider>,
     pub tools:     Arc<ToolExecutor>,
-    pub plugins:   PluginRegistry,
+    pub plugins:   PluginRegistry,   // Arc-shared plugin instances
     pub bus:       AgentBus,
     pub max_turns: u32,
     pub tool_mode: ToolMode,
     pub cancel:    CancellationToken,
+    pub depth:     u32,
 }
 ```
 
 ---
 
-### D3: `AgentEvent` unifies `OrchestratorEvent` and the old streaming channel
+### D3: `AgentEvent` unifies `OrchestratorEvent` and the old streaming channel — with full parity
 
-**Decision:** A single `AgentEvent` enum covers all events previously split across `OrchestratorEvent` variants and the mpsc streaming channel:
+**Decision:** A single `AgentEvent` enum covers all events previously split across `OrchestratorEvent` variants and the mpsc streaming channel, with full parity so no interface loses capability:
 
 ```rust
 pub enum AgentEvent {
     SessionStarted   { session_id: Uuid },
     SessionEnded     { session_id: Uuid },
     TurnStarted      { session_id: Uuid, turn: u32 },
-    TurnEnded        { session_id: Uuid, turn: u32 },
+    TurnCompleted    { session_id: Uuid, turn: u32, answer: String, attachments: Vec<Attachment> },
     ToolCallStarted  { session_id: Uuid, tool: String, call_id: String },
-    ToolCallCompleted{ session_id: Uuid, tool: String, call_id: String, success: bool },
+    ToolCallCompleted{ session_id: Uuid, tool: String, call_id: String, status: ToolCallStatus },
     MessageChunk     { session_id: Uuid, chunk: String },
+    StatusUpdate     { session_id: Uuid, message: String },
+    SkillCompleted   { session_id: Uuid, skill_name: String, success: bool, summary: String },
     LoopError        { session_id: Uuid, error: String },
 }
+
+pub enum ToolCallStatus { Ok, Error, Denied }
 ```
 
-All variants are `Clone + Debug`. Interface crates match on `AgentEvent` instead of `OrchestratorEvent`.
+Key additions over the first design:
 
-**Rationale:** One channel, one enum, one subscription pattern for all consumers. `broadcast` handles multiple independent subscribers (UI rendering, telemetry, test assertions) without coordination.
+- **`TurnCompleted`** (not `TurnEnded`) carries `answer` + `attachments` — messenger interfaces need the final answer to send a reply; there is no other place to get it without inspecting full history.
+- **`StatusUpdate`** — maps 1:1 to `OrchestratorEvent::Status`; consumed by web-ui to render "Calling tool: web-search…" indicators.
+- **`SkillCompleted`** — maps to `OrchestratorEvent::SkillComplete`; consumed by web-ui push-notification hook. Emitted by `SkillPlugin` via `after_tool_call` when it detects a `file-read` of a skill path.
+- **`ToolCallStatus::Denied`** — surfaces blocked tool calls distinctly from errors.
+
+**Rationale:** The first design dropped three `OrchestratorEvent` variants that active consumers depend on (`Status`, `SkillComplete`, `ToolResult` detail). A clean break must still be complete; partial parity forces interfaces to maintain parallel state tracking to compensate.
+
+**Alternatives considered:**
+
+- _Keep `OrchestratorEvent` alongside `AgentEvent`_: Two enums for the same concept — rejected.
+- _Omit `TurnCompleted.answer` and let callers reconstruct from `MessageChunk`s_: Requires callers to buffer chunks, handle tool-call interleaving, and strip non-text content — fragile. `TurnCompleted` is the authoritative answer.
 
 ---
 
@@ -137,18 +155,46 @@ Child events are emitted on a **separate child `AgentBus`** — not the parent's
 
 ---
 
-### D7: Interface crates own their `AgentLoopConfig` construction
+### D7: `ChannelRunner` is retained and updated — not deleted
 
-**Decision:** Each interface crate constructs its own `AgentLoopConfig`, registers the plugins it needs, and subscribes to the bus. There is no shared "runtime factory." `assistant-cli` registers `StoragePlugin + SkillPlugin + MetricsPlugin`; `interface-slack` registers what it needs.
+**Decision:** `ChannelRunner` is NOT deleted. It is updated in-place to construct a per-turn `AgentLoopConfig` + `AgentBus` instead of calling `Orchestrator::run_turn_with_tools`. The `ChannelAdapter` lifecycle hooks (`on_turn_start`, `on_turn_success`, `on_turn_error`) are driven from bus events:
+
+```
+bus subscribe
+AgentEvent::SessionStarted → adapter.on_turn_start()
+AgentEvent::MessageChunk   → adapter.send_typing() (optional)
+AgentEvent::TurnCompleted  → adapter.on_turn_success(answer, attachments)
+                           → adapter.send(user, answer)
+AgentEvent::LoopError      → adapter.on_turn_error()
+```
+
+The per-conversation UUID mapping (`LruCache<String, Uuid>`) and turn serialisation (`conv_locks: HashMap<Uuid, Arc<Mutex<()>>>`) are unchanged — they are interface-agnostic plumbing that every messenger adapter needs and should not be duplicated across 5 crates.
+
+`ChannelRunner` loses its `Arc<Orchestrator>` field and gains an `Arc<AgentLoopConfigTemplate>` — a struct holding the `Arc`-shared deps (`provider`, `tools`, `plugins`) from which per-turn `AgentLoopConfig`s are cloned cheaply.
+
+**Rationale:** Deleting `ChannelRunner` would force all 5 messenger crates to re-implement the same dispatch loop, conversation-key mapping, and turn-serialisation logic. The runner's value is in this shared plumbing; only the `Orchestrator` call in `dispatch()` needs to change.
+
+**Alternatives considered:**
+
+- _Delete `ChannelRunner`, each messenger crate re-implements dispatch_: Pure but creates 5 copies of the same loop. Rejected.
+- _`ChannelRunner` spawns a long-lived `AgentLoop` shared across conversations_: Forces subscribers to filter by `session_id`, adds broadcast noise. Per-turn construction is cleaner.
+
+---
+
+### D8: Interface crates own their `AgentLoopConfigTemplate` construction
+
+**Decision:** Each interface crate constructs its own `AgentLoopConfigTemplate` holding `Arc`-shared deps, registers the plugins it needs, and passes it to `ChannelRunner` (messengers) or constructs `AgentLoopConfig` directly (CLI, web-ui). There is no shared runtime factory. `assistant-cli` uses `StoragePlugin + SkillPlugin + SubagentPlugin`; messenger crates use whatever subset fits their platform.
 
 **Rationale:** Eliminates the implicit shared-state problem in `assistant-runtime` where all interfaces shared one `Orchestrator`. Each interface is now fully self-contained.
 
 ---
 
-### D7: Modules from `assistant-runtime` that are not loop concerns move to appropriate crates
+### D9: Modules from `assistant-runtime` that are not loop concerns move to appropriate crates
 
 | Old module                       | Destination                                                       |
 | -------------------------------- | ----------------------------------------------------------------- |
+| `channel_runner.rs`              | **Stays** — updated to use `AgentLoopConfigTemplate` per-turn     |
+| `interface_runner.rs`            | **Stays** — pure trait, no Orchestrator dep                       |
 | `scheduler.rs`                   | `assistant-cli` (CLI-specific) or new `assistant-scheduler` crate |
 | `memory_indexer/`                | `assistant-storage` or a plugin                                   |
 | `telemetry.rs` / `otel_spans.rs` | `assistant-cli` or shared init util in `assistant-core`           |
