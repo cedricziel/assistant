@@ -3,8 +3,7 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
     groups:
       opentelemetry:
         patterns:
@@ -16,8 +15,7 @@ updates:
   - package-ecosystem: pub
     directory: /app
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
     groups:
       all-pub:
         patterns:
@@ -26,8 +24,7 @@ updates:
   - package-ecosystem: docker
     directory: /docker
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
     groups:
       all-docker:
         patterns:
@@ -36,8 +33,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
     groups:
       all-actions:
         patterns:
