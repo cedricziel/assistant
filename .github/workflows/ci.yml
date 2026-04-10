@@ -228,7 +228,7 @@ jobs:
 
       - name: Post visual diff comment on PR
         if: steps.playwright.outcome == 'failure' && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -363,7 +363,7 @@ jobs:
 
       - name: Clear stale visual diff comment
         if: steps.playwright.outcome == 'success' && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner;
@@ -398,7 +398,7 @@ jobs:
       contents: write
     steps:
       - name: Delete visual-diffs branch for this PR
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const prNumber = context.issue.number;
