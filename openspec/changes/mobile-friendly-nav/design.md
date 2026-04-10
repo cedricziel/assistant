@@ -11,7 +11,7 @@ The chat screen further complicates mobile layout by embedding a drawer trigger 
 - Reduce mobile bottom bar to 4 primary destinations + 1 overflow ("More")
 - Place developer/observability items (Traces, Logs, Webhooks, Agents, Analytics) in the overflow sheet
 - Add a visual divider in the desktop nav rail between primary and developer items
-- Keep Workflows accessible on mobile via the overflow sheet (power user but not developer-only)
+- Keep Workflows accessible on mobile as a primary destination (power user and growing in importance)
 - Maintain deep-link URLs and GoRouter route constants unchanged
 
 **Non-Goals:**

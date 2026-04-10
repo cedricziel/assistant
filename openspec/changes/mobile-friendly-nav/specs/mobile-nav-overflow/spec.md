@@ -2,12 +2,12 @@
 
 ### Requirement: Mobile bottom bar shows at most 5 destinations
 
-On screens narrower than 768px the bottom `NavigationBar` SHALL display exactly 4 primary destinations (Chat, Contexts, Skills, Workflows) plus one "More" overflow destination. It SHALL NOT display more than 5 items.
+On screens narrower than 768px the bottom `NavigationBar` SHALL display exactly 4 primary destinations (Chat, Personas, Skills, Workflows) plus one "More" overflow destination. It SHALL NOT display more than 5 items.
 
 #### Scenario: Primary destinations visible on mobile
 
 - **WHEN** the app is rendered at a viewport width less than 768px
-- **THEN** the bottom navigation bar shows Chat, Contexts, Skills, Workflows, and More — and no other destinations
+- **THEN** the bottom navigation bar shows Chat, Personas, Skills, Workflows, and More — and no other destinations
 
 #### Scenario: Overflow destinations not directly in bottom bar
 

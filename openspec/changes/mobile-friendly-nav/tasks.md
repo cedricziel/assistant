@@ -1,7 +1,7 @@
 ## 1. Refactor Destination Data Model in nav_shell.dart
 
 - [x] 1.1 Split the single `_destinations` list into `_primaryDestinations` (Chat, Contexts, Skills, Workflows) and `_overflowDestinations` (Traces, Logs, Webhooks, Agents, Analytics) constants
-- [x] 1.2 Create a helper method `_routeForIndex(int index)` that maps a combined index across primary + overflow lists to the correct route path
+- [x] 1.2 Inline route-for-index logic into `_mobileSelectedIndex` and `_railSelectedIndex` helpers (no separate `_routeForIndex` needed; navigation is handled directly by tapping primary/overflow lists)
 - [x] 1.3 Create a helper method `_isOverflowRouteActive(String currentPath)` that returns true when the current URI matches any overflow destination's route
 
 ## 2. Mobile Bottom Bar Overflow ("More")
@@ -16,7 +16,7 @@
 
 - [x] 3.1 Render primary destinations in the rail followed by a non-interactive divider row (disabled `NavigationRailDestination` that renders a `Divider`)
 - [x] 3.2 Render overflow/developer destinations below the divider in the rail
-- [x] 3.3 Verify selected index logic still maps correctly across the combined primary + divider + overflow list (divider must not consume an index slot)
+- [x] 3.3 Verify selected index logic maps correctly: divider occupies sentinel index `_primaryDestinations.length` (4); overflow destinations are offset by +1 past the sentinel (indices 5–9); `_railSelectedIndex` skips the sentinel so it never returns 4
 
 ## 4. Index-to-Route Mapping Correctness
 

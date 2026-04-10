@@ -5,10 +5,9 @@ The current navigation exposes all 9 destinations equally on mobile, creating a 
 ## What Changes
 
 - Restructure bottom navigation to show only the 4–5 most frequently-used destinations on mobile
-- Move power-user/developer items (Traces, Logs, Webhooks, Analytics, Agents) into a secondary "More" or settings-style overflow destination
+- Move developer/observability items (Traces, Logs, Webhooks, Analytics, Agents) into a secondary "More" overflow destination; Workflows stays primary
 - Introduce a visual hierarchy difference between primary and secondary nav items on wide screens (nav rail stays full but groups items)
 - Preserve full nav rail on desktop/tablet (≥768px) with a divider separating primary from developer tools
-- Unify the chat sidebar affordance: on mobile, the drawer trigger moves from the AppBar leading icon into the nav shell so there is one consistent gesture layer
 
 **Status Quo vs Proposed (ASCII art)**
 
@@ -98,7 +97,7 @@ PROPOSED — Desktop (≥768px)
 
 ### New Capabilities
 
-- `mobile-nav-overflow`: Secondary "More" destination on mobile bottom bar that opens a modal bottom sheet listing all overflow destinations (Workflows, Webhooks, Agents, Analytics, Traces, Logs)
+- `mobile-nav-overflow`: Secondary "More" destination on mobile bottom bar that opens a modal bottom sheet listing all overflow destinations (Traces, Logs, Webhooks, Agents, Analytics)
 - `nav-grouping`: Visual grouping/divider in the desktop navigation rail separating primary user-facing destinations from developer/power-user destinations
 
 ### Modified Capabilities
@@ -108,6 +107,5 @@ PROPOSED — Desktop (≥768px)
 ## Impact
 
 - `app/lib/shared/nav_shell.dart` — primary change surface; restructure destination list and add overflow sheet
-- `app/lib/router/app_router.dart` — index-to-route mapping must align with reordered destinations
-- No backend, API, or Rust changes required
+- No backend, API, Rust, or router changes required
 - No breaking changes to routes or deep links
