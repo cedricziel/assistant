@@ -22,6 +22,8 @@ The current `assistant-runtime` crate tightly couples the ReAct agent loop with 
 - `agent-loop-storage-plugin`: `StoragePlugin` implementing `Plugin` to persist conversations via `ConversationStore`.
 - `agent-loop-skill-plugin`: `SkillPlugin` implementing `Plugin` for filesystem-based skill discovery and catalog injection via `transform_context`. Skills are instructions loaded by the model via `file-read` — NOT tools. Deletes the `load-skill` and `list-skills` builtin tools and the SQLite-backed `SkillRegistry`.
 
+- `agent-loop-subagent`: `SubagentPlugin` + `AgentLoopFactory` trait that registers a `task` builtin tool. The LLM calls `task` to delegate work to a child `AgentLoop` running in-process. Returns `task_id` (UUID) for resumption across calls. Depth-limited to `MAX_AGENT_DEPTH` (5). The `Plugin` trait gains an optional `tools()` method so plugins can contribute tools to the session.
+
 ### Modified Capabilities
 
 - None — all capabilities listed above are net-new. Existing `assistant-runtime` capabilities are superseded and removed.

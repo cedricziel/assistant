@@ -100,7 +100,7 @@ skill-plugin   = ["dep:assistant-skills"]
 
 ---
 
-### D5: Skills are instructions loaded via file-read — `load-skill`/`list-skills` tools and `SkillRegistry` are deleted
+### D5: `Plugin` trait gains optional `tools()` method; skills are instructions loaded via file-read — `load-skill`/`list-skills` tools and `SkillRegistry` are deleted
 
 **Decision:** `SkillPlugin` owns skill discovery (filesystem scan, no SQLite) and catalog injection via `transform_context`. The model activates skills by calling its existing `file-read` tool on the `<location>` path in the catalog — no dedicated activation tool is needed or registered. `LoadSkillHandler` and `ListSkillsHandler` are deleted from `assistant-tool-executor`. `SkillRegistry` (SQLite-backed) is deleted from `assistant-storage`.
 
@@ -117,7 +117,27 @@ The agentskills.io spec defines three tiers: (1) catalog in context, (2) model r
 
 ---
 
-### D6: Interface crates own their `AgentLoopConfig` construction
+### D6: Subagents are in-process child `AgentLoop` instances spawned via a `task` tool registered by `SubagentPlugin`
+
+**Decision:** `SubagentPlugin` holds an `Arc<dyn AgentLoopFactory>` and contributes a `task` `ToolHandler` via a new optional `Plugin::tools()` method. The `AgentLoop` merges plugin-contributed tools into the session tool list at startup. When the LLM calls `task`, the handler calls `factory.build_child(parent_config, task_id)`, runs the child `AgentLoop` in-process (no subprocess), and returns the final answer + `task_id` as the tool result.
+
+`AgentLoopConfig` gains a `depth: u32` field (default 0). The factory increments it. When `depth >= MAX_AGENT_DEPTH` (5, reusing the existing `DEFAULT_MAX_AGENT_DEPTH` constant from `assistant-core`) the tool returns an error without spawning.
+
+`task_id` (a `Uuid`) is always returned in the tool result. When provided on a subsequent call, `StoragePlugin`'s conversation store is queried to load prior messages — resuming the child session. Without `StoragePlugin`, resumption returns an error rather than silently starting fresh.
+
+Child events are emitted on a **separate child `AgentBus`** — not the parent's. The parent bus sees only `ToolCallStarted`/`ToolCallCompleted` for the `task` tool call, not the child's internal turn/chunk events.
+
+**Rationale:** In-process is simpler and faster than spawning OS subprocesses (pi's approach). The `task_id` resumption pattern (from opencode) is the key improvement over the existing `SubagentRunner` implementation in `assistant-runtime`, which creates a fresh conversation every time. `AgentLoopFactory` as an injected trait avoids a circular dependency between `SubagentPlugin` and `AgentLoop`. The `Plugin::tools()` extension method keeps the pattern consistent — plugins are the only extension point; no separate tool-registration API is needed.
+
+**Alternatives considered:**
+
+- _Subprocess spawning (pi-style)_: Process isolation is appealing but adds spawn latency, IPC complexity, and breaks shared in-process state (e.g. OpenTelemetry context propagation). In-process with depth guard is sufficient.
+- _`canTask` flag on agent config (opencode-style)_: Replaced by the numeric `depth` guard, which is already present in `assistant-core` and is more precise than a boolean.
+- _Registering `task` as a global builtin in `ToolExecutor`_: Would require `ToolExecutor` to know about `AgentLoop`, creating a circular dep. Plugin-contributed tools via `Plugin::tools()` avoids this cleanly.
+
+---
+
+### D7: Interface crates own their `AgentLoopConfig` construction
 
 **Decision:** Each interface crate constructs its own `AgentLoopConfig`, registers the plugins it needs, and subscribes to the bus. There is no shared "runtime factory." `assistant-cli` registers `StoragePlugin + SkillPlugin + MetricsPlugin`; `interface-slack` registers what it needs.
 

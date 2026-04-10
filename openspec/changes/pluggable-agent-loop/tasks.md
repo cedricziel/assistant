@@ -65,27 +65,40 @@
 - [ ] 8.8 Apply `persona_filter` (allowlist/blocklist) during `transform_context` to restrict which skills appear in the catalog
 - [ ] 8.9 Write unit tests: catalog injected with correct XML, project skill shadows user skill with warn log, empty scan → no catalog message, persona blocklist hides skill, works without StoragePlugin, tool list lacks `load-skill` and `list-skills`
 
-## 9. Migrate Interface Crates
+## 9. SubagentPlugin and task tool (feature: subagent-plugin)
 
-- [ ] 9.1 Migrate `crates/interface-cli`: remove `assistant-runtime` dep, add `assistant-agent-loop` with `storage-plugin,skill-plugin` features; construct `AgentLoopConfig` + `StoragePlugin` + `SkillPlugin`; subscribe to `AgentBus` for streaming output; remove all `Orchestrator`/`OrchestratorEvent`/`ChannelRunner` references
-- [ ] 9.2 Migrate `crates/interface-slack`: replace `assistant-runtime` with `assistant-agent-loop`; subscribe to `AgentBus`; match on `AgentEvent`
-- [ ] 9.3 Migrate `crates/interface-mattermost`: same pattern as Slack
-- [ ] 9.4 Migrate `crates/interface-matrix`: same pattern
-- [ ] 9.5 Migrate `crates/interface-nextcloud`: same pattern
-- [ ] 9.6 Migrate `crates/interface-signal`: same pattern
-- [ ] 9.7 Migrate `crates/web-ui`: replace `assistant-runtime` with `assistant-agent-loop`; adapt SSE streaming to `AgentBus` events
-- [ ] 9.8 Run `make check` after each crate migration; fix compile errors before proceeding to next crate
+- [ ] 9.1 Add optional `fn tools(&self) -> Vec<Arc<dyn ToolHandler>> { vec![] }` method to the `Plugin` trait
+- [ ] 9.2 Update `AgentLoop` startup: collect `tools()` from all registered plugins and merge into the session tool list (after builtin tools, plugin tools may shadow by name)
+- [ ] 9.3 Add `depth: u32` field to `AgentLoopConfig` (default 0); add `MAX_AGENT_DEPTH` constant (reuse `DEFAULT_MAX_AGENT_DEPTH = 5` from `assistant-core`)
+- [ ] 9.4 Define `AgentLoopFactory` trait: `fn build_child(&self, parent: &AgentLoopConfig, task_id: Uuid) -> AgentLoopConfig` — child shares `provider` + `tools`, gets fresh `AgentBus` + `CancellationToken`, `depth = parent.depth + 1`
+- [ ] 9.5 Implement `DefaultAgentLoopFactory` that implements `AgentLoopFactory` with the above semantics
+- [ ] 9.6 Implement `SubagentPlugin::new(factory: Arc<dyn AgentLoopFactory>) -> Self`; return `TaskToolHandler` from `Plugin::tools()`
+- [ ] 9.7 Implement `TaskToolHandler`: schema `{ description: string, task_id?: string }`; on call: check depth guard → error if at limit; generate or reuse `task_id`; load prior messages from `StoragePlugin` if `task_id` provided (error if no storage); run child `AgentLoop`; return `{ answer, task_id }` text
+- [ ] 9.8 Wire child `AgentBus` isolation: child events stay on child bus; parent bus receives only `ToolCallStarted`/`ToolCallCompleted` for the `task` call
+- [ ] 9.9 Delete `crates/runtime/src/orchestrator/subagent.rs` and `SubagentRunner` trait from `assistant-core` (replaced by `SubagentPlugin` + `AgentLoopFactory`)
+- [ ] 9.10 Write unit tests: depth guard returns error at limit, depth increments across generations, parallel task calls run child loops concurrently, resume with task_id loads prior messages, resume without storage returns error
 
-## 10. Delete assistant-runtime
+## 10. Migrate Interface Crates
 
-- [ ] 10.1 Verify no crate in the workspace still depends on `assistant-runtime` (`grep -r "assistant-runtime" crates/ --include="*.toml"`)
-- [ ] 10.2 Remove `crates/runtime` from root `Cargo.toml` workspace members
-- [ ] 10.3 Delete `crates/runtime/` directory
-- [ ] 10.4 Run `make build` — full workspace build must succeed
+- [ ] 10.1 Migrate `crates/interface-cli`: remove `assistant-runtime` dep, add `assistant-agent-loop` with `storage-plugin,skill-plugin,subagent-plugin` features; construct `AgentLoopConfig` + `StoragePlugin` + `SkillPlugin` + `SubagentPlugin`; subscribe to `AgentBus` for streaming output; remove all `Orchestrator`/`OrchestratorEvent`/`ChannelRunner` references
+- [ ] 10.2 Migrate `crates/interface-slack`: replace `assistant-runtime` with `assistant-agent-loop`; subscribe to `AgentBus`; match on `AgentEvent`
+- [ ] 10.3 Migrate `crates/interface-mattermost`: same pattern as Slack
+- [ ] 10.4 Migrate `crates/interface-matrix`: same pattern
+- [ ] 10.5 Migrate `crates/interface-nextcloud`: same pattern
+- [ ] 10.6 Migrate `crates/interface-signal`: same pattern
+- [ ] 10.7 Migrate `crates/web-ui`: replace `assistant-runtime` with `assistant-agent-loop`; adapt SSE streaming to `AgentBus` events
+- [ ] 10.8 Run `make check` after each crate migration; fix compile errors before proceeding to next crate
 
-## 11. Final Validation
+## 11. Delete assistant-runtime
 
-- [ ] 11.1 Run `make test` — all tests pass
-- [ ] 11.2 Run `make lint` and `make format` — zero warnings, clean formatting
-- [ ] 11.3 Run `make test-integration` — smoke tests pass
-- [ ] 11.4 Add `//!` crate-level doc to `crates/agent-loop/src/lib.rs` with usage example showing `AgentLoopConfig` construction and `AgentBus` subscription
+- [ ] 11.1 Verify no crate in the workspace still depends on `assistant-runtime` (`grep -r "assistant-runtime" crates/ --include="*.toml"`)
+- [ ] 11.2 Remove `crates/runtime` from root `Cargo.toml` workspace members
+- [ ] 11.3 Delete `crates/runtime/` directory
+- [ ] 11.4 Run `make build` — full workspace build must succeed
+
+## 12. Final Validation
+
+- [ ] 12.1 Run `make test` — all tests pass
+- [ ] 12.2 Run `make lint` and `make format` — zero warnings, clean formatting
+- [ ] 12.3 Run `make test-integration` — smoke tests pass
+- [ ] 12.4 Add `//!` crate-level doc to `crates/agent-loop/src/lib.rs` with usage example showing `AgentLoopConfig` construction and `AgentBus` subscription
