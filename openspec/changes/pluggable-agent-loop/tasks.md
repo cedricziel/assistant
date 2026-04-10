@@ -4,16 +4,16 @@
 - [ ] 1.2 Move `crates/runtime/src/bootstrap.rs` to `crates/interface-cli/src/bootstrap.rs`; update imports
 - [ ] 1.3 Move `crates/runtime/src/telemetry.rs` and `otel_spans.rs` to `crates/interface-cli/src/telemetry.rs`; update all interface crates that call `init_tracing`
 - [ ] 1.4 Move `crates/runtime/src/webhook_dispatch.rs` to `crates/web-ui/src/webhook_dispatch.rs`; update imports in `web-ui`
-- [ ] 1.5 Move `crates/runtime/src/memory_indexer/` to `crates/storage/src/memory_indexer/`; update imports
+- [ ] 1.5 Move `crates/runtime/src/memory_indexer/` to `crates/storage/src/memory_indexer/`; update imports; re-export from `assistant-storage` crate root
 - [ ] 1.6 Move `crates/runtime/src/metrics.rs` and `MetricsRecorder` to each interface crate that uses it (or inline)
 - [ ] 1.7 Run `make check` — verify workspace still compiles after each move
 
 ## 2. Crate Scaffolding: assistant-agent-loop
 
-- [ ] 2.1 Create `crates/agent-loop/Cargo.toml` with package name `assistant-agent-loop`, edition 2021, features `storage-plugin` and `skill-plugin`
+- [ ] 2.1 Create `crates/agent-loop/Cargo.toml` with package name `assistant-agent-loop`, edition 2021, features `storage-plugin`, `skill-plugin`, `subagent-plugin`, and `bus-worker`
 - [ ] 2.2 Add `crates/agent-loop` to root `Cargo.toml` workspace members
 - [ ] 2.3 Declare dependencies: `assistant-core`, `assistant-llm`, `assistant-tool-executor` (always); `assistant-storage` (feature `storage-plugin`), `assistant-skills` (feature `skill-plugin`); workspace deps `tokio`, `async-trait`, `anyhow`, `tracing`, `serde_json`, `uuid`, `futures`, `tokio-util`
-- [ ] 2.4 Create `crates/agent-loop/src/lib.rs` with module declarations: `pub mod bus`, `pub mod hooks`, `pub mod config`, `pub mod loop_core`, `#[cfg(feature="storage-plugin")] pub mod storage_plugin`, `#[cfg(feature="skill-plugin")] pub mod skill_plugin`
+- [ ] 2.4 Create `crates/agent-loop/src/lib.rs` with module declarations: `pub mod bus`, `pub mod hooks`, `pub mod config`, `pub mod loop_core`, `pub mod dispatcher`, `pub mod memory_plugin`, `#[cfg(feature="storage-plugin")] pub mod storage_plugin`, `#[cfg(feature="skill-plugin")] pub mod skill_plugin`, `#[cfg(feature="subagent-plugin")] pub mod subagent_plugin`, `#[cfg(feature="bus-worker")] pub mod turn_worker`
 
 ## 3. AgentBus (agent-loop-bus)
 
@@ -90,29 +90,63 @@
 - [ ] 9.9 Delete `crates/runtime/src/orchestrator/subagent.rs` and `SubagentRunner` trait from `assistant-core` (replaced by `SubagentPlugin` + `AgentLoopFactory`)
 - [ ] 9.10 Write unit tests: depth guard returns error at limit, depth increments across generations, parallel task calls run child loops concurrently, resume with task_id loads prior messages, resume without storage returns error
 
-## 10. Update ChannelRunner and Migrate Interface Crates
+## 10. MemoryPlugin (base crate, no feature flag)
 
-- [ ] 10.1 Add `AgentLoopConfigTemplate` field to `ChannelRunner` replacing `Arc<Orchestrator>`; update `ChannelRunner::dispatch()` to: construct `AgentLoopConfig` from template, subscribe to bus, spawn `AgentLoop::run()`, drive `ChannelAdapter` hooks from bus events (`TurnCompleted` → `on_turn_success`, `LoopError` → `on_turn_error`)
-- [ ] 10.2 Update `SkillPlugin::after_tool_call` to detect file-read of a skill path and emit `SkillCompleted` on the bus
-- [ ] 10.3 Migrate `crates/interface-cli`: remove `assistant-runtime` dep, add `assistant-agent-loop` with `storage-plugin,skill-plugin,subagent-plugin` features; construct `AgentLoopConfigTemplate`; subscribe to `AgentBus` for streaming output; match `MessageChunk` for token printing, `StatusUpdate` for status line, `TurnCompleted` for final answer
-- [ ] 10.4 Migrate `crates/interface-slack`: update `ChannelRunner` construction — swap `Arc<Orchestrator>` for `Arc<AgentLoopConfigTemplate>`; remove `OrchestratorEvent` imports
-- [ ] 10.5 Migrate `crates/interface-mattermost`: same pattern as Slack
-- [ ] 10.6 Migrate `crates/interface-matrix`: same pattern
-- [ ] 10.7 Migrate `crates/interface-nextcloud`: same pattern
-- [ ] 10.8 Migrate `crates/interface-signal`: same pattern
-- [ ] 10.9 Migrate `crates/web-ui`: replace `Orchestrator` + `register_token_sink` with `AgentLoopConfigTemplate`; adapt SSE endpoint to subscribe to `AgentBus` and map `AgentEvent` variants to SSE event names (`MessageChunk` → `token`, `StatusUpdate` → `status`, `ToolCallCompleted` → `tool_result`, `SkillCompleted` → `skill_complete`, `LoopError` → `error`)
-- [ ] 10.10 Run `make check` after each crate change; fix compile errors before proceeding
+- [ ] 10.1 Add `MemoryPlugin` struct to `crates/agent-loop/src/memory_plugin.rs` with `pub fn new(loader: MemoryLoader) -> Self`; `MemoryLoader` is imported from `assistant-core`
+- [ ] 10.2 Implement `Plugin` for `MemoryPlugin`: `name()` returns `"memory"`
+- [ ] 10.3 Implement `transform_context`: call `loader.load_system_prompt()`; if non-empty, prepend a `ChatHistoryMessage` with `role: System` and the assembled content; return messages unmodified if result is empty
+- [ ] 10.4 Implement `on_session_start`: (a) if BOOTSTRAP.md exists at `loader.bootstrap_path()`, delete it after `MemoryLoader` has included it in the assembled content (deletion happens after the first `load_system_prompt` call in this session); (b) read BOOT.md from `loader.boot_path()`; strip HTML comments; if non-empty, submit as a system turn via the loop handle — log `warn!` on any error and continue
+- [ ] 10.5 Declare `pub mod memory_plugin` in `crates/agent-loop/src/lib.rs`; re-export `MemoryPlugin`
+- [ ] 10.6 Write unit tests:
+  - memory content prepended as System message when files present
+  - empty `load_system_prompt()` → no message prepended
+  - BOOT.md executed at session start when present
+  - missing BOOT.md → `on_session_start` completes silently
+  - BOOT.md failure → `warn!` logged, session continues (no panic/error propagation)
+  - BOOTSTRAP.md present → included in first session's content, deleted afterward
+  - BOOTSTRAP.md absent → no deletion attempt
 
-## 11. Delete assistant-runtime
+## 11. TurnDispatcher and TurnWorker (feature: bus-worker)
 
-- [ ] 11.1 Verify no crate in the workspace still depends on `assistant-runtime` (`grep -r "assistant-runtime" crates/ --include="*.toml"`)
-- [ ] 11.2 Remove `crates/runtime` from root `Cargo.toml` workspace members
-- [ ] 11.3 Delete `crates/runtime/` directory
-- [ ] 11.4 Run `make build` — full workspace build must succeed
+- [ ] 11.1 Define `DispatchRequest` struct: `session_id: Uuid`, `conversation_id: Uuid`, `messages: Vec<ChatHistoryMessage>`, `bus: AgentBus`, `cancel: CancellationToken`
+- [ ] 11.2 Define `TurnDispatcher` trait (`#[async_trait]`, `Send + Sync`): `async fn dispatch(&self, request: DispatchRequest) -> Result<()>`; declare in `crates/agent-loop/src/dispatcher.rs`
+- [ ] 11.3 Implement `LocalTurnDispatcher`: constructs `AgentLoopConfig` from a stored `Arc<AgentLoopConfigTemplate>`, calls `AgentLoop::run()` in the current task; live in base crate (no feature flag)
+- [ ] 11.4 Add `Cargo.toml` feature `bus-worker = ["dep:assistant-core/bus"]`; add `crates/agent-loop/src/turn_worker.rs` behind `#[cfg(feature="bus-worker")]`
+- [ ] 11.5 Implement `BusTurnDispatcher`: holds `Arc<dyn MessageBus>` + routing metadata; `dispatch()` serialises `TurnRequest` and calls `bus.publish(PublishRequest { topic: TURN_REQUEST, .. })`
+- [ ] 11.6 Implement `TurnWorker::new(template, bus, claim_filter) -> Self` and `TurnWorker::spawn(self) -> JoinHandle<()>`
+- [ ] 11.7 Implement the claim loop in `TurnWorker::spawn`: `bus.claim()` → deserialise `TurnRequest` → load prior messages from `StoragePlugin` → `AgentLoopConfig::from_template()` → `AgentLoop::run()` → publish `TurnResult` → `bus.ack/nack()`
+- [ ] 11.8 Spawn an `AgentBus` subscriber inside `TurnWorker::spawn` that forwards each `AgentEvent` to `topic::TURN_STATUS` as a `TurnStatus` envelope; log `warn!` on publish failure, never panic
+- [ ] 11.9 Update `ChannelRunner` to hold `Arc<dyn TurnDispatcher>` (replacing `Arc<AgentLoopConfigTemplate>`); update `dispatch()` to call `dispatcher.dispatch(DispatchRequest { .. })`
+- [ ] 11.10 Write unit tests:
+  - `LocalTurnDispatcher` runs loop inline and `TurnCompleted` arrives on bus
+  - `BusTurnDispatcher` publishes to mock bus without running loop
+  - `TurnWorker` claims from in-memory bus, runs mock loop, acks message
+  - Worker crash-before-ack: message becomes available again (test via `nack`)
+  - Two workers claim different messages concurrently without racing
 
-## 12. Final Validation
+## 12. Update ChannelRunner and Migrate Interface Crates
 
-- [ ] 12.1 Run `make test` — all tests pass
-- [ ] 12.2 Run `make lint` and `make format` — zero warnings, clean formatting
-- [ ] 12.3 Run `make test-integration` — smoke tests pass
-- [ ] 12.4 Add `//!` crate-level doc to `crates/agent-loop/src/lib.rs` with usage example showing `AgentLoopConfig` construction and `AgentBus` subscription
+- [ ] 12.1 Update `ChannelRunner` to hold `Arc<dyn TurnDispatcher>` (wired in task 11.9); drive `ChannelAdapter` hooks from bus events (`TurnCompleted` → `on_turn_success`, `LoopError` → `on_turn_error`)
+- [ ] 12.2 Update `SkillPlugin::after_tool_call` to detect file-read of a skill path and emit `SkillCompleted` on the bus
+- [ ] 12.3 Migrate `crates/interface-cli`: remove `assistant-runtime` dep, add `assistant-agent-loop` with `storage-plugin,skill-plugin,subagent-plugin` features; construct `LocalTurnDispatcher` wrapping `AgentLoopConfigTemplate`; subscribe to `AgentBus` for streaming output; match `MessageChunk` for token printing, `StatusUpdate` for status line, `TurnCompleted` for final answer
+- [ ] 12.4 Migrate `crates/interface-slack`: construct `LocalTurnDispatcher` (or `BusTurnDispatcher` if NATS configured); pass to `ChannelRunner`; remove `OrchestratorEvent` imports
+- [ ] 12.5 Migrate `crates/interface-mattermost`: same pattern as Slack
+- [ ] 12.6 Migrate `crates/interface-matrix`: same pattern
+- [ ] 12.7 Migrate `crates/interface-nextcloud`: same pattern
+- [ ] 12.8 Migrate `crates/interface-signal`: same pattern
+- [ ] 12.9 Migrate `crates/web-ui`: replace `Orchestrator` + `register_token_sink` with `AgentLoopConfigTemplate`; adapt SSE endpoint to subscribe to `AgentBus` (local) OR `topic::TURN_STATUS` on `MessageBus` (remote worker) and map `AgentEvent` variants to SSE event names (`MessageChunk` → `token`, `StatusUpdate` → `status`, `ToolCallCompleted` → `tool_result`, `SkillCompleted` → `skill_complete`, `LoopError` → `error`)
+- [ ] 12.10 Run `make check` after each crate change; fix compile errors before proceeding
+
+## 13. Delete assistant-runtime
+
+- [ ] 13.1 Verify no crate in the workspace still depends on `assistant-runtime` (`grep -r "assistant-runtime" crates/ --include="*.toml"`)
+- [ ] 13.2 Remove `crates/runtime` from root `Cargo.toml` workspace members
+- [ ] 13.3 Delete `crates/runtime/` directory
+- [ ] 13.4 Run `make build` — full workspace build must succeed
+
+## 14. Final Validation
+
+- [ ] 14.1 Run `make test` — all tests pass
+- [ ] 14.2 Run `make lint` and `make format` — zero warnings, clean formatting
+- [ ] 14.3 Run `make test-integration` — smoke tests pass
+- [ ] 14.4 Add `//!` crate-level doc to `crates/agent-loop/src/lib.rs` with usage example showing `AgentLoopConfig` construction and `AgentBus` subscription

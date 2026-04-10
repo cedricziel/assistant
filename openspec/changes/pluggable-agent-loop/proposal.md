@@ -24,6 +24,10 @@ The current `assistant-runtime` crate tightly couples the ReAct agent loop with 
 
 - `agent-loop-subagent`: `SubagentPlugin` + `AgentLoopFactory` trait that registers a `task` builtin tool. The LLM calls `task` to delegate work to a child `AgentLoop` running in-process. Returns `task_id` (UUID) for resumption across calls. Depth-limited to `MAX_AGENT_DEPTH` (5). The `Plugin` trait gains an optional `tools()` method so plugins can contribute tools to the session.
 
+- `agent-loop-turn-worker`: `TurnDispatcher` trait decoupling turn submission from execution. `LocalTurnDispatcher` calls `AgentLoop::run()` inline (default, no extra deps). `BusTurnDispatcher` + `TurnWorker` (feature `bus-worker`) publish/claim `TurnRequest` messages via the existing `MessageBus` trait (`assistant-core`) — enabling durable, at-least-once execution with NATS JetStream or SQLite backends. `TurnWorker` forwards `AgentEvent`s to `topic::TURN_STATUS` for distributed SSE observers. `ChannelRunner` holds `Arc<dyn TurnDispatcher>` so messenger interfaces switch between local and durable execution by swapping one field at startup. Replaces `Orchestrator::run_worker`.
+
+- `agent-loop-memory-plugin`: `MemoryPlugin` implementing `Plugin`, wrapping `MemoryLoader` from `assistant-core`. Injects SOUL.md, IDENTITY.md, USER.md, MEMORY.md, AGENTS.md, TOOLS.md, and daily notes as a System-role message via `transform_context` on every turn. Runs the BOOT.md startup hook on `on_session_start` and handles BOOTSTRAP.md self-deletion (shown once, then removed). Lives in the base `assistant-agent-loop` crate with no feature flag — `MemoryLoader` is pure filesystem I/O with no heavy deps. `MemoryIndexer` (chunking + embedding) is NOT a plugin; it relocates to `crates/storage/` and continues running as a background task.
+
 ### Modified Capabilities
 
 - None — all capabilities listed above are net-new. Existing `assistant-runtime` capabilities are superseded and removed.
@@ -35,6 +39,6 @@ The current `assistant-runtime` crate tightly couples the ReAct agent loop with 
 - **Modified crates**: all 7 interface/UI crates replace `assistant-runtime` imports with `assistant-agent-loop`; dependency declarations updated in their `Cargo.toml` files.
 - **`assistant-cli`** (`crates/interface-cli`): constructs `AgentLoopConfig` directly, registers `StoragePlugin` + `SkillPlugin` + any CLI-specific plugins.
 - **`assistant-tool-executor`**: `load-skill` and `list-skills` builtins deleted; `SkillRegistry` dependency removed.
-- **`assistant-storage`**: `SkillRegistry` struct and SQLite skill table removed; skill state is filesystem-only.
+- **`assistant-storage`**: `SkillRegistry` struct and SQLite skill table removed; skill state is filesystem-only. `MemoryIndexer` relocated here from `crates/runtime/src/memory_indexer/`.
 - **Breaking**: `Orchestrator`, `OrchestratorEvent`, `TurnResult`, `ChannelRunner`, `InterfaceRunner`, `AssistantInterface`, `MetricsRecorder` (runtime versions) are gone. Interfaces use `AgentLoop`, `AgentEvent`, `AgentLoopResult` from the new crate.
 - **Root `Cargo.toml`**: `crates/runtime` member removed; `crates/agent-loop` member added.

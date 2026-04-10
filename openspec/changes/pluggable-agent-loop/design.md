@@ -202,6 +202,72 @@ The per-conversation UUID mapping (`LruCache<String, Uuid>`) and turn serialisat
 | `metrics.rs`                     | Each interface crate registers its own metrics                    |
 | `bootstrap.rs`                   | `assistant-cli`                                                   |
 
+### D10: `MemoryPlugin` ships in the base crate (no feature flag); `MemoryIndexer` stays a background task
+
+**Decision:** `MemoryPlugin` (wraps `MemoryLoader` from `assistant-core`) lives in the base `assistant-agent-loop` crate with no Cargo feature gate. `MemoryLoader` performs pure filesystem I/O — reading SOUL.md, IDENTITY.md, USER.md, MEMORY.md, AGENTS.md, TOOLS.md, and daily notes — with no database or embedding dependencies. Making it always-available keeps the default loop useful out of the box.
+
+`MemoryIndexer` (chunking memory files, computing SHA-256 hashes, embedding into SQLite via `LlmProvider::embed()`) is NOT converted to a plugin. It retains its current background `tokio::spawn` pattern and is relocated from `crates/runtime/src/memory_indexer/` to `crates/storage/src/memory_indexer/`. The plugin pipeline has zero dependency on the indexer.
+
+```rust
+pub struct MemoryPlugin {
+    loader: MemoryLoader,
+}
+
+impl MemoryPlugin {
+    pub fn new(loader: MemoryLoader) -> Self { Self { loader } }
+}
+```
+
+`on_session_start` performs two actions:
+
+1. Checks for BOOTSTRAP.md — if present, notes it will appear in assembled content (handled by `MemoryLoader`) and deletes the file so it is not shown again.
+2. Reads BOOT.md — if non-empty after stripping HTML comments, runs it as a loop turn. Failure is non-fatal: `warn!` is logged and the session continues.
+
+`transform_context` calls `loader.load_system_prompt()`. If the result is non-empty, a `System`-role `ChatHistoryMessage` is prepended to the message list. If empty, the list is returned unmodified — no empty System message is injected.
+
+**Rationale:** Memory content shapes every turn's context — it belongs in the plugin that fires on every `transform_context` call, not as a one-time injection at session start. Keeping it in the base crate (not feature-gated) ensures the default loop is immediately useful for the primary CLI use case without requiring callers to opt in.
+
+The `MemoryIndexer` separation is deliberate: indexing is a write-heavy background operation with a heavy dep chain (`assistant-storage`, `assistant-llm`). Pulling it into the plugin pipeline would drag those dependencies into the base crate, violating the slim-core principle.
+
+**Alternatives considered:**
+
+- _Feature-gate `MemoryPlugin` like `StoragePlugin` and `SkillPlugin`_: `MemoryLoader` has no heavy deps, so the gate buys nothing except boilerplate. Rejected.
+- _`MemoryIndexer` as a plugin firing on `on_turn_end`_: Would introduce `assistant-storage` + `assistant-llm` into the base crate's dep tree. Rejected — background task pattern is sufficient.
+
+---
+
+### D11: `TurnDispatcher` decouples turn submission from execution; `TurnWorker` enables durable bus-backed execution
+
+**Decision:** A `TurnDispatcher` trait is added to `assistant-agent-loop` (base crate, no feature flag). `ChannelRunner` holds `Arc<dyn TurnDispatcher>` rather than `Arc<AgentLoopConfigTemplate>` directly. Two implementations ship:
+
+- **`LocalTurnDispatcher`** (base crate): calls `AgentLoop::run()` inline. Zero dependencies beyond the loop itself. Default for single-host deployments.
+- **`BusTurnDispatcher`** + **`TurnWorker`** (feature `bus-worker`, depends on `assistant-core::MessageBus`): `BusTurnDispatcher` publishes a `TurnRequest` envelope to the existing `topic::TURN_REQUEST` topic; `TurnWorker` is the claim-loop counterpart that picks it up, runs `AgentLoop::run()`, and publishes a `TurnResult`. This replaces `Orchestrator::run_worker`.
+
+`TurnWorker` also spawns a subscriber on the internal `AgentBus` that forwards each `AgentEvent` to `topic::TURN_STATUS` on the `MessageBus`. This allows web-ui SSE endpoints or other distributed observers to receive streaming events from a remote worker. Forwarding is best-effort — failures are logged and skipped; the loop is never interrupted.
+
+`AgentLoop` itself has no dependency on `MessageBus`. The bus is an infrastructure concern that wraps the loop.
+
+```
+Interface (Slack/CLI/web-ui)
+    └─ ChannelRunner (Arc<dyn TurnDispatcher>)
+           ├─ LocalTurnDispatcher  ──→  AgentLoop::run() [inline]
+           └─ BusTurnDispatcher ──→ MessageBus publish
+                                          └─ TurnWorker::claim()
+                                                  └─ AgentLoop::run() [remote]
+                                                          └─ AgentBus events
+                                                                  └─ forwarded to topic::TURN_STATUS
+```
+
+**Rationale:** The existing `MessageBus` trait (`assistant-core`) + NATS JetStream backend (`bus-nats`) already provides at-least-once delivery, claim/ack semantics, and `ack_wait`-based retry. The only missing piece was a clean integration point between the bus and the new `AgentLoop`. `TurnDispatcher` is that point — it keeps the loop pure and lets interface crates choose local or distributed execution without changing their own code.
+
+**Alternatives considered:**
+
+- _Make `AgentLoop` aware of `MessageBus` directly_: Drags `assistant-core` bus types into every loop path including tests. Rejected — `AgentLoop` must remain dep-free of bus infrastructure.
+- _Separate `assistant-agent-loop-worker` crate_: More modular but adds another crate name for functionality that is tightly coupled to the loop config. Feature gate is sufficient.
+- _`Plugin` for durable execution_: The `Plugin` trait covers per-turn behaviour. Durable execution is infrastructure that wraps the loop, not a per-turn hook. Wrong abstraction.
+
+---
+
 ## Risks / Trade-offs
 
 - **[Risk] Large migration surface — 7 interface crates must update** → Mitigation: migrate mechanically crate-by-crate; keep old `crates/runtime/` on a feature branch until all crates compile against the new API.
