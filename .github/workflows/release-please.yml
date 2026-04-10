@@ -250,7 +250,11 @@ jobs:
         run: |
           APP="app/build/macos/Build/Products/Release/assistant_app.app"
           IDENTITY="${{ secrets.APPLE_SIGNING_IDENTITY }}"
-          # Bottom-up signing: frameworks first, then the bundle
+          # Bottom-up signing: embedded binaries and frameworks first, then the bundle
+          # Sign the embedded Rust binary (notarization requires all binaries to have hardened runtime + timestamp)
+          find "$APP/Contents/Resources" -type f -perm +111 2>/dev/null | while read f; do
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
+          done
           find "$APP/Contents/Frameworks" \( -name "*.framework" -o -name "*.dylib" \) 2>/dev/null | while read f; do
             codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
           done
