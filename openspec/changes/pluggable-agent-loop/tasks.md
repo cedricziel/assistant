@@ -53,11 +53,17 @@
 - [ ] 7.2 Implement `Plugin` for `StoragePlugin`: `on_turn_end` persists answer + tool results to store
 - [ ] 7.3 Write unit tests: turn end writes to in-memory store, two loops sharing one store don't race
 
-## 8. SkillPlugin (feature: skill-plugin)
+## 8. SkillPlugin (feature: skill-plugin) and skill cleanup
 
-- [ ] 8.1 Implement `SkillPlugin::new(registry: Arc<SkillRegistry>) -> Self`
-- [ ] 8.2 Implement `Plugin` for `SkillPlugin`: `transform_context` prepends skill system content as `System` message
-- [ ] 8.3 Write unit tests: skill content prepended, no-op when registry empty, works without StoragePlugin
+- [ ] 8.1 Delete `crates/tool-executor/src/builtins/load_skill.rs` and `list_skills.rs`; remove from `builtins/mod.rs` and `ToolExecutor::register_builtins()`
+- [ ] 8.2 Remove `SkillRegistry` dependency from `crates/tool-executor/src/executor.rs`; verify `ToolExecutor` has no skill imports
+- [ ] 8.3 Delete `SkillRegistry` struct and SQLite skill table migration from `crates/storage/`; remove all `SkillRegistry` re-exports
+- [ ] 8.4 Implement `SkillPlugin::new(scan_dirs: Vec<PathBuf>, persona_filter: Option<PersonaFilter>) -> Self`
+- [ ] 8.5 Implement `on_session_start`: scan configured dirs for `SKILL.md` files following agentskills.io path conventions (`<project>/.agents/skills/`, `<project>/.<client>/skills/`, `~/.agents/skills/`, `~/.<client>/skills/`); build `HashMap<String, SkillDef>`; apply project-over-user precedence; log `warn!` on name collision
+- [ ] 8.6 Implement `transform_context`: if catalog non-empty, prepend a `System`-role message with `<available_skills>` XML (name, description, location per skill) and a one-line instruction telling the model to use `file-read` on `<location>` to activate a skill; return messages unmodified if catalog is empty
+- [ ] 8.7 Implement allowlisting: register all discovered skill base directories with the loop's permission layer so `file-read` calls into skill dirs require no user confirmation
+- [ ] 8.8 Apply `persona_filter` (allowlist/blocklist) during `transform_context` to restrict which skills appear in the catalog
+- [ ] 8.9 Write unit tests: catalog injected with correct XML, project skill shadows user skill with warn log, empty scan → no catalog message, persona blocklist hides skill, works without StoragePlugin, tool list lacks `load-skill` and `list-skills`
 
 ## 9. Migrate Interface Crates
 

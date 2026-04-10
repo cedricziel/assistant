@@ -20,7 +20,7 @@ The current `assistant-runtime` crate tightly couples the ReAct agent loop with 
 - `agent-loop-hooks`: `Plugin` trait, `PluginRegistry`, context/result structs (`ToolCallContext`, `ToolCallResult`, `LlmRequest`, `LlmResponse`), `BeforeToolCallOutcome`.
 - `agent-loop-bus`: `AgentBus`, `AgentEvent` enum — unified event channel replacing `OrchestratorEvent` and the old mpsc sender pattern.
 - `agent-loop-storage-plugin`: `StoragePlugin` implementing `Plugin` to persist conversations via `ConversationStore`.
-- `agent-loop-skill-plugin`: `SkillPlugin` implementing `Plugin` to inject skills via `transform_context` and register skill tools.
+- `agent-loop-skill-plugin`: `SkillPlugin` implementing `Plugin` for filesystem-based skill discovery and catalog injection via `transform_context`. Skills are instructions loaded by the model via `file-read` — NOT tools. Deletes the `load-skill` and `list-skills` builtin tools and the SQLite-backed `SkillRegistry`.
 
 ### Modified Capabilities
 
@@ -32,5 +32,7 @@ The current `assistant-runtime` crate tightly couples the ReAct agent loop with 
 - **Deleted crate**: `crates/runtime/` (`assistant-runtime`) — removed from workspace after migration.
 - **Modified crates**: all 7 interface/UI crates replace `assistant-runtime` imports with `assistant-agent-loop`; dependency declarations updated in their `Cargo.toml` files.
 - **`assistant-cli`** (`crates/interface-cli`): constructs `AgentLoopConfig` directly, registers `StoragePlugin` + `SkillPlugin` + any CLI-specific plugins.
+- **`assistant-tool-executor`**: `load-skill` and `list-skills` builtins deleted; `SkillRegistry` dependency removed.
+- **`assistant-storage`**: `SkillRegistry` struct and SQLite skill table removed; skill state is filesystem-only.
 - **Breaking**: `Orchestrator`, `OrchestratorEvent`, `TurnResult`, `ChannelRunner`, `InterfaceRunner`, `AssistantInterface`, `MetricsRecorder` (runtime versions) are gone. Interfaces use `AgentLoop`, `AgentEvent`, `AgentLoopResult` from the new crate.
 - **Root `Cargo.toml`**: `crates/runtime` member removed; `crates/agent-loop` member added.

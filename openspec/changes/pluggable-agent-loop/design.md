@@ -100,11 +100,20 @@ skill-plugin   = ["dep:assistant-skills"]
 
 ---
 
-### D5: `Plugin` trait — same design as before; `SkillRegistry` and `ConversationStore` access is through constructor injection into plugin structs
+### D5: Skills are instructions loaded via file-read — `load-skill`/`list-skills` tools and `SkillRegistry` are deleted
 
-**Decision:** `StoragePlugin::new(store: Arc<ConversationStore>)` and `SkillPlugin::new(registry: Arc<SkillRegistry>)`. The `Plugin` trait itself has no knowledge of storage or skills.
+**Decision:** `SkillPlugin` owns skill discovery (filesystem scan, no SQLite) and catalog injection via `transform_context`. The model activates skills by calling its existing `file-read` tool on the `<location>` path in the catalog — no dedicated activation tool is needed or registered. `LoadSkillHandler` and `ListSkillsHandler` are deleted from `assistant-tool-executor`. `SkillRegistry` (SQLite-backed) is deleted from `assistant-storage`.
 
-**Rationale:** Constructor injection keeps the trait pure and testable. Plugins are just structs with deps wired at startup.
+The agentskills.io spec defines three tiers: (1) catalog in context, (2) model reads `SKILL.md` via file-read, (3) scripts/references loaded on demand the same way. Skills are context/instructions — not tool invocations.
+
+`SkillPlugin::new(scan_dirs: Vec<PathBuf>, persona_filter: Option<PersonaFilter>) -> Self`. `StoragePlugin::new(store: Arc<ConversationStore>)` is unchanged.
+
+**Rationale:** Registering `load-skill` as a builtin tool conflates instructions (skills) with capabilities (tools). The `ToolExecutor` should have zero knowledge of skills. `list-skills` is redundant with the catalog. SQLite-backed `SkillRegistry` makes skills opaque to the filesystem and breaks cross-client interoperability (`~/.agents/skills/` convention). Filesystem-first discovery with in-memory caching is the correct model.
+
+**Alternatives considered:**
+
+- _Keep `load-skill` as an `activate_skill`-style dedicated tool_: Valid per spec but unnecessary when the model has `file-read` and the catalog includes `<location>`. Adds a tool call round-trip for no benefit.
+- _Keep `SkillRegistry` in SQLite as a cache_: The cache becomes stale, adds migration burden, and the filesystem is always authoritative anyway. Scan at session start instead.
 
 ---
 
