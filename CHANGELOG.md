@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.92](https://github.com/cedricziel/assistant/compare/v0.1.91...v0.1.92) (2026-04-10)
+
+
+### Bug Fixes
+
+* **ci:** sign embedded Rust binary before notarization ([25697a3](https://github.com/cedricziel/assistant/commit/25697a32ef42665c4f8ba5178a4b1df99a78c75f))
+
 ## [0.1.91](https://github.com/cedricziel/assistant/compare/v0.1.90...v0.1.91) (2026-04-10)
 
 
