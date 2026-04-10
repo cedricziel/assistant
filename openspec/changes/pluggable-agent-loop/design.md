@@ -1,0 +1,149 @@
+## Context
+
+`assistant-runtime` is the monolithic home of the ReAct loop, conversation persistence, skill injection, interface adapters (`ChannelRunner`, `InterfaceRunner`), metrics, scheduling, and memory indexing. This coupling makes the loop non-reusable and non-extensible.
+
+The no-BC design deletes `assistant-runtime` entirely and replaces it with `assistant-agent-loop` — a loop library with zero storage/skill/interface dependencies. Storage and skill concerns become opt-in plugins. All interface crates are updated to use the new API directly.
+
+Reference: pi (badlogic/pi-mono) and opencode (sst/opencode) — both achieve rich extensibility by keeping the core loop pure and offloading cross-cutting concerns to a plugin/hook layer.
+
+## Goals / Non-Goals
+
+**Goals:**
+
+- `assistant-agent-loop` compiles without `assistant-storage`, `assistant-skills`, or any interface crate.
+- `AgentLoop` is the single loop entry point; `AgentBus` is the single event channel.
+- `Plugin` trait covers all meaningful interception points — tool gate, result mutation, context transform, LLM request/response, session/turn lifecycle.
+- Storage and skill injection are `Plugin` implementations, not loop internals.
+- All 7 interface/UI crates compile against the new crate with no `assistant-runtime` dependency.
+- The loop is fully testable with a mock `LlmProvider` and in-process `ToolExecutor` — no SQLite, no filesystem.
+
+**Non-Goals:**
+
+- Backward compatibility with `Orchestrator`, `OrchestratorEvent`, `ChannelRunner`, or `InterfaceRunner`.
+- Dynamic plugin loading from `.so`/`.dylib`.
+- A JavaScript plugin host.
+- Parallel hook dispatch (sequential for determinism).
+
+## Decisions
+
+### D1: Delete `assistant-runtime`; new crate is the replacement
+
+**Decision:** `crates/runtime/` is deleted after migration. `crates/agent-loop/` (`assistant-agent-loop`) is the replacement. The workspace `members` array is updated accordingly.
+
+**Rationale:** A thin wrapper that re-exports the old API defeats the purpose. Keeping the old crate alive adds maintenance surface and tempts future code to shortcut through it. A clean break forces every interface crate to adopt the new API, which is the goal.
+
+**Alternatives considered:**
+
+- _Keep `assistant-runtime` as a compatibility shim_: Rejected — the shim becomes permanent technical debt and negates the architectural improvement.
+
+---
+
+### D2: `AgentBus` is required in `AgentLoopConfig`; mpsc sender is removed
+
+**Decision:** `AgentBus` is a required field (not `Option<AgentBus>`). The old `mpsc::Sender<OrchestratorEvent>` parameter on `run()` is gone. Interface crates call `bus.subscribe()` to receive events.
+
+**Rationale:** Making the bus required ensures every caller gets a uniform event stream. The dual-channel system (mpsc for streaming + broadcast for observation) existed only to preserve the old `Orchestrator` API; without BC, one channel suffices. Callers that don't care about events can create a bus and drop the receiver.
+
+```rust
+pub struct AgentLoopConfig {
+    pub provider:  Arc<dyn LlmProvider>,
+    pub tools:     Arc<ToolExecutor>,
+    pub plugins:   PluginRegistry,
+    pub bus:       AgentBus,
+    pub max_turns: u32,
+    pub tool_mode: ToolMode,
+    pub cancel:    CancellationToken,
+}
+```
+
+---
+
+### D3: `AgentEvent` unifies `OrchestratorEvent` and the old streaming channel
+
+**Decision:** A single `AgentEvent` enum covers all events previously split across `OrchestratorEvent` variants and the mpsc streaming channel:
+
+```rust
+pub enum AgentEvent {
+    SessionStarted   { session_id: Uuid },
+    SessionEnded     { session_id: Uuid },
+    TurnStarted      { session_id: Uuid, turn: u32 },
+    TurnEnded        { session_id: Uuid, turn: u32 },
+    ToolCallStarted  { session_id: Uuid, tool: String, call_id: String },
+    ToolCallCompleted{ session_id: Uuid, tool: String, call_id: String, success: bool },
+    MessageChunk     { session_id: Uuid, chunk: String },
+    LoopError        { session_id: Uuid, error: String },
+}
+```
+
+All variants are `Clone + Debug`. Interface crates match on `AgentEvent` instead of `OrchestratorEvent`.
+
+**Rationale:** One channel, one enum, one subscription pattern for all consumers. `broadcast` handles multiple independent subscribers (UI rendering, telemetry, test assertions) without coordination.
+
+---
+
+### D4: `StoragePlugin` and `SkillPlugin` live in `assistant-agent-loop` as optional feature-gated modules
+
+**Decision:** `StoragePlugin` (wraps `ConversationStore`) and `SkillPlugin` (wraps `SkillRegistry`) are implemented in sub-modules of `assistant-agent-loop` behind Cargo feature flags `storage-plugin` and `skill-plugin`. The base crate has no storage/skill deps; enabling the features adds them.
+
+```toml
+[features]
+default = []
+storage-plugin = ["dep:assistant-storage"]
+skill-plugin   = ["dep:assistant-skills"]
+```
+
+**Rationale:** Keeps the base crate dependency-light. Callers that want persistence just enable the feature. Feature gates are preferable to separate crates for functionality this tightly coupled to the loop API.
+
+**Alternatives considered:**
+
+- _Separate crates `assistant-storage-plugin` and `assistant-skills-plugin`_: More granular but adds two more crate names to the workspace; overkill for functionality that is always used together.
+
+---
+
+### D5: `Plugin` trait — same design as before; `SkillRegistry` and `ConversationStore` access is through constructor injection into plugin structs
+
+**Decision:** `StoragePlugin::new(store: Arc<ConversationStore>)` and `SkillPlugin::new(registry: Arc<SkillRegistry>)`. The `Plugin` trait itself has no knowledge of storage or skills.
+
+**Rationale:** Constructor injection keeps the trait pure and testable. Plugins are just structs with deps wired at startup.
+
+---
+
+### D6: Interface crates own their `AgentLoopConfig` construction
+
+**Decision:** Each interface crate constructs its own `AgentLoopConfig`, registers the plugins it needs, and subscribes to the bus. There is no shared "runtime factory." `assistant-cli` registers `StoragePlugin + SkillPlugin + MetricsPlugin`; `interface-slack` registers what it needs.
+
+**Rationale:** Eliminates the implicit shared-state problem in `assistant-runtime` where all interfaces shared one `Orchestrator`. Each interface is now fully self-contained.
+
+---
+
+### D7: Modules from `assistant-runtime` that are not loop concerns move to appropriate crates
+
+| Old module                       | Destination                                                       |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `scheduler.rs`                   | `assistant-cli` (CLI-specific) or new `assistant-scheduler` crate |
+| `memory_indexer/`                | `assistant-storage` or a plugin                                   |
+| `telemetry.rs` / `otel_spans.rs` | `assistant-cli` or shared init util in `assistant-core`           |
+| `webhook_dispatch.rs`            | `assistant-web-ui`                                                |
+| `metrics.rs`                     | Each interface crate registers its own metrics                    |
+| `bootstrap.rs`                   | `assistant-cli`                                                   |
+
+## Risks / Trade-offs
+
+- **[Risk] Large migration surface — 7 interface crates must update** → Mitigation: migrate mechanically crate-by-crate; keep old `crates/runtime/` on a feature branch until all crates compile against the new API.
+- **[Risk] `broadcast` channel overflow for slow subscribers** → Mitigation: capacity 1024; document that `AgentBus` is best-effort for observers; no correctness dependency on delivery.
+- **[Risk] Feature-gated `StoragePlugin` complicates CI** → Mitigation: `make test` runs `--all-features`; the CI matrix already handles feature combinations.
+- **[Risk] `scheduler`, `memory_indexer`, `telemetry` displacement creates temporary churn** → Mitigation: move these modules in a preparatory commit before deleting `assistant-runtime`, so the deletion PR is clean.
+
+## Migration Plan
+
+1. **Prep**: move `scheduler`, `memory_indexer`, `telemetry`, `webhook_dispatch`, `bootstrap` to their destination crates. Keep `assistant-runtime` compiling throughout.
+2. **Create** `crates/agent-loop/` with `AgentLoop`, `Plugin`, `PluginRegistry`, `AgentBus`, `AgentLoopConfig`, `StoragePlugin` (feature-gated), `SkillPlugin` (feature-gated). Full unit test coverage.
+3. **Migrate interfaces** one at a time: update each crate's `Cargo.toml` and replace `assistant-runtime` imports with `assistant-agent-loop`. Start with `interface-cli` (most complete example), then the messenger crates, then `web-ui`.
+4. **Delete** `crates/runtime/` and remove from workspace once all crates compile.
+5. **Run** `make test` and `make test-integration` to validate.
+
+## Open Questions
+
+- Should `MetricsPlugin` be a first-class plugin shipped in `assistant-agent-loop`? (Likely yes — instrument all interfaces uniformly.)
+- Does `memory_indexer` move to `assistant-storage` or become a plugin? (Leaning plugin — it reacts to turn completion.)
+- Should `AgentBus` expose a `drain()` helper for tests that want to collect all events synchronously?
