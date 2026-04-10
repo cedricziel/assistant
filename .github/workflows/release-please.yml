@@ -25,10 +25,40 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  build-flutter-web:
+    name: Build Flutter web
+    runs-on: ubuntu-latest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.x"
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+        working-directory: app
+
+      - name: Build Flutter web
+        run: flutter build web --release
+        working-directory: app
+
+      - name: Upload Flutter web artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: flutter-web-build
+          path: app/build/web/
+          retention-days: 1
+
   build-binaries:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    needs: release-please
+    needs: [release-please, build-flutter-web]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     strategy:
       fail-fast: false
@@ -58,16 +88,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Flutter SDK
-        uses: subosito/flutter-action@v2
+      - name: Download Flutter web build
+        uses: actions/download-artifact@v8
         with:
-          flutter-version: "3.x"
-          channel: stable
-          cache: true
-
-      - name: Install Flutter dependencies
-        run: flutter pub get
-        working-directory: app
+          name: flutter-web-build
+          path: app/build/web/
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -82,7 +107,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock', 'app/pubspec.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Install protoc (Linux)
@@ -96,10 +121,6 @@ jobs:
       - name: Install cross
         if: matrix.use_cross
         run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Pre-build Flutter web
-        run: flutter build web --release
-        working-directory: app
 
       - name: Preflight check assistant-cli bin
         if: matrix.target == 'x86_64-unknown-linux-gnu'
