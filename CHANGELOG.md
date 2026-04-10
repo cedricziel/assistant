@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.91](https://github.com/cedricziel/assistant/compare/v0.1.90...v0.1.91) (2026-04-10)
+
+
+### Features
+
+* **app:** mobile-friendly nav with "More" overflow sheet ([#404](https://github.com/cedricziel/assistant/issues/404)) ([68a0d82](https://github.com/cedricziel/assistant/commit/68a0d82bda6531923f5f2d26a734587e8fc90b4b))
+* **app:** replace flutter_markdown with flutter_markdown_plus ([#406](https://github.com/cedricziel/assistant/issues/406)) ([ba4d55e](https://github.com/cedricziel/assistant/commit/ba4d55ee4a20b7a07cabc3b5f77d3a371709b2a9))
+
 ## [0.1.90](https://github.com/cedricziel/assistant/compare/v0.1.89...v0.1.90) (2026-04-09)
 
 
