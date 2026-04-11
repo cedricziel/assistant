@@ -199,64 +199,78 @@ class NavShell extends ConsumerWidget {
         body: SafeArea(
           child: Row(
             children: [
-              NavigationRail(
-                selectedIndex: selected,
-                labelType: NavigationRailLabelType.all,
-                destinations: [
-                  // Primary destinations (0–3)
-                  ..._primaryDestinations.map(
-                    (d) => NavigationRailDestination(
-                      icon: Icon(d.icon),
-                      selectedIcon: Icon(d.selectedIcon),
-                      label: Text(d.label),
-                    ),
+              SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight:
+                        MediaQuery.of(context).size.height -
+                        MediaQuery.of(context).padding.top -
+                        MediaQuery.of(context).padding.bottom,
                   ),
-                  // Divider sentinel (index 4) — non-interactive
-                  const NavigationRailDestination(
-                    disabled: true,
-                    icon: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 4),
-                      child: Divider(thickness: 1),
-                    ),
-                    label: SizedBox.shrink(),
-                  ),
-                  // Overflow / developer destinations (5–9)
-                  ..._overflowDestinations.map(
-                    (d) => NavigationRailDestination(
-                      icon: Icon(d.icon),
-                      selectedIcon: Icon(d.selectedIcon),
-                      label: Text(d.label),
-                    ),
-                  ),
-                ],
-                onDestinationSelected: (i) {
-                  if (i < _primaryDestinations.length) {
-                    context.go(_primaryDestinations[i].path);
-                  } else if (i > _primaryDestinations.length) {
-                    // Skip divider at index _primaryDestinations.length
-                    final overflowIndex = i - _primaryDestinations.length - 1;
-                    context.go(_overflowDestinations[overflowIndex].path);
-                  }
-                  // i == _primaryDestinations.length is the divider — ignore
-                },
-                // Show the install button at the bottom of the rail when the
-                // browser's install prompt is available.
-                trailing: isInstallable
-                    ? Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: _InstallButton(
-                          onTap: () =>
-                              ref.read(pwaInstallProvider.notifier).install(),
+                  child: IntrinsicHeight(
+                    child: NavigationRail(
+                      selectedIndex: selected,
+                      labelType: NavigationRailLabelType.all,
+                      destinations: [
+                        // Primary destinations (0–3)
+                        ..._primaryDestinations.map(
+                          (d) => NavigationRailDestination(
+                            icon: Icon(d.icon),
+                            selectedIcon: Icon(d.selectedIcon),
+                            label: Text(d.label),
+                          ),
                         ),
-                      )
-                    : null,
+                        // Divider sentinel (index 4) — non-interactive
+                        const NavigationRailDestination(
+                          disabled: true,
+                          icon: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 4),
+                            child: Divider(thickness: 1),
+                          ),
+                          label: SizedBox.shrink(),
+                        ),
+                        // Overflow / developer destinations (5–9)
+                        ..._overflowDestinations.map(
+                          (d) => NavigationRailDestination(
+                            icon: Icon(d.icon),
+                            selectedIcon: Icon(d.selectedIcon),
+                            label: Text(d.label),
+                          ),
+                        ),
+                      ],
+                      onDestinationSelected: (i) {
+                        if (i < _primaryDestinations.length) {
+                          context.go(_primaryDestinations[i].path);
+                        } else if (i > _primaryDestinations.length) {
+                          // Skip divider at index _primaryDestinations.length
+                          final overflowIndex =
+                              i - _primaryDestinations.length - 1;
+                          context.go(_overflowDestinations[overflowIndex].path);
+                        }
+                        // i == _primaryDestinations.length is the divider — ignore
+                      },
+                      // Show the install button at the bottom of the rail when the
+                      // browser's install prompt is available.
+                      trailing: isInstallable
+                          ? Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: _InstallButton(
+                                onTap: () => ref
+                                    .read(pwaInstallProvider.notifier)
+                                    .install(),
+                              ),
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
               ),
               const VerticalDivider(width: 1, thickness: 1),
               Expanded(
-        child: AgentEventListener(
-          child: UpdateBannerWrapper(child: child),
-        ),
-      ),
+                child: AgentEventListener(
+                  child: UpdateBannerWrapper(child: child),
+                ),
+              ),
             ],
           ),
         ),

@@ -13,6 +13,9 @@ case "$FILE" in
       cargo fmt --manifest-path "$MANIFEST" -- "$FILE" 2>/dev/null
     fi
     ;;
+  *.dart)
+    dart format "$FILE" 2>/dev/null
+    ;;
   *.js|*.ts|*.jsx|*.tsx|*.json|*.css|*.html|*.md|*.yaml|*.yml)
     npx --yes prettier --write "$FILE" 2>/dev/null
     ;;
