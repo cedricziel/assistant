@@ -38,6 +38,8 @@ jobs:
   build-macos-bundle:
     name: Build macOS Bundle
     runs-on: macos-latest
+    env:
+      APPLE_DEV_CERTIFICATE: ${{ secrets.APPLE_DEV_CERTIFICATE }}
     steps:
       - uses: actions/checkout@v6
 
@@ -48,9 +50,7 @@ jobs:
           cache: true
 
       - name: Import certificates
-        if: ${{ secrets.APPLE_DEV_CERTIFICATE != '' }}
-        env:
-          APPLE_DEV_CERTIFICATE: ${{ secrets.APPLE_DEV_CERTIFICATE }}
+        if: ${{ env.APPLE_DEV_CERTIFICATE != '' }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 20)
