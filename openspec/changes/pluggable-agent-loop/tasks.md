@@ -106,47 +106,71 @@
   - BOOTSTRAP.md present → included in first session's content, deleted afterward
   - BOOTSTRAP.md absent → no deletion attempt
 
-## 11. TurnDispatcher and TurnWorker (feature: bus-worker)
+## 11. Compaction and Memory Reflection
 
-- [ ] 11.1 Define `DispatchRequest` struct: `session_id: Uuid`, `conversation_id: Uuid`, `messages: Vec<ChatHistoryMessage>`, `bus: AgentBus`, `cancel: CancellationToken`
-- [ ] 11.2 Define `TurnDispatcher` trait (`#[async_trait]`, `Send + Sync`): `async fn dispatch(&self, request: DispatchRequest) -> Result<()>`; declare in `crates/agent-loop/src/dispatcher.rs`
-- [ ] 11.3 Implement `LocalTurnDispatcher`: constructs `AgentLoopConfig` from a stored `Arc<AgentLoopConfigTemplate>`, calls `AgentLoop::run()` in the current task; live in base crate (no feature flag)
-- [ ] 11.4 Add `Cargo.toml` feature `bus-worker = ["dep:assistant-core/bus"]`; add `crates/agent-loop/src/turn_worker.rs` behind `#[cfg(feature="bus-worker")]`
-- [ ] 11.5 Implement `BusTurnDispatcher`: holds `Arc<dyn MessageBus>` + routing metadata; `dispatch()` serialises `TurnRequest` and calls `bus.publish(PublishRequest { topic: TURN_REQUEST, .. })`
-- [ ] 11.6 Implement `TurnWorker::new(template, bus, claim_filter) -> Self` and `TurnWorker::spawn(self) -> JoinHandle<()>`
-- [ ] 11.7 Implement the claim loop in `TurnWorker::spawn`: `bus.claim()` → deserialise `TurnRequest` → load prior messages from `StoragePlugin` → `AgentLoopConfig::from_template()` → `AgentLoop::run()` → publish `TurnResult` → `bus.ack/nack()`
-- [ ] 11.8 Spawn an `AgentBus` subscriber inside `TurnWorker::spawn` that forwards each `AgentEvent` to `topic::TURN_STATUS` as a `TurnStatus` envelope; log `warn!` on publish failure, never panic
-- [ ] 11.9 Update `ChannelRunner` to hold `Arc<dyn TurnDispatcher>` (replacing `Arc<AgentLoopConfigTemplate>`); update `dispatch()` to call `dispatcher.dispatch(DispatchRequest { .. })`
-- [ ] 11.10 Write unit tests:
+- [ ] 11.1 Add `CompactionOutcome` enum (`Proceed`, `Cancel`) to `crates/agent-loop/src/hooks.rs`
+- [ ] 11.2 Add `before_compact(&self, ctx, messages) -> CompactionOutcome` (default `Proceed`) and `on_compact(&self, ctx, summary, retained)` (default no-op) to the `Plugin` trait
+- [ ] 11.3 Update `PluginRegistry`: dispatch `before_compact` with first-`Cancel`-wins semantics (short-circuit); dispatch `on_compact` to all plugins (swallow-and-warn)
+- [ ] 11.4 Add `CompactionStarted { session_id, messages_compacted }` and `CompactionCompleted { session_id, summary, messages_retained }` to `AgentEvent` enum
+- [ ] 11.5 Create `crates/agent-loop/src/compaction_plugin.rs`; implement `CompactionPlugin::new(provider)`, `.with_threshold(n)`, `.with_keep_recent(n)` builder methods
+- [ ] 11.6 Implement `Plugin` for `CompactionPlugin`: `name()` returns `"compaction"`; `transform_context` checks threshold, partitions messages, calls `plugins.before_compact`, calls LLM for summary, calls `plugins.on_compact`, emits `CompactionStarted`/`CompactionCompleted` on bus, returns `[summary_msg] + retained`
+- [ ] 11.7 Implement `Plugin::tools()` for `CompactionPlugin`: return a `CompactToolHandler` that triggers immediate compaction when called (tool name: `compact`)
+- [ ] 11.8 Update `MemoryPlugin` to track whether any file was truncated during `load_system_prompt()` this session (requires `MemoryLoader` to expose a truncation indicator or re-run with size checks)
+- [ ] 11.9 Implement `MemoryPlugin::with_compaction(provider)`: on `on_session_end`, if truncation detected, call LLM to summarize each oversized file; write back via `MemoryLoader::update_file(..., "replace")`; log `info!` with old/new char counts; `warn!` on LLM failure
+- [ ] 11.10 Implement `MemoryPlugin::with_reflection(provider)`: on `on_session_end`, if session had at least one user turn, call LLM to extract learnings; append to MEMORY.md via `update_file("memory", ..., "append")` and to daily notes via `append_daily_note(Some("session"), ...)`; `warn!` on failure
+- [ ] 11.11 Declare `pub mod compaction_plugin` in `crates/agent-loop/src/lib.rs`; re-export `CompactionPlugin`
+- [ ] 11.12 Write unit tests:
+  - `before_compact` cancel short-circuits; no LLM call and no `on_compact` fired
+  - History below threshold returns unmodified
+  - History above threshold: summary message prepended, retained count correct
+  - `CompactionStarted`/`CompactionCompleted` emitted on bus
+  - LLM failure during compaction: original messages returned, `warn!` logged
+  - Manual `/compact` tool triggers compaction below threshold
+  - `with_reflection`: learnings appended to MEMORY.md and daily notes
+  - `with_reflection`: empty session skips LLM call
+  - `with_compaction`: truncated file is compacted; non-truncated file is untouched
+
+## 12. TurnDispatcher and TurnWorker (feature: bus-worker)
+
+- [ ] 12.1 Define `DispatchRequest` struct: `session_id: Uuid`, `conversation_id: Uuid`, `messages: Vec<ChatHistoryMessage>`, `bus: AgentBus`, `cancel: CancellationToken`
+- [ ] 12.2 Define `TurnDispatcher` trait (`#[async_trait]`, `Send + Sync`): `async fn dispatch(&self, request: DispatchRequest) -> Result<()>`; declare in `crates/agent-loop/src/dispatcher.rs`
+- [ ] 12.3 Implement `LocalTurnDispatcher`: constructs `AgentLoopConfig` from a stored `Arc<AgentLoopConfigTemplate>`, calls `AgentLoop::run()` in the current task; live in base crate (no feature flag)
+- [ ] 12.4 Add `Cargo.toml` feature `bus-worker = ["dep:assistant-core/bus"]`; add `crates/agent-loop/src/turn_worker.rs` behind `#[cfg(feature="bus-worker")]`
+- [ ] 12.5 Implement `BusTurnDispatcher`: holds `Arc<dyn MessageBus>` + routing metadata; `dispatch()` serialises `TurnRequest` and calls `bus.publish(PublishRequest { topic: TURN_REQUEST, .. })`
+- [ ] 12.6 Implement `TurnWorker::new(template, bus, claim_filter) -> Self` and `TurnWorker::spawn(self) -> JoinHandle<()>`
+- [ ] 12.7 Implement the claim loop in `TurnWorker::spawn`: `bus.claim()` → deserialise `TurnRequest` → load prior messages from `StoragePlugin` → `AgentLoopConfig::from_template()` → `AgentLoop::run()` → publish `TurnResult` → `bus.ack/nack()`
+- [ ] 12.8 Spawn an `AgentBus` subscriber inside `TurnWorker::spawn` that forwards each `AgentEvent` to `topic::TURN_STATUS` as a `TurnStatus` envelope; log `warn!` on publish failure, never panic
+- [ ] 12.9 Update `ChannelRunner` to hold `Arc<dyn TurnDispatcher>` (replacing `Arc<AgentLoopConfigTemplate>`); update `dispatch()` to call `dispatcher.dispatch(DispatchRequest { .. })`
+- [ ] 12.10 Write unit tests:
   - `LocalTurnDispatcher` runs loop inline and `TurnCompleted` arrives on bus
   - `BusTurnDispatcher` publishes to mock bus without running loop
   - `TurnWorker` claims from in-memory bus, runs mock loop, acks message
   - Worker crash-before-ack: message becomes available again (test via `nack`)
   - Two workers claim different messages concurrently without racing
 
-## 12. Update ChannelRunner and Migrate Interface Crates
+## 13. Update ChannelRunner and Migrate Interface Crates
 
-- [ ] 12.1 Update `ChannelRunner` to hold `Arc<dyn TurnDispatcher>` (wired in task 11.9); drive `ChannelAdapter` hooks from bus events (`TurnCompleted` → `on_turn_success`, `LoopError` → `on_turn_error`)
-- [ ] 12.2 Update `SkillPlugin::after_tool_call` to detect file-read of a skill path and emit `SkillCompleted` on the bus
-- [ ] 12.3 Migrate `crates/interface-cli`: remove `assistant-runtime` dep, add `assistant-agent-loop` with `storage-plugin,skill-plugin,subagent-plugin` features; construct `LocalTurnDispatcher` wrapping `AgentLoopConfigTemplate`; subscribe to `AgentBus` for streaming output; match `MessageChunk` for token printing, `StatusUpdate` for status line, `TurnCompleted` for final answer
-- [ ] 12.4 Migrate `crates/interface-slack`: construct `LocalTurnDispatcher` (or `BusTurnDispatcher` if NATS configured); pass to `ChannelRunner`; remove `OrchestratorEvent` imports
-- [ ] 12.5 Migrate `crates/interface-mattermost`: same pattern as Slack
-- [ ] 12.6 Migrate `crates/interface-matrix`: same pattern
-- [ ] 12.7 Migrate `crates/interface-nextcloud`: same pattern
-- [ ] 12.8 Migrate `crates/interface-signal`: same pattern
-- [ ] 12.9 Migrate `crates/web-ui`: replace `Orchestrator` + `register_token_sink` with `AgentLoopConfigTemplate`; adapt SSE endpoint to subscribe to `AgentBus` (local) OR `topic::TURN_STATUS` on `MessageBus` (remote worker) and map `AgentEvent` variants to SSE event names (`MessageChunk` → `token`, `StatusUpdate` → `status`, `ToolCallCompleted` → `tool_result`, `SkillCompleted` → `skill_complete`, `LoopError` → `error`)
-- [ ] 12.10 Run `make check` after each crate change; fix compile errors before proceeding
+- [ ] 13.1 Update `ChannelRunner` to hold `Arc<dyn TurnDispatcher>` (wired in task 11.9); drive `ChannelAdapter` hooks from bus events (`TurnCompleted` → `on_turn_success`, `LoopError` → `on_turn_error`)
+- [ ] 13.2 Update `SkillPlugin::after_tool_call` to detect file-read of a skill path and emit `SkillCompleted` on the bus
+- [ ] 13.3 Migrate `crates/interface-cli`: remove `assistant-runtime` dep, add `assistant-agent-loop` with `storage-plugin,skill-plugin,subagent-plugin` features; construct `LocalTurnDispatcher` wrapping `AgentLoopConfigTemplate`; subscribe to `AgentBus` for streaming output; match `MessageChunk` for token printing, `StatusUpdate` for status line, `TurnCompleted` for final answer
+- [ ] 13.4 Migrate `crates/interface-slack`: construct `LocalTurnDispatcher` (or `BusTurnDispatcher` if NATS configured); pass to `ChannelRunner`; remove `OrchestratorEvent` imports
+- [ ] 13.5 Migrate `crates/interface-mattermost`: same pattern as Slack
+- [ ] 13.6 Migrate `crates/interface-matrix`: same pattern
+- [ ] 13.7 Migrate `crates/interface-nextcloud`: same pattern
+- [ ] 13.8 Migrate `crates/interface-signal`: same pattern
+- [ ] 13.9 Migrate `crates/web-ui`: replace `Orchestrator` + `register_token_sink` with `AgentLoopConfigTemplate`; adapt SSE endpoint to subscribe to `AgentBus` (local) OR `topic::TURN_STATUS` on `MessageBus` (remote worker) and map `AgentEvent` variants to SSE event names (`MessageChunk` → `token`, `StatusUpdate` → `status`, `ToolCallCompleted` → `tool_result`, `SkillCompleted` → `skill_complete`, `LoopError` → `error`)
+- [ ] 13.10 Run `make check` after each crate change; fix compile errors before proceeding
 
-## 13. Delete assistant-runtime
+## 14. Delete assistant-runtime
 
-- [ ] 13.1 Verify no crate in the workspace still depends on `assistant-runtime` (`grep -r "assistant-runtime" crates/ --include="*.toml"`)
-- [ ] 13.2 Remove `crates/runtime` from root `Cargo.toml` workspace members
-- [ ] 13.3 Delete `crates/runtime/` directory
-- [ ] 13.4 Run `make build` — full workspace build must succeed
+- [ ] 14.1 Verify no crate in the workspace still depends on `assistant-runtime` (`grep -r "assistant-runtime" crates/ --include="*.toml"`)
+- [ ] 14.2 Remove `crates/runtime` from root `Cargo.toml` workspace members
+- [ ] 14.3 Delete `crates/runtime/` directory
+- [ ] 14.4 Run `make build` — full workspace build must succeed
 
-## 14. Final Validation
+## 15. Final Validation
 
-- [ ] 14.1 Run `make test` — all tests pass
-- [ ] 14.2 Run `make lint` and `make format` — zero warnings, clean formatting
-- [ ] 14.3 Run `make test-integration` — smoke tests pass
-- [ ] 14.4 Add `//!` crate-level doc to `crates/agent-loop/src/lib.rs` with usage example showing `AgentLoopConfig` construction and `AgentBus` subscription
+- [ ] 15.1 Run `make test` — all tests pass
+- [ ] 15.2 Run `make lint` and `make format` — zero warnings, clean formatting
+- [ ] 15.3 Run `make test-integration` — smoke tests pass
+- [ ] 15.4 Add `//!` crate-level doc to `crates/agent-loop/src/lib.rs` with usage example showing `AgentLoopConfig` construction and `AgentBus` subscription

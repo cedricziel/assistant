@@ -268,6 +268,31 @@ Interface (Slack/CLI/web-ui)
 
 ---
 
+### D12: Compaction is a first-class Plugin lifecycle event; `CompactionPlugin` handles in-context history; `MemoryPlugin` handles memory file compaction and reflection
+
+**Decision:** The `Plugin` trait gains `before_compact` (cancellable, returns `CompactionOutcome`) and `on_compact` (notification, receives summary + retained messages). This mirrors pi-mono's `before_compact` / `compact` session lifecycle events. `CompactionPlugin` (base crate, no feature flag — `LlmProvider` is already a base dep) implements context history compaction in `transform_context` and contributes a `compact` slash-command via `Plugin::tools()`. `MemoryPlugin` optionally compacts oversized memory files and extracts session learnings via opt-in builder methods (`with_compaction(provider)`, `with_reflection(provider)`).
+
+Three distinct compaction concerns and where they live:
+
+| Concern                                      | Where                                 | Trigger                                           |
+| -------------------------------------------- | ------------------------------------- | ------------------------------------------------- |
+| In-context history compaction                | `CompactionPlugin::transform_context` | `messages.len() > threshold` or manual `/compact` |
+| Memory file compaction (MEMORY.md too large) | `MemoryPlugin::on_session_end`        | Truncation detected during `load_system_prompt()` |
+| Session reflection / write-back to memory    | `MemoryPlugin::on_session_end`        | Every session end (if `with_reflection` enabled)  |
+
+Two new `AgentEvent` variants are added: `CompactionStarted { messages_compacted }` and `CompactionCompleted { summary, messages_retained }`. These let web-ui show a "Compacting context…" indicator (matching pi's `/compact` UX).
+
+`StoragePlugin` persists the full pre-compaction history — no conversation history is permanently lost. Compaction only affects what is in-context for the LLM. This directly matches pi-mono's approach of keeping full JSONL history on disk while summarising for context.
+
+**Rationale:** Making compaction a first-class lifecycle event (not a hidden transform) lets other plugins react — e.g. `StoragePlugin` can flush unwritten messages before the compacted view replaces them. The cancellable `before_compact` follows pi's pattern and is necessary for correctness when persistence is async. Memory file compaction and session reflection are `MemoryPlugin` responsibilities (not `CompactionPlugin`) because they write to the filesystem and only make sense alongside `MemoryLoader`.
+
+**Alternatives considered:**
+
+- _Compaction purely inside `transform_context` with no lifecycle events_: Hides the operation from other plugins and the event bus. Rejected — pi's experience shows compaction events are needed for UX indicators and flush coordination.
+- _Reflection as a separate `ReflectionPlugin`_: More modular but splits the memory concern across two plugins. `MemoryPlugin` already owns `MemoryLoader` and its write-back API (`update_file`, `append_daily_note`). Keeping it there avoids a second plugin needing its own `MemoryLoader` reference.
+
+---
+
 ## Risks / Trade-offs
 
 - **[Risk] Large migration surface — 7 interface crates must update** → Mitigation: migrate mechanically crate-by-crate; keep old `crates/runtime/` on a feature branch until all crates compile against the new API.
