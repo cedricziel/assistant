@@ -12,3 +12,6 @@ PRODUCT_BUNDLE_IDENTIFIER = com.example.assistantApp
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+
+// Apple Developer Team ID — required for Keychain entitlements (flutter_secure_storage)
+DEVELOPMENT_TEAM = WPW3QSLZ2F
