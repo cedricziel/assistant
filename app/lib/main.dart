@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:pwa_update_listener/pwa_update_listener.dart';
 
+import 'features/contexts/providers/context_providers.dart';
 import 'features/embedded_server/embedded_server_provider.dart';
 import 'features/notifications/notification_badge_notifier.dart';
 import 'router/app_router.dart';
 import 'tray/platform_init.dart';
+import 'tray/tray_platform.dart';
 import 'tray/window_handler_platform.dart';
 
 /// Global key used to show SnackBars from outside the widget tree (e.g. the
@@ -24,6 +26,9 @@ Future<void> main() async {
   // On web this is a no-op.
   await initDesktopFeatures();
 
+  // Initialise context repository before the widget tree is created.
+  final contextRepo = await createContextRepository();
+
   runApp(
     // PwaUpdateListener detects when a new service worker activates (new
     // version available) and surfaces a SnackBar prompt to reload the app.
@@ -32,17 +37,15 @@ Future<void> main() async {
         _scaffoldMessengerKey.currentState?.showSnackBar(
           SnackBar(
             content: const Text('A new version is available.'),
-            action: SnackBarAction(
-              label: 'Reload',
-              onPressed: reloadPwa,
-            ),
+            action: SnackBarAction(label: 'Reload', onPressed: reloadPwa),
             duration: const Duration(days: 1),
           ),
         );
       },
       // Riverpod ProviderScope wraps the entire widget tree.
-      child: const ProviderScope(
-        child: AssistantApp(),
+      child: ProviderScope(
+        overrides: [contextRepositoryProvider.overrideWithValue(contextRepo)],
+        child: const AssistantApp(),
       ),
     ),
   );
@@ -62,6 +65,10 @@ class _AssistantAppState extends ConsumerState<AssistantApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Wire reactive tray menu once the widget tree (and Ref) is available.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      TrayService().initMenu(ref);
+    });
   }
 
   @override
@@ -90,9 +97,7 @@ class _AssistantAppState extends ConsumerState<AssistantApp>
         title: 'Assistant',
         scaffoldMessengerKey: _scaffoldMessengerKey,
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF1A73E8),
-          ),
+          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A73E8)),
           useMaterial3: true,
         ),
         routerConfig: router,

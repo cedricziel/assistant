@@ -6,14 +6,15 @@ import '../features/agents/agent_detail_screen.dart';
 import '../features/agents/agents_screen.dart';
 import '../features/analytics/analytics_screen.dart';
 import '../features/chat/chat_screen.dart';
-import '../features/settings/settings_screen.dart';
-import '../features/connection/connection_provider.dart';
 import '../features/connection/connection_screen.dart';
+import '../features/contexts/providers/context_providers.dart';
+import '../features/contexts/screens/context_switcher_screen.dart';
 import '../features/logs/logs_screen.dart';
 import '../features/personas/persona_create_screen.dart';
 import '../features/personas/persona_detail_screen.dart';
 import '../features/personas/persona_file_editor_screen.dart';
 import '../features/personas/personas_screen.dart';
+import '../features/settings/settings_screen.dart';
 import '../features/skills/skill_create_edit_screen.dart';
 import '../features/skills/skill_detail_screen.dart';
 import '../features/skills/skills_screen.dart';
@@ -30,6 +31,7 @@ import '../shared/nav_shell.dart';
 /// Named route constants.
 class AppRoutes {
   static const setup = '/setup';
+  static const contexts = '/contexts';
   static const chat = '/chat';
   static const chatConversation = '/chat/:id';
   static const traces = '/traces';
@@ -39,10 +41,10 @@ class AppRoutes {
   static const skillNew = '/skills/new';
   static const skillDetail = '/skills/:name';
   static const skillEdit = '/skills/:name/edit';
-  static const contexts = '/contexts';
-  static const contextsNew = '/contexts/new';
-  static const contextsDetail = '/contexts/:id';
-  static const contextsFile = '/contexts/:id/files/:filename';
+  static const personas = '/personas';
+  static const personasNew = '/personas/new';
+  static const personasDetail = '/personas/:id';
+  static const personasFile = '/personas/:id/files/:filename';
   static const workflows = '/workflows';
   static const workflowNew = '/workflows/new';
   static const workflowDetail = '/workflows/:id';
@@ -66,19 +68,17 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: AppRoutes.chat,
     refreshListenable: notifier,
     redirect: (context, state) {
-      final isConnected = ref.read(isConnectedProvider);
-      final onSetup = state.fullPath == AppRoutes.setup;
+      final hasContext = ref.read(hasActiveContextProvider);
+      final onContextSwitcher = state.fullPath == AppRoutes.contexts;
 
-      if (!isConnected && !onSetup) {
-        return AppRoutes.setup;
-      }
-      if (isConnected && onSetup) {
-        return AppRoutes.chat;
+      // If no active context and not already on the switcher, redirect there.
+      if (!hasContext && !onContextSwitcher) {
+        return AppRoutes.contexts;
       }
       return null;
     },
     routes: [
-      // -- Connection Setup ---------------------------------------------------
+      // -- Legacy setup route (kept for deep-link compatibility) -------------
       GoRoute(
         path: AppRoutes.setup,
         builder: (context, state) => const ConnectionScreen(),
@@ -88,6 +88,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       ShellRoute(
         builder: (context, state, child) => NavShell(child: child),
         routes: [
+          // -- Context Switcher ----------------------------------------------
+          GoRoute(
+            path: AppRoutes.contexts,
+            builder: (context, state) => const ContextSwitcherScreen(),
+          ),
+
           // -- Chat ----------------------------------------------------------
           GoRoute(
             path: AppRoutes.chat,
@@ -131,8 +137,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: 'new',
-                builder: (context, state) =>
-                    const SkillCreateEditScreen(),
+                builder: (context, state) => const SkillCreateEditScreen(),
               ),
               GoRoute(
                 path: ':name',
@@ -153,9 +158,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
 
-          // -- Personas / Contexts ------------------------------------------
+          // -- Personas -------------------------------------------------------
           GoRoute(
-            path: AppRoutes.contexts,
+            path: AppRoutes.personas,
             builder: (context, state) => const PersonasScreen(),
             routes: [
               GoRoute(
@@ -192,8 +197,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: 'new',
-                builder: (context, state) =>
-                    const WorkflowEditorScreen(),
+                builder: (context, state) => const WorkflowEditorScreen(),
               ),
               GoRoute(
                 path: ':id',
@@ -273,10 +277,13 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 /// A [ChangeNotifier] that tells go_router to re-evaluate redirects whenever
-/// the connection state changes.
+/// the active context changes.
 class _RouterRefreshNotifier extends ChangeNotifier {
   _RouterRefreshNotifier(Ref ref) {
-    _sub = ref.listen<bool>(isConnectedProvider, (_, next) => notifyListeners());
+    _sub = ref.listen<bool>(
+      hasActiveContextProvider,
+      (prev, next) => notifyListeners(),
+    );
   }
 
   late final ProviderSubscription<bool> _sub;

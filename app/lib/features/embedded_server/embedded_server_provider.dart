@@ -2,11 +2,17 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../connection/connection_provider.dart';
+import '../contexts/models/context_model.dart';
+import '../contexts/providers/context_providers.dart';
 import 'embedded_server_service.dart';
 
-export 'embedded_server_service.dart' show EmbeddedServerState,
-    EmbeddedServerStarting, EmbeddedServerReady, EmbeddedServerError,
-    EmbeddedServerStopped;
+export 'embedded_server_service.dart'
+    show
+        EmbeddedServerState,
+        EmbeddedServerStarting,
+        EmbeddedServerReady,
+        EmbeddedServerError,
+        EmbeddedServerStopped;
 
 /// Manages the embedded-server lifecycle as a Riverpod [AsyncNotifier].
 ///
@@ -14,8 +20,7 @@ export 'embedded_server_service.dart' show EmbeddedServerState,
 /// is already saved, this notifier automatically starts the embedded server
 /// and calls [ServerProfileNotifier.connect] when it becomes ready — causing
 /// the router to redirect to `/chat` without any manual setup.
-class EmbeddedServerNotifier
-    extends AsyncNotifier<EmbeddedServerState>
+class EmbeddedServerNotifier extends AsyncNotifier<EmbeddedServerState>
     with WidgetsBindingObserver {
   final _service = EmbeddedServerService();
 
@@ -48,10 +53,14 @@ class EmbeddedServerNotifier
       state = AsyncData(s);
 
       if (s is EmbeddedServerReady) {
-        // Auto-connect: create an active ServerProfile from the embedded URL.
-        await ref
-            .read(serverProfileProvider.notifier)
-            .connect(s.baseUrl, s.token);
+        // Auto-connect: create a context for the embedded server and activate it.
+        final ctx = AssistantContext.create(
+          name: 'Local (embedded)',
+          serverUrl: s.baseUrl,
+          authToken: s.token.isEmpty ? null : s.token,
+        );
+        await ref.read(contextsProvider.notifier).saveContext(ctx);
+        await ref.read(activeContextProvider.notifier).activate(ctx);
         return s;
       }
 
@@ -84,5 +93,5 @@ class EmbeddedServerNotifier
 /// Provider for [EmbeddedServerNotifier].
 final embeddedServerProvider =
     AsyncNotifierProvider<EmbeddedServerNotifier, EmbeddedServerState>(
-  EmbeddedServerNotifier.new,
-);
+      EmbeddedServerNotifier.new,
+    );

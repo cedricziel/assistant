@@ -43,7 +43,7 @@ class _PersonasScreenState extends ConsumerState<PersonasScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.go('/contexts/new'),
+        onPressed: () => context.go('/personas/new'),
         child: const Icon(Icons.add),
       ),
       body: personasAsync.when(
@@ -154,7 +154,7 @@ class _PersonaRow extends StatelessWidget {
               ),
             )
           : null,
-      onTap: () => context.go('/contexts/${persona.id}'),
+      onTap: () => context.go('/personas/${persona.id}'),
     );
   }
 }

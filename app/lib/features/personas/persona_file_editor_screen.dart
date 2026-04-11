@@ -128,7 +128,7 @@ class _PersonaFileEditorScreenState
         if (didPop) return;
         final leave = await confirmDiscard();
         if (leave && context.mounted) {
-          context.go('/contexts/${widget.personaId}');
+          context.go('/personas/${widget.personaId}');
         }
       },
       child: Scaffold(
@@ -140,10 +140,10 @@ class _PersonaFileEditorScreenState
             if (_dirty) {
               final leave = await confirmDiscard();
               if (leave && context.mounted) {
-                context.go('/contexts/${widget.personaId}');
+                context.go('/personas/${widget.personaId}');
               }
             } else {
-              context.go('/contexts/${widget.personaId}');
+              context.go('/personas/${widget.personaId}');
             }
           },
         ),

@@ -12,13 +12,11 @@ Future<void> initDesktopFeatures() async {
 
   await windowManager.ensureInitialized();
 
-  const windowOptions = WindowOptions(
-    titleBarStyle: TitleBarStyle.normal,
-  );
+  const windowOptions = WindowOptions(titleBarStyle: TitleBarStyle.normal);
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
     await windowManager.focus();
   });
 
-  await TrayService().init();
+  await TrayService().initIcon();
 }

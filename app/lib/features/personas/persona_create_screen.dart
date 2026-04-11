@@ -71,7 +71,7 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
             duration: const Duration(seconds: 2),
           ),
         );
-        context.go('/contexts/${_idController.text.trim()}');
+        context.go('/personas/${_idController.text.trim()}');
       }
     } catch (e) {
       if (mounted) {
@@ -90,7 +90,7 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
         title: const Text('New Persona'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/contexts'),
+          onPressed: () => context.go('/personas'),
         ),
       ),
       body: SafeArea(
@@ -169,7 +169,7 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _submitting ? null : () => context.go('/contexts'),
+                      onPressed: _submitting ? null : () => context.go('/personas'),
                       child: const Text('Cancel'),
                     ),
                   ),

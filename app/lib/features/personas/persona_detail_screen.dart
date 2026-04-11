@@ -23,7 +23,7 @@ class PersonaDetailScreen extends ConsumerWidget {
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/contexts'),
+          onPressed: () => context.go('/personas'),
         ),
         actions: [
           IconButton(
@@ -244,7 +244,7 @@ class _FileSlotTile extends StatelessWidget {
         ),
         trailing: badge,
         onTap: () => context.go(
-          '/contexts/$personaId/files/${slot.filename}',
+          '/personas/$personaId/files/${slot.filename}',
         ),
       ),
     );

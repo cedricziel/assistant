@@ -35,9 +35,9 @@ const List<_NavDest> _primaryDestinations = [
   ),
   _NavDest(
     path: '/contexts',
-    icon: Icons.person_outline,
-    selectedIcon: Icons.person,
-    label: 'Personas',
+    icon: Icons.swap_horiz_outlined,
+    selectedIcon: Icons.swap_horiz,
+    label: 'Contexts',
   ),
   _NavDest(
     path: '/skills',
@@ -56,6 +56,12 @@ const List<_NavDest> _primaryDestinations = [
 // -- Overflow destinations (in "More" sheet on mobile; below divider on desktop rail) --
 
 const List<_NavDest> _overflowDestinations = [
+  _NavDest(
+    path: '/personas',
+    icon: Icons.person_outline,
+    selectedIcon: Icons.person,
+    label: 'Personas',
+  ),
   _NavDest(
     path: '/traces',
     icon: Icons.timeline_outlined,

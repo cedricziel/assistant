@@ -113,7 +113,36 @@ void main() {
     );
 
     testWidgets(
-      '5.3 "More" destination is selected (index 4) when route is /traces',
+      '5.3 tapping Contexts navigates to /contexts and selects index 1',
+      (tester) async {
+        tester.view.physicalSize = const Size(375, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NavigationBar),
+            matching: find.text('Contexts'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // /contexts stub renders this text (see _buildNavShell above)
+        expect(find.text('Personas content'), findsOneWidget);
+        final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+        expect(
+          navBar.selectedIndex,
+          1,
+          reason: 'Contexts is primary destination at index 1',
+        );
+      },
+    );
+
+    testWidgets(
+      '5.4 "More" destination is selected (index 4) when route is /traces',
       (tester) async {
         tester.view.physicalSize = const Size(375, 800);
         tester.view.devicePixelRatio = 1.0;
@@ -122,8 +151,7 @@ void main() {
         await tester.pumpWidget(_buildNavShell(initialLocation: '/traces'));
         await tester.pumpAndSettle();
 
-        final navBar =
-            tester.widget<NavigationBar>(find.byType(NavigationBar));
+        final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
         expect(
           navBar.selectedIndex,
           4,
@@ -146,12 +174,13 @@ void main() {
 
         expect(find.byType(NavigationRail), findsOneWidget);
 
-        // All 9 destination labels must be visible in the rail
+        // All primary + overflow destination labels must be visible in the rail
         for (final label in [
           'Chat',
-          'Personas',
+          'Contexts',
           'Skills',
           'Workflows',
+          'Personas',
           'Traces',
           'Logs',
           'Webhooks',
