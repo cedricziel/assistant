@@ -48,6 +48,7 @@ jobs:
           cache: true
 
       - name: Import certificates
+        if: ${{ secrets.APPLE_DEV_CERTIFICATE != '' }}
         env:
           APPLE_DEV_CERTIFICATE: ${{ secrets.APPLE_DEV_CERTIFICATE }}
         run: |
