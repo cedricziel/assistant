@@ -54,6 +54,10 @@ Widget _buildNavShell({required String initialLocation}) {
             path: '/analytics',
             builder: (_, _) => const Scaffold(body: Text('Analytics content')),
           ),
+          GoRoute(
+            path: '/settings',
+            builder: (_, _) => const Scaffold(body: Text('Settings content')),
+          ),
         ],
       ),
     ],
@@ -112,6 +116,8 @@ void main() {
         expect(find.text('Webhooks'), findsOneWidget);
         expect(find.text('Agents'), findsOneWidget);
         expect(find.text('Analytics'), findsOneWidget);
+        // Settings is at the bottom, separated by a divider
+        expect(find.text('Settings'), findsOneWidget);
       },
     );
 
@@ -176,7 +182,8 @@ void main() {
 
         expect(find.byType(NavigationRail), findsOneWidget);
 
-        // Primary + overflow destination labels in the rail (Contexts is NOT here)
+        // Primary + overflow destination labels in the rail
+        // (Contexts and Settings are NOT here — they live in the trailing slot)
         for (final label in [
           'Chat',
           'Skills',
@@ -207,15 +214,17 @@ void main() {
           findsWidgets,
         );
 
-        // Contexts is in the trailing slot, not as a destination label
-        expect(
-          find.descendant(
-            of: find.byType(NavigationRail),
-            matching: find.byTooltip('Contexts'),
-          ),
-          findsOneWidget,
-          reason: 'Contexts trailing button should be present in the rail',
-        );
+        // Contexts and Settings are in the trailing slot, not as destination labels
+        for (final tooltip in ['Contexts', 'Settings']) {
+          expect(
+            find.descendant(
+              of: find.byType(NavigationRail),
+              matching: find.byTooltip(tooltip),
+            ),
+            findsOneWidget,
+            reason: '$tooltip trailing button should be present in the rail',
+          );
+        }
       },
     );
   });

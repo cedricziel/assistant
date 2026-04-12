@@ -94,13 +94,15 @@ const List<_NavDest> _overflowDestinations = [
     selectedIcon: Icons.bar_chart,
     label: 'Analytics',
   ),
-  _NavDest(
-    path: '/settings',
-    icon: Icons.settings_outlined,
-    selectedIcon: Icons.settings,
-    label: 'Settings',
-  ),
 ];
+
+// Settings + Contexts switcher — sticky trailing slot on desktop, More sheet on mobile.
+const _NavDest _settingsDestination = _NavDest(
+  path: '/settings',
+  icon: Icons.settings_outlined,
+  selectedIcon: Icons.settings,
+  label: 'Settings',
+);
 
 /// Returns true when [currentPath] belongs to any overflow destination.
 bool _isOverflowRouteActive(String currentPath) {
@@ -135,8 +137,9 @@ class NavShell extends ConsumerWidget {
     for (var i = 0; i < _primaryDestinations.length; i++) {
       if (location.startsWith(_primaryDestinations[i].path)) return i;
     }
-    // Contexts switcher and all overflow destinations map to "More".
+    // Contexts, Settings, and all overflow destinations map to "More".
     if (location.startsWith(_contextsDestination.path) ||
+        location.startsWith(_settingsDestination.path) ||
         _isOverflowRouteActive(location)) {
       return _primaryDestinations.length;
     }
@@ -199,6 +202,16 @@ class NavShell extends ConsumerWidget {
                         context.go(d.path);
                       },
                     ),
+                  ),
+                  // Settings is separated from the rest of the overflow items.
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: Icon(_settingsDestination.icon),
+                    title: Text(_settingsDestination.label),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      context.go(_settingsDestination.path);
+                    },
                   ),
                   const SizedBox(height: 8),
                 ],
@@ -274,25 +287,34 @@ class NavShell extends ConsumerWidget {
                         }
                         // i == _primaryDestinations.length is the divider — ignore
                       },
-                      // Trailing slot: Contexts switcher (always) + install
-                      // button (web only when install prompt is available).
-                      trailing: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _ContextsButton(
-                              onTap: () =>
-                                  context.go(_contextsDestination.path),
+                      // Trailing slot (sticky at bottom): separator, then
+                      // Contexts + Settings icon buttons, then install button
+                      // (web only when install prompt is available).
+                      trailing: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Divider(height: 1),
+                          const SizedBox(height: 4),
+                          _ContextsButton(
+                            onTap: () => context.go(_contextsDestination.path),
+                          ),
+                          IconButton(
+                            icon: Icon(_settingsDestination.icon),
+                            selectedIcon: Icon(
+                              _settingsDestination.selectedIcon,
                             ),
-                            if (isInstallable)
-                              _InstallButton(
-                                onTap: () => ref
-                                    .read(pwaInstallProvider.notifier)
-                                    .install(),
-                              ),
-                          ],
-                        ),
+                            tooltip: _settingsDestination.label,
+                            onPressed: () =>
+                                context.go(_settingsDestination.path),
+                          ),
+                          if (isInstallable)
+                            _InstallButton(
+                              onTap: () => ref
+                                  .read(pwaInstallProvider.notifier)
+                                  .install(),
+                            ),
+                          const SizedBox(height: 8),
+                        ],
                       ),
                     ),
                   ),
