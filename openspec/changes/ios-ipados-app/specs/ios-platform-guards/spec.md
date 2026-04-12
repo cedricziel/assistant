@@ -17,7 +17,7 @@ The `tray_manager` and `window_manager` packages SHALL NOT be initialised, calle
 - **THEN** tray and window manager initialise as before
 - **THEN** existing macOS tray behaviour is unchanged
 
-### Requirement: Embedded server code is excluded from the iOS build
+### Requirement: Runtime guard — embedded server code is disabled on iOS
 
 All code paths that reference `EmbeddedServerService`, `EmbeddedServerProvider`, or `EmbeddedServerState` SHALL be unreachable and produce no side effects when running on iOS.
 

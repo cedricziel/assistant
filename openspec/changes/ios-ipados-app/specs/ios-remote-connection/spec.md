@@ -31,7 +31,7 @@ On iOS and iPadOS the connection screen SHALL display only the remote server for
 
 ### Requirement: Saved contexts persist across app restarts on iOS
 
-Server URL and authentication token saved in the iOS Keychain SHALL survive app termination and device reboot. On next launch the app SHALL skip the connection screen and navigate directly to chat if a valid active context exists.
+Server URL and authentication token, if provided, saved in the iOS Keychain SHALL survive app termination and device reboot. On next launch the app SHALL skip the connection screen and navigate directly to chat if a valid active context exists.
 
 #### Scenario: User reopens the app after connecting
 

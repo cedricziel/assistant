@@ -83,6 +83,7 @@ jobs:
   build-ios:
     name: Build iOS (no-codesign)
     runs-on: macos-latest
+    needs: analyze-and-test
     defaults:
       run:
         working-directory: app

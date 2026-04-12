@@ -39,7 +39,7 @@ Current pain points that must be addressed before the iOS target is viable:
 
 ### Decision 2: Conditional import for macOS-only packages
 
-**Chosen**: Wrap `tray_manager` and `window_manager` initialisation in `if (Platform.isMacOS)` blocks inside `main.dart` and the tray service, guarded by a `!kIsWeb` pre-check.
+**Chosen**: Wrap `tray_manager` and `window_manager` initialisation in `if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS)` guards inside `main.dart` and the tray service.
 
 **Rationale**: Both packages define stubs for non-macOS platforms in their `pubspec.yaml` platform map, so they won't be compiled into the iOS binary. The guard is defensive runtime protection.
 
@@ -85,5 +85,5 @@ Rollback: all changes are additive platform guards; removing them reverts to cur
 
 ## Open Questions
 
-- Should the app support iOS 15 (adds ~5% of devices)? Currently targeting 16 — revisit if user demand is clear.
+- Should the app support older iOS versions? Currently targeting iOS 26 — revisit if user demand is clear.
 - Should iPad use a `NavigationDrawer` instead of `NavigationRail` in portrait mode? Deferred to a follow-up UX iteration.
