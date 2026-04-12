@@ -214,15 +214,12 @@ void main() {
           findsWidgets,
         );
 
-        // Contexts and Settings are in the trailing slot, not as destination labels
+        // Contexts and Settings are pinned below the rail (outside NavigationRail)
         for (final tooltip in ['Contexts', 'Settings']) {
           expect(
-            find.descendant(
-              of: find.byType(NavigationRail),
-              matching: find.byTooltip(tooltip),
-            ),
+            find.byTooltip(tooltip),
             findsOneWidget,
-            reason: '$tooltip trailing button should be present in the rail',
+            reason: '$tooltip sticky button should be visible',
           );
         }
       },

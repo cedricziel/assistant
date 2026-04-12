@@ -237,88 +237,78 @@ class NavShell extends ConsumerWidget {
         body: SafeArea(
           child: Row(
             children: [
-              SingleChildScrollView(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight:
-                        MediaQuery.of(context).size.height -
-                        MediaQuery.of(context).padding.top -
-                        MediaQuery.of(context).padding.bottom,
-                  ),
-                  child: IntrinsicHeight(
-                    child: NavigationRail(
-                      selectedIndex: selected,
-                      labelType: NavigationRailLabelType.all,
-                      destinations: [
-                        // Primary destinations (0–3)
-                        ..._primaryDestinations.map(
-                          (d) => NavigationRailDestination(
-                            icon: Icon(d.icon),
-                            selectedIcon: Icon(d.selectedIcon),
-                            label: Text(d.label),
-                          ),
-                        ),
-                        // Divider sentinel (index 4) — non-interactive
-                        const NavigationRailDestination(
-                          disabled: true,
-                          icon: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 4),
-                            child: Divider(thickness: 1),
-                          ),
-                          label: SizedBox.shrink(),
-                        ),
-                        // Overflow / developer destinations (5–9)
-                        ..._overflowDestinations.map(
-                          (d) => NavigationRailDestination(
-                            icon: Icon(d.icon),
-                            selectedIcon: Icon(d.selectedIcon),
-                            label: Text(d.label),
-                          ),
-                        ),
-                      ],
-                      onDestinationSelected: (i) {
-                        if (i < _primaryDestinations.length) {
-                          context.go(_primaryDestinations[i].path);
-                        } else if (i > _primaryDestinations.length) {
-                          // Skip divider at index _primaryDestinations.length
-                          final overflowIndex =
-                              i - _primaryDestinations.length - 1;
-                          context.go(_overflowDestinations[overflowIndex].path);
-                        }
-                        // i == _primaryDestinations.length is the divider — ignore
-                      },
-                      // Trailing slot (sticky at bottom): separator, then
-                      // Contexts + Settings icon buttons, then install button
-                      // (web only when install prompt is available).
-                      trailing: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Divider(height: 1),
-                          const SizedBox(height: 4),
-                          _ContextsButton(
-                            onTap: () => context.go(_contextsDestination.path),
-                          ),
-                          IconButton(
-                            icon: Icon(_settingsDestination.icon),
-                            selectedIcon: Icon(
-                              _settingsDestination.selectedIcon,
+              // The rail sidebar is a Column: the NavigationRail scrolls in
+              // the Expanded area; the trailing section is pinned outside the
+              // scroll so it stays visible regardless of how many destinations
+              // are above it.
+              Column(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: IntrinsicHeight(
+                        child: NavigationRail(
+                          selectedIndex: selected,
+                          labelType: NavigationRailLabelType.all,
+                          destinations: [
+                            // Primary destinations
+                            ..._primaryDestinations.map(
+                              (d) => NavigationRailDestination(
+                                icon: Icon(d.icon),
+                                selectedIcon: Icon(d.selectedIcon),
+                                label: Text(d.label),
+                              ),
                             ),
-                            tooltip: _settingsDestination.label,
-                            onPressed: () =>
-                                context.go(_settingsDestination.path),
-                          ),
-                          if (isInstallable)
-                            _InstallButton(
-                              onTap: () => ref
-                                  .read(pwaInstallProvider.notifier)
-                                  .install(),
+                            // Divider sentinel — non-interactive
+                            const NavigationRailDestination(
+                              disabled: true,
+                              icon: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 4),
+                                child: Divider(thickness: 1),
+                              ),
+                              label: SizedBox.shrink(),
                             ),
-                          const SizedBox(height: 8),
-                        ],
+                            // Overflow / developer destinations
+                            ..._overflowDestinations.map(
+                              (d) => NavigationRailDestination(
+                                icon: Icon(d.icon),
+                                selectedIcon: Icon(d.selectedIcon),
+                                label: Text(d.label),
+                              ),
+                            ),
+                          ],
+                          onDestinationSelected: (i) {
+                            if (i < _primaryDestinations.length) {
+                              context.go(_primaryDestinations[i].path);
+                            } else if (i > _primaryDestinations.length) {
+                              final overflowIndex =
+                                  i - _primaryDestinations.length - 1;
+                              context.go(
+                                _overflowDestinations[overflowIndex].path,
+                              );
+                            }
+                          },
+                        ),
                       ),
                     ),
                   ),
-                ),
+                  // Sticky trailing section — always visible at the bottom.
+                  const Divider(height: 1),
+                  _ContextsButton(
+                    onTap: () => context.go(_contextsDestination.path),
+                  ),
+                  IconButton(
+                    icon: Icon(_settingsDestination.icon),
+                    selectedIcon: Icon(_settingsDestination.selectedIcon),
+                    tooltip: _settingsDestination.label,
+                    onPressed: () => context.go(_settingsDestination.path),
+                  ),
+                  if (isInstallable)
+                    _InstallButton(
+                      onTap: () =>
+                          ref.read(pwaInstallProvider.notifier).install(),
+                    ),
+                  const SizedBox(height: 8),
+                ],
               ),
               const VerticalDivider(width: 1, thickness: 1),
               Expanded(
