@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -20,18 +22,20 @@ class _MacosWindowCloseHandlerState extends State<MacosWindowCloseHandler>
   @override
   void initState() {
     super.initState();
+    if (!Platform.isMacOS) return;
     windowManager.addListener(this);
     windowManager.setPreventClose(true);
   }
 
   @override
   void dispose() {
-    windowManager.removeListener(this);
+    if (Platform.isMacOS) windowManager.removeListener(this);
     super.dispose();
   }
 
   @override
   void onWindowClose() async {
+    if (!Platform.isMacOS) return;
     await windowManager.hide();
   }
 
