@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
@@ -66,9 +69,12 @@ class _AssistantAppState extends ConsumerState<AssistantApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Wire reactive tray menu once the widget tree (and Ref) is available.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      TrayService().initMenu(ref);
-    });
+    // Only on macOS — tray_manager is a no-op on other platforms.
+    if (!kIsWeb && Platform.isMacOS) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        TrayService().initMenu(ref);
+      });
+    }
   }
 
   @override
@@ -88,7 +94,8 @@ class _AssistantAppState extends ConsumerState<AssistantApp>
   Widget build(BuildContext context) {
     // Ensure the embedded-server provider is initialised at startup on macOS
     // so the binary starts before the first frame renders.
-    ref.watch(embeddedServerProvider);
+    // On iOS/web the embedded server is not available — skip watching it.
+    if (!kIsWeb && Platform.isMacOS) ref.watch(embeddedServerProvider);
 
     final router = ref.watch(routerProvider);
 

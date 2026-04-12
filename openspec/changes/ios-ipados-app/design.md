@@ -59,11 +59,11 @@ Current pain points that must be addressed before the iOS target is viable:
 
 **Rationale**: `flutter_secure_storage` already handles iOS Keychain natively. The same code path that works on macOS works on iOS.
 
-### Decision 5: Minimum deployment target iOS 16
+### Decision 5: Minimum deployment target iOS 26
 
-**Chosen**: Set `IPHONEOS_DEPLOYMENT_TARGET = 16.0` in the Xcode project.
+**Chosen**: Set `IPHONEOS_DEPLOYMENT_TARGET = 26.0` in the Xcode project.
 
-**Rationale**: iOS 16 covers >90% of active iOS devices (as of 2025). SwiftUI and native blur/sheet APIs needed for future adaptive work all require 16+. `flutter_secure_storage` 10.x requires iOS 12+, so no conflict.
+**Rationale**: iOS 26 (released September 2025) allows the app to use the latest platform APIs without compatibility shims. Targeting the current major release is acceptable for a new app with no existing user base — there is no legacy install base to protect. `flutter_secure_storage` 10.x requires iOS 12+, so no conflict.
 
 ## Risks / Trade-offs
 

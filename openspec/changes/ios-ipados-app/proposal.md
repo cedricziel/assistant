@@ -9,7 +9,7 @@ The assistant app currently targets web and macOS only. iOS and iPadOS users hav
 - Replace `tray_manager` and `window_manager` (macOS-only) with platform-aware guards so they don't break the iOS build.
 - Add `flutter_secure_storage` keychain entitlement for iOS (token persistence).
 - Add platform-specific UI adaptations: bottom navigation bar for iPhone, sidebar/NavigationRail for iPad, Cupertino-flavoured widgets where appropriate.
-- Configure Xcode project settings: bundle ID, signing, minimum deployment target (iOS 16+), capability entitlements.
+- Configure Xcode project settings: bundle ID, signing, minimum deployment target (iOS 26+), capability entitlements.
 - Add CI job for `flutter build ios --no-codesign` on every PR touching `app/**`.
 
 ## Capabilities
@@ -31,5 +31,5 @@ The assistant app currently targets web and macOS only. iOS and iPadOS users hav
 - `app/lib/tray/` — tray initialisation wrapped in macOS-only guards.
 - `app/lib/router/app_router.dart` — redirect logic unchanged; connection screen already handles remote-only.
 - `app/pubspec.yaml` — `tray_manager` and `window_manager` remain but are guarded; no new dependencies needed (packages already present for other platforms).
-- `app/ios/` — Xcode project configured for bundle ID, signing team placeholder, minimum iOS 16.
+- `app/ios/` — Xcode project configured for bundle ID, signing team placeholder, minimum iOS 26.
 - `.github/workflows/flutter.yml` — new CI step added.

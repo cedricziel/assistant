@@ -1,41 +1,41 @@
 ## 1. Platform Guards — macOS-only packages
 
-- [ ] 1.1 Wrap `tray_manager` and `window_manager` init in `app/lib/main.dart` with `if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS)` guard
-- [ ] 1.2 Wrap tray service calls in `app/lib/tray/` with the same macOS-only guard
-- [ ] 1.3 Run `flutter analyze` and confirm zero errors on all platforms
+- [x] 1.1 Wrap `tray_manager` and `window_manager` init in `app/lib/main.dart` with `if (!kIsWeb && Platform.isMacOS)` guard
+- [x] 1.2 Wrap tray service calls in `app/lib/tray/window_close_handler.dart` with `Platform.isMacOS` guard
+- [x] 1.3 Run `flutter analyze` and confirm zero errors on all platforms
 
 ## 2. Platform Guards — Embedded Server
 
-- [ ] 2.1 Add a `static bool get isAvailable` check to `EmbeddedServerService` that returns `false` on iOS (using `defaultTargetPlatform`)
-- [ ] 2.2 Update `ConnectionScreen` to suppress the mode-toggle segmented button when `EmbeddedServerService.isAvailable` is `false` (already partially in place; verify iOS path)
-- [ ] 2.3 Ensure `embeddedServerProvider` is never watched when `isAvailable` is false (review `connection_screen.dart` and `embedded_server_provider.dart`)
-- [ ] 2.4 Run `flutter build ios --no-codesign` locally and confirm no compile errors from embedded server imports
+- [x] 2.1 Add a `static bool get isAvailable` check to `EmbeddedServerService` that returns `false` on iOS (using `defaultTargetPlatform`) — already implemented
+- [x] 2.2 Update `ConnectionScreen` to suppress the mode-toggle segmented button when `EmbeddedServerService.isAvailable` is `false` — already implemented
+- [x] 2.3 Ensure `embeddedServerProvider` is never watched when `isAvailable` is false — guarded in `main.dart` with `!kIsWeb && Platform.isMacOS`
+- [x] 2.4 Run `flutter build ios --no-codesign` locally and confirm no compile errors from embedded server imports
 
 ## 3. Adaptive Navigation Shell
 
-- [ ] 3.1 Create `app/lib/shared/widgets/adaptive_shell.dart` — `AdaptiveShell` widget that wraps `NavigationRail` (width >= 600 dp) or `BottomNavigationBar` (width < 600 dp)
-- [ ] 3.2 Wire `AdaptiveShell` into the shell route in `app/lib/router/app_router.dart`, replacing the current `NavigationRail`-only layout
-- [ ] 3.3 Map all existing navigation destinations (Chat, Personas, Skills, Traces, Logs, Settings) into the `BottomNavigationBar` items
+- [x] 3.1 `NavShell` already implements adaptive navigation (bottom `NavigationBar` < 768 dp, `NavigationRail` >= 768 dp) — no new widget needed
+- [x] 3.2 `NavShell` already wired into shell route in `app_router.dart` — no changes needed
+- [x] 3.3 Primary destinations (Chat, Contexts, Skills, Workflows) + "More" overflow sheet already mapped in `NavShell` — no changes needed
 - [ ] 3.4 Verify no `RenderFlex overflowed` error appears on iPhone SE form factor (375 × 667 dp) in the iOS Simulator
 
 ## 4. Remote-Only Connection Screen on iOS
 
-- [ ] 4.1 Confirm `ConnectionScreen` hides the `SegmentedButton` mode toggle when `EmbeddedServerService.isAvailable` is false (already gated on this; add explicit iOS Simulator smoke test)
-- [ ] 4.2 Verify the URL field default text is `http://127.0.0.1:8080` (not `Uri.base.origin`) on iOS — `isWebPlatform` is already false on iOS, so this should be correct
+- [x] 4.1 `ConnectionScreen` already hides the `SegmentedButton` mode toggle when `EmbeddedServerService.isAvailable` is false — confirmed by code review
+- [x] 4.2 URL field default is `http://127.0.0.1:8080` on iOS (`isWebPlatform` is false on iOS) — confirmed by code review
 - [ ] 4.3 Verify token is stored via `flutter_secure_storage` in iOS Keychain (use Simulator + Keychain viewer or integration test)
 
 ## 5. Xcode Project Configuration
 
-- [ ] 5.1 Set `IPHONEOS_DEPLOYMENT_TARGET = 16.0` in `app/ios/Runner.xcodeproj/project.pbxproj` for all build configurations (Debug, Profile, Release)
-- [ ] 5.2 Set bundle identifier to `com.assistant.app` (or matching macOS bundle ID pattern) in `project.pbxproj`
-- [ ] 5.3 Add `keychain-access-groups` entitlement to `app/ios/Runner/Runner.entitlements` (required by `flutter_secure_storage` on iOS)
-- [ ] 5.4 Verify `Podfile` sets `platform :ios, '16.0'`
-- [ ] 5.5 Run `pod install` in `app/ios/` and confirm no dependency conflicts
+- [x] 5.1 Set `IPHONEOS_DEPLOYMENT_TARGET = 26.0` in `app/ios/Runner.xcodeproj/project.pbxproj` for all build configurations (Debug, Profile, Release)
+- [x] 5.2 Bundle identifier already set to `com.cedricziel.assistant` in `project.pbxproj` — kept as-is
+- [x] 5.3 `keychain-access-groups` entitlement already present in `DebugProfile.entitlements` and `Release.entitlements` — no changes needed
+- [x] 5.4 `Podfile` updated to `platform :ios, '26.0'`
+- [x] 5.5 Run `pod install` in `app/ios/` and confirm no dependency conflicts
 
 ## 6. CI Integration
 
-- [ ] 6.1 Add a `build-ios` job to `.github/workflows/flutter.yml` that runs `flutter build ios --no-codesign` on pushes/PRs touching `app/**`
-- [ ] 6.2 Set `runs-on: macos-latest` for the new job (Xcode required)
+- [x] 6.1 Added `build-ios` job to `.github/workflows/flutter.yml` that runs `flutter build ios --no-codesign --release`
+- [x] 6.2 Job uses `runs-on: macos-latest` (Xcode required)
 - [ ] 6.3 Confirm the job completes successfully in CI on a test PR
 
 ## 7. Smoke Testing
