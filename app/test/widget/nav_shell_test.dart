@@ -67,7 +67,7 @@ Widget _buildNavShell({required String initialLocation}) {
 void main() {
   group('NavShell — mobile (<768px)', () {
     testWidgets(
-      '5.1 NavigationBar has exactly 5 destinations at narrow width',
+      '5.1 NavigationBar has exactly 4 destinations at narrow width',
       (tester) async {
         tester.view.physicalSize = const Size(375, 800);
         tester.view.devicePixelRatio = 1.0;
@@ -77,12 +77,13 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(NavigationBar), findsOneWidget);
-        expect(find.byType(NavigationDestination), findsNWidgets(5));
+        // 3 primary (Chat, Skills, Workflows) + More
+        expect(find.byType(NavigationDestination), findsNWidgets(4));
       },
     );
 
     testWidgets(
-      '5.2 tapping "More" opens bottom sheet with all overflow destinations',
+      '5.2 tapping "More" opens bottom sheet with Contexts and overflow destinations',
       (tester) async {
         tester.view.physicalSize = const Size(375, 800);
         tester.view.devicePixelRatio = 1.0;
@@ -103,7 +104,9 @@ void main() {
         await tester.tap(find.text('More'));
         await tester.pumpAndSettle();
 
-        // Bottom sheet should show all overflow destinations
+        // Contexts switcher must appear first in the sheet
+        expect(find.text('Contexts'), findsOneWidget);
+        // Overflow destinations also present
         expect(find.text('Traces'), findsOneWidget);
         expect(find.text('Logs'), findsOneWidget);
         expect(find.text('Webhooks'), findsOneWidget);
@@ -112,37 +115,35 @@ void main() {
       },
     );
 
-    testWidgets(
-      '5.3 tapping Contexts navigates to /contexts and selects index 1',
-      (tester) async {
-        tester.view.physicalSize = const Size(375, 800);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
+    testWidgets('5.3 tapping Contexts in More sheet navigates to /contexts', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(375, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
 
-        await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+      await tester.pumpAndSettle();
 
-        await tester.tap(
-          find.descendant(
-            of: find.byType(NavigationBar),
-            matching: find.text('Contexts'),
-          ),
-        );
-        await tester.pumpAndSettle();
+      await tester.tap(find.text('More'));
+      await tester.pumpAndSettle();
 
-        // /contexts stub renders this text (see _buildNavShell above)
-        expect(find.text('Personas content'), findsOneWidget);
-        final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
-        expect(
-          navBar.selectedIndex,
-          1,
-          reason: 'Contexts is primary destination at index 1',
-        );
-      },
-    );
+      await tester.tap(find.text('Contexts'));
+      await tester.pumpAndSettle();
+
+      // /contexts stub renders this text (see _buildNavShell above)
+      expect(find.text('Personas content'), findsOneWidget);
+      // "More" button is selected (index 3) when on an overflow route
+      final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(
+        navBar.selectedIndex,
+        3,
+        reason: '"More" (index 3) should be selected when on /contexts',
+      );
+    });
 
     testWidgets(
-      '5.4 "More" destination is selected (index 4) when route is /traces',
+      '5.4 "More" destination is selected (index 3) when route is /traces',
       (tester) async {
         tester.view.physicalSize = const Size(375, 800);
         tester.view.devicePixelRatio = 1.0;
@@ -154,8 +155,8 @@ void main() {
         final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
         expect(
           navBar.selectedIndex,
-          4,
-          reason: '"More" (index 4) should be selected when on /traces',
+          3,
+          reason: '"More" (index 3) should be selected when on /traces',
         );
       },
     );
@@ -163,7 +164,8 @@ void main() {
 
   group('NavShell — desktop (>=768px)', () {
     testWidgets(
-      '5.4 NavigationRail shows all 9 destinations with a divider between groups',
+      '5.4 NavigationRail shows primary + overflow destinations with a divider, '
+      'and Contexts trailing button',
       (tester) async {
         tester.view.physicalSize = const Size(1280, 900);
         tester.view.devicePixelRatio = 1.0;
@@ -174,10 +176,9 @@ void main() {
 
         expect(find.byType(NavigationRail), findsOneWidget);
 
-        // All primary + overflow destination labels must be visible in the rail
+        // Primary + overflow destination labels in the rail (Contexts is NOT here)
         for (final label in [
           'Chat',
-          'Contexts',
           'Skills',
           'Workflows',
           'Personas',
@@ -204,6 +205,16 @@ void main() {
             matching: find.byType(Divider),
           ),
           findsWidgets,
+        );
+
+        // Contexts is in the trailing slot, not as a destination label
+        expect(
+          find.descendant(
+            of: find.byType(NavigationRail),
+            matching: find.byTooltip('Contexts'),
+          ),
+          findsOneWidget,
+          reason: 'Contexts trailing button should be present in the rail',
         );
       },
     );

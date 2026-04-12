@@ -34,12 +34,6 @@ const List<_NavDest> _primaryDestinations = [
     label: 'Chat',
   ),
   _NavDest(
-    path: '/contexts',
-    icon: Icons.swap_horiz_outlined,
-    selectedIcon: Icons.swap_horiz,
-    label: 'Contexts',
-  ),
-  _NavDest(
     path: '/skills',
     icon: Icons.extension_outlined,
     selectedIcon: Icons.extension,
@@ -52,6 +46,14 @@ const List<_NavDest> _primaryDestinations = [
     label: 'Workflows',
   ),
 ];
+
+// Context switcher — exposed via trailing slot on desktop, More sheet on mobile.
+const _NavDest _contextsDestination = _NavDest(
+  path: '/contexts',
+  icon: Icons.swap_horiz_outlined,
+  selectedIcon: Icons.swap_horiz,
+  label: 'Contexts',
+);
 
 // -- Overflow destinations (in "More" sheet on mobile; below divider on desktop rail) --
 
@@ -133,7 +135,11 @@ class NavShell extends ConsumerWidget {
     for (var i = 0; i < _primaryDestinations.length; i++) {
       if (location.startsWith(_primaryDestinations[i].path)) return i;
     }
-    if (_isOverflowRouteActive(location)) return _primaryDestinations.length;
+    // Contexts switcher and all overflow destinations map to "More".
+    if (location.startsWith(_contextsDestination.path) ||
+        _isOverflowRouteActive(location)) {
+      return _primaryDestinations.length;
+    }
     return 0;
   }
 
@@ -162,29 +168,42 @@ class NavShell extends ConsumerWidget {
       builder: (sheetContext) {
         return Semantics(
           label: 'More destinations',
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Text(
-                  'More',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text(
+                      'More',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  // Contexts switcher is the first item in the More sheet on mobile.
+                  ListTile(
+                    leading: Icon(_contextsDestination.icon),
+                    title: Text(_contextsDestination.label),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      context.go(_contextsDestination.path);
+                    },
+                  ),
+                  ..._overflowDestinations.map(
+                    (d) => ListTile(
+                      leading: Icon(d.icon),
+                      title: Text(d.label),
+                      onTap: () {
+                        Navigator.of(sheetContext).pop();
+                        context.go(d.path);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ),
-              ..._overflowDestinations.map(
-                (d) => ListTile(
-                  leading: Icon(d.icon),
-                  title: Text(d.label),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    context.go(d.path);
-                  },
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
+            ),
           ),
         );
       },
@@ -255,18 +274,26 @@ class NavShell extends ConsumerWidget {
                         }
                         // i == _primaryDestinations.length is the divider — ignore
                       },
-                      // Show the install button at the bottom of the rail when the
-                      // browser's install prompt is available.
-                      trailing: isInstallable
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: _InstallButton(
+                      // Trailing slot: Contexts switcher (always) + install
+                      // button (web only when install prompt is available).
+                      trailing: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _ContextsButton(
+                              onTap: () =>
+                                  context.go(_contextsDestination.path),
+                            ),
+                            if (isInstallable)
+                              _InstallButton(
                                 onTap: () => ref
                                     .read(pwaInstallProvider.notifier)
                                     .install(),
                               ),
-                            )
-                          : null,
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -322,6 +349,23 @@ class NavShell extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Icon button for the Context Switcher in the [NavigationRail] trailing slot.
+class _ContextsButton extends StatelessWidget {
+  const _ContextsButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.swap_horiz_outlined),
+      selectedIcon: const Icon(Icons.swap_horiz),
+      tooltip: 'Contexts',
+      onPressed: onTap,
     );
   }
 }
