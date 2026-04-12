@@ -1,0 +1,13 @@
+# Appfile — App Store Connect identifiers.
+# All values can be overridden via environment variables.
+
+# Bundle identifier of the iOS app.
+app_identifier(ENV["APP_IDENTIFIER"] || "com.cedricziel.assistant.ios")
+
+# Apple ID (email) used for App Store Connect.
+# Override via FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD / FASTLANE_USER.
+apple_id(ENV["APPLE_ID"] || "")
+
+# App Store Connect team ID (numeric).
+# Find it at https://appstoreconnect.apple.com/WebObjects/iTunesConnect.woa/wa/jumpTo?page=userManagement
+itc_team_id(ENV["ITC_TEAM_ID"] || "")

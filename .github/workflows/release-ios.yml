@@ -1,0 +1,64 @@
+name: Release iOS
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: Build & Upload to TestFlight
+    runs-on: macos-latest
+
+    defaults:
+      run:
+        working-directory: app
+
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+      APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+      APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+      APP_STORE_CONNECT_API_KEY_IS_BASE64: "true"
+      MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      MATCH_READONLY: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$APP_STORE_CONNECT_API_KEY_KEY_ID" ]    && missing+=("APP_STORE_CONNECT_API_KEY_KEY_ID")
+          [ -z "$APP_STORE_CONNECT_API_KEY_ISSUER_ID" ] && missing+=("APP_STORE_CONNECT_API_KEY_ISSUER_ID")
+          [ -z "$APP_STORE_CONNECT_API_KEY_KEY" ]       && missing+=("APP_STORE_CONNECT_API_KEY_KEY")
+          [ -z "$MATCH_GIT_URL" ]                        && missing+=("MATCH_GIT_URL")
+          [ -z "$MATCH_PASSWORD" ]                       && missing+=("MATCH_PASSWORD")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "ERROR: The following required secrets are not set:"
+            for v in "${missing[@]}"; do echo "  - $v"; done
+            echo "See app/fastlane/README.md for setup instructions."
+            exit 1
+          fi
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.32.x"
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+          working-directory: app
+
+      - name: Run Fastlane beta lane
+        run: bundle exec fastlane ios beta
