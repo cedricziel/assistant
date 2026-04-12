@@ -7,7 +7,7 @@ The system SHALL provide a `fastlane ios beta` lane that builds the iOS app in r
 #### Scenario: Successful beta upload
 
 - **WHEN** `fastlane ios beta` is invoked with valid `APP_STORE_CONNECT_API_KEY_*` and `MATCH_*` environment variables set
-- **THEN** an IPA is produced, signed with the App Store distribution certificate, and uploaded to TestFlight for bundle ID `com.cedricziel.assistant`
+- **THEN** an IPA is produced, signed with the App Store distribution certificate, and uploaded to TestFlight for bundle ID `com.cedricziel.assistant.ios`
 
 #### Scenario: Missing API key halts lane
 
@@ -25,7 +25,7 @@ The system SHALL provide a `fastlane ios release` lane that performs the same bu
 
 ### Requirement: Match manages iOS code signing
 
-The system SHALL use `fastlane match appstore` to fetch or create the App Store distribution certificate and provisioning profile for `com.cedricziel.assistant` and install them into the keychain before building.
+The system SHALL use `fastlane match appstore` to fetch or create the App Store distribution certificate and provisioning profile for `com.cedricziel.assistant.ios` and install them into the keychain before building.
 
 #### Scenario: Certificate fetched from match repo
 

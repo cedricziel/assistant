@@ -6,7 +6,7 @@
 
 ## 2. Fastlane Configuration Files
 
-- [ ] 2.1 Create `app/fastlane/Appfile` with `app_identifier "com.cedricziel.assistant"`, `apple_id`, and `itc_team_id` placeholders documented as env-var overrideable
+- [ ] 2.1 Create `app/fastlane/Appfile` with `app_identifier "com.cedricziel.assistant.ios"`, `apple_id`, and `itc_team_id` placeholders documented as env-var overrideable
 - [ ] 2.2 Create `app/fastlane/Matchfile` with `git_url`, `storage_mode "git"`, `type "appstore"`, and `platform ["ios"]`
 - [ ] 2.3 Create `app/fastlane/Gymfile` with: `scheme "Runner"`, `workspace "ios/Runner.xcworkspace"`, `export_method "app-store"`, `include_bitcode false`, `output_directory "build/ios/"`
 - [ ] 2.4 Create `app/fastlane/Fastfile` with `platform :ios` block containing `beta` and `release` lanes

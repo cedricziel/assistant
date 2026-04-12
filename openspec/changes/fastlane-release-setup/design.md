@@ -6,7 +6,7 @@ Fastlane is the industry standard for automating Apple platform releases. It han
 
 **Current State:**
 
-- iOS bundle ID: `com.cedricziel.assistant` (correct, registered)
+- iOS bundle ID: `com.cedricziel.assistant.ios` (correct, registered)
 - macOS bundle ID: `com.example.assistantApp` (placeholder — needs correction before App Store submission)
 - No code-signing automation
 - No CI release pipeline
