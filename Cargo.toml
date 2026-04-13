@@ -144,7 +144,7 @@ p256 = { version = "0.13", features = ["arithmetic", "ecdh"] }
 aes-gcm = "0.10"
 hkdf = "0.12"
 # Lossless TOML editing (preserves comments and whitespace)
-toml_edit = "0.22"
+toml_edit = "0.25"
 # NATS message bus
 async-nats = "0.47"
 # Integration testing
