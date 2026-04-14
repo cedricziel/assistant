@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.93](https://github.com/cedricziel/assistant/compare/v0.1.92...v0.1.93) (2026-04-14)
+
+
+### Features
+
+* **app:** add context switcher for multi-server support ([cbaa293](https://github.com/cedricziel/assistant/commit/cbaa293dc6b88c4e454159f7be419b561ca126b6))
+* **app:** iOS/iPadOS remote-only app support ([#417](https://github.com/cedricziel/assistant/issues/417)) ([203ef6b](https://github.com/cedricziel/assistant/commit/203ef6b16290286b3aaedaa87ec3e559d2669a75))
+* **app:** move Contexts to NavigationRail trailing slot ([6676b26](https://github.com/cedricziel/assistant/commit/6676b26db18528e0a085c350bcbfd949e09b7255))
+* **app:** move Settings to sticky trailing slot with separator ([e81b072](https://github.com/cedricziel/assistant/commit/e81b07242c3bdba12ff4a97cc4639aa0caf4fac8))
+
+
+### Bug Fixes
+
+* **app:** make trailing nav section truly sticky by moving outside scroll area ([b3289bd](https://github.com/cedricziel/assistant/commit/b3289bd61b4d7310f7cbdb0c315d36320a4c1809))
+* **app:** prevent NavigationRail overflow on short screens ([f986918](https://github.com/cedricziel/assistant/commit/f98691816f1f4ea22011d193c9ed6953385769cf))
+* **app:** resolve macOS keychain -34018 error with proper signing setup ([#414](https://github.com/cedricziel/assistant/issues/414)) ([1f40b27](https://github.com/cedricziel/assistant/commit/1f40b27d90bc965f31257cb96a8791d437f0e281))
+
 ## [0.1.92](https://github.com/cedricziel/assistant/compare/v0.1.91...v0.1.92) (2026-04-10)
 
 
