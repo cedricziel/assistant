@@ -96,6 +96,42 @@ class ContextRepository {
     }
   }
 
+  // -- Upsert by URL --------------------------------------------------------
+
+  /// Saves [context] — if a context with the same [AssistantContext.serverUrl]
+  /// already exists it is updated in-place (preserving its ID and createdAt);
+  /// otherwise a new entry is inserted.
+  ///
+  /// Returns the context that was saved (the updated one if a match was found,
+  /// or [context] unchanged).
+  Future<AssistantContext> upsertContextByUrl(AssistantContext context) async {
+    final existing = await _loadMetadata();
+    final idx = existing.indexWhere((c) => c.serverUrl == context.serverUrl);
+    final AssistantContext toSave;
+    if (idx >= 0) {
+      // Preserve ID and createdAt; update name and (below) token.
+      toSave = existing[idx].copyWith(
+        name: context.name,
+        authToken: context.authToken,
+      );
+      existing[idx] = toSave;
+    } else {
+      toSave = context;
+      existing.add(toSave);
+    }
+    await _persistMetadata(existing);
+
+    if (toSave.authToken != null && toSave.authToken!.isNotEmpty) {
+      await _secureStorage.write(
+        key: '$_kTokenPrefix${toSave.id}',
+        value: toSave.authToken!,
+      );
+    } else {
+      await _secureStorage.delete(key: '$_kTokenPrefix${toSave.id}');
+    }
+    return toSave;
+  }
+
   // -- Delete ---------------------------------------------------------------
 
   /// Removes the context with [id] from both stores.

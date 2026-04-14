@@ -224,5 +224,37 @@ void main() {
         }
       },
     );
+
+    // 5.4 — non-web: contexts button present, logout button absent.
+    //
+    // kIsWeb is a compile-time constant; in tests it is always false (non-web).
+    // The web path (5.3 — logout present, contexts absent) requires a web
+    // build and is verified by manual testing or a dedicated web integration
+    // test run.
+    testWidgets(
+      '5.4 non-web desktop shows Contexts button and no Logout button',
+      (tester) async {
+        tester.view.physicalSize = const Size(1024, 768);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+        await tester.pumpAndSettle();
+
+        // Contexts button must be visible in the trailing section of the rail.
+        expect(
+          find.byTooltip('Contexts'),
+          findsOneWidget,
+          reason: 'Non-web: Contexts switcher button should be present',
+        );
+
+        // Logout button must NOT appear on non-web.
+        expect(
+          find.byTooltip('Log out'),
+          findsNothing,
+          reason: 'Non-web: Logout button should be absent',
+        );
+      },
+    );
   });
 }

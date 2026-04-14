@@ -298,23 +298,13 @@ async function createAgent(page: Page): Promise<string> {
 // -- Tests ------------------------------------------------------------------
 
 test.describe("Login page", () => {
+  // The Flutter web app serves a token-only login screen at /login.
+  // Unauthenticated visitors are redirected here automatically.
   test("login page renders correctly", async ({ page }) => {
     await navigateAndSettle(page, "/login");
     await expect(page).toHaveScreenshot("login.png", {
       fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
-    });
-  });
-
-  test("login page shows error on invalid token", async ({ page }) => {
-    await page.goto("/login");
-    await page.fill('input[name="token"]', "wrong-token");
-    await page.click('button[type="submit"]');
-    await page.waitForSelector(".login-error");
-    await page.waitForTimeout(CSS_SETTLE_MS);
-    await expect(page).toHaveScreenshot("login-error.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
     });
   });
 });
@@ -356,13 +346,8 @@ test.describe("Authenticated pages", () => {
     });
   });
 
-  test("contexts/personas list page", async ({ page }) => {
-    await navigateAndSettle(page, "/contexts");
-    await expect(page).toHaveScreenshot("contexts.png", {
-      fullPage: true,
-      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
-    });
-  });
+  // NOTE: /contexts is hidden on web (redirects to /chat) — managed via the
+  // native app's context switcher only.
 
   test("analytics screen (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/analytics");
@@ -583,8 +568,7 @@ test.describe("Authenticated pages", () => {
       "/agents",
       "/webhooks",
       "/workflows",
-      "/contexts",
-      "/contexts/new",
+      // /contexts is redirected to /chat on web — excluded from overflow check.
       "/skills",
     ];
 

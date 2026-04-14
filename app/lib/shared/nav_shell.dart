@@ -1,10 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/contexts/providers/context_providers.dart';
 import '../features/notifications/agent_event_listener.dart';
 import '../features/pwa/pwa_provider.dart';
 import '../features/updater/update_banner.dart';
+import '../router/app_router.dart';
 
 /// Breakpoint above which the navigation rail is shown instead of bottom nav.
 const double _kNavRailBreakpoint = 768;
@@ -293,9 +296,21 @@ class NavShell extends ConsumerWidget {
                   ),
                   // Sticky trailing section — always visible at the bottom.
                   const Divider(height: 1),
-                  _ContextsButton(
-                    onTap: () => context.go(_contextsDestination.path),
-                  ),
+                  if (!kIsWeb)
+                    _ContextsButton(
+                      onTap: () => context.go(_contextsDestination.path),
+                    ),
+                  if (kIsWeb)
+                    _LogoutButton(
+                      onLogout: () async {
+                        await ref
+                            .read(activeContextProvider.notifier)
+                            .deactivate();
+                        if (context.mounted) {
+                          context.go(AppRoutes.login);
+                        }
+                      },
+                    ),
                   IconButton(
                     icon: Icon(_settingsDestination.icon),
                     selectedIcon: Icon(_settingsDestination.selectedIcon),
@@ -366,6 +381,7 @@ class NavShell extends ConsumerWidget {
 }
 
 /// Icon button for the Context Switcher in the [NavigationRail] trailing slot.
+/// Only shown on non-web platforms.
 class _ContextsButton extends StatelessWidget {
   const _ContextsButton({required this.onTap});
 
@@ -378,6 +394,22 @@ class _ContextsButton extends StatelessWidget {
       selectedIcon: const Icon(Icons.swap_horiz),
       tooltip: 'Contexts',
       onPressed: onTap,
+    );
+  }
+}
+
+/// Logout icon button shown in the [NavigationRail] trailing slot on web.
+class _LogoutButton extends StatelessWidget {
+  const _LogoutButton({required this.onLogout});
+
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.logout),
+      tooltip: 'Log out',
+      onPressed: onLogout,
     );
   }
 }
