@@ -137,15 +137,11 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
-  visual-regression:
-    name: Visual Regression
+  build:
+    name: Build
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     needs: [build-flutter-web]
-    continue-on-error: true
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v6
 
@@ -166,17 +162,53 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build"
 
       - name: Build unified assistant binary (embeds Flutter web)
         run: cargo build -p assistant-cli
 
       - name: Validate unified runtime subcommands
         run: |
-          cargo run -p assistant-cli -- --help
-          cargo run -p assistant-cli -- orchestrator run --help
-          cargo run -p assistant-cli -- worker --help
-          cargo run -p assistant-cli -- webui serve --help
-          cargo run -p assistant-cli -- signal --help
+          target/debug/assistant --help
+          target/debug/assistant orchestrator run --help
+          target/debug/assistant worker --help
+          target/debug/assistant webui serve --help
+          target/debug/assistant signal --help
+
+      - name: Upload assistant binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: assistant-debug
+          path: target/debug/assistant
+          retention-days: 1
+
+  visual-regression:
+    name: Visual Regression
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    needs: [build-flutter-web, build]
+    continue-on-error: true
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download Flutter web build
+        uses: actions/download-artifact@v8
+        with:
+          name: flutter-web-build
+          path: app/build/web/
+
+      - name: Download assistant binary
+        uses: actions/download-artifact@v8
+        with:
+          name: assistant-debug
+          path: bin/
+
+      - name: Make binary executable
+        run: chmod +x bin/assistant
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -193,6 +225,8 @@ jobs:
         id: playwright
         working-directory: crates/web-ui/e2e
         continue-on-error: true
+        env:
+          ASSISTANT_BIN: ${{ github.workspace }}/bin/assistant
         run: npx playwright test
 
       - name: Upload HTML report

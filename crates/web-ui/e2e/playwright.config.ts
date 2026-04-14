@@ -71,7 +71,9 @@ export default defineConfig({
 
   /* Auto-start the server if not already running */
   webServer: {
-    command: `rm -f ${dbPath} && cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
+    command: process.env.ASSISTANT_BIN
+      ? `rm -f ${dbPath} && ${process.env.ASSISTANT_BIN} webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`
+      : `rm -f ${dbPath} && cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
     url: "http://127.0.0.1:8787/login",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
