@@ -20,6 +20,20 @@ class FakeSecureStorage implements SecureKeyValueStorage {
   Future<void> delete({required String key}) async => _data.remove(key);
 }
 
+/// Fake that always throws on [read] — simulates the web crypto key loss
+/// that can happen after a hard reload.
+class ThrowingSecureStorage implements SecureKeyValueStorage {
+  @override
+  Future<String?> read({required String key}) async =>
+      throw Exception('crypto key unavailable');
+
+  @override
+  Future<void> write({required String key, required String value}) async {}
+
+  @override
+  Future<void> delete({required String key}) async {}
+}
+
 void main() {
   late SharedPreferences prefs;
   late FakeSecureStorage secure;
@@ -84,6 +98,24 @@ void main() {
       await repo.saveContext(ctx);
 
       final result = await repo.loadContexts();
+      expect(result.single.authToken, isNull);
+    });
+
+    test('returns context without token when secure storage throws', () async {
+      // Simulate the web hard-reload scenario where the crypto key is
+      // unavailable and FlutterSecureStorage throws on read.
+      final ctx = makeCtx(authToken: 'secret');
+      // Write metadata via a working repo, then read via the throwing one.
+      await repo.saveContext(ctx);
+
+      final throwingRepo = ContextRepository(
+        prefs: prefs,
+        secureStorage: ThrowingSecureStorage(),
+      );
+      // Must not throw; context should be returned without its token.
+      final result = await throwingRepo.loadContexts();
+      expect(result.length, 1);
+      expect(result.single.id, ctx.id);
       expect(result.single.authToken, isNull);
     });
   });
