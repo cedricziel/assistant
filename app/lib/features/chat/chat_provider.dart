@@ -44,8 +44,7 @@ class ConversationListState {
 }
 
 /// Manages the list of conversations.
-class ConversationListNotifier
-    extends AsyncNotifier<ConversationListState> {
+class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   @override
   Future<ConversationListState> build() async {
     return _fetchAll();
@@ -86,9 +85,7 @@ class ConversationListNotifier
       final created = response.data!;
       final current = state.value ?? const ConversationListState();
       state = AsyncData(
-        current.copyWith(
-          conversations: [created, ...current.conversations],
-        ),
+        current.copyWith(conversations: [created, ...current.conversations]),
       );
       return created;
     } catch (e) {
@@ -104,9 +101,7 @@ class ConversationListNotifier
   void prependConversation(ConversationSummary conv) {
     final current = state.value ?? const ConversationListState();
     state = AsyncData(
-      current.copyWith(
-        conversations: [conv, ...current.conversations],
-      ),
+      current.copyWith(conversations: [conv, ...current.conversations]),
     );
   }
 
@@ -126,12 +121,25 @@ class ConversationListNotifier
 }
 
 /// Provider for [ConversationListNotifier].
-final conversationListProvider = AsyncNotifierProvider.autoDispose<
-    ConversationListNotifier, ConversationListState>(
-  ConversationListNotifier.new,
-);
+final conversationListProvider =
+    AsyncNotifierProvider.autoDispose<
+      ConversationListNotifier,
+      ConversationListState
+    >(ConversationListNotifier.new);
 
 // -- Active chat state -------------------------------------------------------
+
+/// Delivery status of a user message.
+enum MessageStatus {
+  /// The message is currently in-flight (streaming response in progress).
+  sending,
+
+  /// The message was acknowledged by the server (DoneEvent received).
+  ok,
+
+  /// The message failed to deliver (network or server error).
+  failed,
+}
 
 /// A message shown in the chat UI (may be a streaming partial).
 class ChatMessage {
@@ -140,15 +148,31 @@ class ChatMessage {
     required this.role,
     required this.content,
     this.isStreaming = false,
+    this.status = MessageStatus.ok,
   });
 
   final String id;
   final String role;
   String content;
   bool isStreaming;
+  MessageStatus status;
 
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
+
+  ChatMessage copyWith({
+    String? content,
+    bool? isStreaming,
+    MessageStatus? status,
+  }) {
+    return ChatMessage(
+      id: id,
+      role: role,
+      content: content ?? this.content,
+      isStreaming: isStreaming ?? this.isStreaming,
+      status: status ?? this.status,
+    );
+  }
 }
 
 /// A completed tool result recorded during streaming — used by
@@ -175,6 +199,7 @@ class ChatState {
     this.statusMessage,
     this.lastToolResult,
     this.error,
+    this.pendingQueue = const [],
   });
 
   final String? conversationId;
@@ -195,6 +220,9 @@ class ChatState {
 
   final String? error;
 
+  /// Messages waiting to be sent after the current in-flight response completes.
+  final List<String> pendingQueue;
+
   bool get isStreaming => isSending && streamingContent.isNotEmpty;
 
   ChatState copyWith({
@@ -209,18 +237,22 @@ class ChatState {
     bool clearError = false,
     bool clearConversation = false,
     bool clearStatusMessage = false,
+    List<String>? pendingQueue,
   }) {
     return ChatState(
-      conversationId:
-          clearConversation ? null : (conversationId ?? this.conversationId),
+      conversationId: clearConversation
+          ? null
+          : (conversationId ?? this.conversationId),
       messages: messages ?? this.messages,
       isSending: isSending ?? this.isSending,
       isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
       streamingContent: streamingContent ?? this.streamingContent,
-      statusMessage:
-          clearStatusMessage ? null : (statusMessage ?? this.statusMessage),
+      statusMessage: clearStatusMessage
+          ? null
+          : (statusMessage ?? this.statusMessage),
       lastToolResult: lastToolResult ?? this.lastToolResult,
       error: clearError ? null : (error ?? this.error),
+      pendingQueue: pendingQueue ?? this.pendingQueue,
     );
   }
 }
@@ -228,6 +260,7 @@ class ChatState {
 /// Manages the active chat conversation.
 class ChatNotifier extends AsyncNotifier<ChatState> {
   bool _cancelled = false;
+  bool _draining = false;
 
   @override
   Future<ChatState> build() async {
@@ -236,14 +269,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   ApiClient? get _api => ref.read(apiClientProvider);
 
-  /// Cancel an in-progress streaming response.
+  /// Cancel the current in-progress streaming response.
+  ///
+  /// Queued messages in [ChatState.pendingQueue] are preserved and will
+  /// continue to drain after the cancel.
   void cancelStream() {
     _cancelled = true;
     final current = state.value ?? const ChatState();
     final msgs = List<ChatMessage>.from(current.messages)
       ..removeWhere((m) => m.id == 'assistant-streaming');
     state = AsyncData(
-      ChatState(conversationId: current.conversationId, messages: msgs),
+      current.copyWith(
+        messages: msgs,
+        isSending: false,
+        streamingContent: '',
+        clearStatusMessage: true,
+      ),
     );
   }
 
@@ -258,19 +299,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     final api = _api;
     if (api == null) {
-      state = AsyncData(
-        const ChatState(error: 'Not connected to server'),
-      );
+      state = AsyncData(const ChatState(error: 'Not connected to server'));
       return;
     }
 
     try {
-      final response = await api.conversations.getConversation(id: conversationId);
+      final response = await api.conversations.getConversation(
+        id: conversationId,
+      );
       final detail = response.data!;
       final messages = detail.messages
-          .map(
-            (m) => ChatMessage(id: m.id, role: m.role, content: m.content),
-          )
+          .map((m) => ChatMessage(id: m.id, role: m.role, content: m.content))
           .toList();
 
       state = AsyncData(
@@ -304,18 +343,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
   }
 
-  /// Send a user message and stream the assistant's response.
+  /// Enqueue [message] for sending.
+  ///
+  /// If no drain is currently in progress, starts [_drainQueue] immediately.
+  /// The input can be called at any time, including while a response is
+  /// streaming — the message is held in [ChatState.pendingQueue] until the
+  /// current response completes.
   Future<void> sendMessage(String message) async {
     if (message.trim().isEmpty) return;
 
     final api = _api;
     if (api == null) return;
 
-    _cancelled = false;
     final current = state.value ?? const ChatState();
     String? conversationId = current.conversationId;
 
-    // Create a new conversation if needed.
+    // Create a new conversation if needed (once per chat session).
     if (conversationId == null) {
       try {
         final response = await api.conversations.createConversation(
@@ -323,8 +366,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         );
         final conv = response.data!;
         conversationId = conv.id;
-        // Reflect the new conversation in the local list (no extra POST).
         ref.read(conversationListProvider.notifier).prependConversation(conv);
+        state = AsyncData(
+          (state.value ?? const ChatState()).copyWith(
+            conversationId: conversationId,
+          ),
+        );
       } catch (e) {
         state = AsyncData(
           current.copyWith(error: 'Failed to create conversation: $e'),
@@ -333,14 +380,74 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
     }
 
-    // Add the user message immediately.
-    final userMsg = ChatMessage(
-      id: 'user-${DateTime.now().millisecondsSinceEpoch}',
-      role: 'user',
-      content: message,
+    // Append message to pending queue.
+    final afterCreate = state.value ?? const ChatState();
+    state = AsyncData(
+      afterCreate.copyWith(
+        pendingQueue: [...afterCreate.pendingQueue, message],
+      ),
     );
 
-    // Add a streaming placeholder for the assistant.
+    // Kick off drain if not already running.
+    if (!_draining) {
+      _drainQueue();
+    }
+  }
+
+  /// Retry a failed message.
+  ///
+  /// Removes the failed [msg] from the message list and re-enqueues its
+  /// content through [sendMessage].
+  Future<void> retryMessage(ChatMessage msg) async {
+    final current = state.value ?? const ChatState();
+    final msgs = List<ChatMessage>.from(current.messages)
+      ..removeWhere((m) => m.id == msg.id);
+    state = AsyncData(current.copyWith(messages: msgs));
+    await sendMessage(msg.content);
+  }
+
+  /// Pop messages from [ChatState.pendingQueue] and stream them one at a time.
+  ///
+  /// A [_draining] guard prevents re-entrant calls. The loop continues until
+  /// the queue is empty; try/finally ensures the flag is always cleared.
+  void _drainQueue() async {
+    if (_draining) return;
+    _draining = true;
+    try {
+      while (ref.mounted) {
+        final current = state.value ?? const ChatState();
+        if (current.pendingQueue.isEmpty) break;
+
+        final text = current.pendingQueue.first;
+        state = AsyncData(
+          current.copyWith(pendingQueue: current.pendingQueue.sublist(1)),
+        );
+
+        await _streamMessage(text);
+      }
+    } finally {
+      _draining = false;
+    }
+  }
+
+  /// Stream a single [message] to the server and update state from SSE events.
+  Future<void> _streamMessage(String message) async {
+    final api = _api;
+    if (api == null) return;
+
+    _cancelled = false;
+    final current = state.value ?? const ChatState();
+    final conversationId = current.conversationId;
+    if (conversationId == null) return;
+
+    // Add user message with status=sending and assistant streaming placeholder.
+    final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
+    final userMsg = ChatMessage(
+      id: userMsgId,
+      role: 'user',
+      content: message,
+      status: MessageStatus.sending,
+    );
     final assistantPlaceholder = ChatMessage(
       id: 'assistant-streaming',
       role: 'assistant',
@@ -349,8 +456,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
 
     state = AsyncData(
-      ChatState(
-        conversationId: conversationId,
+      current.copyWith(
         messages: [...current.messages, userMsg, assistantPlaceholder],
         isSending: true,
         streamingContent: '',
@@ -378,20 +484,25 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
         } else if (event is StatusEvent) {
-          state = AsyncData(
-            chatState.copyWith(statusMessage: event.message),
-          );
+          state = AsyncData(chatState.copyWith(statusMessage: event.message));
         } else if (event is ToolResultEvent) {
-          // Tool finished — record result for notification listener.
-          state = AsyncData(chatState.copyWith(
-            clearStatusMessage: true,
-            lastToolResult: ChatToolResult(
-              toolName: event.toolName,
-              status: event.status,
+          state = AsyncData(
+            chatState.copyWith(
+              clearStatusMessage: true,
+              lastToolResult: ChatToolResult(
+                toolName: event.toolName,
+                status: event.status,
+              ),
             ),
-          ));
+          );
         } else if (event is DoneEvent) {
           final msgs = List<ChatMessage>.from(chatState.messages);
+          // Mark user message as successfully acknowledged.
+          final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+          if (userIdx != -1) {
+            msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.ok);
+          }
+          // Replace streaming placeholder with final assistant message.
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
             msgs[idx] = ChatMessage(
@@ -401,15 +512,25 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             );
           }
           state = AsyncData(
-            ChatState(conversationId: conversationId, messages: msgs),
+            ChatState(
+              conversationId: conversationId,
+              messages: msgs,
+              pendingQueue: chatState.pendingQueue,
+            ),
           );
           // Refresh conversation list to update timestamps/titles.
           ref.read(conversationListProvider.notifier).refresh();
           return;
         } else if (event is ErrorEvent) {
-          // Remove streaming placeholder, show error.
           final msgs = List<ChatMessage>.from(chatState.messages)
             ..removeWhere((m) => m.id == 'assistant-streaming');
+          // Mark user message as failed (keep it in the list for retry).
+          final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+          if (userIdx != -1) {
+            msgs[userIdx] = msgs[userIdx].copyWith(
+              status: MessageStatus.failed,
+            );
+          }
           state = AsyncData(
             chatState.copyWith(
               messages: msgs,
@@ -436,10 +557,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
                 : '(incomplete response)',
           );
         }
+        // Mark user message as ok — we got at least a partial response.
+        final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+        if (userIdx != -1) {
+          msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.ok);
+        }
         state = AsyncData(
           ChatState(
             conversationId: conversationId,
             messages: msgs,
+            pendingQueue: finalState.pendingQueue,
             error: finalState.streamingContent.isEmpty
                 ? 'Response may be incomplete'
                 : null,
@@ -450,6 +577,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       final chatState = state.value ?? const ChatState();
       final msgs = List<ChatMessage>.from(chatState.messages)
         ..removeWhere((m) => m.id == 'assistant-streaming');
+      // Mark user message as failed.
+      final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+      if (userIdx != -1) {
+        msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.failed);
+      }
       state = AsyncData(
         chatState.copyWith(
           messages: msgs,
@@ -463,7 +595,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 }
 
 /// Provider for [ChatNotifier].
-final chatProvider =
-    AsyncNotifierProvider.autoDispose<ChatNotifier, ChatState>(
+final chatProvider = AsyncNotifierProvider.autoDispose<ChatNotifier, ChatState>(
   ChatNotifier.new,
 );
