@@ -90,3 +90,105 @@ impl TtsProvider for DeepgramTtsProvider {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use wiremock::matchers::{header_exists, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn provider_name() {
+        let p = DeepgramTtsProvider::new("key").unwrap();
+        assert_eq!(p.name(), "deepgram-tts");
+    }
+
+    #[tokio::test]
+    async fn synthesize_returns_audio_bytes_on_success() {
+        let server = MockServer::start().await;
+        let fake_audio = b"DEEPGRAM_AUDIO".to_vec();
+
+        Mock::given(method("POST"))
+            .and(path("/speak"))
+            .and(header_exists("authorization"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(fake_audio.clone())
+                    .insert_header("content-type", "audio/mpeg"),
+            )
+            .mount(&server)
+            .await;
+
+        let provider = DeepgramTtsProvider::new("test-key")
+            .unwrap()
+            .with_base_url(server.uri());
+
+        let result = provider
+            .synthesize(TtsRequest {
+                text: "Hello Deepgram".to_string(),
+                voice: None,
+                format: None,
+                speed: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.audio_data, fake_audio);
+        assert_eq!(result.mime_type, "audio/mpeg");
+    }
+
+    #[tokio::test]
+    async fn synthesize_uses_voice_as_model_override() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/speak"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"audio".to_vec()))
+            .mount(&server)
+            .await;
+
+        let provider = DeepgramTtsProvider::new("key")
+            .unwrap()
+            .with_base_url(server.uri());
+
+        // voice param overrides the model query param
+        let result = provider
+            .synthesize(TtsRequest {
+                text: "Test".to_string(),
+                voice: Some("aura-2-es-es".to_string()),
+                format: None,
+                speed: None,
+            })
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn synthesize_returns_error_on_non_2xx() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/speak"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .mount(&server)
+            .await;
+
+        let provider = DeepgramTtsProvider::new("bad-key")
+            .unwrap()
+            .with_base_url(server.uri());
+
+        let result = provider
+            .synthesize(TtsRequest {
+                text: "Hi".to_string(),
+                voice: None,
+                format: None,
+                speed: None,
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("403"));
+    }
+}

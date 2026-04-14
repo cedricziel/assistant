@@ -106,3 +106,104 @@ impl TtsProvider for OpenAITtsProvider {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use wiremock::matchers::{header_exists, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn provider_name() {
+        let p = OpenAITtsProvider::new("key").unwrap();
+        assert_eq!(p.name(), "openai-tts");
+    }
+
+    #[tokio::test]
+    async fn synthesize_returns_audio_bytes_on_success() {
+        let server = MockServer::start().await;
+        let fake_audio = b"FAKE_MP3".to_vec();
+
+        Mock::given(method("POST"))
+            .and(path("/audio/speech"))
+            .and(header_exists("authorization"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(fake_audio.clone())
+                    .insert_header("content-type", "audio/mpeg"),
+            )
+            .mount(&server)
+            .await;
+
+        let provider = OpenAITtsProvider::new("test-key")
+            .unwrap()
+            .with_base_url(server.uri());
+
+        let result = provider
+            .synthesize(TtsRequest {
+                text: "Hello world".to_string(),
+                voice: None,
+                format: None,
+                speed: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.audio_data, fake_audio);
+        assert_eq!(result.mime_type, "audio/mpeg");
+    }
+
+    #[tokio::test]
+    async fn synthesize_uses_custom_voice() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/audio/speech"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"audio".to_vec()))
+            .mount(&server)
+            .await;
+
+        let provider = OpenAITtsProvider::new("key")
+            .unwrap()
+            .with_base_url(server.uri());
+
+        let result = provider
+            .synthesize(TtsRequest {
+                text: "Test".to_string(),
+                voice: Some("alloy".to_string()),
+                format: None,
+                speed: None,
+            })
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn synthesize_returns_error_on_non_2xx() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/audio/speech"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Unauthorized"))
+            .mount(&server)
+            .await;
+
+        let provider = OpenAITtsProvider::new("bad-key")
+            .unwrap()
+            .with_base_url(server.uri());
+
+        let result = provider
+            .synthesize(TtsRequest {
+                text: "Hi".to_string(),
+                voice: None,
+                format: None,
+                speed: None,
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("401"));
+    }
+}

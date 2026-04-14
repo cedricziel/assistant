@@ -51,3 +51,49 @@ impl AudioStore {
         map.retain(|_, (_, inserted)| inserted.elapsed() < TTL);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn insert_and_get_roundtrip() {
+        let store = AudioStore::new();
+        let audio = b"fake-mp3-bytes".to_vec();
+
+        let id = store.insert(audio.clone()).await;
+        let retrieved = store.get(id).await;
+
+        assert_eq!(retrieved, Some(audio));
+    }
+
+    #[tokio::test]
+    async fn get_returns_none_for_unknown_id() {
+        let store = AudioStore::new();
+        let unknown = Uuid::new_v4();
+        assert_eq!(store.get(unknown).await, None);
+    }
+
+    #[tokio::test]
+    async fn sweep_does_not_remove_fresh_entries() {
+        let store = AudioStore::new();
+        let id = store.insert(b"audio".to_vec()).await;
+
+        store.sweep().await;
+
+        assert!(
+            store.get(id).await.is_some(),
+            "fresh entry should survive sweep"
+        );
+    }
+
+    #[tokio::test]
+    async fn multiple_inserts_return_distinct_ids() {
+        let store = AudioStore::new();
+        let id1 = store.insert(b"a".to_vec()).await;
+        let id2 = store.insert(b"b".to_vec()).await;
+        assert_ne!(id1, id2);
+        assert_eq!(store.get(id1).await, Some(b"a".to_vec()));
+        assert_eq!(store.get(id2).await, Some(b"b".to_vec()));
+    }
+}

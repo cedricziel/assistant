@@ -115,3 +115,157 @@ impl ToolHandler for VoiceResponseHandler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use assistant_core::{ExecutionContext, Interface};
+    use assistant_transcription::{AudioStore, TtsProvider, TtsRequest, TtsResult};
+    use async_trait::async_trait;
+    use uuid::Uuid;
+
+    use assistant_core::ToolHandler;
+
+    use super::VoiceResponseHandler;
+
+    struct FakeTts {
+        audio: Vec<u8>,
+    }
+
+    #[async_trait]
+    impl TtsProvider for FakeTts {
+        fn name(&self) -> &str {
+            "fake-tts"
+        }
+
+        async fn synthesize(&self, _request: TtsRequest) -> anyhow::Result<TtsResult> {
+            Ok(TtsResult {
+                audio_data: self.audio.clone(),
+                mime_type: "audio/mpeg".to_string(),
+            })
+        }
+    }
+
+    struct FailingTts;
+
+    #[async_trait]
+    impl TtsProvider for FailingTts {
+        fn name(&self) -> &str {
+            "failing-tts"
+        }
+
+        async fn synthesize(&self, _request: TtsRequest) -> anyhow::Result<TtsResult> {
+            anyhow::bail!("synthesis failed")
+        }
+    }
+
+    fn make_ctx() -> ExecutionContext {
+        ExecutionContext {
+            conversation_id: Uuid::new_v4(),
+            agent_id: "test".to_string(),
+            turn: 0,
+            interface: Interface::Cli,
+            interactive: false,
+            allowed_tools: None,
+            depth: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_name_is_voice_response() {
+        let handler = VoiceResponseHandler::new(
+            Arc::new(FakeTts { audio: vec![] }),
+            Arc::new(AudioStore::new()),
+        );
+        assert_eq!(handler.name(), "voice-response");
+    }
+
+    #[tokio::test]
+    async fn run_synthesizes_and_returns_audio_id() {
+        let audio_bytes = b"fake-mp3".to_vec();
+        let store = Arc::new(AudioStore::new());
+        let handler = VoiceResponseHandler::new(
+            Arc::new(FakeTts {
+                audio: audio_bytes.clone(),
+            }),
+            store.clone(),
+        );
+
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), serde_json::json!("Hello"));
+
+        let ctx = make_ctx();
+        let output = handler.run(params, &ctx).await.unwrap();
+
+        assert!(output.success, "expected successful output");
+        let data = output.data.expect("expected data payload");
+        let audio_id = data["audio_id"]
+            .as_str()
+            .expect("audio_id must be a string");
+        let uuid: Uuid = audio_id.parse().expect("audio_id must be a valid UUID");
+
+        // The audio should be retrievable from the store.
+        let stored = store.get(uuid).await;
+        assert_eq!(stored, Some(audio_bytes));
+        assert_eq!(data["voiced"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn run_returns_error_output_when_text_is_missing() {
+        let handler = VoiceResponseHandler::new(
+            Arc::new(FakeTts { audio: vec![] }),
+            Arc::new(AudioStore::new()),
+        );
+
+        let params = HashMap::new(); // no "text" key
+        let output = handler.run(params, &make_ctx()).await.unwrap();
+
+        assert!(!output.success, "missing text should yield an error output");
+    }
+
+    #[tokio::test]
+    async fn run_returns_error_output_when_text_is_empty() {
+        let handler = VoiceResponseHandler::new(
+            Arc::new(FakeTts { audio: vec![] }),
+            Arc::new(AudioStore::new()),
+        );
+
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), serde_json::json!("   "));
+        let output = handler.run(params, &make_ctx()).await.unwrap();
+
+        assert!(!output.success, "blank text should yield an error output");
+    }
+
+    #[tokio::test]
+    async fn run_returns_error_output_when_tts_fails() {
+        let handler = VoiceResponseHandler::new(Arc::new(FailingTts), Arc::new(AudioStore::new()));
+
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), serde_json::json!("Hello"));
+        let output = handler.run(params, &make_ctx()).await.unwrap();
+
+        assert!(!output.success, "TTS failure should yield an error output");
+    }
+
+    #[tokio::test]
+    async fn run_passes_custom_voice_to_tts() {
+        // We just check it doesn't panic / error when a voice param is supplied.
+        let store = Arc::new(AudioStore::new());
+        let handler = VoiceResponseHandler::new(
+            Arc::new(FakeTts {
+                audio: b"ok".to_vec(),
+            }),
+            store.clone(),
+        );
+
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), serde_json::json!("Hi"));
+        params.insert("voice".to_string(), serde_json::json!("alloy"));
+
+        let output = handler.run(params, &make_ctx()).await.unwrap();
+        assert!(output.success);
+    }
+}
