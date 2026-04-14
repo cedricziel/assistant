@@ -33,7 +33,7 @@ dependencies:
   pwa_update_listener: ^0.1.0
   flutter_local_notifications: ^21.0.0
   web: ^1.1.1
-  record: ^5.2.0
+  record: ^6.2.0
   audioplayers: ^6.1.0
 dev_dependencies:
   flutter_test:

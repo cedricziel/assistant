@@ -1,4 +1,7 @@
 PODS:
+  - audioplayers_darwin (0.0.1):
+    - Flutter
+    - FlutterMacOS
   - flutter_local_notifications (0.0.1):
     - FlutterMacOS
   - flutter_secure_storage_darwin (10.0.0):
@@ -6,6 +9,8 @@ PODS:
     - FlutterMacOS
   - FlutterMacOS (1.0.0)
   - package_info_plus (0.0.1):
+    - FlutterMacOS
+  - record_macos (1.2.0):
     - FlutterMacOS
   - screen_retriever_macos (0.0.1):
     - FlutterMacOS
@@ -20,10 +25,12 @@ PODS:
     - FlutterMacOS
 
 DEPENDENCIES:
+  - audioplayers_darwin (from `Flutter/ephemeral/.symlinks/plugins/audioplayers_darwin/darwin`)
   - flutter_local_notifications (from `Flutter/ephemeral/.symlinks/plugins/flutter_local_notifications/macos`)
   - flutter_secure_storage_darwin (from `Flutter/ephemeral/.symlinks/plugins/flutter_secure_storage_darwin/darwin`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - package_info_plus (from `Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos`)
+  - record_macos (from `Flutter/ephemeral/.symlinks/plugins/record_macos/macos`)
   - screen_retriever_macos (from `Flutter/ephemeral/.symlinks/plugins/screen_retriever_macos/macos`)
   - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
   - tray_manager (from `Flutter/ephemeral/.symlinks/plugins/tray_manager/macos`)
@@ -31,6 +38,8 @@ DEPENDENCIES:
   - window_manager (from `Flutter/ephemeral/.symlinks/plugins/window_manager/macos`)
 
 EXTERNAL SOURCES:
+  audioplayers_darwin:
+    :path: Flutter/ephemeral/.symlinks/plugins/audioplayers_darwin/darwin
   flutter_local_notifications:
     :path: Flutter/ephemeral/.symlinks/plugins/flutter_local_notifications/macos
   flutter_secure_storage_darwin:
@@ -39,6 +48,8 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral
   package_info_plus:
     :path: Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos
+  record_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/record_macos/macos
   screen_retriever_macos:
     :path: Flutter/ephemeral/.symlinks/plugins/screen_retriever_macos/macos
   shared_preferences_foundation:
@@ -51,10 +62,12 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/window_manager/macos
 
 SPEC CHECKSUMS:
+  audioplayers_darwin: 835ced6edd4c9fc8ebb0a7cc9e294a91d99917d5
   flutter_local_notifications: 1fc7ffb10a83d6a2eeeeddb152d43f1944b0aad0
   flutter_secure_storage_darwin: acdb3f316ed05a3e68f856e0353b133eec373a23
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   package_info_plus: f0052d280d17aa382b932f399edf32507174e870
+  record_macos: 7f227161b93c49e7e34fe681c5891c8622c8cc8b
   screen_retriever_macos: 452e51764a9e1cdb74b3c541238795849f21557f
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
   tray_manager: a104b5c81b578d83f3c3d0f40a997c8b10810166
