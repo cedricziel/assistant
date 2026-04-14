@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 
@@ -13,17 +13,22 @@ class VoiceRecorderButton extends StatefulWidget {
     super.key,
     required this.onRecordingComplete,
     required this.onError,
+    @visibleForTesting this.audioRecorder,
   });
 
   final void Function(Uint8List bytes, String mimeType) onRecordingComplete;
   final void Function(String error) onError;
+
+  /// Overrides the default [AudioRecorder] instance. Intended for testing only.
+  @visibleForTesting
+  final AudioRecorder? audioRecorder;
 
   @override
   State<VoiceRecorderButton> createState() => _VoiceRecorderButtonState();
 }
 
 class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
-  final _recorder = AudioRecorder();
+  late final AudioRecorder _recorder;
   bool _isRecording = false;
   int _secondsElapsed = 0;
   Timer? _countdownTimer;
@@ -31,6 +36,12 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
 
   StreamSubscription<List<int>>? _streamSub;
   final List<int> _recordedBytes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _recorder = widget.audioRecorder ?? AudioRecorder();
+  }
 
   @override
   void dispose() {
@@ -49,8 +60,13 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
   }
 
   Future<void> _start() async {
-    final hasPermission = await _recorder.hasPermission();
-    if (!hasPermission) {
+    try {
+      final hasPermission = await _recorder.hasPermission();
+      if (!hasPermission) {
+        widget.onError('Microphone access is required to send voice messages');
+        return;
+      }
+    } catch (e) {
       widget.onError('Microphone access is required to send voice messages');
       return;
     }

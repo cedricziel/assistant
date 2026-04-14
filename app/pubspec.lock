@@ -73,7 +73,7 @@ packages:
     source: hosted
     version: "4.2.1"
   audioplayers_platform_interface:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: audioplayers_platform_interface
       sha256: "0e2f6a919ab56d0fec272e801abc07b26ae7f31980f912f24af4748763e5a656"

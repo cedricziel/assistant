@@ -696,6 +696,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
               role: 'assistant',
               content: event.content,
+              audioId: msgs[idx].audioId,
             );
           }
           state = AsyncData(
