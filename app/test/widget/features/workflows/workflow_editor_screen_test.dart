@@ -193,6 +193,99 @@ void main() {
       );
     });
 
+    testWidgets(
+      'edit button on mobile card opens config sheet with correct title',
+      (tester) async {
+        // 500px: still mobile layout (<600) but wide enough for the sheet header.
+        tester.view.physicalSize = const Size(500, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildScreen());
+        await tester.pump();
+
+        // Tap the edit pencil on the pre-populated trigger card.
+        await tester.tap(find.byIcon(Icons.edit_outlined).first);
+        await tester.pumpAndSettle();
+
+        // The bottom-sheet header should show the node's label.
+        expect(
+          find.textContaining('Configure:'),
+          findsOneWidget,
+          reason: 'config sheet should open with a Configure: header',
+        );
+      },
+    );
+
+    testWidgets(
+      'editing http_request node URL via config sheet keeps card in list',
+      (tester) async {
+        // 500px: still mobile layout (<600) but wide enough for the config sheet.
+        tester.view.physicalSize = const Size(500, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildScreen());
+        await tester.pump();
+
+        // Add an HTTP Request node.
+        await tester.tap(find.text('Add step'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('HTTP Request'));
+        await tester.pumpAndSettle();
+
+        // Tap edit on the new HTTP Request card (last edit icon in the list).
+        await tester.tap(find.byIcon(Icons.edit_outlined).last);
+        await tester.pumpAndSettle();
+
+        // Fill in a URL in the first text field of the config sheet.
+        await tester.enterText(
+          find.byType(TextField).first,
+          'https://example.com',
+        );
+
+        // Confirm via Apply.
+        await tester.tap(find.text('Apply'));
+        await tester.pumpAndSettle();
+
+        // Both cards remain present after editing.
+        expect(find.text('Manual Trigger'), findsOneWidget);
+        expect(find.text('HTTP Request'), findsOneWidget);
+      },
+    );
+
+    testWidgets('desktop FAB opens node palette listing trigger options', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(800, 600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(buildScreen());
+      await tester.pump();
+
+      expect(find.byType(InteractiveViewer), findsOneWidget);
+
+      // Tap the FloatingActionButton to open the node palette.
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      // The section header is uppercased by _PaletteSection; items are title-cased.
+      expect(
+        find.text('TRIGGERS'),
+        findsOneWidget,
+        reason: 'palette Triggers section header should appear (uppercased)',
+      );
+      expect(
+        find.text('Manual'),
+        findsOneWidget,
+        reason: 'Manual trigger item should be listed',
+      );
+    });
+
     testWidgets('delete node in mobile view removes card from list', (
       tester,
     ) async {
