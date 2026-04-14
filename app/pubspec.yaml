@@ -1,7 +1,7 @@
 name: assistant_app
 description: A new Flutter project.
 publish_to: none
-version: 0.1.96
+version: 0.1.97
 environment:
   sdk: ^3.11.4
 dependencies:
@@ -23,7 +23,7 @@ dependencies:
   path_provider: ^2.1.5
   url_launcher: ^6.3.2
   package_info_plus: ^9.0.1
-  built_value: ">=8.4.0 <9.0.0"
+  built_value: '>=8.4.0 <9.0.0'
   assistant_api:
     path: packages/assistant_api
   tray_manager: ^0.5.2
