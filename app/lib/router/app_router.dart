@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,6 +10,7 @@ import '../features/connection/connection_screen.dart';
 import '../features/contexts/models/context_model.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/contexts/screens/context_switcher_screen.dart';
+import '../features/login/login_screen.dart';
 import '../features/logs/logs_screen.dart';
 import '../features/personas/persona_create_screen.dart';
 import '../features/personas/persona_detail_screen.dart';
@@ -33,6 +34,7 @@ import '../shared/nav_shell.dart';
 /// Named route constants.
 class AppRoutes {
   static const loading = '/loading';
+  static const login = '/login';
   static const setup = '/setup';
   static const contexts = '/contexts';
   static const chat = '/chat';
@@ -80,19 +82,33 @@ final routerProvider = Provider<GoRouter>((ref) {
       final hasContext = activeContextAsync.value != null;
       final onContextSwitcher = state.fullPath == AppRoutes.contexts;
       final onSetup = state.fullPath == AppRoutes.setup;
+      final onLogin = state.fullPath == AppRoutes.login;
       final onLoading = state.fullPath == AppRoutes.loading;
+
+      // On web, /contexts is replaced by the login flow — redirect away.
+      if (kIsWeb && onContextSwitcher) {
+        return hasContext ? AppRoutes.chat : AppRoutes.login;
+      }
 
       // Once loading is done, navigate away from the loading scaffold to
       // the correct destination.
       if (onLoading) {
+        if (kIsWeb) {
+          return hasContext ? AppRoutes.chat : AppRoutes.login;
+        }
         return hasContext ? AppRoutes.chat : AppRoutes.contexts;
       }
 
-      // If no active context and not already on the switcher or setup,
-      // redirect to the context switcher.
-      if (!hasContext && !onContextSwitcher && !onSetup) {
-        return AppRoutes.contexts;
+      // If no active context and not already on an auth screen, redirect.
+      if (!hasContext && !onLogin && !onContextSwitcher && !onSetup) {
+        return kIsWeb ? AppRoutes.login : AppRoutes.contexts;
       }
+
+      // Already authenticated — redirect away from login/setup screens.
+      if (hasContext && (onLogin || onSetup)) {
+        return AppRoutes.chat;
+      }
+
       return null;
     },
     routes: [
@@ -100,6 +116,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.loading,
         builder: (context, state) => const LoadingScreen(),
+      ),
+
+      // -- Web login: token-only entry point (web platform only) -------------
+      GoRoute(
+        path: AppRoutes.login,
+        builder: (context, state) => const LoginScreen(),
       ),
 
       // -- Legacy setup route (kept for deep-link compatibility) -------------

@@ -61,6 +61,17 @@ class ContextsNotifier extends AsyncNotifier<List<AssistantContext>> {
     ref.invalidateSelf();
     await future;
   }
+
+  /// Inserts [context] or updates an existing context with the same
+  /// [AssistantContext.serverUrl].  Returns the saved context (which may
+  /// have a different ID if the URL matched an existing entry).
+  Future<AssistantContext> upsertContextByUrl(AssistantContext context) async {
+    final repo = ref.read(contextRepositoryProvider);
+    final saved = await repo.upsertContextByUrl(context);
+    ref.invalidateSelf();
+    await future;
+    return saved;
+  }
 }
 
 final contextsProvider =
