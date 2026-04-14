@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.97](https://github.com/cedricziel/assistant/compare/v0.1.96...v0.1.97) (2026-04-14)
+
+
+### Features
+
+* **web-ui:** voice message send and receive ([#434](https://github.com/cedricziel/assistant/issues/434)) ([8e8ae35](https://github.com/cedricziel/assistant/commit/8e8ae35166033c6e2d6a1d87b1941329c9f2479a))
+
 ## [0.1.96](https://github.com/cedricziel/assistant/compare/v0.1.95...v0.1.96) (2026-04-14)
 
 
