@@ -2,11 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
-import 'package:pwa_update_listener/pwa_update_listener.dart';
 
 import 'features/contexts/providers/context_providers.dart';
 import 'features/embedded_server/embedded_server_provider.dart';
 import 'features/notifications/notification_badge_notifier.dart';
+import 'features/pwa/pwa_update_service.dart';
 import 'router/app_router.dart';
 import 'tray/platform_init.dart';
 import 'tray/tray_platform.dart';
@@ -31,25 +31,30 @@ Future<void> main() async {
   final contextRepo = await createContextRepository();
 
   runApp(
-    // PwaUpdateListener detects when a new service worker activates (new
-    // version available) and surfaces a SnackBar prompt to reload the app.
-    PwaUpdateListener(
-      onReady: () {
-        _scaffoldMessengerKey.currentState?.showSnackBar(
-          SnackBar(
-            content: const Text('A new version is available.'),
-            action: SnackBarAction(label: 'Reload', onPressed: reloadPwa),
-            duration: const Duration(days: 1),
-          ),
-        );
-      },
-      // Riverpod ProviderScope wraps the entire widget tree.
-      child: ProviderScope(
-        overrides: [contextRepositoryProvider.overrideWithValue(contextRepo)],
-        child: const AssistantApp(),
-      ),
+    ProviderScope(
+      overrides: [contextRepositoryProvider.overrideWithValue(contextRepo)],
+      child: const AssistantApp(),
     ),
   );
+
+  // Register for PWA update notifications after the first frame so the
+  // ScaffoldMessenger key is bound and can show the SnackBar.
+  //
+  // Flutter's flutter_service_worker.js calls skipWaiting() on install, so
+  // the new SW never enters the 'waiting' state.  We listen for the
+  // 'controllerchange' event via JS instead (see index.html).  The stub
+  // implementation is a no-op on non-web platforms.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    registerPwaUpdateCallback(() {
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: const Text('A new version is available.'),
+          action: SnackBarAction(label: 'Reload', onPressed: reloadPwa),
+          duration: const Duration(days: 1),
+        ),
+      );
+    });
+  });
 }
 
 /// Root application widget.
