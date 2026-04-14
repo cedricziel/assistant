@@ -36,10 +36,9 @@ jobs:
         run: flutter test
 
   build-macos-bundle:
-    name: Build macOS Bundle
+    name: Build macOS Bundle (no-codesign)
     runs-on: macos-latest
-    env:
-      APPLE_DEV_CERTIFICATE: ${{ secrets.APPLE_DEV_CERTIFICATE }}
+    needs: analyze-and-test
     steps:
       - uses: actions/checkout@v6
 
@@ -49,19 +48,13 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Import certificates
-        if: ${{ env.APPLE_DEV_CERTIFICATE != '' }}
+      - name: Disable code signing
         run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 20)
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          echo -n "$APPLE_DEV_CERTIFICATE" | base64 --decode -o $RUNNER_TEMP/dev-certificate.p12
-          security import "$RUNNER_TEMP/dev-certificate.p12" -P "" \
-            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          cat >> app/macos/Runner/Configs/AppInfo.xcconfig <<'EOF'
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGNING_ALLOWED = NO
+          CODE_SIGN_IDENTITY =
+          EOF
 
       - name: Install Rust target
         run: rustup target add aarch64-apple-darwin

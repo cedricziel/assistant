@@ -8,10 +8,10 @@
 PRODUCT_NAME = assistant_app
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.assistantApp
+PRODUCT_BUNDLE_IDENTIFIER = com.cedricziel.assistant.macos
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Cedric Ziel. All rights reserved.
 
 // Apple Developer Team ID — required for Keychain entitlements (flutter_secure_storage)
 DEVELOPMENT_TEAM = WPW3QSLZ2F
