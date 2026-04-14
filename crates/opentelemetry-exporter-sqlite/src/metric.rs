@@ -738,7 +738,8 @@ fn resource_fingerprint(resource: &Resource) -> String {
         hasher.update(v.as_bytes());
         hasher.update(b",");
     }
-    format!("{:x}", hasher.finalize())
+    let result = hasher.finalize();
+    result.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Serialize resource attributes to a JSON string (stored once per resource row).

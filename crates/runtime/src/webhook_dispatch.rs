@@ -1,5 +1,5 @@
 use anyhow::Result;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use opentelemetry::{
     global,
     trace::{Span as _, TraceContextExt, Tracer as _},
