@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.95](https://github.com/cedricziel/assistant/compare/v0.1.94...v0.1.95) (2026-04-14)
+
+
+### Features
+
+* **app:** web login screen with auto-context and logout ([#432](https://github.com/cedricziel/assistant/issues/432)) ([b6ec140](https://github.com/cedricziel/assistant/commit/b6ec140a72a2458cb6fff76dd0a4ca0020fccca2))
+* **interface-matrix:** voice and image message support ([#433](https://github.com/cedricziel/assistant/issues/433)) ([8109dda](https://github.com/cedricziel/assistant/commit/8109dda54b2ab47932b5d75bc2da0c3f744a2689))
+
 ## [0.1.94](https://github.com/cedricziel/assistant/compare/v0.1.93...v0.1.94) (2026-04-14)
 
 
