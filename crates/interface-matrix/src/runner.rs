@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_runtime::{ChannelRunner, InterfaceRunner, Orchestrator};
+use assistant_transcription::TranscriptionProvider;
 
 use crate::adapter::MatrixAdapter;
 use crate::client::MatrixClient;
@@ -17,6 +18,8 @@ pub use assistant_core::MatrixConfig;
 pub struct MatrixInterface {
     config: MatrixConfig,
     orchestrator: Arc<Orchestrator>,
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    transcription_language: Option<String>,
 }
 
 impl MatrixInterface {
@@ -24,7 +27,20 @@ impl MatrixInterface {
         Self {
             config,
             orchestrator,
+            transcription: None,
+            transcription_language: None,
         }
+    }
+
+    /// Enable automatic audio transcription for voice messages.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
+        self
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -61,13 +77,17 @@ impl MatrixInterface {
 
         tracing::info!(user_id = %client.user_id, "Matrix: authenticated");
 
-        let adapter = Arc::new(MatrixAdapter::new(
+        let mut adapter = MatrixAdapter::new(
             client,
             self.config.allowed_rooms.clone(),
             self.config.allowed_users.clone(),
-        ));
+        );
+        if let Some(ref provider) = self.transcription {
+            adapter =
+                adapter.with_transcription(provider.clone(), self.transcription_language.clone());
+        }
 
-        ChannelRunner::new(adapter, self.orchestrator.clone())
+        ChannelRunner::new(Arc::new(adapter), self.orchestrator.clone())
             .run()
             .await
     }
