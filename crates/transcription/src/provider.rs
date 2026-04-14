@@ -58,3 +58,35 @@ pub trait TranscriptionProvider: Send + Sync {
         request: TranscriptionRequest,
     ) -> anyhow::Result<TranscriptionResult>;
 }
+
+/// A request to synthesize speech from text.
+#[derive(Debug, Clone)]
+pub struct TtsRequest {
+    /// The text to synthesize.
+    pub text: String,
+    /// Voice identifier (provider-specific, e.g. `"nova"` for OpenAI).
+    pub voice: Option<String>,
+    /// Output audio format. Defaults to `"mp3"`.
+    pub format: Option<String>,
+    /// Speech speed multiplier (1.0 = normal). Supported by some providers.
+    pub speed: Option<f32>,
+}
+
+/// The result of a TTS synthesis.
+#[derive(Debug, Clone)]
+pub struct TtsResult {
+    /// Raw audio bytes (mp3 by default).
+    pub audio_data: Vec<u8>,
+    /// MIME type of the audio (e.g. `"audio/mpeg"`).
+    pub mime_type: String,
+}
+
+/// Pluggable backend for converting text to speech.
+#[async_trait]
+pub trait TtsProvider: Send + Sync {
+    /// Human-readable provider name (e.g. `"openai-tts"`, `"deepgram-tts"`).
+    fn name(&self) -> &str;
+
+    /// Synthesize text into audio bytes.
+    async fn synthesize(&self, request: TtsRequest) -> anyhow::Result<TtsResult>;
+}

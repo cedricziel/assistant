@@ -28,6 +28,7 @@ assistant-skills = { path = "../skills" }
 assistant-storage = { path = "../storage" }
 assistant-tool-executor = { path = "../tool-executor" }
 assistant-mcp-client = { path = "../mcp-client" }
+assistant-transcription = { path = "../transcription" }
 axum = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }

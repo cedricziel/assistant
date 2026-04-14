@@ -11,20 +11,29 @@
 //! bytes to the configured provider, and inject the resulting transcript into
 //! the normal text message flow.
 
+pub mod audio_store;
 mod converter;
 mod deepgram;
+mod deepgram_tts;
 mod ollama;
+mod openai_tts;
 mod provider;
 mod whisper;
 
 use std::sync::Arc;
 
-use assistant_core::{TranscriptionConfig, TranscriptionProviderKind};
+use assistant_core::{TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsProviderKind};
 
+pub use audio_store::AudioStore;
 pub use converter::{AudioConverter, AudioFormat, ConversionResult};
 pub use deepgram::DeepgramProvider;
+pub use deepgram_tts::DeepgramTtsProvider;
 pub use ollama::OllamaTranscriptionProvider;
-pub use provider::{TranscriptionProvider, TranscriptionRequest, TranscriptionResult};
+pub use openai_tts::OpenAITtsProvider;
+pub use provider::{
+    TranscriptionProvider, TranscriptionRequest, TranscriptionResult, TtsProvider, TtsRequest,
+    TtsResult,
+};
 pub use whisper::WhisperProvider;
 
 /// MIME type prefixes recognised as audio attachments.
@@ -49,6 +58,57 @@ pub fn is_audio_mime(mime: &str) -> bool {
     AUDIO_MIME_PREFIXES
         .iter()
         .any(|prefix| mime.starts_with(prefix))
+}
+
+/// Build a [`TtsProvider`] from the assistant TTS configuration.
+pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvider>> {
+    match config.provider {
+        TtsProviderKind::OpenAI => {
+            let api_key = config
+                .api_key
+                .clone()
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "OpenAI TTS requires an API key. \
+                         Set api_key in [tts] or OPENAI_API_KEY env var."
+                    )
+                })?;
+
+            let mut provider = OpenAITtsProvider::new(api_key)?;
+            if let Some(ref url) = config.base_url {
+                provider = provider.with_base_url(url);
+            }
+            if let Some(ref model) = config.model {
+                provider = provider.with_model(model);
+            }
+            if let Some(ref voice) = config.voice {
+                provider = provider.with_voice(voice);
+            }
+            Ok(Arc::new(provider))
+        }
+        TtsProviderKind::Deepgram => {
+            let api_key = config
+                .api_key
+                .clone()
+                .or_else(|| std::env::var("DEEPGRAM_API_KEY").ok())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Deepgram TTS requires an API key. \
+                         Set api_key in [tts] or DEEPGRAM_API_KEY env var."
+                    )
+                })?;
+
+            let mut provider = DeepgramTtsProvider::new(api_key)?;
+            if let Some(ref url) = config.base_url {
+                provider = provider.with_base_url(url);
+            }
+            if let Some(ref model) = config.model {
+                provider = provider.with_model(model);
+            }
+            Ok(Arc::new(provider))
+        }
+    }
 }
 
 /// Build a [`TranscriptionProvider`] from the assistant configuration.

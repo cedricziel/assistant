@@ -117,6 +117,23 @@ impl Orchestrator {
 
         let mut tool_status = "ok";
 
+        // For the voice-response tool we need to extract the audio_id before
+        // consuming the output below.
+        let voice_audio_id: Option<String> = if tool_name == "voice-response" {
+            if let Ok(ref output) = exec_result {
+                output
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("audio_id"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let observation = match exec_result {
             Ok(output) => {
                 debug!(tool = %tool_name, duration_ms, "Tool execution completed");
@@ -175,6 +192,13 @@ impl Orchestrator {
                     status: tool_status.to_string(),
                 })
                 .await;
+
+            // For the voice-response tool, emit a dedicated AudioReady event
+            // so voice-enabled clients can auto-play the synthesised audio
+            // without waiting for the full turn to finish.
+            if let Some(audio_id) = voice_audio_id {
+                let _ = sink.send(OrchestratorEvent::AudioReady { audio_id }).await;
+            }
         }
 
         observation

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
@@ -15,6 +16,7 @@ class _FakeApiClient extends ApiClient {
   _FakeApiClient() : super(baseUrl: 'http://fake', token: 'fake');
 
   final List<StreamController<StreamEvent>> _queue = [];
+  final List<StreamController<StreamEvent>> _voiceQueue = [];
 
   /// Enqueue a [StreamController] whose stream will be returned for the next
   /// [streamMessages] call. The caller controls when events are added.
@@ -24,10 +26,29 @@ class _FakeApiClient extends ApiClient {
     return ctrl;
   }
 
+  /// Enqueue a [StreamController] for the next [sendVoiceMessage] call.
+  StreamController<StreamEvent> enqueueVoiceStream() {
+    final ctrl = StreamController<StreamEvent>();
+    _voiceQueue.add(ctrl);
+    return ctrl;
+  }
+
   @override
   Stream<StreamEvent> streamMessages(String conversationId, String message) {
     if (_queue.isNotEmpty) {
       return _queue.removeAt(0).stream;
+    }
+    return const Stream.empty();
+  }
+
+  @override
+  Stream<StreamEvent> sendVoiceMessage(
+    String conversationId,
+    Uint8List audioBytes,
+    String mimeType,
+  ) {
+    if (_voiceQueue.isNotEmpty) {
+      return _voiceQueue.removeAt(0).stream;
     }
     return const Stream.empty();
   }
@@ -250,6 +271,36 @@ void main() {
       },
     );
 
+    testWidgets('7.5: AudioReadyEvent sets audioId on the assistant message', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('play audio'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl
+          ..add(const AudioReadyEvent('uuid-123'))
+          ..add(const DoneEvent(role: 'assistant', content: 'Here you go'))
+          ..close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final assistant = notifier.state.value!.messages.firstWhere(
+        (m) => !m.isUser,
+      );
+      expect(
+        assistant.audioId,
+        equals('uuid-123'),
+        reason: 'AudioReadyEvent should set audioId on the assistant message',
+      );
+    });
+
     testWidgets('7.4: retryMessage removes failed message and re-enqueues it', (
       tester,
     ) async {
@@ -308,5 +359,115 @@ void main() {
         reason: 'retried message must reappear in list during drain',
       );
     });
+  });
+
+  // -- sendVoiceMessage tests -------------------------------------------------
+
+  group('ChatNotifier.sendVoiceMessage', () {
+    testWidgets('adds a voice placeholder user message while streaming', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueVoiceStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(
+        notifier.sendVoiceMessage(Uint8List.fromList([1, 2, 3]), 'audio/webm'),
+      );
+      await tester.pump();
+
+      final chatState = notifier.state.value!;
+      expect(chatState.isSending, isTrue);
+      final userMsg = chatState.messages.firstWhere((m) => m.isUser);
+      expect(userMsg.content, contains('🎤'));
+      expect(userMsg.status, MessageStatus.sending);
+
+      ctrl
+        ..add(const DoneEvent(role: 'assistant', content: 'transcribed'))
+        ..close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('DoneEvent finalizes the assistant message', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueVoiceStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(
+        notifier.sendVoiceMessage(Uint8List.fromList([1, 2, 3]), 'audio/webm'),
+      );
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl
+          ..add(const DoneEvent(role: 'assistant', content: 'Hello!'))
+          ..close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final assistant = notifier.state.value!.messages.firstWhere(
+        (m) => !m.isUser,
+      );
+      expect(assistant.content, equals('Hello!'));
+      expect(assistant.isStreaming, isFalse);
+      expect(notifier.state.value!.isSending, isFalse);
+    });
+
+    testWidgets('ErrorEvent marks user message as failed', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueVoiceStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(
+        notifier.sendVoiceMessage(Uint8List.fromList([1, 2, 3]), 'audio/webm'),
+      );
+      await tester.pump();
+
+      ctrl
+        ..add(const ErrorEvent('transcription failed'))
+        ..close();
+      await tester.pumpAndSettle();
+
+      final userMsg = notifier.state.value!.messages.firstWhere(
+        (m) => m.isUser,
+      );
+      expect(userMsg.status, MessageStatus.failed);
+    });
+
+    testWidgets(
+      'AudioReadyEvent sets audioId on the streaming assistant message',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueVoiceStream();
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(
+          notifier.sendVoiceMessage(
+            Uint8List.fromList([1, 2, 3]),
+            'audio/webm',
+          ),
+        );
+        await tester.pump();
+
+        await tester.runAsync(() async {
+          ctrl
+            ..add(const AudioReadyEvent('voice-audio-id'))
+            ..add(const DoneEvent(role: 'assistant', content: 'Here'))
+            ..close();
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+
+        final assistant = notifier.state.value!.messages.firstWhere(
+          (m) => !m.isUser,
+        );
+        expect(assistant.audioId, equals('voice-audio-id'));
+      },
+    );
   });
 }

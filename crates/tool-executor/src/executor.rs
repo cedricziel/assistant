@@ -79,6 +79,23 @@ impl ToolExecutor {
             .insert(handler.name().to_string(), handler);
     }
 
+    /// Register the `voice-response` tool.
+    ///
+    /// Call after construction when both a TTS provider and audio store are
+    /// available (i.e. when the web UI has voice configured).
+    pub fn register_voice_response(
+        &self,
+        tts: Arc<dyn assistant_transcription::TtsProvider>,
+        store: Arc<assistant_transcription::AudioStore>,
+    ) {
+        use crate::builtins::VoiceResponseHandler;
+        let handler = Arc::new(VoiceResponseHandler::new(tts, store));
+        self.tool_handlers
+            .write()
+            .unwrap()
+            .insert(handler.name().to_string(), handler);
+    }
+
     /// Inject the subagent runner and register subagent tools.
     ///
     /// Registers `agent-spawn` and `agent-terminate`.  This must be called

@@ -38,6 +38,7 @@ pub use types::{
     MoonshotWebSearchOptions, NextcloudConfig, NotificationsConfig, ObservabilityConfig,
     OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation, OpenAIWebSearchOptions, OtelExporter,
     PartitionGranularity, SignalConfig, SkillsConfig, SlackConfig, SlackListenMode, StorageConfig,
-    TranscriptionConfig, TranscriptionProviderKind, DEFAULT_MAX_AGENT_DEPTH,
+    TranscriptionConfig, TranscriptionProviderKind, TtsConfig, TtsProviderKind,
+    DEFAULT_MAX_AGENT_DEPTH,
 };
 pub use upload::resolve_upload_bytes;

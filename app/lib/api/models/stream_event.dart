@@ -80,3 +80,18 @@ class ErrorEvent extends StreamEvent {
 
   final String message;
 }
+
+/// The server has produced audio for the most recent assistant response.
+///
+/// Corresponds to `event:audio_ready` in the SSE stream.  The JSON body is
+/// `{"audio_id":"<uuid>"}`.
+class AudioReadyEvent extends StreamEvent {
+  const AudioReadyEvent(this.audioId);
+
+  /// Opaque identifier used with GET /api/audio/{audioId}.
+  final String audioId;
+
+  factory AudioReadyEvent.fromJson(Map<String, dynamic> json) {
+    return AudioReadyEvent(json['audio_id'] as String? ?? '');
+  }
+}

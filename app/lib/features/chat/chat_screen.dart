@@ -1,12 +1,18 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/capabilities_provider.dart';
+import '../../api/models/server_capabilities.dart';
 import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
+import 'audio_player_widget.dart';
 import 'chat_provider.dart';
 import 'conversation_list.dart';
+import 'voice_recorder_button.dart';
 
 /// Main chat screen.
 ///
@@ -84,6 +90,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _scrollToBottom();
   }
 
+  Future<void> _sendVoiceMessage(Uint8List bytes, String mimeType) async {
+    await ref.read(chatProvider.notifier).sendVoiceMessage(bytes, mimeType);
+    _scrollToBottom();
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatAsync = ref.watch(chatProvider);
@@ -100,6 +111,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final personasAsync = ref.watch(personasProvider);
     final activePersona = personasAsync.value?.activePersona;
     final activePersonaName = activePersona?.name ?? 'Assistant';
+
+    // Resolve capabilities only when an API client is available (avoids
+    // triggering async work in tests that have no active profile).
+    final hasClient = ref.watch(apiClientProvider) != null;
+    final capabilities = hasClient
+        ? (ref.watch(capabilitiesProvider).value ?? ServerCapabilities.disabled)
+        : ServerCapabilities.disabled;
 
     return Scaffold(
       appBar: AppBar(
@@ -233,11 +251,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               return _MessageBubble(
                                 message: msg,
                                 isGrouped: isGrouped,
+                                capabilities: capabilities,
                                 onRetry: msg.status == MessageStatus.failed
                                     ? () => ref
                                           .read(chatProvider.notifier)
                                           .retryMessage(msg)
                                     : null,
+                                fetchMessageAudio: () {
+                                  final api = ref.read(apiClientProvider);
+                                  return api?.fetchMessageAudio(msg.id) ??
+                                      Future.value(null);
+                                },
                               );
                             },
                           ),
@@ -273,9 +297,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     focusNode: _inputFocus,
                     isSending: chatState.isSending,
                     pendingQueueCount: chatState.pendingQueue.length,
+                    capabilities: capabilities,
                     onSend: _sendMessage,
                     onStop: () =>
                         ref.read(chatProvider.notifier).cancelStream(),
+                    onVoiceRecorded: _sendVoiceMessage,
                   ),
                 ],
               ),
@@ -292,6 +318,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
+    required this.capabilities,
+    required this.fetchMessageAudio,
     this.isGrouped = false,
     this.onRetry,
   });
@@ -299,6 +327,8 @@ class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
   final bool isGrouped;
   final VoidCallback? onRetry;
+  final ServerCapabilities capabilities;
+  final Future<Uint8List?> Function() fetchMessageAudio;
 
   @override
   Widget build(BuildContext context) {
@@ -358,17 +388,34 @@ class _MessageBubble extends StatelessWidget {
                       ),
                     ],
                   )
-                : MarkdownBody(
-                    data: message.content,
-                    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
-                        .copyWith(
-                          p: TextStyle(color: colorScheme.onSurface),
-                          code: TextStyle(
-                            color: colorScheme.onSurface,
-                            backgroundColor: colorScheme.surfaceContainerLowest,
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      MarkdownBody(
+                        data: message.content,
+                        styleSheet:
+                            MarkdownStyleSheet.fromTheme(
+                              Theme.of(context),
+                            ).copyWith(
+                              p: TextStyle(color: colorScheme.onSurface),
+                              code: TextStyle(
+                                color: colorScheme.onSurface,
+                                backgroundColor:
+                                    colorScheme.surfaceContainerLowest,
+                              ),
+                            ),
+                        selectable: true,
+                      ),
+                      // Play button for voice-capable assistant messages.
+                      if (capabilities.voiceReceive && !message.isStreaming)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: AudioPlayerWidget(
+                            fetchAudio: fetchMessageAudio,
                           ),
                         ),
-                    selectable: true,
+                    ],
                   ),
           ),
           // Retry button shown below the bubble for failed user messages.
@@ -470,16 +517,20 @@ class _InputRow extends StatelessWidget {
     required this.focusNode,
     required this.isSending,
     required this.pendingQueueCount,
+    required this.capabilities,
     required this.onSend,
     required this.onStop,
+    required this.onVoiceRecorded,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isSending;
   final int pendingQueueCount;
+  final ServerCapabilities capabilities;
   final VoidCallback onSend;
   final VoidCallback onStop;
+  final void Function(Uint8List bytes, String mimeType) onVoiceRecorded;
 
   @override
   Widget build(BuildContext context) {
@@ -516,6 +567,18 @@ class _InputRow extends StatelessWidget {
           ),
           child: Row(
             children: [
+              // Voice recorder button — shown when server supports voice send.
+              if (capabilities.voiceSend && !isSending)
+                VoiceRecorderButton(
+                  onRecordingComplete: onVoiceRecorded,
+                  onError: (err) {
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text(err)));
+                  },
+                ),
+              if (capabilities.voiceSend && !isSending)
+                const SizedBox(width: 4),
               Expanded(
                 child: TextField(
                   key: const Key('message_input'),

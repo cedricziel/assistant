@@ -49,4 +49,16 @@ pub enum OrchestratorEvent {
         /// Human-readable description of the error.
         message: String,
     },
+
+    /// A `voice-response` tool call produced synthesised audio that clients
+    /// should auto-play.
+    ///
+    /// Emitted immediately after the tool result is finalised so that
+    /// voice-enabled web clients can retrieve and play the audio without
+    /// waiting for the full turn to complete.
+    AudioReady {
+        /// The UUID of the audio blob in the server's [`AudioStore`].
+        /// Retrieve via `GET /api/audio/{audio_id}`.
+        audio_id: String,
+    },
 }

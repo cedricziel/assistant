@@ -55,8 +55,12 @@ void main() {
         const ErrorEvent('error'),
       ];
 
-      int tokenCount = 0, statusCount = 0, toolCount = 0, doneCount = 0,
-          errorCount = 0;
+      int tokenCount = 0,
+          statusCount = 0,
+          toolCount = 0,
+          doneCount = 0,
+          errorCount = 0,
+          audioReadyCount = 0;
       for (final e in events) {
         switch (e) {
           case TokenEvent():
@@ -69,6 +73,8 @@ void main() {
             doneCount++;
           case ErrorEvent():
             errorCount++;
+          case AudioReadyEvent():
+            audioReadyCount++;
         }
       }
 
@@ -77,6 +83,7 @@ void main() {
       expect(toolCount, equals(1));
       expect(doneCount, equals(1));
       expect(errorCount, equals(1));
+      expect(audioReadyCount, equals(0));
     });
   });
 }
