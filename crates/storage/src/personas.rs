@@ -2,6 +2,16 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
+/// Default output destination for scheduler-originated turns (cron tasks and
+/// heartbeats).  Operator-configured; the agent is unaware of routing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeChannel {
+    /// Interface name matching the adapter's `name()` (e.g. `"slack"`, `"signal"`, `"matrix"`).
+    pub home_interface: String,
+    /// Platform-native channel address (e.g. `"#ops"`, `"+12345678901"`, `"!room:server"`).
+    pub home_channel: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct PersonaRecord {
     pub id: String,
@@ -12,6 +22,9 @@ pub struct PersonaRecord {
     /// Per-persona turn timeout in seconds. `None` means use the compiled-in
     /// default (10 800 s / 3 h).
     pub turn_timeout_secs: Option<u64>,
+    /// Default output destination for scheduler-originated turns. `None` means
+    /// scheduler output is stored in conversation history only (no delivery).
+    pub home_channel: Option<HomeChannel>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -75,7 +88,7 @@ impl PersonaStore {
 
     pub async fn list(&self) -> Result<Vec<PersonaRecord>> {
         let rows = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, created_at, updated_at
              FROM personas
              ORDER BY is_default DESC, id ASC",
         )
@@ -127,7 +140,7 @@ impl PersonaStore {
 
     pub async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
         let row = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, created_at, updated_at
              FROM personas
              WHERE id = ?1",
         )
@@ -169,6 +182,48 @@ impl PersonaStore {
              WHERE id = ?2",
         )
         .bind(secs as i64)
+        .bind(id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        anyhow::ensure!(rows > 0, "persona '{}' not found", id);
+        Ok(())
+    }
+
+    /// Set the home channel for scheduler-originated output routing.
+    /// Both `interface` and `channel` must be non-empty.
+    pub async fn set_home_channel(
+        &self,
+        id: &str,
+        home_interface: &str,
+        home_channel: &str,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            !home_interface.is_empty() && !home_channel.is_empty(),
+            "home_interface and home_channel must both be non-empty"
+        );
+        let rows = sqlx::query(
+            "UPDATE personas
+             SET home_interface = ?1, home_channel = ?2, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?3",
+        )
+        .bind(home_interface)
+        .bind(home_channel)
+        .bind(id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        anyhow::ensure!(rows > 0, "persona '{}' not found", id);
+        Ok(())
+    }
+
+    /// Clear the home channel, disabling scheduler output routing for this persona.
+    pub async fn clear_home_channel(&self, id: &str) -> Result<()> {
+        let rows = sqlx::query(
+            "UPDATE personas
+             SET home_interface = NULL, home_channel = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+        )
         .bind(id)
         .execute(&self.pool)
         .await?
@@ -266,6 +321,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn home_channel_defaults_to_none() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.ensure_default().await.unwrap();
+        let persona = store.get("default").await.unwrap().unwrap();
+        assert!(
+            persona.home_channel.is_none(),
+            "new persona should have no home channel"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_and_clear_home_channel() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.create("bot", "Bot").await.unwrap();
+
+        store
+            .set_home_channel("bot", "slack", "#ops")
+            .await
+            .unwrap();
+        let persona = store.get("bot").await.unwrap().unwrap();
+        let hc = persona.home_channel.as_ref().unwrap();
+        assert_eq!(hc.home_interface, "slack", "interface should be slack");
+        assert_eq!(hc.home_channel, "#ops", "channel should be #ops");
+
+        store.clear_home_channel("bot").await.unwrap();
+        let persona = store.get("bot").await.unwrap().unwrap();
+        assert!(
+            persona.home_channel.is_none(),
+            "home_channel should be None after clear"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_home_channel_rejects_empty_fields() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.create("bot", "Bot").await.unwrap();
+
+        assert!(
+            store.set_home_channel("bot", "", "#ops").await.is_err(),
+            "empty interface should be rejected"
+        );
+        assert!(
+            store.set_home_channel("bot", "slack", "").await.is_err(),
+            "empty channel should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_home_channel_unknown_persona_returns_error() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let result = store.set_home_channel("nonexistent", "slack", "#ops").await;
+        assert!(
+            result.is_err(),
+            "setting home channel on unknown persona should error"
+        );
+    }
+
+    #[tokio::test]
+    async fn home_channel_visible_in_list() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.ensure_default().await.unwrap();
+        store.create("notifier", "Notifier").await.unwrap();
+        store
+            .set_home_channel("notifier", "signal", "+12345678901")
+            .await
+            .unwrap();
+
+        let list = store.list().await.unwrap();
+        let notifier = list.iter().find(|p| p.id == "notifier").unwrap();
+        let hc = notifier.home_channel.as_ref().unwrap();
+        assert_eq!(hc.home_interface, "signal");
+        assert_eq!(hc.home_channel, "+12345678901");
+
+        let default = list.iter().find(|p| p.id == "default").unwrap();
+        assert!(default.home_channel.is_none());
+    }
+
+    #[tokio::test]
     async fn turn_timeout_visible_in_list() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let store = super::PersonaStore::new(storage.pool.clone());
@@ -284,6 +427,16 @@ mod tests {
 }
 
 fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
+    let home_interface: Option<String> = row.try_get("home_interface").unwrap_or(None);
+    let home_channel_val: Option<String> = row.try_get("home_channel").unwrap_or(None);
+    let home_channel = match (home_interface, home_channel_val) {
+        (Some(iface), Some(chan)) if !iface.is_empty() && !chan.is_empty() => Some(HomeChannel {
+            home_interface: iface,
+            home_channel: chan,
+        }),
+        _ => None,
+    };
+
     Ok(PersonaRecord {
         id: row.get("id"),
         name: row.get("name"),
@@ -295,6 +448,7 @@ fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
             .try_get::<Option<i64>, _>("turn_timeout_secs")
             .unwrap_or(None)
             .map(|v| v as u64),
+        home_channel,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })

@@ -180,6 +180,12 @@ impl ChannelRunner {
     pub async fn run(self) -> Result<()> {
         let name = self.adapter.name().to_string();
 
+        // Register adapter in the registry so the scheduler can find it.
+        self.orchestrator
+            .adapter_registry
+            .register(self.adapter.clone())
+            .await;
+
         // BOOT.md startup hook (non-fatal).
         let boot_id = Uuid::new_v4();
         let interface = self.adapter.interface();
@@ -232,6 +238,9 @@ impl ChannelRunner {
                 }
             }
         }
+
+        // Deregister adapter from the registry on stop.
+        self.orchestrator.adapter_registry.deregister(&name).await;
 
         self.adapter.stop().await?;
         Ok(())
