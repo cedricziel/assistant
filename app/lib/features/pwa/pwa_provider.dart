@@ -4,6 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'pwa_service.dart';
 
+// True when running in iOS Safari outside standalone mode.
+// Safari never fires beforeinstallprompt, so we show a custom instruction
+// banner telling the user to tap Share → "Add to Home Screen".
+final safariInstallProvider = Provider<bool>(
+  (_) => PwaService.isSafariInstallable,
+);
+
 // Tracks whether the browser's PWA install prompt is currently available.
 //
 // Always false on non-web platforms. On web, becomes true once the browser

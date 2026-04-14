@@ -77,6 +77,57 @@
             appLaunchedInBrowser();
         }
       }
+
+      // -- Safari install detection ------------------------------------------
+      // Safari (iOS/macOS) never fires beforeinstallprompt.  We detect the
+      // "installable but not yet installed" state ourselves and let Dart show
+      // a custom instruction banner (Share → Add to Home Screen on iOS).
+      window.isSafariInstallable = function () {
+        const ua = navigator.userAgent;
+        const isIOS = /iP(ad|hone|od)/.test(ua);
+        const isSafariBrowser =
+          /Safari/.test(ua) && !/CriOS|FxiOS|OPiOS|EdgiOS/.test(ua);
+        const isStandalone =
+          navigator.standalone === true ||
+          window.matchMedia("(display-mode: standalone)").matches;
+        return isIOS && isSafariBrowser && !isStandalone;
+      };
+
+      // -- PWA update detection ----------------------------------------------
+      // Flutter's generated flutter_service_worker.js calls self.skipWaiting()
+      // on install, so the new SW goes straight from 'installing' → 'activated'
+      // without ever entering the 'waiting' state.  Packages that poll for the
+      // 'waiting' state (e.g. pwa_update_listener) therefore never fire.
+      //
+      // We listen for 'controllerchange' instead, which fires the moment the
+      // new SW calls clients.claim() after skipWaiting().  The first
+      // controllerchange on a fresh install (no previous controller) is
+      // ignored; only replacements trigger the update callback.
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+        let initialController = navigator.serviceWorker.controller;
+        let updateReady = false;
+        const updateCallbacks = [];
+
+        window.registerPwaUpdateCallback = function (cb) {
+          if (updateReady) {
+            cb();
+            return;
+          }
+          updateCallbacks.push(cb);
+        };
+
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (initialController !== null) {
+            // A replacement SW has taken control — new version is ready.
+            updateReady = true;
+            updateCallbacks.forEach((cb) => cb());
+          } else {
+            // First activation (no prior controller) — not an update.
+            initialController = navigator.serviceWorker.controller;
+          }
+        });
+      })();
     </script>
 
     <!--

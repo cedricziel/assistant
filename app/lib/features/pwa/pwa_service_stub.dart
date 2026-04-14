@@ -4,6 +4,9 @@ abstract class PwaService {
   // Always false outside of a web browser.
   static bool get isInstallable => false;
 
+  // Always false outside of a web browser.
+  static bool get isSafariInstallable => false;
+
   // No-op on non-web platforms.
   static void setup() {}
 

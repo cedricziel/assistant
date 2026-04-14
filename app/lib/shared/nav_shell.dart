@@ -233,6 +233,8 @@ class NavShell extends ConsumerWidget {
 
     // Watch install-prompt availability (false on non-web platforms).
     final isInstallable = ref.watch(pwaInstallProvider);
+    // True when on iOS Safari and not yet installed as a PWA.
+    final isSafariInstallable = ref.watch(safariInstallProvider);
 
     if (isWide) {
       final selected = _railSelectedIndex(context);
@@ -322,6 +324,7 @@ class NavShell extends ConsumerWidget {
                       onTap: () =>
                           ref.read(pwaInstallProvider.notifier).install(),
                     ),
+                  if (isSafariInstallable) const _SafariInstallButton(),
                   const SizedBox(height: 8),
                 ],
               ),
@@ -350,6 +353,7 @@ class NavShell extends ConsumerWidget {
             _InstallBanner(
               onInstall: () => ref.read(pwaInstallProvider.notifier).install(),
             ),
+          if (isSafariInstallable) const _SafariInstallBanner(),
           NavigationBar(
             selectedIndex: selected,
             onDestinationSelected: (i) {
@@ -463,6 +467,141 @@ class _InstallBanner extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Icon button shown in the [NavigationRail] trailing slot on iOS Safari.
+/// Tapping it opens a bottom sheet explaining how to add to home screen.
+class _SafariInstallButton extends StatelessWidget {
+  const _SafariInstallButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton.filledTonal(
+      icon: const Icon(Icons.ios_share),
+      tooltip: 'Add to Home Screen',
+      onPressed: () => _showSafariInstructions(context),
+    );
+  }
+}
+
+/// Slim banner above the mobile [NavigationBar] on iOS Safari.
+class _SafariInstallBanner extends StatelessWidget {
+  const _SafariInstallBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: colorScheme.primaryContainer,
+      child: InkWell(
+        onTap: () => _showSafariInstructions(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.ios_share, color: colorScheme.onPrimaryContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Add to Home Screen',
+                  style: TextStyle(
+                    color: colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              Icon(Icons.arrow_forward, color: colorScheme.onPrimaryContainer),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shows a bottom sheet explaining iOS Safari's manual install steps.
+void _showSafariInstructions(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    builder: (sheetContext) {
+      final colorScheme = Theme.of(sheetContext).colorScheme;
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Add to Home Screen',
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 16),
+              _SafariStep(
+                number: '1',
+                icon: Icons.ios_share,
+                color: colorScheme.primary,
+                text: 'Tap the Share button in the Safari toolbar.',
+              ),
+              const SizedBox(height: 12),
+              _SafariStep(
+                number: '2',
+                icon: Icons.add_box_outlined,
+                color: colorScheme.primary,
+                text: 'Scroll down and tap "Add to Home Screen".',
+              ),
+              const SizedBox(height: 12),
+              _SafariStep(
+                number: '3',
+                icon: Icons.check_circle_outline,
+                color: colorScheme.primary,
+                text: 'Tap "Add" to confirm.',
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class _SafariStep extends StatelessWidget {
+  const _SafariStep({
+    required this.number,
+    required this.icon,
+    required this.color,
+    required this.text,
+  });
+
+  final String number;
+  final IconData icon;
+  final Color color;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CircleAvatar(
+          radius: 14,
+          backgroundColor: color,
+          child: Text(
+            number,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Icon(icon, color: color),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text)),
+      ],
     );
   }
 }
