@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.94](https://github.com/cedricziel/assistant/compare/v0.1.93...v0.1.94) (2026-04-14)
+
+
+### Features
+
+* **app:** chat message queue and retry ([#424](https://github.com/cedricziel/assistant/issues/424)) ([9e645ee](https://github.com/cedricziel/assistant/commit/9e645eede888d46a4c06099bea8e10a0b742a16d))
+
+
+### Bug Fixes
+
+* **app:** disable codesign in flutter CI, update macOS bundle ID ([013d2f7](https://github.com/cedricziel/assistant/commit/013d2f7a6475cac9ecba82f29de31c538a6652a2))
+
 ## [0.1.93](https://github.com/cedricziel/assistant/compare/v0.1.92...v0.1.93) (2026-04-14)
 
 
