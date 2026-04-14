@@ -1556,7 +1556,10 @@ async fn main() -> Result<()> {
         let matrix_cfg = bs.config.matrix.clone().context(
             "Matrix is not configured. Add a [matrix] section to ~/.assistant/config.toml",
         )?;
-        let iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
+        let mut iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         let worker_orch = bs.orchestrator.clone();
         let _worker = tokio::spawn(async move {
@@ -1668,7 +1671,10 @@ async fn main() -> Result<()> {
     if bs.config.matrix.is_some() && interface_selected(&orchestrator_interfaces, "matrix") {
         use assistant_interface_matrix::MatrixInterface;
         let matrix_cfg = bs.config.matrix.clone().unwrap_or_default();
-        let iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
+        let mut iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         let worker_orch = bs.orchestrator.clone();
         tokio::spawn(async move {
