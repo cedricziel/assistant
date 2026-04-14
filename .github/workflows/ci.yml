@@ -55,30 +55,19 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: "check"
 
       - name: cargo check
         run: cargo check --workspace --all-features
-
-      - name: Validate unified runtime subcommands
-        run: |
-          cargo run -p assistant-cli -- --help
-          cargo run -p assistant-cli -- orchestrator run --help
-          cargo run -p assistant-cli -- worker --help
-          cargo run -p assistant-cli -- webui serve --help
-          cargo run -p assistant-cli -- signal --help
 
   test:
     name: Test
@@ -90,19 +79,16 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: "test"
 
       - name: cargo test
         run: cargo test --workspace
@@ -119,19 +105,16 @@ jobs:
         with:
           components: clippy
 
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: "check"
 
       - name: cargo clippy
         run: cargo clippy --workspace -- -D warnings
@@ -169,6 +152,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler ffmpeg
 
@@ -179,19 +165,18 @@ jobs:
           path: app/build/web/
 
       - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
 
       - name: Build unified assistant binary (embeds Flutter web)
+        run: cargo build -p assistant-cli
+
+      - name: Validate unified runtime subcommands
         run: |
-          cargo build -p assistant-cli
+          cargo run -p assistant-cli -- --help
+          cargo run -p assistant-cli -- orchestrator run --help
+          cargo run -p assistant-cli -- worker --help
+          cargo run -p assistant-cli -- webui serve --help
+          cargo run -p assistant-cli -- signal --help
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -435,16 +420,13 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: "test"
 
       - name: Pull Ollama smoke-test model
         run: |
