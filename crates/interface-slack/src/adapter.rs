@@ -306,12 +306,15 @@ impl ChannelAdapter for SlackAdapter {
     }
 
     fn platform_tools(&self, msg: &ChannelMessage, _conv_id: Uuid) -> Vec<Arc<dyn ToolHandler>> {
+        // Prefer the platform-native channel_id from metadata (inbound turns).
+        // Fall back to sender.platform_id for synthetic messages (scheduler turns).
         let channel_id = msg
             .metadata
             .get("channel_id")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| msg.sender.platform_id.clone());
         let thread_ts = msg.thread_id.clone();
         let message_ts = msg
             .platform_message_id

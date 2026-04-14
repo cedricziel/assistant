@@ -161,12 +161,15 @@ impl ChannelAdapter for NextcloudAdapter {
     }
 
     fn platform_tools(&self, msg: &ChannelMessage, _conv_id: Uuid) -> Vec<Arc<dyn ToolHandler>> {
+        // Prefer the platform-native conversation_token from metadata (inbound turns).
+        // Fall back to sender.platform_id for synthetic messages (scheduler turns).
         let conversation_token = msg
             .metadata
             .get("conversation_token")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| msg.sender.platform_id.clone());
         let message_id = msg.platform_message_id.as_deref().unwrap_or("").to_string();
         crate::tools::build_nextcloud_tools(
             &self.server_url,

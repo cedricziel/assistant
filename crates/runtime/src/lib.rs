@@ -1,3 +1,4 @@
+pub mod adapter_registry;
 pub mod bootstrap;
 pub mod channel_runner;
 pub(crate) mod compaction;
@@ -13,6 +14,7 @@ pub mod scheduler;
 pub mod telemetry;
 pub mod webhook_dispatch;
 
+pub use adapter_registry::AdapterRegistry;
 pub use bootstrap::spawn_memory_indexer;
 pub use channel_runner::ChannelRunner;
 pub use interface_runner::InterfaceRunner;

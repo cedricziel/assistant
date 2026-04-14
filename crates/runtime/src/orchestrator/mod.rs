@@ -195,6 +195,9 @@ pub struct Orchestrator {
     pub(crate) metrics: crate::MetricsRecorder,
     /// Active assistant agent ID for memory/workspace conversation scoping.
     pub(crate) agent_id: String,
+    /// Registry of live channel adapters, used by the scheduler to inject
+    /// platform tools for scheduler-originated turns.
+    pub adapter_registry: crate::AdapterRegistry,
     /// Context compaction configuration.
     pub(crate) compaction_config: assistant_core::CompactionConfig,
     /// How long `submit_turn` waits for the worker to return a result before
@@ -233,6 +236,7 @@ impl Orchestrator {
             agent_id: config.agent.id.clone(),
             compaction_config: config.compaction.clone(),
             submit_timeout_secs: 10_800,
+            adapter_registry: crate::AdapterRegistry::new(),
         }
     }
 

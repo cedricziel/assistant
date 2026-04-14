@@ -6,12 +6,16 @@
 //! The orchestrator's [`run_worker`](crate::Orchestrator::run_worker) loop
 //! claims and processes them asynchronously.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use assistant_core::{bus_messages, strip_html_comments, topic, Interface, PublishRequest};
+use assistant_core::{
+    bus_messages, strip_html_comments, topic, ChannelContent, ChannelMessage, ChannelType,
+    ChannelUser, Interface, PublishRequest,
+};
 use assistant_storage::StorageLayer;
 use chrono::Utc;
 use cron::Schedule;
@@ -19,7 +23,7 @@ use opentelemetry::{
     trace::{Span as _, SpanKind},
     KeyValue,
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::orchestrator::Orchestrator;
@@ -134,6 +138,15 @@ pub(crate) async fn run_due_tasks(
         }
         produce_trigger_span.end();
 
+        // Resolve home-channel tools and register them before publishing the
+        // TurnRequest so the worker can find them when it claims the message.
+        let home_tools = resolve_home_channel_tools(storage, orchestrator, conversation_id).await;
+        if !home_tools.is_empty() {
+            orchestrator
+                .register_extensions(conversation_id, home_tools, vec![])
+                .await;
+        }
+
         let turn_req = bus_messages::TurnRequest {
             prompt: task.prompt.clone(),
             conversation_id,
@@ -202,6 +215,69 @@ pub(crate) async fn run_due_tasks(
     Ok(())
 }
 
+/// Resolve home-channel platform tools for a scheduler-originated turn.
+///
+/// Loads the active persona's `home_channel`, looks up the matching live
+/// adapter in the registry, and returns the adapter's platform tools pre-bound
+/// to the configured channel address.  Returns an empty vec (with a warning
+/// log) when no home channel is configured or no matching adapter is running.
+async fn resolve_home_channel_tools(
+    storage: &StorageLayer,
+    orchestrator: &Orchestrator,
+    conversation_id: Uuid,
+) -> Vec<Arc<dyn assistant_core::ToolHandler>> {
+    let persona_store = storage.persona_store();
+    let persona = match persona_store.get(&orchestrator.agent_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return vec![],
+        Err(e) => {
+            warn!(error = %e, "Failed to load persona for home channel resolution");
+            return vec![];
+        }
+    };
+
+    let hc = match &persona.home_channel {
+        Some(hc) => hc.clone(),
+        None => return vec![],
+    };
+
+    let adapter = match orchestrator.adapter_registry.get(&hc.home_interface).await {
+        Some(a) => a,
+        None => {
+            warn!(
+                interface = %hc.home_interface,
+                channel = %hc.home_channel,
+                "No live adapter found for home_interface — scheduler turn has no output tools"
+            );
+            return vec![];
+        }
+    };
+
+    let channel_type = match hc.home_interface.as_str() {
+        "slack" => ChannelType::Slack,
+        "mattermost" => ChannelType::Mattermost,
+        "matrix" => ChannelType::Matrix,
+        "nextcloud" => ChannelType::Nextcloud,
+        "signal" => ChannelType::Signal,
+        other => ChannelType::Custom(other.to_string()),
+    };
+
+    let synthetic_msg = ChannelMessage {
+        channel_type,
+        platform_message_id: None,
+        sender: ChannelUser {
+            platform_id: hc.home_channel.clone(),
+            display_name: None,
+        },
+        content: ChannelContent::Text(String::new()),
+        thread_id: None,
+        timestamp: Utc::now(),
+        metadata: HashMap::new(),
+    };
+
+    adapter.platform_tools(&synthetic_msg, conversation_id)
+}
+
 /// Compute the next occurrence after now for a cron expression.
 /// Accepts both 5-field (standard) and 7-field (with seconds) expressions.
 pub(crate) fn compute_next_run(cron_expr: &str) -> Option<chrono::DateTime<Utc>> {
@@ -237,6 +313,16 @@ pub(crate) async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         "heartbeat.dispatch",
         Some(conversation_id),
     );
+
+    // Resolve home-channel tools and register them before publishing.
+    let storage = orchestrator.storage.clone();
+    let home_tools = resolve_home_channel_tools(&storage, orchestrator, conversation_id).await;
+    if !home_tools.is_empty() {
+        orchestrator
+            .register_extensions(conversation_id, home_tools, vec![])
+            .await;
+    }
+
     let turn_req = bus_messages::TurnRequest {
         prompt,
         conversation_id,
@@ -629,5 +715,68 @@ mod tests {
         // Verify the prompt text was preserved
         let payload: bus_messages::TurnRequest = serde_json::from_value(msg.payload).unwrap();
         assert_eq!(payload.prompt.trim(), "Check system health.");
+    }
+
+    // -- home channel resolution -----------------------------------------------
+
+    #[tokio::test]
+    async fn resolve_home_channel_tools_no_home_channel_returns_empty() {
+        let server = MockServer::start().await;
+        let (orch, storage) = build(&server.uri()).await;
+
+        // Persona exists but has no home_channel set (default).
+        storage.persona_store().ensure_default().await.unwrap();
+
+        let conv_id = Uuid::new_v4();
+        let tools = resolve_home_channel_tools(&storage, &orch, conv_id).await;
+        assert!(
+            tools.is_empty(),
+            "no home channel configured — should return empty tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_home_channel_tools_adapter_not_registered_returns_empty() {
+        let server = MockServer::start().await;
+        let (orch, storage) = build(&server.uri()).await;
+
+        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .set_home_channel("default", "slack", "#ops")
+            .await
+            .unwrap();
+
+        // No adapter registered — should degrade gracefully.
+        let conv_id = Uuid::new_v4();
+        let tools = resolve_home_channel_tools(&storage, &orch, conv_id).await;
+        assert!(
+            tools.is_empty(),
+            "no adapter running — should return empty tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn due_task_fires_without_output_tools_when_no_home_channel() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (orch, storage) = build(&server.uri()).await;
+
+        let store = storage.scheduled_task_store_for_agent(&orch.agent_id);
+        let past = Utc::now() - Duration::seconds(60);
+        store
+            .insert("no-home-task", "0 0 * * *", "ping", false, Some(past))
+            .await
+            .unwrap();
+
+        // Task fires normally even without home_channel.
+        run_due_tasks(&storage, &orch).await.unwrap();
+
+        let bus = storage.message_bus();
+        let msg = bus
+            .claim(topic::TURN_REQUEST, "test-consumer")
+            .await
+            .unwrap();
+        assert!(msg.is_some(), "turn.request must be published");
     }
 }

@@ -326,6 +326,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "031_push_subscriptions",
             include_str!("../../../migrations/031_push_subscriptions.sql"),
         ),
+        (
+            "032_persona_home_channel",
+            include_str!("../../../migrations/032_persona_home_channel.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {
