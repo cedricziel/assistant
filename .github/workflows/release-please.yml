@@ -256,7 +256,8 @@ jobs:
           find "$APP/Contents/Frameworks" \( -name "*.framework" -o -name "*.dylib" \) 2>/dev/null | while read f; do
             codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
           done
-          codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
+          codesign --force --sign "$IDENTITY" --options runtime --timestamp \
+            --entitlements app/macos/Runner/Release.entitlements "$APP"
 
       - name: Notarize macOS app
         run: |
