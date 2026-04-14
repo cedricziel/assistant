@@ -65,10 +65,17 @@ class ContextRepository {
           ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
     // Re-attach tokens from secure storage.
+    // Failures are caught per-context so that a single secure-storage error
+    // (common on web when the crypto key is unavailable after a hard reload)
+    // does not prevent the contexts list from loading at all.
     final result = <AssistantContext>[];
     for (final ctx in contexts) {
-      final token = await _secureStorage.read(key: '$_kTokenPrefix${ctx.id}');
-      result.add(token != null ? ctx.copyWith(authToken: token) : ctx);
+      try {
+        final token = await _secureStorage.read(key: '$_kTokenPrefix${ctx.id}');
+        result.add(token != null ? ctx.copyWith(authToken: token) : ctx);
+      } catch (_) {
+        result.add(ctx);
+      }
     }
     return result;
   }

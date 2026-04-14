@@ -69,7 +69,13 @@ class ContextsNotifier extends AsyncNotifier<List<AssistantContext>> {
     final repo = ref.read(contextRepositoryProvider);
     final saved = await repo.upsertContextByUrl(context);
     ref.invalidateSelf();
-    await future;
+    // Swallow any reload error (e.g. secure-storage failure on web) so the
+    // caller always receives `saved` and can proceed to call activate().
+    try {
+      await future;
+    } catch (_) {
+      // Context was written to storage; load failure does not block activation.
+    }
     return saved;
   }
 }
