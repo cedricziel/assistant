@@ -20,6 +20,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage};
+use assistant_llm::ContentBlock;
+use base64::Engine as _;
 use futures::StreamExt;
 use lru::LruCache;
 use tokio::sync::Mutex;
@@ -90,6 +92,28 @@ impl ChannelRunner {
             .clone()
     }
 
+    /// Map a `ChannelContent` to `(user_message, attachments)` for the orchestrator.
+    ///
+    /// Returns `None` for content types that should not be dispatched (e.g. non-image files).
+    pub(crate) fn content_to_dispatch(
+        content: &ChannelContent,
+    ) -> Option<(String, Vec<ContentBlock>)> {
+        match content {
+            ChannelContent::Text(t) => Some((t.clone(), vec![])),
+            ChannelContent::FileData {
+                data, mime_type, ..
+            } if mime_type.starts_with("image/") => {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+                let block = ContentBlock::Image {
+                    media_type: mime_type.clone(),
+                    data: b64,
+                };
+                Some(("[Image attached]".to_string(), vec![block]))
+            }
+            _ => None,
+        }
+    }
+
     /// Dispatch a single inbound message through the orchestrator.
     async fn dispatch(
         msg: ChannelMessage,
@@ -97,10 +121,8 @@ impl ChannelRunner {
         adapter: Arc<dyn ChannelAdapter>,
         orchestrator: Arc<Orchestrator>,
     ) {
-        // Only handle text content.
-        let text = match &msg.content {
-            ChannelContent::Text(t) => t.clone(),
-            _ => return,
+        let Some((text, attachments)) = Self::content_to_dispatch(&msg.content) else {
+            return;
         };
 
         let user = msg.sender.clone();
@@ -114,7 +136,7 @@ impl ChannelRunner {
         }
 
         let result = orchestrator
-            .run_turn_with_tools(&text, conv_id, interface, tools, None, vec![])
+            .run_turn_with_tools(&text, conv_id, interface, tools, None, attachments)
             .await;
 
         match result {
@@ -292,6 +314,56 @@ mod tests {
             !Arc::ptr_eq(&l1, &l2),
             "different UUIDs must have different locks"
         );
+    }
+
+    /// `content_to_dispatch` maps image FileData to a multimodal attachment.
+    #[test]
+    fn image_file_data_dispatched_as_attachment() {
+        use assistant_core::ChannelContent;
+        use assistant_llm::ContentBlock;
+        use base64::Engine as _;
+
+        let data = b"fakeimgbytes".to_vec();
+        let content = ChannelContent::FileData {
+            data: data.clone(),
+            filename: "photo.jpg".to_string(),
+            mime_type: "image/jpeg".to_string(),
+        };
+        let result = ChannelRunner::content_to_dispatch(&content);
+        assert!(
+            result.is_some(),
+            "image FileData must produce a dispatch tuple"
+        );
+        let (text, attachments) = result.unwrap();
+        assert_eq!(text, "[Image attached]");
+        assert_eq!(attachments.len(), 1);
+        match &attachments[0] {
+            ContentBlock::Image {
+                media_type,
+                data: b64,
+            } => {
+                assert_eq!(media_type, "image/jpeg");
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .unwrap();
+                assert_eq!(decoded, data);
+            }
+            other => panic!("expected ContentBlock::Image, got {:?}", other),
+        }
+    }
+
+    /// `content_to_dispatch` returns None for non-image FileData.
+    #[test]
+    fn non_image_file_data_dropped() {
+        use assistant_core::ChannelContent;
+
+        let content = ChannelContent::FileData {
+            data: b"pdf".to_vec(),
+            filename: "doc.pdf".to_string(),
+            mime_type: "application/pdf".to_string(),
+        };
+        let result = ChannelRunner::content_to_dispatch(&content);
+        assert!(result.is_none(), "non-image FileData must be dropped");
     }
 
     /// Per-conversation lock serialises concurrent turns.

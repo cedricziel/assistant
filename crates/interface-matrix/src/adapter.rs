@@ -15,6 +15,7 @@ use anyhow::Result;
 use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, ToolHandler,
 };
+use assistant_transcription::{TranscriptionProvider, TranscriptionRequest};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream::Stream;
@@ -23,6 +24,12 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::client::MatrixClient;
+
+/// Maximum audio file size downloaded for transcription (25 MB — Whisper API limit).
+const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+
+/// Maximum image file size downloaded (10 MB).
+const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Matrix `ChannelAdapter`.
 pub struct MatrixAdapter {
@@ -33,6 +40,10 @@ pub struct MatrixAdapter {
     next_batch_path: PathBuf,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
+    /// Optional audio transcription provider for voice messages.
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    /// BCP-47 language hint passed to the transcription provider.
+    transcription_language: Option<String>,
 }
 
 impl MatrixAdapter {
@@ -54,7 +65,20 @@ impl MatrixAdapter {
             next_batch_path,
             stop_tx,
             stop_rx,
+            transcription: None,
+            transcription_language: None,
         }
+    }
+
+    /// Attach an audio transcription provider for voice message support.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
+        self
     }
 
     pub fn api_client(&self) -> Arc<MatrixClient> {
@@ -78,6 +102,8 @@ impl ChannelAdapter for MatrixAdapter {
         let allowed_users = self.allowed_users.clone();
         let next_batch_path = self.next_batch_path.clone();
         let mut stop_rx = self.stop_rx.clone();
+        let transcription = self.transcription.clone();
+        let transcription_language = self.transcription_language.clone();
 
         let (tx, rx) = mpsc::channel::<ChannelMessage>(64);
 
@@ -158,60 +184,187 @@ impl ChannelAdapter for MatrixAdapter {
                                     .get("msgtype")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
-                                if msgtype != "m.text" {
-                                    continue;
-                                }
-                                let text = event
-                                    .content
-                                    .get("body")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                if text.is_empty() {
-                                    continue;
-                                }
-                                // Filter own messages.
-                                if event.sender == client.user_id {
-                                    debug!(sender = %event.sender, "Matrix: ignoring self-message");
-                                    continue;
-                                }
-                                // Allowlist checks.
-                                if !allowed_rooms.is_empty() && !allowed_rooms.contains(room_id) {
-                                    debug!(room_id, "Matrix: room not in allowlist; dropping");
-                                    continue;
-                                }
-                                if !allowed_users.is_empty()
-                                    && !allowed_users.contains(&event.sender)
-                                {
-                                    debug!(sender = %event.sender, "Matrix: user not in allowlist; dropping");
-                                    continue;
-                                }
 
-                                let mut metadata = std::collections::HashMap::new();
-                                metadata.insert(
-                                    "room_id".to_string(),
-                                    serde_json::Value::String(room_id.clone()),
-                                );
-                                metadata.insert(
-                                    "sender".to_string(),
-                                    serde_json::Value::String(event.sender.clone()),
-                                );
+                                match msgtype {
+                                    "m.text" => {
+                                        let text = event
+                                            .content
+                                            .get("body")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        if text.is_empty() {
+                                            continue;
+                                        }
+                                        if event.sender == client.user_id {
+                                            debug!(sender = %event.sender, "Matrix: ignoring self-message");
+                                            continue;
+                                        }
+                                        if !allowed_rooms.is_empty()
+                                            && !allowed_rooms.contains(room_id)
+                                        {
+                                            debug!(
+                                                room_id,
+                                                "Matrix: room not in allowlist; dropping"
+                                            );
+                                            continue;
+                                        }
+                                        if !allowed_users.is_empty()
+                                            && !allowed_users.contains(&event.sender)
+                                        {
+                                            debug!(sender = %event.sender, "Matrix: user not in allowlist; dropping");
+                                            continue;
+                                        }
+                                        let msg = build_message(
+                                            room_id,
+                                            &event.sender,
+                                            event.event_id.clone(),
+                                            ChannelContent::Text(text),
+                                        );
+                                        if tx.send(msg).await.is_err() {
+                                            return;
+                                        }
+                                    }
 
-                                let msg = ChannelMessage {
-                                    channel_type: ChannelType::Matrix,
-                                    platform_message_id: event.event_id.clone(),
-                                    sender: ChannelUser {
-                                        platform_id: room_id.clone(),
-                                        display_name: Some(event.sender.clone()),
-                                    },
-                                    content: ChannelContent::Text(text),
-                                    thread_id: None,
-                                    timestamp: Utc::now(),
-                                    metadata,
-                                };
+                                    "m.audio" => {
+                                        if event.sender == client.user_id {
+                                            debug!(sender = %event.sender, "Matrix: ignoring self voice message");
+                                            continue;
+                                        }
+                                        if !allowed_rooms.is_empty()
+                                            && !allowed_rooms.contains(room_id)
+                                        {
+                                            debug!(
+                                                room_id,
+                                                "Matrix: room not in allowlist; dropping voice"
+                                            );
+                                            continue;
+                                        }
+                                        if !allowed_users.is_empty()
+                                            && !allowed_users.contains(&event.sender)
+                                        {
+                                            debug!(sender = %event.sender, "Matrix: user not in allowlist; dropping voice");
+                                            continue;
+                                        }
+                                        let Some(ref provider) = transcription else {
+                                            warn!(
+                                                room_id,
+                                                sender = %event.sender,
+                                                "Matrix: received voice message but no transcription provider configured; dropping"
+                                            );
+                                            continue;
+                                        };
+                                        let mxc_url =
+                                            match event.content.get("url").and_then(|v| v.as_str())
+                                            {
+                                                Some(u) => u.to_string(),
+                                                None => {
+                                                    warn!(
+                                                        room_id,
+                                                        "Matrix: m.audio event missing url field"
+                                                    );
+                                                    continue;
+                                                }
+                                            };
+                                        let (audio_bytes, mime_type) = match client
+                                            .download_media(&mxc_url, MAX_AUDIO_BYTES)
+                                            .await
+                                        {
+                                            Ok(v) => v,
+                                            Err(e) => {
+                                                warn!(error = %e, room_id, "Matrix: failed to download audio");
+                                                continue;
+                                            }
+                                        };
+                                        let request = TranscriptionRequest {
+                                            audio_data: audio_bytes,
+                                            mime_type,
+                                            filename: None,
+                                            language: transcription_language.clone(),
+                                        };
+                                        let transcript = match provider.transcribe(request).await {
+                                            Ok(r) => r.text,
+                                            Err(e) => {
+                                                warn!(error = %e, room_id, "Matrix: audio transcription failed");
+                                                continue;
+                                            }
+                                        };
+                                        let text = format!("[Voice message]: {transcript}");
+                                        let msg = build_message(
+                                            room_id,
+                                            &event.sender,
+                                            event.event_id.clone(),
+                                            ChannelContent::Text(text),
+                                        );
+                                        if tx.send(msg).await.is_err() {
+                                            return;
+                                        }
+                                    }
 
-                                if tx.send(msg).await.is_err() {
-                                    return; // receiver dropped
+                                    "m.image" => {
+                                        if event.sender == client.user_id {
+                                            debug!(sender = %event.sender, "Matrix: ignoring self image");
+                                            continue;
+                                        }
+                                        if !allowed_rooms.is_empty()
+                                            && !allowed_rooms.contains(room_id)
+                                        {
+                                            debug!(
+                                                room_id,
+                                                "Matrix: room not in allowlist; dropping image"
+                                            );
+                                            continue;
+                                        }
+                                        if !allowed_users.is_empty()
+                                            && !allowed_users.contains(&event.sender)
+                                        {
+                                            debug!(sender = %event.sender, "Matrix: user not in allowlist; dropping image");
+                                            continue;
+                                        }
+                                        let mxc_url =
+                                            match event.content.get("url").and_then(|v| v.as_str())
+                                            {
+                                                Some(u) => u.to_string(),
+                                                None => {
+                                                    warn!(
+                                                        room_id,
+                                                        "Matrix: m.image event missing url field"
+                                                    );
+                                                    continue;
+                                                }
+                                            };
+                                        let filename = event
+                                            .content
+                                            .get("body")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("image")
+                                            .to_string();
+                                        let (image_bytes, mime_type) = match client
+                                            .download_media(&mxc_url, MAX_IMAGE_BYTES)
+                                            .await
+                                        {
+                                            Ok(v) => v,
+                                            Err(e) => {
+                                                warn!(error = %e, room_id, "Matrix: failed to download image");
+                                                continue;
+                                            }
+                                        };
+                                        let msg = build_message(
+                                            room_id,
+                                            &event.sender,
+                                            event.event_id.clone(),
+                                            ChannelContent::FileData {
+                                                data: image_bytes,
+                                                filename,
+                                                mime_type,
+                                            },
+                                        );
+                                        if tx.send(msg).await.is_err() {
+                                            return;
+                                        }
+                                    }
+
+                                    _ => {} // ignore other message types
                                 }
                             }
                         }
@@ -269,5 +422,366 @@ impl ChannelAdapter for MatrixAdapter {
             .send_message(room_id, &format!("Sorry, I encountered an error: {err}"))
             .await;
         Ok(())
+    }
+}
+
+fn build_message(
+    room_id: &str,
+    sender: &str,
+    event_id: Option<String>,
+    content: ChannelContent,
+) -> ChannelMessage {
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert(
+        "room_id".to_string(),
+        serde_json::Value::String(room_id.to_string()),
+    );
+    metadata.insert(
+        "sender".to_string(),
+        serde_json::Value::String(sender.to_string()),
+    );
+    ChannelMessage {
+        channel_type: ChannelType::Matrix,
+        platform_message_id: event_id,
+        sender: ChannelUser {
+            platform_id: room_id.to_string(),
+            display_name: Some(sender.to_string()),
+        },
+        content,
+        thread_id: None,
+        timestamp: Utc::now(),
+        metadata,
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use assistant_transcription::{
+        TranscriptionProvider, TranscriptionRequest, TranscriptionResult,
+    };
+    use async_trait::async_trait;
+    use futures::StreamExt;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::client::MatrixClient;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    fn make_client(server: &MockServer) -> Arc<MatrixClient> {
+        Arc::new(
+            MatrixClient::new_with_token(server.uri(), "test-token", "@bot:example.com").unwrap(),
+        )
+    }
+
+    fn make_adapter(client: Arc<MatrixClient>) -> MatrixAdapter {
+        MatrixAdapter::new(client, vec![], vec![])
+    }
+
+    /// Build a minimal sync JSON with one message event in room "!room:example.com".
+    fn sync_with_event(
+        msgtype: &str,
+        sender: &str,
+        extra_content: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut content = serde_json::json!({ "msgtype": msgtype });
+        if let serde_json::Value::Object(ref mut map) = content {
+            if let serde_json::Value::Object(extra) = extra_content {
+                map.extend(extra);
+            }
+        }
+        serde_json::json!({
+            "next_batch": "s1",
+            "rooms": {
+                "join": {
+                    "!room:example.com": {
+                        "timeline": {
+                            "events": [{
+                                "type": "m.room.message",
+                                "sender": sender,
+                                "event_id": "$evt1",
+                                "content": content
+                            }]
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// Mount a two-sync sequence: first an empty bootstrap, then the real event.
+    async fn mount_two_syncs(server: &MockServer, event_sync: serde_json::Value) {
+        let bootstrap = serde_json::json!({ "next_batch": "s0", "rooms": {} });
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(bootstrap)
+                    .append_header("X-Seq", "0"),
+            )
+            .up_to_n_times(1)
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(event_sync))
+            .mount(server)
+            .await;
+    }
+
+    /// A transcription provider that always returns a fixed transcript.
+    struct FakeTranscriber(String);
+
+    #[async_trait]
+    impl TranscriptionProvider for FakeTranscriber {
+        fn name(&self) -> &str {
+            "fake"
+        }
+        async fn transcribe(
+            &self,
+            _req: TranscriptionRequest,
+        ) -> anyhow::Result<TranscriptionResult> {
+            Ok(TranscriptionResult {
+                text: self.0.clone(),
+                language: None,
+                duration_secs: None,
+            })
+        }
+    }
+
+    // ── voice tests ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn voice_message_transcribed_and_emitted() {
+        let server = MockServer::start().await;
+        // Media download mock
+        Mock::given(method("GET"))
+            .and(path("/_matrix/media/v3/download/example.com/audio1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(b"audio".as_ref())
+                    .append_header("Content-Type", "audio/ogg"),
+            )
+            .mount(&server)
+            .await;
+        let event_sync = sync_with_event(
+            "m.audio",
+            "@user:example.com",
+            serde_json::json!({ "url": "mxc://example.com/audio1", "body": "voice.ogg" }),
+        );
+        mount_two_syncs(&server, event_sync).await;
+
+        let client = make_client(&server);
+        let provider = Arc::new(FakeTranscriber("hello world".to_string()));
+        let adapter = make_adapter(client).with_transcription(provider, None);
+
+        let mut stream = adapter.start().await.unwrap();
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+            .await
+            .expect("timeout")
+            .expect("stream ended");
+
+        assert!(
+            matches!(&msg.content, ChannelContent::Text(t) if t == "[Voice message]: hello world"),
+            "unexpected content: {:?}",
+            msg.content
+        );
+    }
+
+    #[tokio::test]
+    async fn voice_message_no_provider_dropped() {
+        let server = MockServer::start().await;
+        let event_sync = sync_with_event(
+            "m.audio",
+            "@user:example.com",
+            serde_json::json!({ "url": "mxc://example.com/audio2" }),
+        );
+        // Third sync returns empty so the stream doesn't hang.
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "next_batch": "s2", "rooms": {} })),
+            )
+            .mount(&server)
+            .await;
+        mount_two_syncs(&server, event_sync).await;
+
+        let client = make_client(&server);
+        let adapter = make_adapter(client); // no transcription provider
+
+        let mut stream = adapter.start().await.unwrap();
+        // Expect NO message within a short window.
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
+        assert!(
+            result.is_err(),
+            "expected timeout — no message should be emitted"
+        );
+    }
+
+    #[tokio::test]
+    async fn voice_message_from_self_dropped() {
+        let server = MockServer::start().await;
+        let event_sync = sync_with_event(
+            "m.audio",
+            "@bot:example.com", // same as client user_id
+            serde_json::json!({ "url": "mxc://example.com/audio3" }),
+        );
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "next_batch": "s2", "rooms": {} })),
+            )
+            .mount(&server)
+            .await;
+        mount_two_syncs(&server, event_sync).await;
+
+        let client = make_client(&server);
+        let provider = Arc::new(FakeTranscriber("ignored".to_string()));
+        let adapter = make_adapter(client).with_transcription(provider, None);
+
+        let mut stream = adapter.start().await.unwrap();
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
+        assert!(result.is_err(), "self voice message should be dropped");
+    }
+
+    #[tokio::test]
+    async fn voice_message_non_allowed_user_dropped() {
+        let server = MockServer::start().await;
+        let event_sync = sync_with_event(
+            "m.audio",
+            "@stranger:example.com",
+            serde_json::json!({ "url": "mxc://example.com/audio4" }),
+        );
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "next_batch": "s2", "rooms": {} })),
+            )
+            .mount(&server)
+            .await;
+        mount_two_syncs(&server, event_sync).await;
+
+        let client = make_client(&server);
+        let provider = Arc::new(FakeTranscriber("ignored".to_string()));
+        // Only allow "@allowed:example.com"
+        let mut adapter =
+            MatrixAdapter::new(client, vec![], vec!["@allowed:example.com".to_string()]);
+        adapter = adapter.with_transcription(provider, None);
+
+        let mut stream = adapter.start().await.unwrap();
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
+        assert!(
+            result.is_err(),
+            "non-allowed user voice message should be dropped"
+        );
+    }
+
+    // ── image tests ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn image_message_emitted_as_file_data() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_matrix/media/v3/download/example.com/img1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(b"imgdata".as_ref())
+                    .append_header("Content-Type", "image/jpeg"),
+            )
+            .mount(&server)
+            .await;
+        let event_sync = sync_with_event(
+            "m.image",
+            "@user:example.com",
+            serde_json::json!({ "url": "mxc://example.com/img1", "body": "photo.jpg" }),
+        );
+        mount_two_syncs(&server, event_sync).await;
+
+        let client = make_client(&server);
+        let adapter = make_adapter(client);
+
+        let mut stream = adapter.start().await.unwrap();
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+            .await
+            .expect("timeout")
+            .expect("stream ended");
+
+        match &msg.content {
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type,
+            } => {
+                assert_eq!(data, b"imgdata");
+                assert_eq!(filename, "photo.jpg");
+                assert_eq!(mime_type, "image/jpeg");
+            }
+            other => panic!("expected FileData, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn image_message_from_self_dropped() {
+        let server = MockServer::start().await;
+        let event_sync = sync_with_event(
+            "m.image",
+            "@bot:example.com",
+            serde_json::json!({ "url": "mxc://example.com/img2", "body": "photo.jpg" }),
+        );
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "next_batch": "s2", "rooms": {} })),
+            )
+            .mount(&server)
+            .await;
+        mount_two_syncs(&server, event_sync).await;
+
+        let client = make_client(&server);
+        let adapter = make_adapter(client);
+
+        let mut stream = adapter.start().await.unwrap();
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
+        assert!(result.is_err(), "self image should be dropped");
+    }
+
+    #[tokio::test]
+    async fn image_message_non_allowed_user_dropped() {
+        let server = MockServer::start().await;
+        let event_sync = sync_with_event(
+            "m.image",
+            "@stranger:example.com",
+            serde_json::json!({ "url": "mxc://example.com/img3", "body": "photo.jpg" }),
+        );
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/sync"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "next_batch": "s2", "rooms": {} })),
+            )
+            .mount(&server)
+            .await;
+        mount_two_syncs(&server, event_sync).await;
+
+        let client = make_client(&server);
+        let adapter = MatrixAdapter::new(client, vec![], vec!["@allowed:example.com".to_string()]);
+
+        let mut stream = adapter.start().await.unwrap();
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
+        assert!(result.is_err(), "non-allowed user image should be dropped");
     }
 }

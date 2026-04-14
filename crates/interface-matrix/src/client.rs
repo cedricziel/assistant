@@ -147,6 +147,57 @@ impl MatrixClient {
         Ok(())
     }
 
+    // ── Media download ────────────────────────────────────────────────────────
+
+    /// Download a Matrix Content Repository resource identified by an `mxc://` URI.
+    ///
+    /// Returns `(bytes, mime_type)`. Enforces `max_bytes` to prevent OOM.
+    pub async fn download_media(
+        &self,
+        mxc_url: &str,
+        max_bytes: usize,
+    ) -> Result<(Vec<u8>, String)> {
+        let rest = mxc_url
+            .strip_prefix("mxc://")
+            .ok_or_else(|| anyhow::anyhow!("not an mxc:// URI: {mxc_url}"))?;
+        let sep = rest
+            .find('/')
+            .ok_or_else(|| anyhow::anyhow!("malformed mxc:// URI (no media_id): {mxc_url}"))?;
+        let server = &rest[..sep];
+        let media_id = &rest[sep + 1..];
+        let url = format!(
+            "{}/_matrix/media/v3/download/{}/{}",
+            self.homeserver_url, server, media_id
+        );
+        debug!(url = %url, "Matrix download_media");
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Matrix download_media request")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Matrix download_media failed ({status}): {err}");
+        }
+        let mime_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
+        let bytes = resp.bytes().await.context("Matrix download_media body")?;
+        if bytes.len() > max_bytes {
+            anyhow::bail!(
+                "Matrix download_media: response too large ({} > {} bytes)",
+                bytes.len(),
+                max_bytes
+            );
+        }
+        Ok((bytes.to_vec(), mime_type))
+    }
+
     // ── Join room ────────────────────────────────────────────────────────────
 
     /// Accept a room invite.
@@ -243,5 +294,74 @@ mod tests {
         let client = mock_client(&server).await;
         let resp = client.sync(None, 0).await.unwrap();
         assert_eq!(resp.next_batch, "s123");
+    }
+
+    #[tokio::test]
+    async fn download_media_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_matrix/media/v3/download/example.com/abc123"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(b"audio-data".as_ref())
+                    .append_header("Content-Type", "audio/ogg"),
+            )
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        let (bytes, mime) = client
+            .download_media("mxc://example.com/abc123", 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"audio-data");
+        assert_eq!(mime, "audio/ogg");
+    }
+
+    #[tokio::test]
+    async fn download_media_malformed_uri() {
+        let server = MockServer::start().await;
+        let client = mock_client(&server).await;
+        let result = client
+            .download_media("https://example.com/not-mxc", 1024)
+            .await;
+        assert!(result.is_err(), "expected error for non-mxc URI");
+    }
+
+    #[tokio::test]
+    async fn download_media_non_200() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        let result = client
+            .download_media("mxc://example.com/missing", 1024 * 1024)
+            .await;
+        assert!(result.is_err(), "expected error for 404");
+        assert!(
+            result.unwrap_err().to_string().contains("404"),
+            "error should mention status"
+        );
+    }
+
+    #[tokio::test]
+    async fn download_media_exceeds_size_limit() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(b"ABCDEFGHIJ".as_ref())
+                    .append_header("Content-Type", "audio/ogg"),
+            )
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        // limit to 5 bytes — body is 10
+        let result = client.download_media("mxc://example.com/big", 5).await;
+        assert!(
+            result.is_err(),
+            "expected error when body exceeds max_bytes"
+        );
     }
 }

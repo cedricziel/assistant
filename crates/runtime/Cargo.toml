@@ -39,6 +39,7 @@ hmac = { workspace = true }
 hex = { workspace = true }
 lru = { workspace = true }
 futures = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }
