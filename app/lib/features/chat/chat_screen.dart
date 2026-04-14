@@ -147,8 +147,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           : Drawer(
               child: SafeArea(
                 child: ConversationList(
-                  onConversationSelected: () =>
-                      Navigator.of(context).pop(),
+                  onConversationSelected: () => Navigator.of(context).pop(),
                 ),
               ),
             ),
@@ -156,129 +155,134 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
         child: Row(
-        children: [
-          // Conversation list sidebar (wide screens only).
-          if (isWide)
-            SizedBox(
-              width: 240,
-              child: Container(
-                decoration: const BoxDecoration(
-                  border: Border(
-                    right: BorderSide(color: Colors.black12),
+          children: [
+            // Conversation list sidebar (wide screens only).
+            if (isWide)
+              SizedBox(
+                width: 240,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    border: Border(right: BorderSide(color: Colors.black12)),
                   ),
+                  child: const ConversationList(),
                 ),
-                child: const ConversationList(),
               ),
-            ),
 
-          // Chat area.
-          Expanded(
-            child: Column(
-              children: [
-                // Error banner.
-                if (chatState.error != null)
-                  Material(
-                    color: Colors.red.shade50,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+            // Chat area.
+            Expanded(
+              child: Column(
+                children: [
+                  // Error banner.
+                  if (chatState.error != null)
+                    Material(
+                      color: Colors.red.shade50,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.warning_amber_outlined,
+                              color: Colors.red.shade700,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                chatState.error!,
+                                style: TextStyle(color: Colors.red.shade700),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () {
+                                ref.read(chatProvider.notifier).dismissError();
+                              },
+                            ),
+                          ],
+                        ),
                       ),
+                    ),
+
+                  // Loading indicator when fetching history.
+                  if (chatState.isLoadingHistory)
+                    const LinearProgressIndicator(),
+
+                  // Message list.
+                  Expanded(
+                    child: chatState.messages.isEmpty
+                        ? const _EmptyChat()
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 16,
+                              horizontal: 12,
+                            ),
+                            itemCount: chatState.messages.length,
+                            itemBuilder: (context, index) {
+                              final msg = chatState.messages[index];
+                              final prevMsg = index > 0
+                                  ? chatState.messages[index - 1]
+                                  : null;
+                              final isGrouped =
+                                  prevMsg != null &&
+                                  prevMsg.role == msg.role &&
+                                  !prevMsg.isStreaming;
+                              return _MessageBubble(
+                                message: msg,
+                                isGrouped: isGrouped,
+                                onRetry: msg.status == MessageStatus.failed
+                                    ? () => ref
+                                          .read(chatProvider.notifier)
+                                          .retryMessage(msg)
+                                    : null,
+                              );
+                            },
+                          ),
+                  ),
+
+                  // Progress indicator (shown while streaming).
+                  if (chatState.isSending && chatState.streamingContent.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            Icons.warning_amber_outlined,
-                            color: Colors.red.shade700,
-                            size: 18,
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                           const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              chatState.error!,
-                              style: TextStyle(color: Colors.red.shade700),
+                          Text(
+                            chatState.statusMessage ?? 'Thinking...',
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              fontSize: 13,
                             ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close, size: 18),
-                            onPressed: () {
-                              ref.read(chatProvider.notifier).dismissError();
-                            },
                           ),
                         ],
                       ),
                     ),
+
+                  // Input row.
+                  _InputRow(
+                    controller: _inputController,
+                    focusNode: _inputFocus,
+                    isSending: chatState.isSending,
+                    pendingQueueCount: chatState.pendingQueue.length,
+                    onSend: _sendMessage,
+                    onStop: () =>
+                        ref.read(chatProvider.notifier).cancelStream(),
                   ),
-
-                // Loading indicator when fetching history.
-                if (chatState.isLoadingHistory)
-                  const LinearProgressIndicator(),
-
-                // Message list.
-                Expanded(
-                  child: chatState.messages.isEmpty
-                      ? const _EmptyChat()
-                      : ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 16,
-                            horizontal: 12,
-                          ),
-                          itemCount: chatState.messages.length,
-                          itemBuilder: (context, index) {
-                            final msg = chatState.messages[index];
-                            final prevMsg = index > 0
-                                ? chatState.messages[index - 1]
-                                : null;
-                            final isGrouped =
-                                prevMsg != null &&
-                                prevMsg.role == msg.role &&
-                                !prevMsg.isStreaming;
-                            return _MessageBubble(
-                              message: msg,
-                              isGrouped: isGrouped,
-                            );
-                          },
-                        ),
-                ),
-
-                // Progress indicator (shown while streaming).
-                if (chatState.isSending && chatState.streamingContent.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          chatState.statusMessage ?? 'Thinking...',
-                          style: const TextStyle(
-                            color: Colors.black54,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // Input row.
-                _InputRow(
-                  controller: _inputController,
-                  focusNode: _inputFocus,
-                  isSending: chatState.isSending,
-                  onSend: _sendMessage,
-                  onStop: () => ref.read(chatProvider.notifier).cancelStream(),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-      ),  // GestureDetector
+          ],
+        ),
+      ), // GestureDetector
     );
   }
 }
@@ -286,58 +290,109 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 // -- Message bubble ----------------------------------------------------------
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, this.isGrouped = false});
+  const _MessageBubble({
+    required this.message,
+    this.isGrouped = false,
+    this.onRetry,
+  });
 
   final ChatMessage message;
   final bool isGrouped;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final isUser = message.isUser;
     final colorScheme = Theme.of(context).colorScheme;
+    final isFailed = message.status == MessageStatus.failed;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: EdgeInsets.only(
-          top: isGrouped ? 2 : 8,
-          bottom: 2,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: const BoxConstraints(maxWidth: 640),
-        decoration: BoxDecoration(
-          color: isUser ? colorScheme.primary : colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: isUser
-                ? const Radius.circular(16)
-                : const Radius.circular(4),
-            bottomRight: isUser
-                ? const Radius.circular(4)
-                : const Radius.circular(16),
-          ),
-        ),
-        child: message.isStreaming && message.content.isEmpty
-            ? _streamingDotsIndicator()
-            : isUser
-                ? SelectableText(
-                    message.content,
-                    style: TextStyle(color: colorScheme.onPrimary),
+      child: Column(
+        crossAxisAlignment: isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: EdgeInsets.only(top: isGrouped ? 2 : 8, bottom: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            constraints: const BoxConstraints(maxWidth: 640),
+            decoration: BoxDecoration(
+              color: isUser
+                  ? colorScheme.primary
+                  : colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: isUser
+                    ? const Radius.circular(16)
+                    : const Radius.circular(4),
+                bottomRight: isUser
+                    ? const Radius.circular(4)
+                    : const Radius.circular(16),
+              ),
+              border: isFailed
+                  ? Border.all(color: Colors.red.shade400, width: 1.5)
+                  : null,
+            ),
+            child: message.isStreaming && message.content.isEmpty
+                ? _streamingDotsIndicator()
+                : isUser
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isFailed)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Icon(
+                            Icons.error_outline,
+                            size: 16,
+                            color: Colors.red.shade300,
+                          ),
+                        ),
+                      Flexible(
+                        child: SelectableText(
+                          message.content,
+                          style: TextStyle(color: colorScheme.onPrimary),
+                        ),
+                      ),
+                    ],
                   )
                 : MarkdownBody(
                     data: message.content,
                     styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
                         .copyWith(
-                      p: TextStyle(color: colorScheme.onSurface),
-                      code: TextStyle(
-                        color: colorScheme.onSurface,
-                        backgroundColor:
-                            colorScheme.surfaceContainerLowest,
-                      ),
-                    ),
+                          p: TextStyle(color: colorScheme.onSurface),
+                          code: TextStyle(
+                            color: colorScheme.onSurface,
+                            backgroundColor: colorScheme.surfaceContainerLowest,
+                          ),
+                        ),
                     selectable: true,
                   ),
+          ),
+          // Retry button shown below the bubble for failed user messages.
+          if (isFailed && onRetry != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: TextButton.icon(
+                key: const Key('retry_button'),
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh, size: 14),
+                label: const Text('Retry'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.red.shade700,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -414,6 +469,7 @@ class _InputRow extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.isSending,
+    required this.pendingQueueCount,
     required this.onSend,
     required this.onStop,
   });
@@ -421,55 +477,82 @@ class _InputRow extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isSending;
+  final int pendingQueueCount;
   final VoidCallback onSend;
   final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    return Container(
-      padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.black12)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              key: const Key('message_input'),
-              controller: controller,
-              focusNode: focusNode,
-              decoration: const InputDecoration(
-                hintText: 'Type a message...',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Queue depth badge — visible when messages are waiting.
+        if (pendingQueueCount > 0)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            color: Colors.amber.shade50,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.hourglass_top_rounded,
+                  size: 14,
+                  color: Colors.amber.shade800,
                 ),
-                isDense: true,
-              ),
-              minLines: 1,
-              maxLines: 6,
-              enabled: !isSending,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => onSend(),
+                const SizedBox(width: 6),
+                Text(
+                  '$pendingQueueCount message${pendingQueueCount == 1 ? '' : 's'} queued',
+                  key: const Key('queue_depth_badge'),
+                  style: TextStyle(fontSize: 12, color: Colors.amber.shade800),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          if (isSending)
-            IconButton.filled(
-              key: const Key('stop_button'),
-              onPressed: onStop,
-              icon: const Icon(Icons.stop_rounded),
-            )
-          else
-            IconButton.filled(
-              key: const Key('send_button'),
-              onPressed: onSend,
-              icon: const Icon(Icons.send),
-            ),
-        ],
-      ),
+        Container(
+          padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: Colors.black12)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('message_input'),
+                  controller: controller,
+                  focusNode: focusNode,
+                  decoration: const InputDecoration(
+                    hintText: 'Type a message...',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    isDense: true,
+                  ),
+                  minLines: 1,
+                  maxLines: 6,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => onSend(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (isSending)
+                IconButton.filled(
+                  key: const Key('stop_button'),
+                  onPressed: onStop,
+                  icon: const Icon(Icons.stop_rounded),
+                )
+              else
+                IconButton.filled(
+                  key: const Key('send_button'),
+                  onPressed: onSend,
+                  icon: const Icon(Icons.send),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
