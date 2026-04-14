@@ -1,5 +1,6 @@
 mod a2a;
 pub mod api;
+pub(crate) mod audio_store;
 pub mod auth;
 pub(crate) mod backends;
 mod flutter_assets;
@@ -29,6 +30,7 @@ use assistant_skills::SkillSource;
 use assistant_storage::registry::SkillRegistry;
 use assistant_storage::{default_db_path, StorageLayer};
 use assistant_tool_executor::ToolExecutor;
+use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use assistant_workflow::{
     spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
     AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
@@ -543,13 +545,65 @@ async fn run_with_args(args: Args) -> Result<()> {
         agent_id: state.agent_id.clone(),
     };
 
+    // -- Build transcription provider (for voice message STT) ----------------
+    let transcription_provider = config
+        .transcription
+        .as_ref()
+        .map(|tc| {
+            let provider = build_transcription_provider(tc)?;
+            info!(
+                provider = provider.name(),
+                "Audio transcription enabled (web UI)"
+            );
+            Ok::<_, anyhow::Error>(provider)
+        })
+        .transpose()?;
+
+    // -- Build TTS provider (for voice message playback) ---------------------
+    let tts_provider = config
+        .tts
+        .as_ref()
+        .map(|tc| {
+            let provider = build_tts_provider(tc)?;
+            info!(provider = provider.name(), "TTS enabled (web UI)");
+            Ok::<_, anyhow::Error>(provider)
+        })
+        .transpose()?;
+
+    // -- In-memory audio store (tool-synthesized audio) ----------------------
+    let audio_store = Arc::new(audio_store::AudioStore::new());
+
+    // -- Spawn TTL sweep task ------------------------------------------------
+    {
+        let store = audio_store.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(600));
+            loop {
+                interval.tick().await;
+                store.sweep().await;
+            }
+        });
+    }
+
+    // Register the voice-response tool when TTS is configured.
+    if let Some(ref tts) = tts_provider {
+        executor.register_voice_response(tts.clone(), audio_store.clone());
+        tracing::info!("voice-response tool registered");
+    }
+
     let api_state = {
-        let s = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
+        let mut s = api::ApiState::new(storage.pool.clone(), orchestrator, state.agent_id.clone());
         if let Some(ref d) = state.push_dispatcher {
-            s.with_push_dispatcher(d.clone())
-        } else {
-            s
+            s = s.with_push_dispatcher(d.clone());
         }
+        if let Some(ref tp) = transcription_provider {
+            s = s.with_transcription_provider(tp.clone());
+        }
+        if let Some(ref tts) = tts_provider {
+            s = s.with_tts_provider(tts.clone());
+        }
+        s.audio_store = audio_store.clone();
+        s
     };
 
     let persona_api_state = api::personas::PersonaApiState {

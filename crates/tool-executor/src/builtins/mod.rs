@@ -16,6 +16,7 @@ pub mod memory_search;
 pub mod process;
 pub mod schedule_task;
 pub mod self_analyze;
+pub mod voice_response;
 pub mod web_fetch;
 pub mod web_search;
 
@@ -37,5 +38,6 @@ pub use memory_search::MemorySearchHandler;
 pub use process::ProcessHandler;
 pub use schedule_task::ScheduleTaskHandler;
 pub use self_analyze::SelfAnalyzeHandler;
+pub use voice_response::VoiceResponseHandler;
 pub use web_fetch::WebFetchHandler;
 pub use web_search::WebSearchHandler;

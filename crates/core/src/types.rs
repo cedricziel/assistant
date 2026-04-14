@@ -173,6 +173,10 @@ pub struct AssistantConfig {
     /// Populated from the `[transcription]` section of `config.toml`.
     #[serde(default)]
     pub transcription: Option<TranscriptionConfig>,
+    /// Text-to-speech configuration (optional).
+    /// Populated from the `[tts]` section of `config.toml`.
+    #[serde(default)]
+    pub tts: Option<TtsConfig>,
     /// Push notification / VAPID configuration (`[notifications]` section).
     #[serde(default)]
     pub notifications: NotificationsConfig,
@@ -382,6 +386,41 @@ pub struct TranscriptionConfig {
     pub api_key: Option<String>,
     /// Optional BCP-47 language hint (e.g. `"en"`, `"de"`).
     pub language: Option<String>,
+}
+
+/// Which TTS backend to use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TtsProviderKind {
+    /// OpenAI TTS API (`POST /v1/audio/speech`).
+    OpenAI,
+    /// Deepgram TTS API (`POST /v1/speak`).
+    Deepgram,
+}
+
+/// Configuration for text-to-speech synthesis.
+///
+/// When present, the web UI will offer voice playback on assistant messages.
+///
+/// ```toml
+/// [tts]
+/// provider = "openai"
+/// voice = "nova"
+/// # api_key = "sk-..."  # or set OPENAI_API_KEY env var
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TtsConfig {
+    /// Which TTS backend to use.
+    pub provider: TtsProviderKind,
+    /// Model name (provider-specific default if omitted; e.g. `"tts-1"` for OpenAI).
+    pub model: Option<String>,
+    /// Voice name (provider-specific; e.g. `"nova"`, `"alloy"` for OpenAI).
+    pub voice: Option<String>,
+    /// Base URL override (uses provider-specific default if omitted).
+    pub base_url: Option<String>,
+    /// API key (also checked via provider-specific env vars: `OPENAI_API_KEY` for OpenAI,
+    /// `DEEPGRAM_API_KEY` for Deepgram).
+    pub api_key: Option<String>,
 }
 
 fn default_llm_model() -> String {

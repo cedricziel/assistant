@@ -72,6 +72,8 @@ where
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use assistant_transcription::{TranscriptionProvider, TtsProvider};
+
 use assistant_core::{Interface, MessageRole};
 use assistant_runtime::{AssistantInterface, OrchestratorEvent};
 use assistant_storage::ConversationStore;
@@ -104,6 +106,12 @@ pub struct ApiState {
     pub orchestrator: Arc<dyn AssistantInterface>,
     /// Optional Web Push dispatcher — absent when VAPID keys are not configured.
     pub push_dispatcher: Option<Arc<crate::push::PushDispatcher>>,
+    /// Optional transcription provider for voice message STT.
+    pub transcription_provider: Option<Arc<dyn TranscriptionProvider>>,
+    /// Optional TTS provider for voice playback synthesis.
+    pub tts_provider: Option<Arc<dyn TtsProvider>>,
+    /// In-memory store for tool-synthesized audio blobs.
+    pub audio_store: Arc<crate::audio_store::AudioStore>,
 }
 
 impl ApiState {
@@ -117,11 +125,24 @@ impl ApiState {
             agent_id,
             orchestrator,
             push_dispatcher: None,
+            transcription_provider: None,
+            tts_provider: None,
+            audio_store: Arc::new(crate::audio_store::AudioStore::new()),
         }
     }
 
     pub fn with_push_dispatcher(mut self, dispatcher: Arc<crate::push::PushDispatcher>) -> Self {
         self.push_dispatcher = Some(dispatcher);
+        self
+    }
+
+    pub fn with_transcription_provider(mut self, provider: Arc<dyn TranscriptionProvider>) -> Self {
+        self.transcription_provider = Some(provider);
+        self
+    }
+
+    pub fn with_tts_provider(mut self, provider: Arc<dyn TtsProvider>) -> Self {
+        self.tts_provider = Some(provider);
         self
     }
 }
@@ -608,6 +629,13 @@ pub async fn send_message(
                     }
                     Event::default().event("agent_error").data(message)
                 }
+                OrchestratorEvent::AudioReady { audio_id } => {
+                    let data = serde_json::json!({
+                        "audio_id": audio_id,
+                        "auto_play": true,
+                    });
+                    Event::default().event("audio_ready").data(data.to_string())
+                }
             };
             if sse_tx.send(Ok(sse_event)).await.is_err() {
                 return;
@@ -723,6 +751,9 @@ mod tests {
             agent_id: Arc::new(RwLock::new("default".to_string())),
             orchestrator,
             push_dispatcher: None,
+            transcription_provider: None,
+            tts_provider: None,
+            audio_store: Arc::new(crate::audio_store::AudioStore::new()),
         };
         (state, storage)
     }

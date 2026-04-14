@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -149,6 +151,7 @@ class ChatMessage {
     required this.content,
     this.isStreaming = false,
     this.status = MessageStatus.ok,
+    this.audioId,
   });
 
   final String id;
@@ -157,6 +160,9 @@ class ChatMessage {
   bool isStreaming;
   MessageStatus status;
 
+  /// Non-null when the server has produced audio for this assistant message.
+  final String? audioId;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -164,6 +170,7 @@ class ChatMessage {
     String? content,
     bool? isStreaming,
     MessageStatus? status,
+    String? audioId,
   }) {
     return ChatMessage(
       id: id,
@@ -171,6 +178,7 @@ class ChatMessage {
       content: content ?? this.content,
       isStreaming: isStreaming ?? this.isStreaming,
       status: status ?? this.status,
+      audioId: audioId ?? this.audioId,
     );
   }
 }
@@ -408,6 +416,40 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     }
   }
 
+  /// Upload [audioBytes] to the voice endpoint and stream the response.
+  ///
+  /// Creates a conversation if none is active (same as [sendMessage]).
+  Future<void> sendVoiceMessage(Uint8List audioBytes, String mimeType) async {
+    final api = _api;
+    if (api == null) return;
+
+    final current = state.value ?? const ChatState();
+    String? conversationId = current.conversationId;
+
+    if (conversationId == null) {
+      try {
+        final response = await api.conversations.createConversation(
+          createConversationRequest: CreateConversationRequest((b) => b),
+        );
+        final conv = response.data!;
+        conversationId = conv.id;
+        ref.read(conversationListProvider.notifier).prependConversation(conv);
+        state = AsyncData(
+          (state.value ?? const ChatState()).copyWith(
+            conversationId: conversationId,
+          ),
+        );
+      } catch (e) {
+        state = AsyncData(
+          current.copyWith(error: 'Failed to create conversation: $e'),
+        );
+        return;
+      }
+    }
+
+    await _streamVoiceMessage(audioBytes, mimeType, conversationId);
+  }
+
   /// Retry a failed message.
   ///
   /// Removes the failed [msg] from the message list and re-enqueues its
@@ -441,6 +483,139 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
     } finally {
       _draining = false;
+    }
+  }
+
+  /// Upload voice audio and stream the assistant's SSE response.
+  Future<void> _streamVoiceMessage(
+    Uint8List audioBytes,
+    String mimeType,
+    String conversationId,
+  ) async {
+    final api = _api;
+    if (api == null) return;
+
+    _cancelled = false;
+    final current = state.value ?? const ChatState();
+
+    // Show a placeholder user message while transcribing.
+    final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
+    final userMsg = ChatMessage(
+      id: userMsgId,
+      role: 'user',
+      content: '🎤 Voice message',
+      status: MessageStatus.sending,
+    );
+    final assistantPlaceholder = ChatMessage(
+      id: 'assistant-streaming',
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+    );
+    state = AsyncData(
+      current.copyWith(
+        messages: [...current.messages, userMsg, assistantPlaceholder],
+        isSending: true,
+        streamingContent: '',
+      ),
+    );
+
+    try {
+      await for (final event in api.sendVoiceMessage(
+        conversationId,
+        audioBytes,
+        mimeType,
+      )) {
+        if (_cancelled) break;
+        final chatState = state.value ?? const ChatState();
+
+        if (event is TokenEvent) {
+          final newContent = chatState.streamingContent + event.token;
+          final msgs = List<ChatMessage>.from(chatState.messages);
+          final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+          if (idx != -1) msgs[idx].content = newContent;
+          state = AsyncData(
+            chatState.copyWith(
+              messages: msgs,
+              streamingContent: newContent,
+              clearStatusMessage: true,
+            ),
+          );
+        } else if (event is StatusEvent) {
+          state = AsyncData(chatState.copyWith(statusMessage: event.message));
+        } else if (event is AudioReadyEvent) {
+          // Store audioId on the streaming assistant message for auto-play.
+          final msgs = List<ChatMessage>.from(chatState.messages);
+          final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+          if (idx != -1) {
+            msgs[idx] = msgs[idx].copyWith(audioId: event.audioId);
+          }
+          state = AsyncData(chatState.copyWith(messages: msgs));
+        } else if (event is DoneEvent) {
+          final msgs = List<ChatMessage>.from(chatState.messages);
+          final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+          if (userIdx != -1) {
+            msgs[userIdx] = msgs[userIdx].copyWith(
+              content: event.content.isNotEmpty
+                  ? '[Voice] ${event.content}'
+                  : '🎤 Voice message',
+              status: MessageStatus.ok,
+            );
+          }
+          final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+          if (idx != -1) {
+            msgs[idx] = ChatMessage(
+              id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
+              role: 'assistant',
+              content: event.content,
+              audioId: msgs[idx].audioId,
+            );
+          }
+          state = AsyncData(
+            ChatState(
+              conversationId: conversationId,
+              messages: msgs,
+              pendingQueue: chatState.pendingQueue,
+            ),
+          );
+          ref.read(conversationListProvider.notifier).refresh();
+          return;
+        } else if (event is ErrorEvent) {
+          final msgs = List<ChatMessage>.from(chatState.messages)
+            ..removeWhere((m) => m.id == 'assistant-streaming');
+          final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+          if (userIdx != -1) {
+            msgs[userIdx] = msgs[userIdx].copyWith(
+              status: MessageStatus.failed,
+            );
+          }
+          state = AsyncData(
+            chatState.copyWith(
+              messages: msgs,
+              isSending: false,
+              streamingContent: '',
+              error: event.message,
+            ),
+          );
+          return;
+        }
+      }
+    } catch (e) {
+      final chatState = state.value ?? const ChatState();
+      final msgs = List<ChatMessage>.from(chatState.messages)
+        ..removeWhere((m) => m.id == 'assistant-streaming');
+      final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+      if (userIdx != -1) {
+        msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.failed);
+      }
+      state = AsyncData(
+        chatState.copyWith(
+          messages: msgs,
+          isSending: false,
+          streamingContent: '',
+          error: 'Voice stream error: $e',
+        ),
+      );
     }
   }
 
@@ -533,6 +708,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           // Refresh conversation list to update timestamps/titles.
           ref.read(conversationListProvider.notifier).refresh();
           return;
+        } else if (event is AudioReadyEvent) {
+          final msgs = List<ChatMessage>.from(chatState.messages);
+          final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+          if (idx != -1) {
+            msgs[idx] = msgs[idx].copyWith(audioId: event.audioId);
+          }
+          state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is ErrorEvent) {
           final msgs = List<ChatMessage>.from(chatState.messages)
             ..removeWhere((m) => m.id == 'assistant-streaming');

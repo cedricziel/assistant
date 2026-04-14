@@ -804,6 +804,7 @@ dependencies = [
  "assistant-llm",
  "assistant-skills",
  "assistant-storage",
+ "assistant-transcription",
  "async-trait",
  "chrono",
  "cron",
@@ -831,9 +832,11 @@ dependencies = [
  "reqwest 0.12.28",
  "reqwest-middleware",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -856,6 +859,7 @@ dependencies = [
  "assistant-skills",
  "assistant-storage",
  "assistant-tool-executor",
+ "assistant-transcription",
  "assistant-workflow",
  "assistant-workflow-http",
  "async-trait",
