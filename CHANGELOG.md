@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.96](https://github.com/cedricziel/assistant/compare/v0.1.95...v0.1.96) (2026-04-14)
+
+
+### Features
+
+* **runtime:** route scheduler output to persona home channel ([#438](https://github.com/cedricziel/assistant/issues/438)) ([aaf92ec](https://github.com/cedricziel/assistant/commit/aaf92ec0fe9fb429d496fc617007e1ccb08bb728))
+
+
+### Bug Fixes
+
+* **app:** persist web session across hard reloads ([#440](https://github.com/cedricziel/assistant/issues/440)) ([4c9e28b](https://github.com/cedricziel/assistant/commit/4c9e28b6c6cb523fbdd827f8e3cf511c3830496b))
+* **interface-cli:** wire transcription provider to Matrix interface ([291111b](https://github.com/cedricziel/assistant/commit/291111bfc72a24c01430d2f4c0941120db85fe8c))
+* **pwa:** Safari install prompt and update detection ([#439](https://github.com/cedricziel/assistant/issues/439)) ([8709326](https://github.com/cedricziel/assistant/commit/870932672dfe6dac8e2e3e8d1b97c2f094638749))
+* **release:** fix macOS build signing and sandbox for CI ([#436](https://github.com/cedricziel/assistant/issues/436)) ([17029f7](https://github.com/cedricziel/assistant/commit/17029f772cf63f8c203379e61e0f01b33e6bdea9))
+
 ## [0.1.95](https://github.com/cedricziel/assistant/compare/v0.1.94...v0.1.95) (2026-04-14)
 
 
