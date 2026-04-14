@@ -27,10 +27,12 @@ import '../features/workflows/workflow_detail_screen.dart';
 import '../features/workflows/workflow_editor_screen.dart';
 import '../features/workflows/workflow_run_detail_screen.dart';
 import '../features/workflows/workflows_screen.dart';
+import '../shared/loading_screen.dart';
 import '../shared/nav_shell.dart';
 
 /// Named route constants.
 class AppRoutes {
+  static const loading = '/loading';
   static const setup = '/setup';
   static const contexts = '/contexts';
   static const chat = '/chat';
@@ -71,21 +73,35 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final activeContextAsync = ref.read(activeContextProvider);
 
-      // While the context is still loading from storage, don't redirect — the
-      // router will re-evaluate once the AsyncNotifier settles.
-      if (activeContextAsync.isLoading) return null;
+      // While the context is still loading from storage, show the loading
+      // scaffold — the router will re-evaluate once the AsyncNotifier settles.
+      if (activeContextAsync.isLoading) return AppRoutes.loading;
 
       final hasContext = activeContextAsync.value != null;
       final onContextSwitcher = state.fullPath == AppRoutes.contexts;
       final onSetup = state.fullPath == AppRoutes.setup;
+      final onLoading = state.fullPath == AppRoutes.loading;
 
-      // If no active context and not already on the switcher or setup, redirect there.
+      // Once loading is done, navigate away from the loading scaffold to
+      // the correct destination.
+      if (onLoading) {
+        return hasContext ? AppRoutes.chat : AppRoutes.contexts;
+      }
+
+      // If no active context and not already on the switcher or setup,
+      // redirect to the context switcher.
       if (!hasContext && !onContextSwitcher && !onSetup) {
         return AppRoutes.contexts;
       }
       return null;
     },
     routes: [
+      // -- Loading scaffold: shown while async providers initialise -----------
+      GoRoute(
+        path: AppRoutes.loading,
+        builder: (context, state) => const LoadingScreen(),
+      ),
+
       // -- Legacy setup route (kept for deep-link compatibility) -------------
       GoRoute(
         path: AppRoutes.setup,
