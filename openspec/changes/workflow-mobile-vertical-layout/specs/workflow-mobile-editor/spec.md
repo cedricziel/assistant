@@ -87,6 +87,27 @@ The system SHALL display an informational banner in mobile view when the loaded 
 
 ---
 
+### Requirement: Visual regression baselines are captured for mobile layout
+
+The project SHALL maintain Playwright screenshot baselines for the mobile card list editor. New baselines MUST be committed whenever the mobile editor layout is introduced or structurally changed.
+
+#### Scenario: Mobile card list baseline exists
+
+- **WHEN** the workflow editor is rendered at 390 × 844 px with a 3-node workflow (trigger + 2 actions)
+- **THEN** a Playwright baseline screenshot for the mobile card list view exists in the baselines directory
+
+#### Scenario: Complex-DAG banner baseline exists
+
+- **WHEN** the workflow editor is rendered at 390 × 844 px with a fan-in workflow
+- **THEN** a Playwright baseline screenshot for the complex-graph banner state exists in the baselines directory
+
+#### Scenario: Desktop canvas baseline is not regressed
+
+- **WHEN** the workflow editor is rendered at 1280 × 800 px after the desktop canvas extraction refactor
+- **THEN** the existing desktop canvas baseline either matches pixel-for-pixel or is deliberately updated and committed
+
+---
+
 ### Requirement: Save and validation behave identically to desktop
 
 The system SHALL apply the same validation rules (one trigger required, at least one node, name not empty) and the same save flow in mobile view as in desktop view.
