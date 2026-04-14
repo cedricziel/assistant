@@ -22,7 +22,10 @@ const MAX_DIFF_RATIO_FLUTTER = 0.15;
 const CSS_SETTLE_MS = 300;
 
 // Extra settle time for Flutter to render after network idle.
-const FLUTTER_SETTLE_MS = 800;
+// Flutter web needs time to: initialize WASM, load async providers from
+// SharedPreferences, re-evaluate the router, and render the final state.
+// 3 seconds is the observed upper bound on a developer MacBook; CI may need more.
+const FLUTTER_SETTLE_MS = 3000;
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -153,6 +156,100 @@ async function createWorkflow(page: Page): Promise<string> {
   const id = (body as Record<string, unknown>)?.id as string | undefined;
   if (!id) {
     throw new Error(`Failed to create workflow: ${JSON.stringify(body)}`);
+  }
+  return id;
+}
+
+/**
+ * Create a workflow with a fan-in edge pattern (complex DAG) via the REST API.
+ * The mobile editor detects this and shows the "Complex graph" banner.
+ */
+async function createComplexWorkflow(page: Page): Promise<string> {
+  const { body } = await apiPost(page, "/api/workflows", {
+    name: `E2E Complex Workflow ${Date.now()}`,
+    description: "Fan-in DAG for visual regression",
+    graph: {
+      version: 1,
+      nodes: [
+        { id: "t1", kind: "trigger", config: { type: "manual" } },
+        {
+          id: "a1",
+          kind: "action",
+          config: {
+            type: "http_request",
+            url: "https://a.example.com",
+            method: "GET",
+          },
+        },
+        {
+          id: "a2",
+          kind: "action",
+          config: {
+            type: "http_request",
+            url: "https://b.example.com",
+            method: "POST",
+          },
+        },
+      ],
+      // t1→a1, t1→a2, a1→a2 gives a2 two incoming edges (fan-in)
+      edges: [
+        { from: "t1", to: "a1", on: "trigger" },
+        { from: "t1", to: "a2", on: "trigger" },
+        { from: "a1", to: "a2", on: "success" },
+      ],
+      execution: { max_steps: 200, max_visits_per_node: 25 },
+    },
+    active: false,
+  });
+  const id = (body as Record<string, unknown>)?.id as string | undefined;
+  if (!id) {
+    throw new Error(
+      `Failed to create complex workflow: ${JSON.stringify(body)}`,
+    );
+  }
+  return id;
+}
+
+/**
+ * Create a linear 3-node workflow (trigger + 2 actions) for mobile editor
+ * baseline tests.
+ */
+async function createLinearWorkflow(page: Page): Promise<string> {
+  const { body } = await apiPost(page, "/api/workflows", {
+    name: `E2E Linear Workflow ${Date.now()}`,
+    description: "Linear chain for mobile editor baseline",
+    graph: {
+      version: 1,
+      nodes: [
+        { id: "t1", kind: "trigger", config: { type: "manual" } },
+        {
+          id: "a1",
+          kind: "action",
+          config: {
+            type: "http_request",
+            url: "https://step1.example.com",
+            method: "GET",
+          },
+        },
+        {
+          id: "a2",
+          kind: "action",
+          config: { type: "assistant_turn", prompt: "Summarise the response" },
+        },
+      ],
+      edges: [
+        { from: "t1", to: "a1", on: "trigger" },
+        { from: "a1", to: "a2", on: "success" },
+      ],
+      execution: { max_steps: 200, max_visits_per_node: 25 },
+    },
+    active: false,
+  });
+  const id = (body as Record<string, unknown>)?.id as string | undefined;
+  if (!id) {
+    throw new Error(
+      `Failed to create linear workflow: ${JSON.stringify(body)}`,
+    );
   }
   return id;
 }
@@ -444,7 +541,40 @@ test.describe("Authenticated pages", () => {
     );
   });
 
+  test("workflow editor - new workflow (all viewports)", async ({ page }) => {
+    await navigateAndSettle(page, "/workflows/new");
+    await expect(page).toHaveScreenshot("workflow-editor-new.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("workflow editor - mobile card list (linear 3-node workflow)", async ({
+    page,
+  }) => {
+    const workflowId = await createLinearWorkflow(page);
+    await navigateAndSettle(page, `/workflows/${workflowId}/edit`);
+    await expect(page).toHaveScreenshot(
+      "workflow-editor-mobile-card-list.png",
+      {
+        fullPage: true,
+        maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+      },
+    );
+  });
+
+  test("workflow editor - complex DAG banner (mobile)", async ({ page }) => {
+    const workflowId = await createComplexWorkflow(page);
+    await navigateAndSettle(page, `/workflows/${workflowId}/edit`);
+    await expect(page).toHaveScreenshot("workflow-editor-complex-dag.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
   test("core routes avoid viewport horizontal overflow", async ({ page }) => {
+    // 10 routes × ~5 s each (3 s settle + navigation) — extend the default 30 s limit.
+    test.setTimeout(90_000);
     const routes = [
       "/chat",
       "/traces",

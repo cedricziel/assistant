@@ -38,10 +38,23 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
         ? ServerMode.embedded
         : ServerMode.remote;
 
+    // On web, honour `_token` and optional `_url` query parameters so that
+    // automated flows (e2e tests, deep links) can connect without any user
+    // interaction.  The form is pre-populated and auto-submitted after the
+    // first frame.
+    final autoToken = isWebPlatform ? Uri.base.queryParameters['_token'] : null;
+    final autoUrl = isWebPlatform ? Uri.base.queryParameters['_url'] : null;
+
     _urlController = TextEditingController(
-      text: isWebPlatform ? Uri.base.origin : 'http://127.0.0.1:8080',
+      text:
+          autoUrl ??
+          (isWebPlatform ? Uri.base.origin : 'http://127.0.0.1:8080'),
     );
-    _tokenController = TextEditingController();
+    _tokenController = TextEditingController(text: autoToken ?? '');
+
+    if (autoToken != null && autoToken.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _connect());
+    }
   }
 
   @override

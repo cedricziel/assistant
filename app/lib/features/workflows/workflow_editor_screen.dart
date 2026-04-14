@@ -8,6 +8,15 @@ import 'package:uuid/uuid.dart';
 import 'workflows_provider.dart';
 
 // ---------------------------------------------------------------------------
+// Canvas layout constants (shared across canvas widgets)
+
+const _kNodeW = 160.0;
+const _kNodeH = 72.0;
+const _kNodeSize = Size(_kNodeW, _kNodeH);
+const _kCanvasW = 3000.0;
+const _kCanvasH = 3000.0;
+
+// ---------------------------------------------------------------------------
 // Local graph model (not the API model — nodes carry canvas positions)
 
 class EditorNode {
@@ -23,10 +32,7 @@ class EditorNode {
   Map<String, dynamic> config;
   Offset position;
 
-  EditorNode copyWith({
-    Map<String, dynamic>? config,
-    Offset? position,
-  }) {
+  EditorNode copyWith({Map<String, dynamic>? config, Offset? position}) {
     return EditorNode(
       id: id,
       kind: kind,
@@ -101,29 +107,73 @@ class EditorNode {
     }
   }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'kind': kind,
-        'config': config,
-      };
+  Map<String, dynamic> toJson() => {'id': id, 'kind': kind, 'config': config};
 }
 
 class EditorEdge {
-  EditorEdge({
-    required this.from,
-    required this.to,
-    this.on,
-  });
+  EditorEdge({required this.from, required this.to, this.on});
 
   final String from;
   final String to;
   String? on;
 
   Map<String, dynamic> toJson() => {
-        'from': from,
-        'to': to,
-        if (on != null) 'on': on,
-      };
+    'from': from,
+    'to': to,
+    if (on != null) 'on': on,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mobile edge inference
+
+/// Builds a linear edge chain from the ordered [nodes] list.
+/// Each node connects to the next via its primary outcome.
+List<EditorEdge> buildMobileEdges(List<EditorNode> nodes) {
+  final edges = <EditorEdge>[];
+  for (int i = 0; i < nodes.length - 1; i++) {
+    final from = nodes[i];
+    final to = nodes[i + 1];
+    final String outcome;
+    switch (from.kind) {
+      case 'trigger':
+        outcome = 'trigger';
+        break;
+      case 'condition':
+        outcome = 'true';
+        break;
+      default:
+        outcome = 'success';
+    }
+    edges.add(EditorEdge(from: from.id, to: to.id, on: outcome));
+  }
+  return edges;
+}
+
+/// Returns true when [edges] form a non-linear graph that cannot be
+/// represented as a simple chain — i.e. any node has more than one
+/// incoming edge, or nodes exist that are disconnected from the chain.
+bool isComplexDag(List<EditorNode> nodes, List<EditorEdge> edges) {
+  if (nodes.length <= 1 || edges.isEmpty) return false;
+
+  // Any node with multiple incoming edges → complex
+  final incomingCount = <String, int>{};
+  for (final edge in edges) {
+    incomingCount[edge.to] = (incomingCount[edge.to] ?? 0) + 1;
+  }
+  if (incomingCount.values.any((c) => c > 1)) return true;
+
+  // Any non-first node not referenced by any edge → disconnected
+  final referenced = <String>{};
+  for (final edge in edges) {
+    referenced.add(edge.from);
+    referenced.add(edge.to);
+  }
+  for (int i = 1; i < nodes.length; i++) {
+    if (!referenced.contains(nodes[i].id)) return true;
+  }
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,10 +202,7 @@ class _EdgePainter extends CustomPainter {
   }
 
   Offset _nodeTopCenter(EditorNode n) {
-    return Offset(
-      n.position.dx + nodeSize.width / 2,
-      n.position.dy,
-    );
+    return Offset(n.position.dx + nodeSize.width / 2, n.position.dy);
   }
 
   @override
@@ -164,8 +211,7 @@ class _EdgePainter extends CustomPainter {
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
-    final arrowPaint = Paint()
-      ..style = PaintingStyle.fill;
+    final arrowPaint = Paint()..style = PaintingStyle.fill;
 
     final labelBg = Paint()
       ..color = Colors.white
@@ -202,11 +248,7 @@ class _EdgePainter extends CustomPainter {
       // Edge label
       if (edge.on != null) {
         final mid = _cubicPoint(start, cp1, cp2, end, 0.5);
-        final labelRect = Rect.fromCenter(
-          center: mid,
-          width: 56,
-          height: 18,
-        );
+        final labelRect = Rect.fromCenter(center: mid, width: 56, height: 18);
         canvas.drawRRect(
           RRect.fromRectAndRadius(labelRect, const Radius.circular(9)),
           labelBg,
@@ -222,17 +264,16 @@ class _EdgePainter extends CustomPainter {
           ),
           textDirection: TextDirection.ltr,
         )..layout(maxWidth: 52);
-        tp.paint(
-          canvas,
-          Offset(mid.dx - tp.width / 2, mid.dy - tp.height / 2),
-        );
+        tp.paint(canvas, Offset(mid.dx - tp.width / 2, mid.dy - tp.height / 2));
       }
     }
 
     // Pending edge (drag-in-progress)
     if (pendingFrom != null && pendingEnd != null) {
-      final fromNode =
-          nodes.firstWhere((n) => n.id == pendingFrom, orElse: () => nodes.first);
+      final fromNode = nodes.firstWhere(
+        (n) => n.id == pendingFrom,
+        orElse: () => nodes.first,
+      );
       final start = _nodeBottomCenter(fromNode);
       paint.color = Colors.grey.withValues(alpha: 0.5);
       paint.strokeWidth = 1.5;
@@ -298,12 +339,6 @@ class WorkflowEditorScreen extends ConsumerStatefulWidget {
 }
 
 class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
-  static const _nodeW = 160.0;
-  static const _nodeH = 72.0;
-  static const _nodeSize = Size(_nodeW, _nodeH);
-  static const _canvasW = 3000.0;
-  static const _canvasH = 3000.0;
-
   final _uuid = const Uuid();
   final _nameController = TextEditingController();
   final _descController = TextEditingController();
@@ -322,6 +357,9 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
   String? _error;
   bool _loaded = false;
 
+  // Tracks which layout branch is active; set during build by LayoutBuilder.
+  bool _isMobileLayout = false;
+
   @override
   void initState() {
     super.initState();
@@ -332,10 +370,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
           id: _uuid.v4(),
           kind: 'trigger',
           config: {'type': 'manual'},
-          position: const Offset(
-            (_canvasW / 2) - (_nodeW / 2),
-            200,
-          ),
+          position: const Offset((_kCanvasW / 2) - (_kNodeW / 2), 200),
         ),
       ];
     }
@@ -366,7 +401,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
       _maxVisitsPerNode = (execRaw['max_visits_per_node'] as int?) ?? 25;
 
       // Lay nodes out in a vertical cascade since we have no stored positions
-      double x = (_canvasW / 2) - (_nodeW / 2);
+      double x = (_kCanvasW / 2) - (_kNodeW / 2);
       double y = 150;
       _nodes = nodesRaw.asMap().entries.map((entry) {
         final raw = entry.value as Map;
@@ -376,7 +411,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
           config: Map<String, dynamic>.from(raw['config'] as Map? ?? {}),
           position: Offset(x, y),
         );
-        y += _nodeH + 60;
+        y += _kNodeH + 60;
         return node;
       }).toList();
 
@@ -392,10 +427,11 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
   }
 
   Map<String, dynamic> _buildGraph() {
+    final edges = _isMobileLayout ? buildMobileEdges(_nodes) : _edges;
     return {
       'version': 1,
       'nodes': _nodes.map((n) => n.toJson()).toList(),
-      'edges': _edges.map((e) => e.toJson()).toList(),
+      'edges': edges.map((e) => e.toJson()).toList(),
       'execution': {
         'max_steps': _maxSteps,
         'max_visits_per_node': _maxVisitsPerNode,
@@ -519,7 +555,9 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
     }
 
     setState(() {
-      _edges.add(EditorEdge(from: _connectingFrom!, to: toNodeId, on: chosenOn));
+      _edges.add(
+        EditorEdge(from: _connectingFrom!, to: toNodeId, on: chosenOn),
+      );
       _connectingFrom = null;
       _pendingEdgeEnd = null;
     });
@@ -537,8 +575,8 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
               kind: kind,
               config: config,
               position: Offset(
-                _canvasW / 2 - _nodeW / 2,
-                (_nodes.isEmpty ? 200 : _nodes.last.position.dy + _nodeH + 80),
+                _kCanvasW / 2 - _kNodeW / 2,
+                (_nodes.isEmpty ? 200 : _nodes.last.position.dy + _kNodeH + 80),
               ),
             ),
           );
@@ -607,192 +645,451 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
       detailAsync.whenData(_populateFromDetail);
     }
 
-    final theme = Theme.of(context);
-    final isConnecting = _connectingFrom != null;
+    return LayoutBuilder(
+      builder: (context, outerConstraints) {
+        _isMobileLayout = outerConstraints.maxWidth < 600;
+        final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isEdit ? 'Edit Workflow' : 'New Workflow'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => widget.isEdit
-              ? context.go('/workflows/${widget.workflowId}')
-              : context.go('/workflows'),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Workflow settings',
-            onPressed: _showSettings,
-          ),
-          if (_submitting)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          else
-            TextButton(
-              onPressed: _save,
-              child: Text(
-                widget.isEdit ? 'Save' : 'Create',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.primary,
-                ),
-              ),
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(widget.isEdit ? 'Edit Workflow' : 'New Workflow'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => widget.isEdit
+                  ? context.go('/workflows/${widget.workflowId}')
+                  : context.go('/workflows'),
             ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Error banner
-          if (_error != null)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Colors.red.shade50,
-              child: Row(
-                children: [
-                  Icon(Icons.error_outline, size: 16, color: Colors.red.shade700),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        fontSize: 12,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Workflow settings',
+                onPressed: _showSettings,
+              ),
+              if (_submitting)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else
+                TextButton(
+                  onPressed: _save,
+                  child: Text(
+                    widget.isEdit ? 'Save' : 'Create',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          body: Column(
+            children: [
+              // Error banner (shared between both layouts)
+              if (_error != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  color: Colors.red.shade50,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 16,
                         color: Colors.red.shade700,
                       ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 14),
-                    onPressed: () => setState(() => _error = null),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
-            ),
-
-          // Connecting mode banner
-          if (isConnecting)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: theme.colorScheme.primaryContainer,
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.cable,
-                    size: 16,
-                    color: theme.colorScheme.onPrimaryContainer,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Tap a destination node to connect — or tap background to cancel',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onPrimaryContainer,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _cancelConnecting,
-                    child: const Text('Cancel'),
-                  ),
-                ],
-              ),
-            ),
-
-          // Canvas
-          Expanded(
-            child: InteractiveViewer(
-              constrained: false,
-              boundaryMargin: const EdgeInsets.all(100),
-              minScale: 0.4,
-              maxScale: 2.5,
-              child: SizedBox(
-                width: _canvasW,
-                height: _canvasH,
-                child: Stack(
-                  children: [
-                    // Grid background
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: _GridPainter(),
-                      ),
-                    ),
-
-                    // Edges layer
-                    Positioned.fill(
-                      child: GestureDetector(
-                        onTapUp: (_) {
-                          if (isConnecting) _cancelConnecting();
-                        },
-                        child: CustomPaint(
-                          painter: _EdgePainter(
-                            nodes: _nodes,
-                            edges: _edges,
-                            nodeSize: _nodeSize,
-                            pendingFrom: _connectingFrom,
-                            pendingEnd: _pendingEdgeEnd,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.red.shade700,
                           ),
                         ),
                       ),
-                    ),
-
-                    // Edge delete hit areas (midpoints)
-                    ..._edges.map(
-                      (edge) => _EdgeDeleteHandle(
-                        edge: edge,
-                        nodes: _nodes,
-                        nodeSize: _nodeSize,
-                        onDelete: () => _deleteEdge(edge),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 14),
+                        onPressed: () => setState(() => _error = null),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
                       ),
-                    ),
+                    ],
+                  ),
+                ),
 
-                    // Nodes
-                    ..._nodes.map(
-                      (node) => _NodeWidget(
-                        key: ValueKey(node.id),
-                        node: node,
-                        isConnectingFrom:
-                            _connectingFrom == node.id,
-                        isConnecting: isConnecting,
-                        onDrag: (delta) {
+              // Layout branch
+              Expanded(
+                child: _isMobileLayout
+                    ? _MobileWorkflowEditor(
+                        nodes: _nodes,
+                        edges: _edges,
+                        onNodesChanged: (nodes) =>
+                            setState(() => _nodes = nodes),
+                        onAddNode: _addNode,
+                        onEditNode: _editNode,
+                        onDeleteNode: _deleteNode,
+                      )
+                    : _DesktopCanvasEditor(
+                        nodes: _nodes,
+                        edges: _edges,
+                        connectingFrom: _connectingFrom,
+                        pendingEdgeEnd: _pendingEdgeEnd,
+                        onDragNode: (node, delta) {
                           setState(() {
                             node.position = Offset(
-                              (node.position.dx + delta.dx)
-                                  .clamp(0, _canvasW - _nodeW),
-                              (node.position.dy + delta.dy)
-                                  .clamp(0, _canvasH - _nodeH),
+                              (node.position.dx + delta.dx).clamp(
+                                0,
+                                _kCanvasW - _kNodeW,
+                              ),
+                              (node.position.dy + delta.dy).clamp(
+                                0,
+                                _kCanvasH - _kNodeH,
+                              ),
                             );
                           });
                         },
-                        onEdit: () => _editNode(node),
-                        onDelete: () => _deleteNode(node.id),
-                        onStartConnect: () => _startConnecting(node.id),
-                        onTap: isConnecting
-                            ? () => _completeEdge(node.id)
-                            : null,
+                        onEditNode: _editNode,
+                        onDeleteNode: _deleteNode,
+                        onStartConnect: _startConnecting,
+                        onCompleteEdge: _completeEdge,
+                        onCancelConnecting: _cancelConnecting,
+                        onUpdatePendingEdge: (offset) =>
+                            setState(() => _pendingEdgeEnd = offset),
+                        onDeleteEdge: _deleteEdge,
+                      ),
+              ),
+            ],
+          ),
+          floatingActionButton: _isMobileLayout
+              ? null
+              : FloatingActionButton(
+                  onPressed: _addNode,
+                  tooltip: 'Add node',
+                  child: const Icon(Icons.add),
+                ),
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Desktop canvas editor (extracted from _WorkflowEditorScreenState.build)
+
+class _DesktopCanvasEditor extends StatelessWidget {
+  const _DesktopCanvasEditor({
+    required this.nodes,
+    required this.edges,
+    required this.connectingFrom,
+    required this.pendingEdgeEnd,
+    required this.onDragNode,
+    required this.onEditNode,
+    required this.onDeleteNode,
+    required this.onStartConnect,
+    required this.onCompleteEdge,
+    required this.onCancelConnecting,
+    required this.onUpdatePendingEdge,
+    required this.onDeleteEdge,
+  });
+
+  final List<EditorNode> nodes;
+  final List<EditorEdge> edges;
+  final String? connectingFrom;
+  final Offset? pendingEdgeEnd;
+  final void Function(EditorNode node, Offset delta) onDragNode;
+  final void Function(EditorNode node) onEditNode;
+  final void Function(String nodeId) onDeleteNode;
+  final void Function(String nodeId) onStartConnect;
+  final Future<void> Function(String nodeId) onCompleteEdge;
+  final VoidCallback onCancelConnecting;
+  final void Function(Offset offset) onUpdatePendingEdge;
+  final void Function(EditorEdge edge) onDeleteEdge;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isConnecting = connectingFrom != null;
+
+    return Column(
+      children: [
+        // Connecting mode banner
+        if (isConnecting)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: theme.colorScheme.primaryContainer,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.cable,
+                  size: 16,
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Tap a destination node to connect — or tap background to cancel',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: onCancelConnecting,
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ),
+
+        // Canvas
+        Expanded(
+          child: InteractiveViewer(
+            constrained: false,
+            boundaryMargin: const EdgeInsets.all(100),
+            minScale: 0.4,
+            maxScale: 2.5,
+            child: SizedBox(
+              width: _kCanvasW,
+              height: _kCanvasH,
+              child: Stack(
+                children: [
+                  // Grid background
+                  Positioned.fill(child: CustomPaint(painter: _GridPainter())),
+
+                  // Edges layer
+                  Positioned.fill(
+                    child: GestureDetector(
+                      onTapUp: (_) {
+                        if (isConnecting) onCancelConnecting();
+                      },
+                      child: CustomPaint(
+                        painter: _EdgePainter(
+                          nodes: nodes,
+                          edges: edges,
+                          nodeSize: _kNodeSize,
+                          pendingFrom: connectingFrom,
+                          pendingEnd: pendingEdgeEnd,
+                        ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+
+                  // Edge delete hit areas (midpoints)
+                  ...edges.map(
+                    (edge) => _EdgeDeleteHandle(
+                      edge: edge,
+                      nodes: nodes,
+                      nodeSize: _kNodeSize,
+                      onDelete: () => onDeleteEdge(edge),
+                    ),
+                  ),
+
+                  // Nodes
+                  ...nodes.map(
+                    (node) => _NodeWidget(
+                      key: ValueKey(node.id),
+                      node: node,
+                      isConnectingFrom: connectingFrom == node.id,
+                      isConnecting: isConnecting,
+                      onDrag: (delta) => onDragNode(node, delta),
+                      onEdit: () => onEditNode(node),
+                      onDelete: () => onDeleteNode(node.id),
+                      onStartConnect: () => onStartConnect(node.id),
+                      onTap: isConnecting
+                          ? () => onCompleteEdge(node.id)
+                          : null,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mobile workflow editor
+
+class _MobileWorkflowEditor extends StatelessWidget {
+  const _MobileWorkflowEditor({
+    required this.nodes,
+    required this.edges,
+    required this.onNodesChanged,
+    required this.onAddNode,
+    required this.onEditNode,
+    required this.onDeleteNode,
+  });
+
+  final List<EditorNode> nodes;
+  final List<EditorEdge> edges;
+  final void Function(List<EditorNode> nodes) onNodesChanged;
+  final VoidCallback onAddNode;
+  final void Function(EditorNode node) onEditNode;
+  final void Function(String nodeId) onDeleteNode;
+
+  @override
+  Widget build(BuildContext context) {
+    final complex = isComplexDag(nodes, edges);
+
+    return Column(
+      children: [
+        // Complex-graph banner
+        if (complex)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            color: Colors.orange.shade50,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: Colors.orange.shade800,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Complex graph — edit branching on a wider screen',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange.shade800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // Reorderable card list
+        Expanded(
+          child: ReorderableListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            itemCount: nodes.length,
+            onReorder: (oldIndex, newIndex) {
+              if (newIndex > oldIndex) newIndex--;
+              final updated = List<EditorNode>.from(nodes);
+              final item = updated.removeAt(oldIndex);
+              updated.insert(newIndex, item);
+              onNodesChanged(updated);
+            },
+            itemBuilder: (context, index) {
+              final node = nodes[index];
+              return _MobileNodeCard(
+                key: ValueKey(node.id),
+                node: node,
+                index: index,
+                onEdit: () => onEditNode(node),
+                onDelete: () => onDeleteNode(node.id),
+              );
+            },
+          ),
+        ),
+
+        // Add step button
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: FilledButton.icon(
+            onPressed: onAddNode,
+            icon: const Icon(Icons.add),
+            label: const Text('Add step'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mobile node card
+
+class _MobileNodeCard extends StatelessWidget {
+  const _MobileNodeCard({
+    super.key,
+    required this.node,
+    required this.index,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final EditorNode node;
+  final int index;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = node.color;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: color.withValues(alpha: 0.4), width: 1.5),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addNode,
-        tooltip: 'Add node',
-        child: const Icon(Icons.add),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        leading: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(node.icon, color: color, size: 20),
+        ),
+        title: Text(
+          node.label,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: color.withValues(alpha: 0.9),
+          ),
+        ),
+        subtitle: Text(node.kind, style: const TextStyle(fontSize: 11)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(Icons.edit_outlined, size: 20, color: color),
+              onPressed: onEdit,
+              tooltip: 'Edit',
+              visualDensity: VisualDensity.compact,
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.delete_outline,
+                size: 20,
+                color: Colors.red.shade400,
+              ),
+              onPressed: onDelete,
+              tooltip: 'Delete',
+              visualDensity: VisualDensity.compact,
+            ),
+            ReorderableDelayedDragStartListener(
+              index: index,
+              child: const Icon(
+                Icons.drag_handle,
+                size: 24,
+                color: Colors.black38,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -838,10 +1135,14 @@ class _EdgeDeleteHandle extends StatelessWidget {
   final VoidCallback onDelete;
 
   Offset _midpoint() {
-    final fromNode =
-        nodes.firstWhere((n) => n.id == edge.from, orElse: () => nodes.first);
-    final toNode =
-        nodes.firstWhere((n) => n.id == edge.to, orElse: () => nodes.last);
+    final fromNode = nodes.firstWhere(
+      (n) => n.id == edge.from,
+      orElse: () => nodes.first,
+    );
+    final toNode = nodes.firstWhere(
+      (n) => n.id == edge.to,
+      orElse: () => nodes.last,
+    );
     final start = Offset(
       fromNode.position.dx + nodeSize.width / 2,
       fromNode.position.dy + nodeSize.height,
@@ -850,10 +1151,7 @@ class _EdgeDeleteHandle extends StatelessWidget {
       toNode.position.dx + nodeSize.width / 2,
       toNode.position.dy,
     );
-    return Offset(
-      (start.dx + end.dx) / 2,
-      (start.dy + end.dy) / 2,
-    );
+    return Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
   }
 
   @override
@@ -879,7 +1177,7 @@ class _EdgeDeleteHandle extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Node widget
+// Node widget (canvas)
 
 class _NodeWidget extends StatelessWidget {
   const _NodeWidget({
@@ -914,8 +1212,8 @@ class _NodeWidget extends StatelessWidget {
         onPanUpdate: (details) => onDrag(details.delta),
         onTap: onTap,
         child: SizedBox(
-          width: _WorkflowEditorScreenState._nodeW,
-          height: _WorkflowEditorScreenState._nodeH,
+          width: _kNodeW,
+          height: _kNodeH,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -1036,7 +1334,7 @@ class _NodeWidget extends StatelessWidget {
                 // Connect button (bottom-center)
                 Positioned(
                   bottom: -10,
-                  left: _WorkflowEditorScreenState._nodeW / 2 - 11,
+                  left: _kNodeW / 2 - 11,
                   child: GestureDetector(
                     onTap: onStartConnect,
                     child: Container(
@@ -1116,33 +1414,31 @@ class _NodePalette extends StatelessWidget {
                       title: 'Manual',
                       subtitle: 'Triggered manually or by test run',
                       icon: Icons.touch_app,
-                      onTap: () =>
-                          onSelected('trigger', {'type': 'manual'}),
+                      onTap: () => onSelected('trigger', {'type': 'manual'}),
                     ),
                     _PaletteItem(
                       title: 'Webhook',
                       subtitle: 'Triggered via inbound HTTP webhook',
                       icon: Icons.webhook,
-                      onTap: () =>
-                          onSelected('trigger', {'type': 'webhook'}),
+                      onTap: () => onSelected('trigger', {'type': 'webhook'}),
                     ),
                     _PaletteItem(
                       title: 'Schedule',
                       subtitle: 'Triggered on a cron schedule',
                       icon: Icons.schedule,
-                      onTap: () => onSelected(
-                        'trigger',
-                        {'type': 'schedule', 'cron': '0 * * * *'},
-                      ),
+                      onTap: () => onSelected('trigger', {
+                        'type': 'schedule',
+                        'cron': '0 * * * *',
+                      }),
                     ),
                     _PaletteItem(
                       title: 'Event',
                       subtitle: 'Triggered by an internal bus event',
                       icon: Icons.notifications_active_outlined,
-                      onTap: () => onSelected(
-                        'trigger',
-                        {'type': 'event', 'event': 'message.completed'},
-                      ),
+                      onTap: () => onSelected('trigger', {
+                        'type': 'event',
+                        'event': 'message.completed',
+                      }),
                     ),
                   ],
                 ),
@@ -1155,23 +1451,20 @@ class _NodePalette extends StatelessWidget {
                       title: 'Assistant Turn',
                       subtitle: 'Run a prompt through the assistant',
                       icon: Icons.smart_toy_outlined,
-                      onTap: () => onSelected(
-                        'action',
-                        {'type': 'assistant_turn', 'prompt': ''},
-                      ),
+                      onTap: () => onSelected('action', {
+                        'type': 'assistant_turn',
+                        'prompt': '',
+                      }),
                     ),
                     _PaletteItem(
                       title: 'HTTP Request',
                       subtitle: 'Make an outbound HTTP call',
                       icon: Icons.http,
-                      onTap: () => onSelected(
-                        'action',
-                        {
-                          'type': 'http_request',
-                          'url': 'https://',
-                          'method': 'GET',
-                        },
-                      ),
+                      onTap: () => onSelected('action', {
+                        'type': 'http_request',
+                        'url': 'https://',
+                        'method': 'GET',
+                      }),
                     ),
                   ],
                 ),
@@ -1198,10 +1491,10 @@ class _NodePalette extends StatelessWidget {
                       title: 'Payload Key Check',
                       subtitle: 'Check if trigger payload has a key',
                       icon: Icons.vpn_key_outlined,
-                      onTap: () => onSelected(
-                        'condition',
-                        {'type': 'has_trigger_payload_key', 'key': ''},
-                      ),
+                      onTap: () => onSelected('condition', {
+                        'type': 'has_trigger_payload_key',
+                        'key': '',
+                      }),
                     ),
                   ],
                 ),
@@ -1310,8 +1603,9 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
     _config = Map<String, dynamic>.from(widget.node.config);
     _cronCtrl = TextEditingController(text: _config['cron'] as String? ?? '');
     _eventCtrl = TextEditingController(text: _config['event'] as String? ?? '');
-    _promptCtrl =
-        TextEditingController(text: _config['prompt'] as String? ?? '');
+    _promptCtrl = TextEditingController(
+      text: _config['prompt'] as String? ?? '',
+    );
     _urlCtrl = TextEditingController(text: _config['url'] as String? ?? '');
     _keyCtrl = TextEditingController(text: _config['key'] as String? ?? '');
     _method = _config['method'] as String? ?? 'GET';
@@ -1387,10 +1681,7 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
           const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: FilledButton(
-              onPressed: _save,
-              child: const Text('Apply'),
-            ),
+            child: FilledButton(onPressed: _save, child: const Text('Apply')),
           ),
           const SizedBox(height: 24),
         ],
@@ -1410,7 +1701,7 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
             color: Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Text(
+          child: const Text(
             'No configuration required for this node type.',
             style: TextStyle(fontSize: 13, color: Colors.black54),
           ),
@@ -1461,9 +1752,13 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
                 labelText: 'HTTP method',
                 border: OutlineInputBorder(),
               ),
-              items: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-                  .map((m) => DropdownMenuItem(value: m, child: Text(m)))
-                  .toList(),
+              items: [
+                'GET',
+                'POST',
+                'PUT',
+                'PATCH',
+                'DELETE',
+              ].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
               onChanged: (v) => setState(() => _method = v ?? 'GET'),
             ),
             const SizedBox(height: 12),
@@ -1514,7 +1809,8 @@ class _WorkflowSettingsSheet extends StatefulWidget {
   final bool active;
   final int maxSteps;
   final int maxVisitsPerNode;
-  final void Function(bool active, int maxSteps, int maxVisitsPerNode) onChanged;
+  final void Function(bool active, int maxSteps, int maxVisitsPerNode)
+  onChanged;
 
   @override
   State<_WorkflowSettingsSheet> createState() => _WorkflowSettingsSheetState();

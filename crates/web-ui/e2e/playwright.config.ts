@@ -20,8 +20,7 @@ export default defineConfig({
   testDir: "./tests",
   outputDir: "./test-results",
   snapshotDir: "./screenshots",
-  snapshotPathTemplate:
-    "{snapshotDir}/{testFilePath}/{arg}{-projectName}{ext}",
+  snapshotPathTemplate: "{snapshotDir}/{testFilePath}/{arg}{-projectName}{ext}",
 
   /* Fail fast in CI, retry locally */
   retries: process.env.CI ? 0 : 1,
@@ -31,7 +30,10 @@ export default defineConfig({
   /* Reporter: always generate HTML report for visual diff review.
    * In CI, also emit GitHub annotations for inline failure markers. */
   reporter: process.env.CI
-    ? [["github"], ["html", { open: "never", outputFolder: "playwright-report" }]]
+    ? [
+        ["github"],
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+      ]
     : [["html", { open: "on-failure", outputFolder: "playwright-report" }]],
 
   use: {
@@ -39,6 +41,9 @@ export default defineConfig({
     colorScheme: "dark",
     /* Reduce flakiness from animations */
     actionTimeout: 10_000,
+    /* Block service workers so Flutter web always loads fresh assets during tests,
+     * preventing stale caches from serving outdated code after rebuilds. */
+    serviceWorkers: "block",
   },
 
   projects: [
@@ -66,8 +71,7 @@ export default defineConfig({
 
   /* Auto-start the server if not already running */
   webServer: {
-    command:
-      `rm -f ${dbPath} && cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
+    command: `rm -f ${dbPath} && cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
     url: "http://127.0.0.1:8787/login",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

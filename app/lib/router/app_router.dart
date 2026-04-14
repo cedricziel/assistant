@@ -7,6 +7,7 @@ import '../features/agents/agents_screen.dart';
 import '../features/analytics/analytics_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/connection/connection_screen.dart';
+import '../features/contexts/models/context_model.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/contexts/screens/context_switcher_screen.dart';
 import '../features/logs/logs_screen.dart';
@@ -26,10 +27,12 @@ import '../features/workflows/workflow_detail_screen.dart';
 import '../features/workflows/workflow_editor_screen.dart';
 import '../features/workflows/workflow_run_detail_screen.dart';
 import '../features/workflows/workflows_screen.dart';
+import '../shared/loading_screen.dart';
 import '../shared/nav_shell.dart';
 
 /// Named route constants.
 class AppRoutes {
+  static const loading = '/loading';
   static const setup = '/setup';
   static const contexts = '/contexts';
   static const chat = '/chat';
@@ -68,16 +71,37 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: AppRoutes.chat,
     refreshListenable: notifier,
     redirect: (context, state) {
-      final hasContext = ref.read(hasActiveContextProvider);
-      final onContextSwitcher = state.fullPath == AppRoutes.contexts;
+      final activeContextAsync = ref.read(activeContextProvider);
 
-      // If no active context and not already on the switcher, redirect there.
-      if (!hasContext && !onContextSwitcher) {
+      // While the context is still loading from storage, show the loading
+      // scaffold — the router will re-evaluate once the AsyncNotifier settles.
+      if (activeContextAsync.isLoading) return AppRoutes.loading;
+
+      final hasContext = activeContextAsync.value != null;
+      final onContextSwitcher = state.fullPath == AppRoutes.contexts;
+      final onSetup = state.fullPath == AppRoutes.setup;
+      final onLoading = state.fullPath == AppRoutes.loading;
+
+      // Once loading is done, navigate away from the loading scaffold to
+      // the correct destination.
+      if (onLoading) {
+        return hasContext ? AppRoutes.chat : AppRoutes.contexts;
+      }
+
+      // If no active context and not already on the switcher or setup,
+      // redirect to the context switcher.
+      if (!hasContext && !onContextSwitcher && !onSetup) {
         return AppRoutes.contexts;
       }
       return null;
     },
     routes: [
+      // -- Loading scaffold: shown while async providers initialise -----------
+      GoRoute(
+        path: AppRoutes.loading,
+        builder: (context, state) => const LoadingScreen(),
+      ),
+
       // -- Legacy setup route (kept for deep-link compatibility) -------------
       GoRoute(
         path: AppRoutes.setup,
@@ -280,13 +304,15 @@ final routerProvider = Provider<GoRouter>((ref) {
 /// the active context changes.
 class _RouterRefreshNotifier extends ChangeNotifier {
   _RouterRefreshNotifier(Ref ref) {
-    _sub = ref.listen<bool>(
-      hasActiveContextProvider,
+    // Listen to the raw async state so the router re-evaluates on every
+    // transition (loading→data, data→data, etc.), not just bool changes.
+    _sub = ref.listen<AsyncValue<AssistantContext?>>(
+      activeContextProvider,
       (prev, next) => notifyListeners(),
     );
   }
 
-  late final ProviderSubscription<bool> _sub;
+  late final ProviderSubscription<AsyncValue<AssistantContext?>> _sub;
 
   @override
   void dispose() {
