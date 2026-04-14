@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
@@ -43,7 +44,7 @@ class _FakeConversationListNotifier extends ConversationListNotifier {
   Future<void> refresh() async {}
 
   @override
-  void prependConversation(conv) {}
+  void prependConversation(ConversationSummary conv) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -123,14 +124,20 @@ void main() {
   group('ChatState.copyWith with pendingQueue', () {
     test('copies pendingQueue when provided', () {
       const state = ChatState();
-      final updated = state.copyWith(pendingQueue: ['a', 'b']);
-      expect(updated.pendingQueue, ['a', 'b']);
+      final msgs = [
+        const PendingMessage(text: 'a', conversationId: 'c1'),
+        const PendingMessage(text: 'b', conversationId: 'c1'),
+      ];
+      final updated = state.copyWith(pendingQueue: msgs);
+      expect(updated.pendingQueue.map((p) => p.text).toList(), ['a', 'b']);
     });
 
     test('preserves pendingQueue when not overridden', () {
-      final state = const ChatState().copyWith(pendingQueue: ['x']);
+      final state = const ChatState().copyWith(
+        pendingQueue: [const PendingMessage(text: 'x', conversationId: 'c1')],
+      );
       final again = state.copyWith(isSending: true);
-      expect(again.pendingQueue, ['x']);
+      expect(again.pendingQueue.map((p) => p.text).toList(), ['x']);
     });
   });
 
@@ -157,7 +164,7 @@ void main() {
       await tester.pump();
 
       expect(
-        notifier.state.value!.pendingQueue,
+        notifier.state.value!.pendingQueue.map((p) => p.text),
         contains('second'),
         reason: 'second message should be in pendingQueue while first streams',
       );

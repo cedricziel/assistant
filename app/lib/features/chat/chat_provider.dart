@@ -175,6 +175,17 @@ class ChatMessage {
   }
 }
 
+/// A message waiting in the send queue.
+///
+/// Stores the message text together with the [conversationId] that was active
+/// at enqueue time, so messages are always routed to the correct conversation
+/// even if the user navigates away while the queue is draining.
+class PendingMessage {
+  const PendingMessage({required this.text, required this.conversationId});
+  final String text;
+  final String conversationId;
+}
+
 /// A completed tool result recorded during streaming — used by
 /// [AgentEventListener] to fire skill notifications.
 class ChatToolResult {
@@ -221,7 +232,7 @@ class ChatState {
   final String? error;
 
   /// Messages waiting to be sent after the current in-flight response completes.
-  final List<String> pendingQueue;
+  final List<PendingMessage> pendingQueue;
 
   bool get isStreaming => isSending && streamingContent.isNotEmpty;
 
@@ -237,7 +248,7 @@ class ChatState {
     bool clearError = false,
     bool clearConversation = false,
     bool clearStatusMessage = false,
-    List<String>? pendingQueue,
+    List<PendingMessage>? pendingQueue,
   }) {
     return ChatState(
       conversationId: clearConversation
@@ -380,11 +391,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
     }
 
-    // Append message to pending queue.
+    // Append message to pending queue, capturing conversationId at enqueue time.
     final afterCreate = state.value ?? const ChatState();
     state = AsyncData(
       afterCreate.copyWith(
-        pendingQueue: [...afterCreate.pendingQueue, message],
+        pendingQueue: [
+          ...afterCreate.pendingQueue,
+          PendingMessage(text: message, conversationId: conversationId),
+        ],
       ),
     );
 
@@ -410,7 +424,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   ///
   /// A [_draining] guard prevents re-entrant calls. The loop continues until
   /// the queue is empty; try/finally ensures the flag is always cleared.
-  void _drainQueue() async {
+  Future<void> _drainQueue() async {
     if (_draining) return;
     _draining = true;
     try {
@@ -418,12 +432,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         final current = state.value ?? const ChatState();
         if (current.pendingQueue.isEmpty) break;
 
-        final text = current.pendingQueue.first;
+        final pending = current.pendingQueue.first;
         state = AsyncData(
           current.copyWith(pendingQueue: current.pendingQueue.sublist(1)),
         );
 
-        await _streamMessage(text);
+        await _streamMessage(pending.text, pending.conversationId);
       }
     } finally {
       _draining = false;
@@ -431,14 +445,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   }
 
   /// Stream a single [message] to the server and update state from SSE events.
-  Future<void> _streamMessage(String message) async {
+  Future<void> _streamMessage(String message, String conversationId) async {
     final api = _api;
     if (api == null) return;
 
     _cancelled = false;
     final current = state.value ?? const ChatState();
-    final conversationId = current.conversationId;
-    if (conversationId == null) return;
 
     // Add user message with status=sending and assistant streaming placeholder.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';

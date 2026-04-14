@@ -1,3 +1,4 @@
+import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
@@ -28,7 +29,7 @@ class _FakeConversationListNotifier extends ConversationListNotifier {
   Future<void> refresh() async {}
 
   @override
-  void prependConversation(conv) {}
+  void prependConversation(ConversationSummary conv) {}
 }
 
 // ---------------------------------------------------------------------------
