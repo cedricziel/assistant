@@ -306,7 +306,7 @@ fn encrypt_payload(
     ikm_info.extend_from_slice(receiver_pub_bytes);
     ikm_info.extend_from_slice(&sender_pub_bytes);
 
-    let hk_auth = Hkdf::<Sha256>::new(Some(auth_secret), shared_bytes.as_slice());
+    let hk_auth = Hkdf::<Sha256>::new(Some(auth_secret), shared_bytes.as_ref());
     let mut ikm = [0u8; 32];
     hk_auth
         .expand(&ikm_info, &mut ikm)
@@ -327,12 +327,12 @@ fn encrypt_payload(
     let mut buf = plaintext.to_vec();
     buf.push(0x02); // record delimiter
 
-    let key: &Key<Aes128Gcm> = Key::<Aes128Gcm>::from_slice(&cek);
+    let key: &Key<Aes128Gcm> = (&cek).into();
     let mut cipher = Aes128Gcm::new(key);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
 
     cipher
-        .encrypt_in_place(nonce, b"", &mut buf)
+        .encrypt_in_place(&nonce, b"", &mut buf)
         .map_err(|_| anyhow::anyhow!("AES-GCM encryption failed"))?;
 
     // Build the aes128gcm content-encoding header (RFC 8188 §2.1):
@@ -379,7 +379,7 @@ fn build_vapid_jwt(signing_key: &SigningKey, endpoint: &str) -> Result<String> {
     // ES256 signature (RFC 7518 §3.4): fixed-size r||s (64 bytes).
     let sig: p256::ecdsa::Signature = signing_key.sign(signing_input.as_bytes());
     let sig_bytes = sig.to_bytes();
-    let signature = URL_SAFE_NO_PAD.encode(sig_bytes.as_slice());
+    let signature = URL_SAFE_NO_PAD.encode(&sig_bytes[..]);
 
     Ok(format!("{signing_input}.{signature}"))
 }

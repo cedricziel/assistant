@@ -615,7 +615,7 @@ fn generate_secret() -> String {
 
 /// Compute HMAC-SHA256 of `body` using `secret`, returning hex.
 fn compute_signature(secret: &str, body: &str) -> String {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     type HmacSha256 = Hmac<sha2::Sha256>;
     let mut mac =
         HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
