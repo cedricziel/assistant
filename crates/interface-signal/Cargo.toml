@@ -1,6 +1,6 @@
 [package]
 name = "assistant-interface-signal"
-version = "0.1.92"
+version = "0.1.93"
 license.workspace = true
 edition.workspace = true
 description = "Signal messenger interface for the assistant via signal-cli-rest-api"
