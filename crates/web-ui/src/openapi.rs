@@ -9,12 +9,7 @@ use assistant_a2a_json_schema::{
         AgentCapabilities, AgentCard, AgentCardSignature, AgentExtension, AgentInterface,
         AgentProvider, AgentSkill,
     },
-    requests::{
-        CancelTaskRequest, CreateTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
-        GetTaskPushNotificationConfigRequest, GetTaskRequest,
-        ListTaskPushNotificationConfigsRequest, ListTasksRequest, SendMessageRequest,
-        SubscribeToTaskRequest,
-    },
+    requests::{CancelTaskRequest, CreateTaskPushNotificationConfigRequest, SendMessageRequest},
     responses::{
         ListTaskPushNotificationConfigsResponse, ListTasksResponse, SendMessageResponse,
         StreamResponse,
@@ -41,8 +36,7 @@ use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::{
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
     analytics::{
-        AnalyticsQueryParams, AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse,
-        ToolUsageResponse,
+        AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
     },
     logs::LogEntryResponse,
     personas::{
@@ -63,15 +57,6 @@ use crate::api::{
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
     SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, UpdateConversationRequest,
 };
-
-/// API error response body (JSON-RPC style used by A2A handlers).
-#[derive(serde::Serialize, utoipa::ToSchema)]
-pub struct ApiErrorResponse {
-    /// Numeric error code.
-    pub code: i32,
-    /// Human-readable error message.
-    pub message: String,
-}
 
 /// Adds the Bearer token security scheme to the OpenAPI components.
 struct BearerTokenSecurityAddon;
@@ -96,6 +81,15 @@ impl Modify for BearerTokenSecurityAddon {
     }
 }
 
+/// API error response body returned for 4xx and 5xx errors.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct ApiErrorResponse {
+    /// Numeric error code.
+    pub code: i32,
+    /// Human-readable error message.
+    pub message: String,
+}
+
 /// Assembled OpenAPI document for the Assistant web-UI.
 ///
 /// Covers the machine-readable APIs:
@@ -112,7 +106,7 @@ impl Modify for BearerTokenSecurityAddon {
         description = "AI assistant API — A2A protocol (Agent-to-Agent), chat, and workflow management.\n\n\
                        **Authentication**: protected endpoints require `Authorization: Bearer <token>`.\n\
                        The token is set via `--auth-token` / `ASSISTANT_WEB_TOKEN` on the server.",
-        license(name = "MIT"),
+        license(name = "MIT", identifier = "MIT"),
     ),
     modifiers(&BearerTokenSecurityAddon),
     paths(
@@ -214,14 +208,8 @@ impl Modify for BearerTokenSecurityAddon {
             StringList,
             // A2A request types
             SendMessageRequest,
-            ListTasksRequest,
-            GetTaskRequest,
             CancelTaskRequest,
-            SubscribeToTaskRequest,
             CreateTaskPushNotificationConfigRequest,
-            GetTaskPushNotificationConfigRequest,
-            ListTaskPushNotificationConfigsRequest,
-            GetExtendedAgentCardRequest,
             // A2A response types
             SendMessageResponse,
             StreamResponse,
@@ -285,7 +273,6 @@ impl Modify for BearerTokenSecurityAddon {
             ModelUsageResponse,
             ToolUsageResponse,
             TimeSeriesResponse,
-            AnalyticsQueryParams,
             // Workflow API types
             WorkflowSummary,
             WorkflowDetail,
@@ -299,7 +286,7 @@ impl Modify for BearerTokenSecurityAddon {
             VapidKeyResponse,
             SubscribeRequest,
             UnsubscribeRequest,
-            // Local handler types
+            // Common error response
             ApiErrorResponse,
         )
     ),

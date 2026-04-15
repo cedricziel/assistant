@@ -22,6 +22,7 @@ use assistant_a2a_json_schema::responses::*;
 use assistant_a2a_json_schema::types::*;
 
 use super::task_store::TaskStore;
+use crate::openapi::ApiErrorResponse;
 
 // -- Shared state --
 
@@ -67,7 +68,8 @@ fn bad_request(msg: impl Into<String>) -> Response {
     path = "/.well-known/agent.json",
     responses(
         (status = 200, description = "Public agent card", body = AgentCard,
-         content_type = "application/json")
+         content_type = "application/json"),
+        (status = 404, description = "Agent card not found")
     ),
     tag = "agent-card",
     security()
@@ -102,10 +104,12 @@ pub async fn get_extended_agent_card(State(state): State<A2AState>) -> Json<Agen
 #[utoipa::path(
     post,
     path = "/message/send",
+    operation_id = "a2a_send_message",
     request_body(content = SendMessageRequest, content_type = "application/json"),
     responses(
         (status = 200, description = "Task created and completed", body = SendMessageResponse,
          content_type = "application/json"),
+        (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "messages",
@@ -180,10 +184,12 @@ pub async fn send_message(
 #[utoipa::path(
     post,
     path = "/message/stream",
+    operation_id = "a2a_send_message_streaming",
     request_body(content = SendMessageRequest, content_type = "application/json"),
     responses(
         (status = 200, description = "Streaming SSE response; each event is a JSON-encoded StreamResponse",
-         content_type = "text/event-stream"),
+         content_type = "text/event-stream", body = StreamResponse),
+        (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "messages",
@@ -288,38 +294,45 @@ pub async fn send_message_streaming(
     get,
     path = "/tasks/{id}",
     params(
-        ("id" = String, Path, description = "Task ID")
+        ("id" = String, Path, description = "Task ID"),
+        GetTaskQuery
     ),
     responses(
         (status = 200, description = "Task details", body = Task,
          content_type = "application/json"),
-        (status = 404, description = "Task not found"),
+        (status = 404, description = "Task not found", body = ApiErrorResponse,
+         content_type = "application/json"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "tasks",
     security(("bearer_token" = []))
 )]
-pub async fn get_task(State(state): State<A2AState>, Path(id): Path<String>) -> Response {
+pub async fn get_task(
+    State(state): State<A2AState>,
+    Path(id): Path<String>,
+    Query(_query): Query<GetTaskQuery>,
+) -> Response {
     match state.task_store.get_task(&id).await {
         Some(task) => Json(task).into_response(),
         None => not_found(format!("Task '{id}' not found")),
     }
 }
 
-/// Query parameters for `GET /tasks`.
+/// Query parameters for `GET /tasks/{id}`.
 #[derive(Debug, Default, serde::Deserialize, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
-pub struct ListTasksQuery {
-    pub context_id: Option<String>,
-    pub status: Option<TaskState>,
-    pub page_size: Option<i32>,
+pub struct GetTaskQuery {
+    /// Max number of recent messages to include in history.
+    pub history_length: Option<i32>,
+    /// Optional tenant ID.
+    pub tenant: Option<String>,
 }
 
 /// `GET /tasks` -- Lists tasks matching optional filters.
 #[utoipa::path(
     get,
     path = "/tasks",
-    params(ListTasksQuery),
+    params(ListTasksRequest),
     responses(
         (status = 200, description = "Paginated task list", body = ListTasksResponse,
          content_type = "application/json"),
@@ -330,7 +343,7 @@ pub struct ListTasksQuery {
 )]
 pub async fn list_tasks(
     State(state): State<A2AState>,
-    Query(query): Query<ListTasksQuery>,
+    Query(query): Query<ListTasksRequest>,
 ) -> Json<ListTasksResponse> {
     let limit = query.page_size.unwrap_or(50).clamp(1, 100) as usize;
 
@@ -355,16 +368,24 @@ pub async fn list_tasks(
     params(
         ("id" = String, Path, description = "Task ID to cancel")
     ),
+    request_body(content = CancelTaskRequest, content_type = "application/json",
+                 description = "Optional cancellation metadata"),
     responses(
         (status = 200, description = "Cancelled task", body = Task,
          content_type = "application/json"),
-        (status = 404, description = "Task not found"),
+        (status = 404, description = "Task not found", body = ApiErrorResponse,
+         content_type = "application/json"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "tasks",
     security(("bearer_token" = []))
 )]
-pub async fn cancel_task(State(state): State<A2AState>, Path(id): Path<String>) -> Response {
+pub async fn cancel_task(
+    State(state): State<A2AState>,
+    Path(id): Path<String>,
+    body: Option<axum::Json<CancelTaskRequest>>,
+) -> Response {
+    let _ = body; // body fields are available for future use (e.g. metadata)
     match state.task_store.cancel_task(&id).await {
         Some(task) => Json(task).into_response(),
         None => not_found(format!("Task '{id}' not found")),
@@ -380,9 +401,11 @@ pub async fn cancel_task(State(state): State<A2AState>, Path(id): Path<String>) 
     ),
     responses(
         (status = 200, description = "SSE stream of StreamResponse events",
-         content_type = "text/event-stream"),
-        (status = 400, description = "Task already in terminal state"),
-        (status = 404, description = "Task not found"),
+         content_type = "text/event-stream", body = StreamResponse),
+        (status = 400, description = "Task already in terminal state", body = ApiErrorResponse,
+         content_type = "application/json"),
+        (status = 404, description = "Task not found", body = ApiErrorResponse,
+         content_type = "application/json"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "tasks",
@@ -446,7 +469,8 @@ pub async fn subscribe_to_task(State(state): State<A2AState>, Path(id): Path<Str
     responses(
         (status = 201, description = "Push notification config created", body = TaskPushNotificationConfig,
          content_type = "application/json"),
-        (status = 404, description = "Task not found"),
+        (status = 404, description = "Task not found", body = ApiErrorResponse,
+         content_type = "application/json"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "push-notifications",
@@ -478,7 +502,8 @@ pub async fn create_push_notification_config(
     responses(
         (status = 200, description = "Push notification config", body = TaskPushNotificationConfig,
          content_type = "application/json"),
-        (status = 404, description = "Config not found"),
+        (status = 404, description = "Config not found", body = ApiErrorResponse,
+         content_type = "application/json"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "push-notifications",
@@ -544,7 +569,8 @@ pub async fn list_push_notification_configs(
     ),
     responses(
         (status = 204, description = "Config deleted"),
-        (status = 404, description = "Config not found"),
+        (status = 404, description = "Config not found", body = ApiErrorResponse,
+         content_type = "application/json"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "push-notifications",
