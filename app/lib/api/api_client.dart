@@ -5,7 +5,6 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
@@ -16,9 +15,7 @@ import 'models/stream_event.dart';
 
 /// Configured client bundle: generated API instances + SSE streaming helper.
 class ApiClient {
-  ApiClient({required String baseUrl, required String token})
-    : _token = token,
-      _baseUrl = baseUrl {
+  ApiClient({required String baseUrl, required String token}) : _token = token {
     _dio = Dio(
       BaseOptions(
         baseUrl: baseUrl,
@@ -32,7 +29,6 @@ class ApiClient {
   }
 
   final String _token;
-  final String _baseUrl;
   late final Dio _dio;
   late final AssistantApi _generatedApi;
 
@@ -45,6 +41,7 @@ class ApiClient {
   AgentsApi get agents => _generatedApi.getAgentsApi();
   AnalyticsApi get analytics => _generatedApi.getAnalyticsApi();
   WorkflowsApi get workflows => _generatedApi.getWorkflowsApi();
+  CapabilitiesApi get capabilities => _generatedApi.getCapabilitiesApi();
 
   /// Stream assistant tokens for a conversation message.
   ///
@@ -79,29 +76,20 @@ class ApiClient {
   // -- Voice / capabilities ---------------------------------------------------
 
   /// Fetch server capability flags (voice_send, voice_receive, …).
-  ///
-  /// Uses dart:io HttpClient directly (no Dio interceptor chain) so no
-  /// zero-duration dart:async Timer is created during the request setup,
-  /// which keeps Flutter's fakeAsync tests clean.
   Future<ServerCapabilities> getCapabilities({CancelToken? cancelToken}) async {
-    final client = HttpClient();
-    // Disable connect timeout — no dart:async Timer created.
-    client.connectionTimeout = null;
     try {
-      final uri = Uri.parse('$_baseUrl/api/capabilities');
-      final request = await client.getUrl(uri);
-      request.headers.set('Authorization', 'Bearer $_token');
-      if (cancelToken?.isCancelled == true) return ServerCapabilities.disabled;
-      final response = await request.close();
-      if (response.statusCode == 200) {
-        final body = await response.transform(utf8.decoder).join();
-        final json = jsonDecode(body) as Map<String, dynamic>;
-        return ServerCapabilities.fromJson(json);
+      final response = await capabilities.getCapabilities(
+        cancelToken: cancelToken,
+      );
+      final data = response.data;
+      if (data != null) {
+        return ServerCapabilities(
+          voiceSend: data.voiceSend,
+          voiceReceive: data.voiceReceive,
+        );
       }
     } catch (_) {
       // Network, cancellation, or parse errors → report no capabilities.
-    } finally {
-      client.close(force: true);
     }
     return ServerCapabilities.disabled;
   }
