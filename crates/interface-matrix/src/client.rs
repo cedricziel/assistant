@@ -198,6 +198,105 @@ impl MatrixClient {
         Ok((bytes.to_vec(), mime_type))
     }
 
+    // ── Typing indicator ──────────────────────────────────────────────────────
+
+    /// Set or clear the typing indicator for the bot in a room.
+    ///
+    /// `typing: true` sets a 30-second indicator; `false` clears it immediately.
+    pub async fn send_typing(&self, room_id: &str, typing: bool) -> Result<()> {
+        let path = format!(
+            "rooms/{}/typing/{}",
+            urlencoding::encode(room_id),
+            urlencoding::encode(&self.user_id),
+        );
+        let url = self.cs_url(&path);
+        let body = if typing {
+            serde_json::json!({ "typing": true, "timeout": 30_000 })
+        } else {
+            serde_json::json!({ "typing": false })
+        };
+        debug!(url = %url, room_id, typing, "Matrix send_typing");
+        let resp = self
+            .client
+            .put(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("Matrix send_typing")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Matrix send_typing failed ({status}): {err}");
+        }
+        Ok(())
+    }
+
+    // ── Reactions ─────────────────────────────────────────────────────────────
+
+    /// Add an `m.reaction` event to a room targeting `event_id`.
+    /// Returns the event ID of the new reaction event (for later redaction).
+    pub async fn add_reaction(&self, room_id: &str, event_id: &str, emoji: &str) -> Result<String> {
+        let txn_id = Uuid::new_v4().to_string();
+        let path = format!(
+            "rooms/{}/send/m.reaction/{}",
+            urlencoding::encode(room_id),
+            txn_id,
+        );
+        let url = self.cs_url(&path);
+        let body = serde_json::json!({
+            "m.relates_to": {
+                "rel_type": "m.annotation",
+                "event_id": event_id,
+                "key": emoji,
+            }
+        });
+        debug!(url = %url, room_id, emoji, "Matrix add_reaction");
+        let resp = self
+            .client
+            .put(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("Matrix add_reaction")?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            anyhow::bail!("Matrix add_reaction failed ({status}): {text}");
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            event_id: String,
+        }
+        let r: Resp = serde_json::from_str(&text).context("deserialise add_reaction response")?;
+        Ok(r.event_id)
+    }
+
+    /// Redact an event (e.g. remove a reaction) by sending a redaction event.
+    pub async fn redact_event(&self, room_id: &str, event_id: &str) -> Result<()> {
+        let txn_id = Uuid::new_v4().to_string();
+        let path = format!(
+            "rooms/{}/redact/{}/{}",
+            urlencoding::encode(room_id),
+            urlencoding::encode(event_id),
+            txn_id,
+        );
+        let url = self.cs_url(&path);
+        debug!(url = %url, room_id, event_id, "Matrix redact_event");
+        let resp = self
+            .client
+            .put(&url)
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .context("Matrix redact_event")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Matrix redact_event failed ({status}): {err}");
+        }
+        Ok(())
+    }
+
     // ── Join room ────────────────────────────────────────────────────────────
 
     /// Accept a room invite.
@@ -363,5 +462,77 @@ mod tests {
             result.is_err(),
             "expected error when body exceeds max_bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn send_typing_true_sends_put_with_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(wiremock::matchers::path_regex(
+                r"/_matrix/client/v3/rooms/.+/typing/.+",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        client.send_typing("!room:example.com", true).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_typing_false_sends_put() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(wiremock::matchers::path_regex(
+                r"/_matrix/client/v3/rooms/.+/typing/.+",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        client
+            .send_typing("!room:example.com", false)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_reaction_returns_event_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(wiremock::matchers::path_regex(
+                r"/_matrix/client/v3/rooms/.+/send/m.reaction/.+",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "event_id": "$reaction123" })),
+            )
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        let event_id = client
+            .add_reaction("!room:example.com", "$msg1", "⏳")
+            .await
+            .unwrap();
+        assert_eq!(event_id, "$reaction123");
+    }
+
+    #[tokio::test]
+    async fn redact_event_sends_put() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(wiremock::matchers::path_regex(
+                r"/_matrix/client/v3/rooms/.+/redact/.+/.+",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "event_id": "$redact1" })),
+            )
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        client
+            .redact_event("!room:example.com", "$reaction123")
+            .await
+            .unwrap();
     }
 }

@@ -186,6 +186,15 @@ pub trait ChannelAdapter: Send + Sync {
     async fn on_turn_error(&self, _user: &ChannelUser, _err: &anyhow::Error) -> anyhow::Result<()> {
         Ok(())
     }
+
+    /// Called immediately when a message is received, before any per-conversation
+    /// lock is acquired.  Use this to signal "message queued" (e.g. add an ⏳
+    /// reaction) so users get instant feedback even while another turn is in flight.
+    ///
+    /// Must be cheap — it runs on the hot receive path before `tokio::spawn`.
+    async fn on_message_received(&self, _msg: &ChannelMessage) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 // -- Tests --
@@ -233,5 +242,55 @@ mod tests {
     fn channel_type_display() {
         assert_eq!(ChannelType::Slack.to_string(), "slack");
         assert_eq!(ChannelType::Custom("discord".into()).to_string(), "discord");
+    }
+
+    #[tokio::test]
+    async fn on_message_received_default_is_noop() {
+        use futures::Stream;
+        use std::pin::Pin;
+
+        struct NoopAdapter;
+
+        #[async_trait::async_trait]
+        impl ChannelAdapter for NoopAdapter {
+            fn name(&self) -> &str {
+                "noop"
+            }
+            fn channel_type(&self) -> ChannelType {
+                ChannelType::Slack
+            }
+            async fn start(
+                &self,
+            ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ChannelMessage> + Send + 'static>>>
+            {
+                unimplemented!()
+            }
+            async fn send(
+                &self,
+                _user: &ChannelUser,
+                _content: ChannelContent,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn stop(&self) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        let adapter = NoopAdapter;
+        let msg = ChannelMessage {
+            channel_type: ChannelType::Slack,
+            platform_message_id: None,
+            sender: ChannelUser {
+                platform_id: "U1".into(),
+                display_name: None,
+            },
+            content: ChannelContent::Text("hi".into()),
+            thread_id: None,
+            timestamp: Utc::now(),
+            metadata: HashMap::new(),
+        };
+        // Default implementation must return Ok(()) without panicking.
+        adapter.on_message_received(&msg).await.unwrap();
     }
 }

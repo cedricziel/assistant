@@ -35,3 +35,5 @@ axum = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }

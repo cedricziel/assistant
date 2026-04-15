@@ -4,6 +4,7 @@
 //! challenge, and yields inbound `posted` events as [`ChannelMessage`]s.
 //! Automatic exponential-backoff reconnection is built in.
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +17,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream::Stream;
 use futures::SinkExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info, warn};
@@ -34,6 +35,10 @@ pub struct MattermostAdapter {
     allowed_users: Vec<String>,
     /// Resolved bot user ID (set after a successful `get_me()` call in `start()`).
     bot_user_id: Arc<tokio::sync::RwLock<Option<String>>>,
+    /// Stores the post ID that the hourglass reaction was added to in `on_message_received`,
+    /// keyed by platform_id (channel_id/thread_root).  Used for precise removal in
+    /// `on_turn_start` regardless of threading.
+    pending_post_ids: Arc<Mutex<HashMap<String, String>>>,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
 }
@@ -50,6 +55,7 @@ impl MattermostAdapter {
             allowed_channels,
             allowed_users,
             bot_user_id: Arc::new(tokio::sync::RwLock::new(None)),
+            pending_post_ids: Arc::new(Mutex::new(HashMap::new())),
             stop_tx,
             stop_rx,
         }
@@ -244,6 +250,64 @@ impl ChannelAdapter for MattermostAdapter {
             bot_user_id,
             self.client.clone(),
         )
+    }
+
+    /// Add ⏳ hourglass reaction immediately on message receipt (before the conv lock).
+    /// Stores the reacted post_id keyed by platform_id for precise removal in `on_turn_start`.
+    async fn on_message_received(&self, msg: &ChannelMessage) -> Result<()> {
+        let post_id = match &msg.platform_message_id {
+            Some(id) if !id.is_empty() => id.clone(),
+            _ => return Ok(()),
+        };
+        let bot_user_id = self
+            .bot_user_id
+            .try_read()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_default();
+        if bot_user_id.is_empty() {
+            return Ok(());
+        }
+        if let Err(e) = self
+            .client
+            .add_reaction(&bot_user_id, &post_id, "hourglass_flowing_sand")
+            .await
+        {
+            debug!(error = %e, "mattermost: failed to add hourglass reaction (best-effort)");
+        } else {
+            self.pending_post_ids
+                .lock()
+                .await
+                .insert(msg.sender.platform_id.clone(), post_id);
+        }
+        Ok(())
+    }
+
+    /// Remove ⏳ (using the stored post_id) and send typing event when a turn starts.
+    async fn on_turn_start(&self, user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
+        let (channel_id, _) = parse_platform_id(&user.platform_id);
+        let bot_user_id = self
+            .bot_user_id
+            .try_read()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_default();
+        if !bot_user_id.is_empty() {
+            let post_id = self.pending_post_ids.lock().await.remove(&user.platform_id);
+            if let Some(pid) = post_id {
+                if let Err(e) = self
+                    .client
+                    .remove_reaction(&bot_user_id, &pid, "hourglass_flowing_sand")
+                    .await
+                {
+                    debug!(error = %e, "mattermost: failed to remove hourglass reaction (best-effort)");
+                }
+            }
+        }
+        if let Err(e) = self.client.send_typing(&channel_id).await {
+            debug!(error = %e, "mattermost: failed to send typing indicator (best-effort)");
+        }
+        Ok(())
     }
 
     async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {

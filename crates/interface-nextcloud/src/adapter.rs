@@ -6,6 +6,7 @@
 //!
 //! HMAC-SHA256 signing logic is unchanged — it lives in `signing.rs`.
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +24,7 @@ use axum::routing::post;
 use axum::Router;
 use chrono::Utc;
 use futures::stream::Stream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -41,6 +42,9 @@ pub struct NextcloudAdapter {
     secret: String,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
+    /// Stores pending ⏳ message IDs keyed by conversation_token.
+    /// Used to remove the hourglass reaction in on_turn_start.
+    pending_message_ids: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl NextcloudAdapter {
@@ -58,6 +62,7 @@ impl NextcloudAdapter {
             secret,
             stop_tx,
             stop_rx,
+            pending_message_ids: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }
@@ -179,23 +184,71 @@ impl ChannelAdapter for NextcloudAdapter {
         )
     }
 
-    /// Add hourglass reaction while processing.
-    async fn on_turn_start(&self, _user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
-        // Reaction is best-effort; log but don't fail the turn.
+    /// Add ⏳ hourglass reaction immediately on message receipt (before the conv lock).
+    async fn on_message_received(&self, msg: &ChannelMessage) -> Result<()> {
+        // Use sender.platform_id as the key — it equals conversation_token for all
+        // inbound webhook messages and matches what on_turn_start uses via user.platform_id.
+        let conversation_token = msg.sender.platform_id.clone();
+        let message_id = match &msg.platform_message_id {
+            Some(id) if !id.is_empty() => id.clone(),
+            _ => return Ok(()),
+        };
+        // Store for removal in on_turn_start.
+        self.pending_message_ids
+            .lock()
+            .await
+            .insert(conversation_token.clone(), message_id.clone());
+        // Add ⏳ reaction (best-effort; Talk < 17 returns 404, which we ignore).
+        if let Err(e) = http_add_reaction(
+            &self.server_url,
+            &self.secret,
+            &conversation_token,
+            &message_id,
+            "⏳",
+        )
+        .await
+        {
+            debug!(error = %e, "nextcloud: failed to add hourglass reaction (best-effort)");
+        }
         Ok(())
     }
 
-    /// On success, deliver any file attachments as text notices.
+    /// Remove ⏳, send typing notification when a turn starts.
+    async fn on_turn_start(&self, user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
+        // Use the same key derivation as on_message_received: prefer platform_id
+        // (which equals conversation_token for all inbound webhook messages).
+        let conversation_token = &user.platform_id;
+        let message_id = self
+            .pending_message_ids
+            .lock()
+            .await
+            .remove(conversation_token);
+        if let Some(mid) = message_id {
+            let _ = http_remove_reaction(
+                &self.server_url,
+                &self.secret,
+                conversation_token,
+                &mid,
+                "⏳",
+            )
+            .await;
+        }
+        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, true).await;
+        Ok(())
+    }
+
+    /// On success, clear typing and deliver any file attachments as text notices.
     async fn on_turn_success(
         &self,
         user: &ChannelUser,
         _answer: &str,
         attachments: &[Attachment],
     ) -> Result<()> {
+        let conversation_token = &user.platform_id;
+        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, false).await;
         if attachments.is_empty() {
             return Ok(());
         }
-        let conversation_token = &user.platform_id;
         let mut lines = Vec::new();
         for a in attachments {
             let kind = if a.is_image() { "image" } else { "file" };
@@ -223,10 +276,12 @@ impl ChannelAdapter for NextcloudAdapter {
     }
 
     async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
+        let conversation_token = &user.platform_id;
+        let _ = http_send_typing(&self.server_url, &self.secret, conversation_token, false).await;
         let _ = http_post_message(
             &self.server_url,
             &self.secret,
-            &user.platform_id,
+            conversation_token,
             &format!("Sorry, something went wrong: {err}"),
             None,
         )
@@ -382,4 +437,194 @@ pub(crate) async fn http_post_message(
         anyhow::bail!("Nextcloud post_message failed: HTTP {}", resp.status());
     }
     Ok(())
+}
+
+/// Send a typing indicator to Nextcloud Talk (best-effort; Talk < 17 may 404).
+pub(crate) async fn http_send_typing(
+    server_url: &str,
+    secret: &str,
+    conversation_token: &str,
+    typing: bool,
+) -> Result<()> {
+    let body_str = serde_json::json!({ "typing": typing }).to_string();
+    let (random, signature) = sign_request(secret, &body_str)?;
+
+    let url = format!(
+        "{}/ocs/v2.php/apps/spreed/api/v1/bot/{}/typing",
+        server_url.trim_end_matches('/'),
+        conversation_token
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(SEND_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let resp = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .header("OCS-APIRequest", "true")
+        .header("X-Nextcloud-Talk-Bot-Random", &random)
+        .header("X-Nextcloud-Talk-Bot-Signature", &signature)
+        .body(body_str)
+        .send()
+        .await
+        .context("Nextcloud send_typing HTTP error")?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("Nextcloud send_typing failed: HTTP {}", resp.status());
+    }
+    Ok(())
+}
+
+/// Add an emoji reaction to a Nextcloud Talk message.
+pub(crate) async fn http_add_reaction(
+    server_url: &str,
+    secret: &str,
+    conversation_token: &str,
+    message_id: &str,
+    reaction: &str,
+) -> Result<()> {
+    let body_str = serde_json::json!({ "reaction": reaction }).to_string();
+    let (random, signature) = sign_request(secret, &body_str)?;
+
+    let url = format!(
+        "{}/ocs/v2.php/apps/spreed/api/v1/reaction/{}/{}",
+        server_url.trim_end_matches('/'),
+        conversation_token,
+        message_id
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(SEND_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let resp = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .header("OCS-APIRequest", "true")
+        .header("X-Nextcloud-Talk-Bot-Random", &random)
+        .header("X-Nextcloud-Talk-Bot-Signature", &signature)
+        .body(body_str)
+        .send()
+        .await
+        .context("Nextcloud add_reaction HTTP error")?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("Nextcloud add_reaction failed: HTTP {}", resp.status());
+    }
+    Ok(())
+}
+
+/// Remove an emoji reaction from a Nextcloud Talk message.
+pub(crate) async fn http_remove_reaction(
+    server_url: &str,
+    secret: &str,
+    conversation_token: &str,
+    message_id: &str,
+    reaction: &str,
+) -> Result<()> {
+    let body_str = serde_json::json!({ "reaction": reaction }).to_string();
+    let (random, signature) = sign_request(secret, &body_str)?;
+
+    let url = format!(
+        "{}/ocs/v2.php/apps/spreed/api/v1/reaction/{}/{}",
+        server_url.trim_end_matches('/'),
+        conversation_token,
+        message_id
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(SEND_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let resp = client
+        .delete(&url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .header("OCS-APIRequest", "true")
+        .header("X-Nextcloud-Talk-Bot-Random", &random)
+        .header("X-Nextcloud-Talk-Bot-Signature", &signature)
+        .body(body_str)
+        .send()
+        .await
+        .context("Nextcloud remove_reaction HTTP error")?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("Nextcloud remove_reaction failed: HTTP {}", resp.status());
+    }
+    Ok(())
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    const SECRET: &str = "test-secret";
+    const TOKEN: &str = "conversation-token-abc";
+    const MSG_ID: &str = "12345";
+
+    fn ocs_ok() -> serde_json::Value {
+        serde_json::json!({ "ocs": { "meta": { "status": "ok" }, "data": {} } })
+    }
+
+    #[tokio::test]
+    async fn send_typing_posts_to_correct_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/ocs/v2.php/apps/spreed/api/v1/bot/{TOKEN}/typing"
+            )))
+            .and(header("OCS-APIRequest", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ocs_ok()))
+            .mount(&server)
+            .await;
+
+        http_send_typing(&server.uri(), SECRET, TOKEN, true)
+            .await
+            .expect("send_typing should succeed");
+    }
+
+    #[tokio::test]
+    async fn add_reaction_posts_to_correct_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/ocs/v2.php/apps/spreed/api/v1/reaction/{TOKEN}/{MSG_ID}"
+            )))
+            .and(header("OCS-APIRequest", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ocs_ok()))
+            .mount(&server)
+            .await;
+
+        http_add_reaction(&server.uri(), SECRET, TOKEN, MSG_ID, "⏳")
+            .await
+            .expect("add_reaction should succeed");
+    }
+
+    #[tokio::test]
+    async fn remove_reaction_deletes_correct_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path(format!(
+                "/ocs/v2.php/apps/spreed/api/v1/reaction/{TOKEN}/{MSG_ID}"
+            )))
+            .and(header("OCS-APIRequest", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ocs_ok()))
+            .mount(&server)
+            .await;
+
+        http_remove_reaction(&server.uri(), SECRET, TOKEN, MSG_ID, "⏳")
+            .await
+            .expect("remove_reaction should succeed");
+    }
 }
