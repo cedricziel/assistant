@@ -1104,7 +1104,7 @@ fn default_compaction_reserve_floor() -> u64 {
 }
 
 fn default_compaction_soft_threshold() -> u64 {
-    4_000
+    30_000
 }
 
 fn default_keep_recent_turns() -> usize {
