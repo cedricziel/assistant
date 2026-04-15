@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.98](https://github.com/cedricziel/assistant/compare/v0.1.97...v0.1.98) (2026-04-15)
+
+
+### Features
+
+* **app:** auto-scroll to latest message and add scroll-to-bottom FAB ([#450](https://github.com/cedricziel/assistant/issues/450)) ([2b94e7c](https://github.com/cedricziel/assistant/commit/2b94e7c138944e71a1bbc07a41d8c149d5e05fda))
+* **skills:** add openapi-sync skill to enforce API spec discipline ([3b05268](https://github.com/cedricziel/assistant/commit/3b052687d35e3d99c0a3d1c32c687940f4e2da2c))
+
+
+### Bug Fixes
+
+* **app:** scroll chat to bottom when keyboard opens on iOS Safari ([#448](https://github.com/cedricziel/assistant/issues/448)) ([9644890](https://github.com/cedricziel/assistant/commit/96448906bd59ff97cf0ce86d5e615d0d7bc77c95))
+
 ## [0.1.97](https://github.com/cedricziel/assistant/compare/v0.1.96...v0.1.97) (2026-04-14)
 
 
