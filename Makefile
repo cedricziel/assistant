@@ -94,7 +94,7 @@ build-macos-bundle: build-macos-binary
 # Export the OpenAPI spec to openapi.json (requires no running server).
 dump-openapi:
 	cargo run -p assistant-cli -- webui serve --print-openapi 2>/dev/null \
-	  | python3 -m json.tool --no-ensure-ascii > openapi.json
+	  | python3 -m json.tool --no-ensure-ascii --indent 2 > openapi.json
 
 # Generate the Dart/Flutter API client from openapi.json.
 # Requires: openapi-generator (brew install openapi-generator)

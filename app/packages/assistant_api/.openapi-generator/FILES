@@ -23,6 +23,7 @@ doc/Artifact.md
 doc/AuthenticationInfo.md
 doc/AuthorizationCodeOAuthFlow.md
 doc/CancelTaskRequest.md
+doc/CapabilitiesApi.md
 doc/ClientCredentialsOAuthFlow.md
 doc/ConversationDetail.md
 doc/ConversationSummary.md
@@ -70,6 +71,7 @@ doc/SecurityScheme.md
 doc/SendMessageConfiguration.md
 doc/SendMessageRequest.md
 doc/SendMessageResponse.md
+doc/ServerCapabilities.md
 doc/SetActivePersonaRequest.md
 doc/SetSkillAccessModeRequest.md
 doc/SkillDetail.md
@@ -117,6 +119,7 @@ lib/src/api.dart
 lib/src/api/agent_card_api.dart
 lib/src/api/agents_api.dart
 lib/src/api/analytics_api.dart
+lib/src/api/capabilities_api.dart
 lib/src/api/conversations_api.dart
 lib/src/api/logs_api.dart
 lib/src/api/messages_api.dart
@@ -197,6 +200,7 @@ lib/src/model/security_scheme.dart
 lib/src/model/send_message_configuration.dart
 lib/src/model/send_message_request.dart
 lib/src/model/send_message_response.dart
+lib/src/model/server_capabilities.dart
 lib/src/model/set_active_persona_request.dart
 lib/src/model/set_skill_access_mode_request.dart
 lib/src/model/skill_detail.dart
@@ -235,7 +239,3 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/subscribe_request_test.dart
-test/unsubscribe_request_test.dart
-test/vapid_key_response_test.dart
-test/web_push_api_test.dart

@@ -8,7 +8,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:assistant_api/assistant_api.dart';
+import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:dio/dio.dart';
 
 import 'models/server_capabilities.dart';
