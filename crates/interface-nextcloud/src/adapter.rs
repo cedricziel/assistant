@@ -186,12 +186,9 @@ impl ChannelAdapter for NextcloudAdapter {
 
     /// Add ⏳ hourglass reaction immediately on message receipt (before the conv lock).
     async fn on_message_received(&self, msg: &ChannelMessage) -> Result<()> {
-        let conversation_token = msg
-            .metadata
-            .get("conversation_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&msg.sender.platform_id)
-            .to_string();
+        // Use sender.platform_id as the key — it equals conversation_token for all
+        // inbound webhook messages and matches what on_turn_start uses via user.platform_id.
+        let conversation_token = msg.sender.platform_id.clone();
         let message_id = match &msg.platform_message_id {
             Some(id) if !id.is_empty() => id.clone(),
             _ => return Ok(()),
@@ -218,6 +215,8 @@ impl ChannelAdapter for NextcloudAdapter {
 
     /// Remove ⏳, send typing notification when a turn starts.
     async fn on_turn_start(&self, user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
+        // Use the same key derivation as on_message_received: prefer platform_id
+        // (which equals conversation_token for all inbound webhook messages).
         let conversation_token = &user.platform_id;
         let message_id = self
             .pending_message_ids

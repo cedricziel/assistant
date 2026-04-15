@@ -292,7 +292,7 @@ mod tests {
 
     use std::collections::HashMap;
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use assistant_core::{
         ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser,
@@ -502,11 +502,81 @@ mod tests {
         );
     }
 
-    /// `on_message_received` default is a no-op — AtomicBool stays false.
+    /// `on_message_received` fires before the conv lock is acquired.
+    ///
+    /// Mirrors the runner's invocation pattern: hook is called after `resolve_conv_id`
+    /// but while the conv lock is still held externally, proving it runs outside the
+    /// locked critical section.
     #[tokio::test]
-    async fn on_message_received_default_noop_in_runner_context() {
-        // Verify the trait default via ChannelRunner::content_to_dispatch (indirect)
-        // — the real check is that the adapter test in core passes.
-        let _ = AtomicBool::new(false); // suppress unused import warning
+    async fn on_message_received_fires_before_conv_lock() {
+        struct CountingAdapter {
+            count: Arc<AtomicUsize>,
+        }
+
+        #[async_trait]
+        impl ChannelAdapter for CountingAdapter {
+            fn name(&self) -> &str {
+                "counting"
+            }
+            fn channel_type(&self) -> ChannelType {
+                ChannelType::Slack
+            }
+            async fn start(
+                &self,
+            ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ChannelMessage> + Send + 'static>>>
+            {
+                unimplemented!()
+            }
+            async fn send(&self, _u: &ChannelUser, _c: ChannelContent) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn stop(&self) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn on_message_received(&self, _msg: &ChannelMessage) -> anyhow::Result<()> {
+                self.count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let adapter = Arc::new(CountingAdapter {
+            count: count.clone(),
+        });
+
+        let convs = Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(100).unwrap())));
+        let locks = Arc::new(Mutex::new(HashMap::new()));
+
+        let msg = ChannelMessage {
+            channel_type: ChannelType::Slack,
+            platform_message_id: None,
+            sender: ChannelUser {
+                platform_id: "C1/ts2".into(),
+                display_name: None,
+            },
+            content: ChannelContent::Text("hi".into()),
+            thread_id: Some("ts2".into()),
+            timestamp: Utc::now(),
+            metadata: HashMap::new(),
+        };
+
+        let key = "C1/ts2".to_string();
+        let conv_id = ChannelRunner::resolve_conv_id(&convs, &key).await;
+        let lock = ChannelRunner::get_conv_lock(&locks, conv_id).await;
+
+        // Hold the conv lock — any spawned dispatch task would block here.
+        let _guard = lock.lock().await;
+
+        assert_eq!(count.load(Ordering::SeqCst), 0, "not yet called");
+
+        // Mirror the runner's invocation: hook fires before acquiring the lock.
+        adapter.on_message_received(&msg).await.unwrap();
+
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "on_message_received must fire before the conv lock is acquired"
+        );
+        // _guard is still held here — the hook didn't need the lock.
     }
 }

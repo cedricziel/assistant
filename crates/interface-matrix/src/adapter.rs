@@ -6,7 +6,7 @@
 //!
 //! Auto-accepts room invitations via `POST /join/<room_id>`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -46,8 +46,9 @@ pub struct MatrixAdapter {
     /// BCP-47 language hint passed to the transcription provider.
     transcription_language: Option<String>,
     /// Stores the reaction event IDs for pending ⏳ hourglass reactions,
-    /// keyed by the inbound event ID.  Used to redact them in `on_turn_start`.
-    pending_reactions: Arc<Mutex<HashMap<String, String>>>,
+    /// keyed by room_id.  A VecDeque is used so that multiple queued messages
+    /// in the same room are redacted in FIFO order without losing track.
+    pending_reactions: Arc<Mutex<HashMap<String, VecDeque<String>>>>,
 }
 
 impl MatrixAdapter {
@@ -421,7 +422,8 @@ impl ChannelAdapter for MatrixAdapter {
     }
 
     /// Add ⏳ hourglass reaction immediately on message receipt (before the conv lock).
-    /// Stores the resulting reaction event ID keyed by room_id for later redaction.
+    /// Spawns a detached task to avoid blocking the inbound stream on homeserver I/O.
+    /// Reaction event IDs are stored in a per-room FIFO queue for later redaction.
     async fn on_message_received(&self, msg: &ChannelMessage) -> Result<()> {
         let room_id = msg
             .metadata
@@ -429,31 +431,46 @@ impl ChannelAdapter for MatrixAdapter {
             .and_then(|v| v.as_str())
             .unwrap_or(&msg.sender.platform_id)
             .to_string();
-        let Some(event_id) = &msg.platform_message_id else {
+        let Some(event_id) = msg.platform_message_id.clone() else {
             return Ok(());
         };
-        match self.client.add_reaction(&room_id, event_id, "⏳").await {
-            Ok(reaction_id) => {
-                self.pending_reactions
-                    .lock()
-                    .await
-                    .insert(room_id, reaction_id);
+        let client = self.client.clone();
+        let pending = self.pending_reactions.clone();
+        tokio::spawn(async move {
+            match client.add_reaction(&room_id, &event_id, "⏳").await {
+                Ok(reaction_id) => {
+                    pending
+                        .lock()
+                        .await
+                        .entry(room_id)
+                        .or_default()
+                        .push_back(reaction_id);
+                }
+                Err(e) => {
+                    debug!(error = %e, "matrix: failed to add hourglass reaction (best-effort)");
+                }
             }
-            Err(e) => {
-                debug!(error = %e, "matrix: failed to add hourglass reaction (best-effort)");
-            }
-        }
+        });
         Ok(())
     }
 
-    /// Redact ⏳ and send typing indicator when a turn starts.
+    /// Redact ⏳ (FIFO) and send typing indicator when a turn starts.
     async fn on_turn_start(&self, user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
         let room_id = &user.platform_id;
-        let reaction_id = self.pending_reactions.lock().await.remove(room_id);
+        let reaction_id = self
+            .pending_reactions
+            .lock()
+            .await
+            .get_mut(room_id)
+            .and_then(|q| q.pop_front());
         if let Some(rid) = reaction_id {
-            let _ = self.client.redact_event(room_id, &rid).await;
+            if let Err(e) = self.client.redact_event(room_id, &rid).await {
+                debug!(error = %e, "matrix: failed to redact hourglass reaction (best-effort)");
+            }
         }
-        let _ = self.client.send_typing(room_id, true).await;
+        if let Err(e) = self.client.send_typing(room_id, true).await {
+            debug!(error = %e, "matrix: failed to send typing indicator (best-effort)");
+        }
         Ok(())
     }
 
@@ -464,13 +481,17 @@ impl ChannelAdapter for MatrixAdapter {
         _answer: &str,
         _attachments: &[assistant_core::Attachment],
     ) -> Result<()> {
-        let _ = self.client.send_typing(&user.platform_id, false).await;
+        if let Err(e) = self.client.send_typing(&user.platform_id, false).await {
+            debug!(error = %e, "matrix: failed to clear typing indicator (best-effort)");
+        }
         Ok(())
     }
 
     async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
         let room_id = &user.platform_id;
-        let _ = self.client.send_typing(room_id, false).await;
+        if let Err(e) = self.client.send_typing(room_id, false).await {
+            debug!(error = %e, "matrix: failed to clear typing indicator (best-effort)");
+        }
         let _ = self
             .client
             .send_message(room_id, &format!("Sorry, I encountered an error: {err}"))
