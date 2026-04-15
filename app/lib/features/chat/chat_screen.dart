@@ -28,15 +28,19 @@ class ChatScreen extends ConsumerStatefulWidget {
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
+const double _kBottomThreshold = 80.0;
+
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
   final _inputFocus = FocusNode();
+  bool _atBottom = true;
 
   @override
   void initState() {
     super.initState();
     _inputFocus.addListener(_onInputFocusChange);
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadConversation();
     });
@@ -62,6 +66,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    final nearBottom = pos.pixels >= pos.maxScrollExtent - _kBottomThreshold;
+    if (_atBottom != nearBottom) setState(() => _atBottom = nearBottom);
+  }
+
   @override
   void didUpdateWidget(ChatScreen old) {
     super.didUpdateWidget(old);
@@ -79,11 +90,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } else {
       ref.read(chatProvider.notifier).clearConversation();
     }
+    _scrollToBottom();
   }
 
   @override
   void dispose() {
     _inputFocus.removeListener(_onInputFocusChange);
+    _scrollController.removeListener(_onScroll);
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
@@ -123,9 +136,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final chatState = chatAsync.value ?? const ChatState();
     final isWide = MediaQuery.of(context).size.width > 700;
 
-    // Scroll to bottom when messages change.
+    // Scroll to bottom when messages change, but only if already at bottom.
     ref.listen(chatProvider, (_, next) {
-      if (next.value?.messages.isNotEmpty == true) {
+      if (_atBottom && next.value?.messages.isNotEmpty == true) {
         _scrollToBottom();
       }
     });
@@ -252,41 +265,56 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
                   // Message list.
                   Expanded(
-                    child: chatState.messages.isEmpty
-                        ? const _EmptyChat()
-                        : ListView.builder(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 16,
-                              horizontal: 12,
-                            ),
-                            itemCount: chatState.messages.length,
-                            itemBuilder: (context, index) {
-                              final msg = chatState.messages[index];
-                              final prevMsg = index > 0
-                                  ? chatState.messages[index - 1]
-                                  : null;
-                              final isGrouped =
-                                  prevMsg != null &&
-                                  prevMsg.role == msg.role &&
-                                  !prevMsg.isStreaming;
-                              return _MessageBubble(
-                                message: msg,
-                                isGrouped: isGrouped,
-                                capabilities: capabilities,
-                                onRetry: msg.status == MessageStatus.failed
-                                    ? () => ref
-                                          .read(chatProvider.notifier)
-                                          .retryMessage(msg)
-                                    : null,
-                                fetchMessageAudio: () {
-                                  final api = ref.read(apiClientProvider);
-                                  return api?.fetchMessageAudio(msg.id) ??
-                                      Future.value(null);
+                    child: Stack(
+                      children: [
+                        chatState.messages.isEmpty
+                            ? const _EmptyChat()
+                            : ListView.builder(
+                                controller: _scrollController,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                  horizontal: 12,
+                                ),
+                                itemCount: chatState.messages.length,
+                                itemBuilder: (context, index) {
+                                  final msg = chatState.messages[index];
+                                  final prevMsg = index > 0
+                                      ? chatState.messages[index - 1]
+                                      : null;
+                                  final isGrouped =
+                                      prevMsg != null &&
+                                      prevMsg.role == msg.role &&
+                                      !prevMsg.isStreaming;
+                                  return _MessageBubble(
+                                    message: msg,
+                                    isGrouped: isGrouped,
+                                    capabilities: capabilities,
+                                    onRetry: msg.status == MessageStatus.failed
+                                        ? () => ref
+                                              .read(chatProvider.notifier)
+                                              .retryMessage(msg)
+                                        : null,
+                                    fetchMessageAudio: () {
+                                      final api = ref.read(apiClientProvider);
+                                      return api?.fetchMessageAudio(msg.id) ??
+                                          Future.value(null);
+                                    },
+                                  );
                                 },
-                              );
-                            },
+                              ),
+                        if (!_atBottom)
+                          Positioned(
+                            bottom: 8,
+                            right: 8,
+                            child: FloatingActionButton.small(
+                              key: const Key('scroll_to_bottom_button'),
+                              onPressed: _scrollToBottom,
+                              tooltip: 'Scroll to bottom',
+                              child: const Icon(Icons.keyboard_arrow_down),
+                            ),
                           ),
+                      ],
+                    ),
                   ),
 
                   // Progress indicator (shown while streaming).

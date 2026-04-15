@@ -94,6 +94,81 @@ void main() {
     });
   });
 
+  group('Chat screen — scroll-to-bottom FAB', () {
+    /// Builds a list of [count] messages to ensure the ListView has scroll
+    /// extent in the 480×960 test viewport.
+    List<ChatMessage> manyMessages(int count) => List.generate(
+      count,
+      (i) => ChatMessage(
+        id: 'msg-$i',
+        role: i.isEven ? 'user' : 'assistant',
+        content: 'Message number $i with enough text to take up space.',
+      ),
+    );
+
+    testWidgets('FAB is hidden when at bottom (initial state)', (tester) async {
+      final res = await pumpChatScreen(tester);
+
+      res.notifier.push(
+        ChatState(conversationId: 'c1', messages: manyMessages(30)),
+      );
+      await tester.pumpAndSettle();
+
+      // At rest the user is scrolled to the bottom — FAB must not be visible.
+      expect(
+        find.byKey(const Key('scroll_to_bottom_button')),
+        findsNothing,
+        reason: 'FAB should be hidden when the list is at the bottom',
+      );
+    });
+
+    testWidgets('FAB appears after scrolling up', (tester) async {
+      final res = await pumpChatScreen(tester);
+
+      res.notifier.push(
+        ChatState(conversationId: 'c1', messages: manyMessages(30)),
+      );
+      await tester.pumpAndSettle();
+
+      // Drag the list down (i.e., scroll content upward).
+      await tester.drag(find.byType(ListView), const Offset(0, 600));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('scroll_to_bottom_button')),
+        findsOneWidget,
+        reason: 'FAB should appear when scrolled away from bottom',
+      );
+    });
+
+    testWidgets('tapping FAB scrolls back to bottom and hides FAB', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+
+      res.notifier.push(
+        ChatState(conversationId: 'c1', messages: manyMessages(30)),
+      );
+      await tester.pumpAndSettle();
+
+      // Scroll up to reveal FAB.
+      await tester.drag(find.byType(ListView), const Offset(0, 600));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsOneWidget);
+
+      // Tap the FAB.
+      await tester.tap(find.byKey(const Key('scroll_to_bottom_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('scroll_to_bottom_button')),
+        findsNothing,
+        reason: 'FAB should disappear after scrolling back to bottom',
+      );
+    });
+  });
+
   group('Chat screen — retry affordance', () {
     testWidgets(
       '7.6: Retry button appears when a user message has status == failed',
