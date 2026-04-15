@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:assistant_app/api/capabilities_provider.dart';
+import 'package:assistant_app/api/models/server_capabilities.dart';
 import 'package:assistant_app/features/contexts/data/context_repository.dart';
 import 'package:assistant_app/features/contexts/models/context_model.dart';
 import 'package:assistant_app/features/contexts/providers/context_providers.dart';
@@ -33,7 +35,12 @@ Future<ContextRepository> makeRepo({String? activeContextId}) async {
 
 Widget buildApp(ContextRepository repo) {
   return ProviderScope(
-    overrides: [contextRepositoryProvider.overrideWithValue(repo)],
+    overrides: [
+      contextRepositoryProvider.overrideWithValue(repo),
+      capabilitiesProvider.overrideWith(
+        (ref) async => ServerCapabilities.disabled,
+      ),
+    ],
     child: Consumer(
       builder: (context, ref, child) {
         final router = ref.watch(routerProvider);
