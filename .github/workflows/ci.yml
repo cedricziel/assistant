@@ -432,6 +432,21 @@ jobs:
               core.info(`No branch visual-diffs/pr-${prNumber} to clean up`);
             }
 
+  validate-openapi:
+    name: Validate OpenAPI spec
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Lint OpenAPI spec with Redocly
+        run: npx --yes @redocly/cli lint openapi.json
+
   integration:
     name: Integration (smoke)
     if: github.event.action != 'closed'

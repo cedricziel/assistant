@@ -96,6 +96,10 @@ dump-openapi:
 	cargo run -p assistant-cli -- webui serve --print-openapi 2>/dev/null \
 	  | python3 -m json.tool --no-ensure-ascii --indent 2 > openapi.json
 
+# Validate the OpenAPI spec with Redocly CLI (requires Node.js / npx).
+validate-openapi: openapi.json
+	npx --yes @redocly/cli lint openapi.json
+
 # Generate the Dart/Flutter API client from openapi.json.
 # Requires: openapi-generator (brew install openapi-generator)
 generate-flutter-client: openapi.json
