@@ -34,7 +34,7 @@ pub struct SendMessageRequest {
 
 /// Request for the `GetTask` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema, utoipa::IntoParams))]
 #[serde(rename_all = "camelCase")]
 pub struct GetTaskRequest {
     /// Optional tenant ID.
@@ -51,7 +51,7 @@ pub struct GetTaskRequest {
 
 /// Request for the `ListTasks` method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema, utoipa::IntoParams))]
 #[serde(rename_all = "camelCase")]
 pub struct ListTasksRequest {
     /// Tenant ID.

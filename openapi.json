@@ -4,9 +4,10 @@
     "title": "Assistant API",
     "description": "AI assistant API — A2A protocol (Agent-to-Agent), chat, and workflow management.\n\n**Authentication**: protected endpoints require `Authorization: Bearer <token>`.\nThe token is set via `--auth-token` / `ASSISTANT_WEB_TOKEN` on the server.",
     "license": {
-      "name": "MIT"
+      "name": "MIT",
+      "identifier": "MIT"
     },
-    "version": "0.1.97"
+    "version": "0.1.98"
   },
   "servers": [
     {
@@ -32,6 +33,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Agent card not found"
           }
         },
         "security": []
@@ -2779,7 +2783,7 @@
         ],
         "summary": "`POST /message/send` -- Sends a message to the agent (unary).",
         "description": "Creates a task, records the user message, transitions to Working, produces\nan agent reply, and returns the final task state.",
-        "operationId": "send_message",
+        "operationId": "a2a_send_message",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2801,6 +2805,9 @@
               }
             }
           },
+          "400": {
+            "description": "Bad request"
+          },
           "401": {
             "description": "Unauthorized"
           }
@@ -2818,7 +2825,7 @@
           "messages"
         ],
         "summary": "`POST /message/stream` -- Sends a message with streaming response (SSE).",
-        "operationId": "send_message_streaming",
+        "operationId": "a2a_send_message_streaming",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2833,8 +2840,15 @@
           "200": {
             "description": "Streaming SSE response; each event is a JSON-encoded StreamResponse",
             "content": {
-              "text/event-stream": {}
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
             }
+          },
+          "400": {
+            "description": "Bad request"
           },
           "401": {
             "description": "Unauthorized"
@@ -2856,8 +2870,21 @@
         "operationId": "list_tasks",
         "parameters": [
           {
+            "name": "tenant",
+            "in": "query",
+            "description": "Tenant ID.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "contextId",
             "in": "query",
+            "description": "Filter tasks by context ID.",
             "required": false,
             "schema": {
               "type": [
@@ -2869,6 +2896,7 @@
           {
             "name": "status",
             "in": "query",
+            "description": "Filter tasks by current status state.",
             "required": false,
             "schema": {
               "oneOf": [
@@ -2884,6 +2912,7 @@
           {
             "name": "pageSize",
             "in": "query",
+            "description": "Max number of tasks to return (1..=100, default 50).",
             "required": false,
             "schema": {
               "type": [
@@ -2891,6 +2920,56 @@
                 "null"
               ],
               "format": "int32"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "description": "Page token from a previous `ListTasks` call.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "historyLength",
+            "in": "query",
+            "description": "Max number of messages to include in each task's history.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "statusTimestampAfter",
+            "in": "query",
+            "description": "Filter tasks with status updated after this timestamp.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "includeArtifacts",
+            "in": "query",
+            "description": "Whether to include artifacts in returned tasks.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
             }
           }
         ],
@@ -2932,6 +3011,31 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "historyLength",
+            "in": "query",
+            "description": "Max number of recent messages to include in history.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "description": "Optional tenant ID.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -2949,7 +3053,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Task not found"
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2977,6 +3088,17 @@
             }
           }
         ],
+        "requestBody": {
+          "description": "Optional cancellation metadata",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Cancelled task",
@@ -2992,7 +3114,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Task not found"
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3024,17 +3153,35 @@
           "200": {
             "description": "SSE stream of StreamResponse events",
             "content": {
-              "text/event-stream": {}
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
             }
           },
           "400": {
-            "description": "Task already in terminal state"
+            "description": "Task already in terminal state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Task not found"
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3148,7 +3295,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Task not found"
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3200,7 +3354,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Config not found"
+            "description": "Config not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3243,7 +3404,14 @@
             "description": "Unauthorized"
           },
           "404": {
-            "description": "Config not found"
+            "description": "Config not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3634,20 +3802,6 @@
           }
         }
       },
-      "AnalyticsQueryParams": {
-        "type": "object",
-        "description": "Query parameters for the analytics endpoint.",
-        "properties": {
-          "window": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Window in hours. Valid values: 1, 6, 24, 72, 168. Defaults to 24."
-          }
-        }
-      },
       "AnalyticsSummaryResponse": {
         "type": "object",
         "description": "Aggregated analytics summary for a time window.",
@@ -3729,7 +3883,7 @@
       },
       "ApiErrorResponse": {
         "type": "object",
-        "description": "API error response body (JSON-RPC style used by A2A handlers).",
+        "description": "API error response body returned for 4xx and 5xx errors.",
         "required": [
           "code",
           "message"
@@ -4154,72 +4308,6 @@
           }
         }
       },
-      "GetExtendedAgentCardRequest": {
-        "type": "object",
-        "description": "Request for the `GetExtendedAgentCard` method.",
-        "properties": {
-          "tenant": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional tenant ID."
-          }
-        }
-      },
-      "GetTaskPushNotificationConfigRequest": {
-        "type": "object",
-        "description": "Request for the `GetTaskPushNotificationConfig` method.",
-        "required": [
-          "taskId",
-          "id"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "The resource ID of the configuration to retrieve."
-          },
-          "taskId": {
-            "type": "string",
-            "description": "The parent task resource ID."
-          },
-          "tenant": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional tenant ID."
-          }
-        }
-      },
-      "GetTaskRequest": {
-        "type": "object",
-        "description": "Request for the `GetTask` method.",
-        "required": [
-          "id"
-        ],
-        "properties": {
-          "historyLength": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "Max number of recent messages to include in history."
-          },
-          "id": {
-            "type": "string",
-            "description": "The resource ID of the task to retrieve."
-          },
-          "tenant": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional tenant ID."
-          }
-        }
-      },
       "HttpAuthSecurityScheme": {
         "type": "object",
         "description": "Defines a security scheme using HTTP authentication.",
@@ -4277,41 +4365,6 @@
           }
         }
       },
-      "ListTaskPushNotificationConfigsRequest": {
-        "type": "object",
-        "description": "Request for the `ListTaskPushNotificationConfigs` method.",
-        "required": [
-          "taskId"
-        ],
-        "properties": {
-          "pageSize": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "Max number of configurations to return."
-          },
-          "pageToken": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Page token from a previous call."
-          },
-          "taskId": {
-            "type": "string",
-            "description": "The parent task resource ID."
-          },
-          "tenant": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional tenant ID."
-          }
-        }
-      },
       "ListTaskPushNotificationConfigsResponse": {
         "type": "object",
         "description": "Response for the `ListTaskPushNotificationConfigs` method.",
@@ -4332,75 +4385,6 @@
               "null"
             ],
             "description": "A token to retrieve the next page of results."
-          }
-        }
-      },
-      "ListTasksRequest": {
-        "type": "object",
-        "description": "Request for the `ListTasks` method.",
-        "properties": {
-          "contextId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Filter tasks by context ID."
-          },
-          "historyLength": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "Max number of messages to include in each task's history."
-          },
-          "includeArtifacts": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "Whether to include artifacts in returned tasks."
-          },
-          "pageSize": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "Max number of tasks to return (1..=100, default 50)."
-          },
-          "pageToken": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Page token from a previous `ListTasks` call."
-          },
-          "status": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/TaskState",
-                "description": "Filter tasks by current status state."
-              }
-            ]
-          },
-          "statusTimestampAfter": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "Filter tasks with status updated after this timestamp."
-          },
-          "tenant": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Tenant ID."
           }
         }
       },
@@ -5416,26 +5400,6 @@
           "p256dh": {
             "type": "string",
             "description": "Base64url-encoded P-256 ECDH public key from the browser subscription."
-          }
-        }
-      },
-      "SubscribeToTaskRequest": {
-        "type": "object",
-        "description": "Request for the `SubscribeToTask` method.",
-        "required": [
-          "id"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "The resource ID of the task to subscribe to."
-          },
-          "tenant": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional tenant ID."
           }
         }
       },
