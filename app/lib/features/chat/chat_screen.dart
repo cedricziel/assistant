@@ -296,6 +296,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                         : null,
                                     fetchMessageAudio: () {
                                       final api = ref.read(apiClientProvider);
+                                      // Prefer pre-synthesized audio from the
+                                      // audio_ready SSE event; fall back to
+                                      // on-demand synthesis via the message ID.
+                                      final audioId = msg.audioId;
+                                      if (audioId != null) {
+                                        return api?.fetchAudio(audioId) ??
+                                            Future.value(null);
+                                      }
                                       return api?.fetchMessageAudio(msg.id) ??
                                           Future.value(null);
                                     },

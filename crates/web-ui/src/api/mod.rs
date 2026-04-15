@@ -1015,7 +1015,7 @@ pub async fn get_audio(State(state): State<ApiState>, Path(id): Path<String>) ->
     };
 
     match state.audio_store.get(audio_id).await {
-        Some(bytes) => ([(header::CONTENT_TYPE, "audio/mpeg")], Body::from(bytes)).into_response(),
+        Some((bytes, mime)) => ([(header::CONTENT_TYPE, mime)], Body::from(bytes)).into_response(),
         None => (StatusCode::NOT_FOUND, "Audio not found or expired").into_response(),
     }
 }
@@ -1612,7 +1612,10 @@ mod tests {
         let (state, _) = test_state(&server.uri()).await;
 
         let fake_audio = b"mp3-bytes".to_vec();
-        let audio_id = state.audio_store.insert(fake_audio.clone()).await;
+        let audio_id = state
+            .audio_store
+            .insert(fake_audio.clone(), "audio/mpeg".to_string())
+            .await;
 
         let resp = app(state)
             .oneshot(

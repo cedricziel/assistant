@@ -13,7 +13,7 @@ use uuid::Uuid;
 const TTL: Duration = Duration::from_secs(3600); // 1 hour
 
 /// Inner map type alias to keep the field declaration readable.
-type AudioMap = HashMap<Uuid, (Vec<u8>, Instant)>;
+type AudioMap = HashMap<Uuid, (Vec<u8>, String, Instant)>;
 
 /// Shared in-memory store for audio blobs produced by the `voice-response` tool.
 #[derive(Clone, Default)]
@@ -26,19 +26,22 @@ impl AudioStore {
         Self::default()
     }
 
-    /// Store audio bytes under a fresh UUID. Returns the UUID.
-    pub async fn insert(&self, audio: Vec<u8>) -> Uuid {
+    /// Store audio bytes and MIME type under a fresh UUID. Returns the UUID.
+    pub async fn insert(&self, audio: Vec<u8>, mime_type: String) -> Uuid {
         let id = Uuid::new_v4();
-        self.inner.write().await.insert(id, (audio, Instant::now()));
+        self.inner
+            .write()
+            .await
+            .insert(id, (audio, mime_type, Instant::now()));
         id
     }
 
-    /// Retrieve audio bytes by ID. Returns `None` if not found or expired.
-    pub async fn get(&self, id: Uuid) -> Option<Vec<u8>> {
+    /// Retrieve audio bytes and MIME type by ID. Returns `None` if not found or expired.
+    pub async fn get(&self, id: Uuid) -> Option<(Vec<u8>, String)> {
         let map = self.inner.read().await;
-        map.get(&id).and_then(|(data, inserted)| {
+        map.get(&id).and_then(|(data, mime, inserted)| {
             if inserted.elapsed() < TTL {
-                Some(data.clone())
+                Some((data.clone(), mime.clone()))
             } else {
                 None
             }
@@ -48,7 +51,7 @@ impl AudioStore {
     /// Remove all expired entries.
     pub async fn sweep(&self) {
         let mut map = self.inner.write().await;
-        map.retain(|_, (_, inserted)| inserted.elapsed() < TTL);
+        map.retain(|_, (_, _, inserted)| inserted.elapsed() < TTL);
     }
 }
 
@@ -61,10 +64,10 @@ mod tests {
         let store = AudioStore::new();
         let audio = b"fake-mp3-bytes".to_vec();
 
-        let id = store.insert(audio.clone()).await;
+        let id = store.insert(audio.clone(), "audio/mpeg".to_string()).await;
         let retrieved = store.get(id).await;
 
-        assert_eq!(retrieved, Some(audio));
+        assert_eq!(retrieved, Some((audio, "audio/mpeg".to_string())));
     }
 
     #[tokio::test]
@@ -77,7 +80,9 @@ mod tests {
     #[tokio::test]
     async fn sweep_does_not_remove_fresh_entries() {
         let store = AudioStore::new();
-        let id = store.insert(b"audio".to_vec()).await;
+        let id = store
+            .insert(b"audio".to_vec(), "audio/mpeg".to_string())
+            .await;
 
         store.sweep().await;
 
@@ -90,10 +95,16 @@ mod tests {
     #[tokio::test]
     async fn multiple_inserts_return_distinct_ids() {
         let store = AudioStore::new();
-        let id1 = store.insert(b"a".to_vec()).await;
-        let id2 = store.insert(b"b".to_vec()).await;
+        let id1 = store.insert(b"a".to_vec(), "audio/mpeg".to_string()).await;
+        let id2 = store.insert(b"b".to_vec(), "audio/ogg".to_string()).await;
         assert_ne!(id1, id2);
-        assert_eq!(store.get(id1).await, Some(b"a".to_vec()));
-        assert_eq!(store.get(id2).await, Some(b"b".to_vec()));
+        assert_eq!(
+            store.get(id1).await,
+            Some((b"a".to_vec(), "audio/mpeg".to_string()))
+        );
+        assert_eq!(
+            store.get(id2).await,
+            Some((b"b".to_vec(), "audio/ogg".to_string()))
+        );
     }
 }
