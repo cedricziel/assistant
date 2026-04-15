@@ -98,7 +98,7 @@ axum = { version = "0.8", features = ["macros"] }
 # Async streams
 futures = "0.3"
 # Terminal line editor
-reedline = "0.46"
+reedline = "0.47"
 # YAML frontmatter parser
 gray_matter = "0.3"
 # YAML serialization (for writing agent card frontmatter)
