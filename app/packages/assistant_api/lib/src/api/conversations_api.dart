@@ -524,6 +524,7 @@ class ConversationsApi {
   ///
   /// Parameters:
   /// * [id] - Conversation ID
+  /// * [audio] - Raw audio bytes (opus/aac/webm/wav …).
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -535,6 +536,7 @@ class ConversationsApi {
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> sendVoiceMessage({ 
     required String id,
+    required BuiltList<int> audio,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -562,8 +564,28 @@ class ConversationsApi {
       validateStatus: validateStatus,
     );
 
+    dynamic _bodyData;
+
+    try {
+      _bodyData = FormData.fromMap(<String, dynamic>{
+        r'audio': encodeFormParameter(_serializers, audio, const FullType(BuiltList, [FullType(int)])),
+      });
+
+    } catch(error, stackTrace) {
+      throw DioException(
+         requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
     final _response = await _dio.request<Object>(
       _path,
+      data: _bodyData,
       options: _options,
       cancelToken: cancelToken,
       onSendProgress: onSendProgress,

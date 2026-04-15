@@ -233,6 +233,10 @@ Serializers serializers = (_$serializers.toBuilder()
         () => ListBuilder<TraceSummaryResponse>(),
       )
       ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(int)]),
+        () => ListBuilder<int>(),
+      )
+      ..addBuilderFactory(
         const FullType(BuiltList, [FullType(LogEntryResponse)]),
         () => ListBuilder<LogEntryResponse>(),
       )

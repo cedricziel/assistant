@@ -304,7 +304,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **sendVoiceMessage**
-> sendVoiceMessage(id)
+> sendVoiceMessage(id, audio)
 
 `POST /api/conversations/{id}/voice` — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
 
@@ -314,9 +314,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getConversationsApi();
 final String id = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | Conversation ID
+final BuiltList<int> audio = ; // BuiltList<int> | Raw audio bytes (opus/aac/webm/wav …).
 
 try {
-    api.sendVoiceMessage(id);
+    api.sendVoiceMessage(id, audio);
 } on DioException catch (e) {
     print('Exception when calling ConversationsApi->sendVoiceMessage: $e\n');
 }
@@ -327,6 +328,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Conversation ID | 
+ **audio** | [**BuiltList&lt;int&gt;**](int.md)| Raw audio bytes (opus/aac/webm/wav …). | 
 
 ### Return type
 
@@ -339,7 +341,7 @@ void (empty response body)
 ### HTTP request headers
 
  - **Content-Type**: multipart/form-data
- - **Accept**: Not defined
+ - **Accept**: text/event-stream
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
