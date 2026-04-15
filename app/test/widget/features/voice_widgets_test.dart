@@ -470,8 +470,8 @@ void main() {
         equals(expectedBytes),
         reason: 'callback must receive the bytes written by the recorder',
       );
-      // On native the encoder is aacLc → MIME is audio/aac.
-      expect(capturedMime, equals('audio/aac'));
+      // On native the encoder is aacLc → MPEG-4 container → audio/mp4.
+      expect(capturedMime, equals('audio/mp4'));
       // After stop the mic button returns.
       expect(find.byIcon(Icons.mic_none_outlined), findsOneWidget);
 

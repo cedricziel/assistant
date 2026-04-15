@@ -688,6 +688,15 @@ pub struct ServerCapabilities {
     pub voice_receive: bool,
 }
 
+/// Multipart form body for `POST /api/conversations/{id}/voice`.
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+struct VoiceUploadForm {
+    /// Raw audio bytes (opus/aac/webm/wav …).
+    #[schema(format = Binary, content_encoding = "binary")]
+    audio: Vec<u8>,
+}
+
 /// `GET /api/capabilities` — return server capability flags.
 #[utoipa::path(
     get,
@@ -714,9 +723,12 @@ pub async fn get_capabilities(State(state): State<ApiState>) -> Response {
     path = "/api/conversations/{id}/voice",
     tag = "conversations",
     params(("id" = Uuid, Path, description = "Conversation ID")),
-    request_body(content_type = "multipart/form-data"),
+    request_body(
+        content_type = "multipart/form-data",
+        content = inline(VoiceUploadForm),
+    ),
     responses(
-        (status = 200, description = "SSE stream of assistant response"),
+        (status = 200, description = "SSE stream of assistant response", content_type = "text/event-stream"),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized"),
         (status = 503, description = "Voice not configured"),

@@ -305,7 +305,6 @@ impl ConversationStore {
             .collect()
     }
 
-    /// Return the last `limit` messages for a conversation, in chronological order.
     /// Fetch a single message by its ID (agent-scoped via the conversation join).
     pub async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let id_str = message_id.to_string();
@@ -338,6 +337,7 @@ impl ConversationStore {
         .transpose()
     }
 
+    /// Return the last `limit` messages for a conversation, in chronological order.
     pub async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
         let conv_id_str = conversation_id.to_string();
 

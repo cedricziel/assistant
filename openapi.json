@@ -724,12 +724,36 @@
         ],
         "requestBody": {
           "content": {
-            "multipart/form-data": {}
-          }
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "description": "Multipart form body for `POST /api/conversations/{id}/voice`.",
+                "required": [
+                  "audio"
+                ],
+                "properties": {
+                  "audio": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "format": "binary",
+                      "minimum": 0
+                    },
+                    "description": "Raw audio bytes (opus/aac/webm/wav …).",
+                    "contentEncoding": "binary"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
         },
         "responses": {
           "200": {
-            "description": "SSE stream of assistant response"
+            "description": "SSE stream of assistant response",
+            "content": {
+              "text/event-stream": {}
+            }
           },
           "400": {
             "description": "Bad request"

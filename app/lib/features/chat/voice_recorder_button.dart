@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:async' show Timer, unawaited;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -86,9 +86,9 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
       }
       return (AudioEncoder.wav, 'audio/wav');
     } else {
-      // Native platforms: AAC is the most widely supported efficient codec.
+      // Native platforms: AAC-LC in an MPEG-4 container (.m4a) → audio/mp4.
       if (await _recorder.isEncoderSupported(AudioEncoder.aacLc)) {
-        return (AudioEncoder.aacLc, 'audio/aac');
+        return (AudioEncoder.aacLc, 'audio/mp4');
       }
       if (await _recorder.isEncoderSupported(AudioEncoder.opus)) {
         return (AudioEncoder.opus, 'audio/ogg');
@@ -140,7 +140,7 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
 
       _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         setState(() => _secondsElapsed++);
-        if (_secondsElapsed >= _maxSeconds) _stop();
+        if (_secondsElapsed >= _maxSeconds) unawaited(_stop());
       });
     } catch (e) {
       widget.onError('Failed to start recording: $e');
@@ -149,18 +149,20 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
 
   Future<void> _stop() async {
     _countdownTimer?.cancel();
-    final urlOrPath = await _recorder.stop();
-    setState(() => _isRecording = false);
-
-    if (urlOrPath == null || urlOrPath.isEmpty) return;
-
     try {
+      final urlOrPath = await _recorder.stop();
+      if (!mounted) return;
+      setState(() => _isRecording = false);
+
+      if (urlOrPath == null || urlOrPath.isEmpty) return;
+
       final (bytes, mime) = await readRecordedOutput(urlOrPath, _selectedMime);
       if (bytes.isNotEmpty) {
         widget.onRecordingComplete(bytes, mime);
       }
     } catch (e) {
-      widget.onError('Failed to read recording: $e');
+      if (mounted) setState(() => _isRecording = false);
+      widget.onError('Failed to stop recording: $e');
     }
   }
 
