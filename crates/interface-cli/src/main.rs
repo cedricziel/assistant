@@ -1958,6 +1958,8 @@ async fn main() -> Result<()> {
                 break;
             }
 
+            Ok(_) => {}
+
             Err(e) => {
                 eprintln!("Read error: {e}");
                 break;
