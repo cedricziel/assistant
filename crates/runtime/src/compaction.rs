@@ -375,21 +375,22 @@ mod tests {
 
     #[test]
     fn should_compact_below_threshold() {
-        let c = cfg(true, 200_000, 20_000, 4_000, 10);
-        // trigger = 200_000 - 20_000 - 4_000 = 176_000
-        assert!(!should_compact(175_999, &c));
+        let c = cfg(true, 200_000, 20_000, 30_000, 10);
+        // trigger = 200_000 - 20_000 - 30_000 = 150_000
+        assert!(!should_compact(149_999, &c));
     }
 
     #[test]
     fn should_compact_at_threshold() {
-        let c = cfg(true, 200_000, 20_000, 4_000, 10);
-        assert!(should_compact(176_000, &c));
+        let c = cfg(true, 200_000, 20_000, 30_000, 10);
+        // trigger = 150_000
+        assert!(should_compact(150_000, &c));
     }
 
     #[test]
     fn should_compact_above_threshold() {
-        let c = cfg(true, 200_000, 20_000, 4_000, 10);
-        assert!(should_compact(190_000, &c));
+        let c = cfg(true, 200_000, 20_000, 30_000, 10);
+        assert!(should_compact(175_000, &c));
     }
 
     #[test]
@@ -467,5 +468,37 @@ mod tests {
         }];
         // 400 chars / 4 = 100 tokens
         assert_eq!(estimate_tokens(&history), 100);
+    }
+
+    /// Regression: a conversation with ~703k bytes of content (~175,780 estimated
+    /// tokens) must trigger compaction with the default config.  The old default
+    /// soft_threshold of 4,000 produced a trigger at 176,000 — just 220 tokens
+    /// above the estimate — causing real conversations to silently exceed the
+    /// context window.
+    #[test]
+    fn default_config_triggers_on_near_limit_conversation() {
+        let default_cfg = CompactionConfig::default();
+
+        // 703,122 bytes of content (matches the real stuck conversation on schorschvm).
+        // estimate_tokens uses 4 chars/token → 703_122 / 4 = 175_780 tokens.
+        let large_tool_output = "x".repeat(703_122);
+        let history = vec![ChatHistoryMessage::ToolResult {
+            name: "bash".into(),
+            content: large_tool_output,
+        }];
+
+        let estimated = estimate_tokens(&history);
+        assert!(
+            should_compact(estimated, &default_cfg),
+            "expected compaction to trigger for estimated={estimated} tokens with default config \
+             (window={}, floor={}, soft={}), trigger={}",
+            default_cfg.context_window_tokens,
+            default_cfg.reserve_floor_tokens,
+            default_cfg.soft_threshold_tokens,
+            default_cfg
+                .context_window_tokens
+                .saturating_sub(default_cfg.reserve_floor_tokens)
+                .saturating_sub(default_cfg.soft_threshold_tokens),
+        );
     }
 }
