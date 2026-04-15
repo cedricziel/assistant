@@ -6,6 +6,7 @@
 //!
 //! Auto-accepts room invitations via `POST /join/<room_id>`.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use assistant_transcription::{TranscriptionProvider, TranscriptionRequest};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream::Stream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -44,6 +45,9 @@ pub struct MatrixAdapter {
     transcription: Option<Arc<dyn TranscriptionProvider>>,
     /// BCP-47 language hint passed to the transcription provider.
     transcription_language: Option<String>,
+    /// Stores the reaction event IDs for pending ⏳ hourglass reactions,
+    /// keyed by the inbound event ID.  Used to redact them in `on_turn_start`.
+    pending_reactions: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl MatrixAdapter {
@@ -67,6 +71,7 @@ impl MatrixAdapter {
             stop_rx,
             transcription: None,
             transcription_language: None,
+            pending_reactions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -415,8 +420,57 @@ impl ChannelAdapter for MatrixAdapter {
         crate::tools::build_matrix_tools(room_id, self.client.clone())
     }
 
+    /// Add ⏳ hourglass reaction immediately on message receipt (before the conv lock).
+    /// Stores the resulting reaction event ID keyed by room_id for later redaction.
+    async fn on_message_received(&self, msg: &ChannelMessage) -> Result<()> {
+        let room_id = msg
+            .metadata
+            .get("room_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&msg.sender.platform_id)
+            .to_string();
+        let Some(event_id) = &msg.platform_message_id else {
+            return Ok(());
+        };
+        match self.client.add_reaction(&room_id, event_id, "⏳").await {
+            Ok(reaction_id) => {
+                self.pending_reactions
+                    .lock()
+                    .await
+                    .insert(room_id, reaction_id);
+            }
+            Err(e) => {
+                debug!(error = %e, "matrix: failed to add hourglass reaction (best-effort)");
+            }
+        }
+        Ok(())
+    }
+
+    /// Redact ⏳ and send typing indicator when a turn starts.
+    async fn on_turn_start(&self, user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
+        let room_id = &user.platform_id;
+        let reaction_id = self.pending_reactions.lock().await.remove(room_id);
+        if let Some(rid) = reaction_id {
+            let _ = self.client.redact_event(room_id, &rid).await;
+        }
+        let _ = self.client.send_typing(room_id, true).await;
+        Ok(())
+    }
+
+    /// Clear typing indicator on successful turn.
+    async fn on_turn_success(
+        &self,
+        user: &ChannelUser,
+        _answer: &str,
+        _attachments: &[assistant_core::Attachment],
+    ) -> Result<()> {
+        let _ = self.client.send_typing(&user.platform_id, false).await;
+        Ok(())
+    }
+
     async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
         let room_id = &user.platform_id;
+        let _ = self.client.send_typing(room_id, false).await;
         let _ = self
             .client
             .send_message(room_id, &format!("Sorry, I encountered an error: {err}"))

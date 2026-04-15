@@ -246,6 +246,51 @@ impl ChannelAdapter for MattermostAdapter {
         )
     }
 
+    /// Add ⏳ hourglass reaction immediately on message receipt (before the conv lock).
+    async fn on_message_received(&self, msg: &ChannelMessage) -> Result<()> {
+        let post_id = match &msg.platform_message_id {
+            Some(id) if !id.is_empty() => id.clone(),
+            _ => return Ok(()),
+        };
+        let bot_user_id = self
+            .bot_user_id
+            .try_read()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_default();
+        if bot_user_id.is_empty() {
+            return Ok(());
+        }
+        if let Err(e) = self
+            .client
+            .add_reaction(&bot_user_id, &post_id, "hourglass_flowing_sand")
+            .await
+        {
+            debug!(error = %e, "mattermost: failed to add hourglass reaction (best-effort)");
+        }
+        Ok(())
+    }
+
+    /// Remove ⏳ and send typing event when a turn starts.
+    async fn on_turn_start(&self, user: &ChannelUser, _conv_id: Uuid) -> Result<()> {
+        let (channel_id, thread_id) = parse_platform_id(&user.platform_id);
+        let post_id = thread_id.as_deref().unwrap_or(&channel_id).to_string();
+        let bot_user_id = self
+            .bot_user_id
+            .try_read()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_default();
+        if !bot_user_id.is_empty() && !post_id.is_empty() {
+            let _ = self
+                .client
+                .remove_reaction(&bot_user_id, &post_id, "hourglass_flowing_sand")
+                .await;
+        }
+        let _ = self.client.send_typing(&channel_id).await;
+        Ok(())
+    }
+
     async fn on_turn_error(&self, user: &ChannelUser, err: &anyhow::Error) -> Result<()> {
         let (channel_id, thread_id) = parse_platform_id(&user.platform_id);
         let _ = self

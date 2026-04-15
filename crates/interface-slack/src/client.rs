@@ -400,6 +400,95 @@ impl SlackApiClient {
         Ok(bytes.to_vec())
     }
 
+    // -- reactions.remove -----------------------------------------------------
+
+    /// Remove an emoji reaction from a message.
+    pub async fn remove_reaction(&self, channel: &str, timestamp: &str, name: &str) -> Result<()> {
+        #[derive(Deserialize)]
+        struct Resp {
+            ok: bool,
+            error: Option<String>,
+        }
+
+        let body = serde_json::json!({
+            "channel": channel,
+            "timestamp": timestamp,
+            "name": name,
+        });
+
+        let resp: Resp = self
+            .client
+            .post(format!("{}/api/reactions.remove", self.base_url))
+            .bearer_auth(&self.bot_token)
+            .json(&body)
+            .send()
+            .await
+            .context("reactions.remove request failed")?
+            .json()
+            .await
+            .context("reactions.remove response parse failed")?;
+
+        if !resp.ok {
+            let err = resp.error.unwrap_or_default();
+            // "no_reaction" means it was already removed — benign.
+            if err == "no_reaction" {
+                debug!(channel, name, "reactions.remove: no_reaction (ignored)");
+                return Ok(());
+            }
+            bail!("reactions.remove error: {err}");
+        }
+        Ok(())
+    }
+
+    // -- assistant.threads.setStatus ------------------------------------------
+
+    /// Set an animated agent-status message on a Slack assistant thread.
+    ///
+    /// `loading_messages` cycles through up to 10 messages while the agent is
+    /// working.  The status clears automatically when the bot posts a reply.
+    pub async fn set_agent_status(
+        &self,
+        channel_id: &str,
+        thread_ts: &str,
+        status: &str,
+        loading_messages: &[&str],
+    ) -> Result<()> {
+        #[derive(Deserialize)]
+        struct Resp {
+            ok: bool,
+            error: Option<String>,
+        }
+
+        let body = serde_json::json!({
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "status": status,
+            "loading_messages": loading_messages,
+        });
+
+        debug!(channel_id, thread_ts, status, "assistant.threads.setStatus");
+
+        let resp: Resp = self
+            .client
+            .post(format!("{}/api/assistant.threads.setStatus", self.base_url))
+            .bearer_auth(&self.bot_token)
+            .json(&body)
+            .send()
+            .await
+            .context("assistant.threads.setStatus request failed")?
+            .json()
+            .await
+            .context("assistant.threads.setStatus response parse failed")?;
+
+        if !resp.ok {
+            bail!(
+                "assistant.threads.setStatus error: {}",
+                resp.error.unwrap_or_default()
+            );
+        }
+        Ok(())
+    }
+
     // -- generic helper -------------------------------------------------------
 
     /// POST a JSON body to a Slack API path using the **bot token**.
@@ -572,6 +661,80 @@ mod tests {
             .await
             .expect("threaded post succeeded");
         assert_eq!(ts, "999.000");
+    }
+
+    #[tokio::test]
+    async fn set_agent_status_posts_to_correct_endpoint() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/assistant.threads.setStatus"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+
+        let client =
+            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
+                .unwrap();
+
+        client
+            .set_agent_status(
+                "C123",
+                "111.222",
+                "Thinking...",
+                &["Searching...", "Almost there..."],
+            )
+            .await
+            .expect("set_agent_status should succeed");
+    }
+
+    #[tokio::test]
+    async fn set_agent_status_returns_err_on_api_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/assistant.threads.setStatus"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "ok": false, "error": "not_allowed" })),
+            )
+            .mount(&server)
+            .await;
+
+        let client =
+            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
+                .unwrap();
+
+        let result = client
+            .set_agent_status("C123", "111.222", "Thinking...", &[])
+            .await;
+        assert!(result.is_err(), "API error must propagate as Err");
+    }
+
+    #[tokio::test]
+    async fn remove_reaction_no_reaction_is_ok() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/reactions.remove"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "ok": false, "error": "no_reaction" })),
+            )
+            .mount(&server)
+            .await;
+
+        let client =
+            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
+                .unwrap();
+
+        // no_reaction should be treated as Ok (already removed)
+        client
+            .remove_reaction("C123", "111.222", "hourglass_flowing_sand")
+            .await
+            .expect("no_reaction should be Ok");
     }
 
     #[tokio::test]

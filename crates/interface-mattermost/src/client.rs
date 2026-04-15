@@ -129,6 +129,34 @@ impl MattermostClient {
             .map(|_| ())
     }
 
+    /// Remove an emoji reaction from a post.
+    pub async fn remove_reaction(&self, user_id: &str, post_id: &str, emoji: &str) -> Result<()> {
+        let url = self.api_url(&format!(
+            "users/{user_id}/posts/{post_id}/reactions/{emoji}"
+        ));
+        debug!(url = %url, "MM DELETE reaction");
+        let resp = self
+            .client
+            .delete(&url)
+            .send()
+            .await
+            .with_context(|| format!("DELETE {url}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("DELETE {url} → {status}: {text}");
+        }
+        Ok(())
+    }
+
+    /// Send a typing event to a channel (fire-and-forget; server auto-expires).
+    pub async fn send_typing(&self, channel_id: &str) -> Result<()> {
+        let body = serde_json::json!({ "channel_id": channel_id });
+        self.post_json::<Value, Value>("users/me/typing", &body)
+            .await
+            .map(|_| ())
+    }
+
     /// Upload a file to a channel and return the file ID(s).
     pub async fn upload_file(
         &self,
@@ -257,5 +285,52 @@ mod tests {
     async fn ws_url_converts_https_to_wss() {
         let client = MattermostClient::new("https://mm.example.com", "tok").unwrap();
         assert_eq!(client.ws_url(), "wss://mm.example.com/api/v4/websocket");
+    }
+
+    #[tokio::test]
+    async fn remove_reaction_calls_delete() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path(
+                "/api/v4/users/u1/posts/p1/reactions/hourglass_flowing_sand",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        client
+            .remove_reaction("u1", "p1", "hourglass_flowing_sand")
+            .await
+            .expect("remove_reaction should succeed");
+    }
+
+    #[tokio::test]
+    async fn send_typing_posts_to_correct_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/users/me/typing"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        client
+            .send_typing("ch1")
+            .await
+            .expect("send_typing should succeed");
+    }
+
+    #[tokio::test]
+    async fn add_reaction_posts_to_reactions_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v4/reactions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({"id":"r1"})))
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        client
+            .add_reaction("u1", "p1", "hourglass_flowing_sand")
+            .await
+            .expect("add_reaction should succeed");
     }
 }

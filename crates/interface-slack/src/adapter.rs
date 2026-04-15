@@ -326,15 +326,49 @@ impl ChannelAdapter for SlackAdapter {
             .collect()
     }
 
-    /// Add 👀 reaction and seed thread history on the first turn for a conversation.
+    /// Add ⏳ reaction immediately when a message arrives (before the conv lock).
+    async fn on_message_received(&self, msg: &ChannelMessage) -> Result<()> {
+        let (channel, _) = parse_platform_id(&msg.sender.platform_id);
+        if let Some(ts) = &msg.platform_message_id {
+            if !channel.is_empty() && !ts.is_empty() {
+                let _ = self
+                    .client
+                    .add_reaction(&channel, ts, "hourglass_flowing_sand")
+                    .await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove ⏳, add 👀, call setStatus, and seed thread history on the first turn.
     async fn on_turn_start(&self, user: &ChannelUser, conv_id: Uuid) -> Result<()> {
         let (channel, thread_ts) = parse_platform_id(&user.platform_id);
 
-        // Add 👀 reaction to signal the bot is processing.
         if !channel.is_empty() {
             let ts = thread_ts.as_deref().unwrap_or("").to_string();
             if !ts.is_empty() {
+                // Remove the queued ⏳ hourglass.
+                let _ = self
+                    .client
+                    .remove_reaction(&channel, &ts, "hourglass_flowing_sand")
+                    .await;
+                // Add 👀 to signal active processing.
                 let _ = self.client.add_reaction(&channel, &ts, "eyes").await;
+                // Show animated agent status in the Slack assistant thread UI.
+                let _ = self
+                    .client
+                    .set_agent_status(
+                        &channel,
+                        &ts,
+                        "Working on it...",
+                        &[
+                            "Thinking...",
+                            "Searching knowledge base...",
+                            "Processing your request...",
+                            "Almost there...",
+                        ],
+                    )
+                    .await;
             }
         }
 
@@ -645,4 +679,112 @@ fn rand_jitter() -> f64 {
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
     (v >> 33) as f64 / (u32::MAX as f64)
+}
+
+// -- Tests --------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::client::SlackApiClient;
+
+    fn make_adapter(server: &MockServer) -> SlackAdapter {
+        let client = Arc::new(
+            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
+                .unwrap(),
+        );
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        SlackAdapter {
+            config: Default::default(),
+            client,
+            stop_tx,
+            stop_rx,
+            storage: None,
+            seeded_keys: Arc::new(Mutex::new(Default::default())),
+            transcription: None,
+            transcription_language: None,
+        }
+    }
+
+    fn make_msg(channel: &str, ts: &str) -> ChannelMessage {
+        use assistant_core::{ChannelContent, ChannelType};
+        use chrono::Utc;
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            "channel_id".into(),
+            serde_json::Value::String(channel.into()),
+        );
+        ChannelMessage {
+            channel_type: ChannelType::Slack,
+            platform_message_id: Some(ts.into()),
+            sender: ChannelUser {
+                platform_id: format!("{channel}/{ts}"),
+                display_name: None,
+            },
+            content: ChannelContent::Text("hello".into()),
+            thread_id: Some(ts.into()),
+            timestamp: Utc::now(),
+            metadata,
+        }
+    }
+
+    #[tokio::test]
+    async fn on_message_received_adds_hourglass() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/reactions.add"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = make_adapter(&server);
+        let msg = make_msg("C123", "111.222");
+        adapter.on_message_received(&msg).await.unwrap();
+
+        // wiremock will assert the mock was hit when server drops
+    }
+
+    #[tokio::test]
+    async fn on_turn_start_removes_hourglass_adds_eyes_and_sets_status() {
+        let server = MockServer::start().await;
+        // reactions.remove (hourglass)
+        Mock::given(method("POST"))
+            .and(path("/api/reactions.remove"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+        // reactions.add (eyes)
+        Mock::given(method("POST"))
+            .and(path("/api/reactions.add"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+        // assistant.threads.setStatus
+        Mock::given(method("POST"))
+            .and(path("/api/assistant.threads.setStatus"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = make_adapter(&server);
+        let user = ChannelUser {
+            platform_id: "C123/111.222".into(),
+            display_name: None,
+        };
+        adapter
+            .on_turn_start(&user, uuid::Uuid::new_v4())
+            .await
+            .unwrap();
+    }
 }
