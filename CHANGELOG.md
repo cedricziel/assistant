@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.101](https://github.com/cedricziel/assistant/compare/v0.1.100...v0.1.101) (2026-04-15)
+
+
+### Bug Fixes
+
+* **app:** use generated CapabilitiesApi — voice buttons now visible on web/PWA ([#461](https://github.com/cedricziel/assistant/issues/461)) ([b10647e](https://github.com/cedricziel/assistant/commit/b10647ee0a63fd7fdfff9513cdefb500130ca8f2))
+
 ## [0.1.100](https://github.com/cedricziel/assistant/compare/v0.1.99...v0.1.100) (2026-04-15)
 
 
