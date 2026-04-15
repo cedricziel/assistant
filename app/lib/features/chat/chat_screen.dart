@@ -36,8 +36,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _inputFocus.addListener(_onInputFocusChange);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadConversation();
+    });
+  }
+
+  /// Scrolls to the bottom when the input gains focus, so the latest messages
+  /// remain visible above the keyboard on mobile (especially iOS Safari).
+  /// Only scrolls if the list is already near the bottom — if the user has
+  /// scrolled up to read history we leave their position alone.
+  void _onInputFocusChange() {
+    if (!_inputFocus.hasFocus) return;
+    // Delay past the iOS keyboard animation (~300 ms) before measuring/scrolling.
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted || !_scrollController.hasClients) return;
+      final pos = _scrollController.position;
+      if (pos.maxScrollExtent - pos.pixels < 200) {
+        _scrollController.animateTo(
+          pos.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
@@ -62,6 +83,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    _inputFocus.removeListener(_onInputFocusChange);
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
