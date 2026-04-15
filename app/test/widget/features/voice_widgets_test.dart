@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:audioplayers_platform_interface/audioplayers_platform_interface.dart';
 import 'package:flutter/material.dart';
@@ -123,11 +124,64 @@ void _setRecordChannelMock({required bool permissionGranted}) {
       );
 }
 
+// Mock path_provider so getTemporaryDirectory() resolves in test environment.
+// The newer macOS/iOS plugin uses the _foundation channel name.
+void _setPathProviderMock() {
+  for (final ch in const [
+    'plugins.flutter.io/path_provider_foundation',
+    'plugins.flutter.io/path_provider',
+  ]) {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(MethodChannel(ch), (call) async {
+          if (call.method == 'getTemporaryDirectory') {
+            return Directory.systemTemp.path;
+          }
+          return null;
+        });
+  }
+}
+
+void _clearPathProviderMock() {
+  for (final ch in const [
+    'plugins.flutter.io/path_provider_foundation',
+    'plugins.flutter.io/path_provider',
+  ]) {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(MethodChannel(ch), null);
+  }
+}
+
 void _clearRecordChannelMock() {
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
         const MethodChannel('com.llfbandit.record/messages'),
         null,
+      );
+}
+
+/// Mocks the record channel for a full recording cycle.
+///
+/// Permission is granted, all encoders report as supported, [start] succeeds,
+/// and [stop] returns [stopPath] (the file the caller pre-populated with test
+/// bytes).
+void _setFullRecordChannelMock(String stopPath) {
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(
+        const MethodChannel('com.llfbandit.record/messages'),
+        (call) async {
+          switch (call.method) {
+            case 'hasPermission':
+              return true;
+            case 'isEncoderSupported':
+              return true;
+            case 'start':
+              return null;
+            case 'stop':
+              return stopPath;
+            default:
+              return null;
+          }
+        },
       );
 }
 
@@ -146,7 +200,10 @@ void main() {
     _setRecordChannelMock(permissionGranted: false);
   });
 
-  tearDown(_clearRecordChannelMock);
+  tearDown(() {
+    _clearRecordChannelMock();
+    _clearPathProviderMock();
+  });
 
   group('AudioPlayerWidget', () {
     testWidgets('initially shows a play icon', (tester) async {
@@ -317,6 +374,111 @@ void main() {
       // After an error the mic icon is still shown (not the stop button).
       expect(find.byIcon(Icons.mic_none_outlined), findsOneWidget);
       expect(find.byIcon(Icons.stop_circle_outlined), findsNothing);
+    });
+
+    testWidgets('shows stop button and timer once recording starts', (
+      tester,
+    ) async {
+      // Pre-create a stub file so stop() has something to return.
+      final stubFile = File(
+        '${Directory.systemTemp.path}/voice_stub_${DateTime.now().millisecondsSinceEpoch}.m4a',
+      );
+      await tester.runAsync(() => stubFile.writeAsBytes([1, 2, 3]));
+
+      _setFullRecordChannelMock(stubFile.path);
+      _setPathProviderMock();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VoiceRecorderButton(
+              onRecordingComplete: (_, _) {},
+              onError: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byIcon(Icons.mic_none_outlined));
+      // Let channel futures and setState calls resolve.
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump();
+
+      expect(
+        find.byIcon(Icons.stop_circle_outlined),
+        findsOneWidget,
+        reason: 'stop button must appear once recording is active',
+      );
+      expect(find.byIcon(Icons.mic_none_outlined), findsNothing);
+      // Timer text format: M:SS (initially "2:00" for 120 s max).
+      expect(find.text('2:00'), findsOneWidget);
+
+      // Clean up
+      if (stubFile.existsSync()) await tester.runAsync(() => stubFile.delete());
+    });
+
+    testWidgets('calls onRecordingComplete with bytes and MIME after stop', (
+      tester,
+    ) async {
+      final expectedBytes = Uint8List.fromList([0xDE, 0xAD, 0xBE, 0xEF]);
+      final audioFile = File(
+        '${Directory.systemTemp.path}/voice_audio_${DateTime.now().millisecondsSinceEpoch}.m4a',
+      );
+      await tester.runAsync(() => audioFile.writeAsBytes(expectedBytes));
+
+      _setFullRecordChannelMock(audioFile.path);
+      _setPathProviderMock();
+
+      Uint8List? capturedBytes;
+      String? capturedMime;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VoiceRecorderButton(
+              onRecordingComplete: (bytes, mime) {
+                capturedBytes = bytes;
+                capturedMime = mime;
+              },
+              onError: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      // Start recording.
+      await tester.tap(find.byIcon(Icons.mic_none_outlined));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump();
+
+      expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
+
+      // Stop recording — tap and await inside runAsync so the channel call
+      // and subsequent file I/O both resolve in real-async context.
+      await tester.runAsync(() async {
+        await tester.tap(find.byIcon(Icons.stop_circle_outlined));
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+      });
+      await tester.pump();
+
+      expect(
+        capturedBytes,
+        equals(expectedBytes),
+        reason: 'callback must receive the bytes written by the recorder',
+      );
+      // On native the encoder is aacLc → MPEG-4 container → audio/mp4.
+      expect(capturedMime, equals('audio/mp4'));
+      // After stop the mic button returns.
+      expect(find.byIcon(Icons.mic_none_outlined), findsOneWidget);
+
+      // Clean up (readRecordedOutput deletes the file, but guard anyway).
+      if (audioFile.existsSync()) {
+        await tester.runAsync(() => audioFile.delete());
+      }
     });
   });
 }

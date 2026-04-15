@@ -98,7 +98,7 @@ impl ToolHandler for VoiceResponseHandler {
 
         match self.tts.synthesize(request).await {
             Ok(result) => {
-                let audio_id = self.store.insert(result.audio_data).await;
+                let audio_id = self.store.insert(result.audio_data, result.mime_type).await;
                 Ok(
                     ToolOutput::success(format!("Audio synthesized (id={audio_id}).")).with_data(
                         serde_json::json!({
@@ -208,7 +208,7 @@ mod tests {
 
         // The audio should be retrievable from the store.
         let stored = store.get(uuid).await;
-        assert_eq!(stored, Some(audio_bytes));
+        assert_eq!(stored, Some((audio_bytes, "audio/mpeg".to_string())));
         assert_eq!(data["voiced"], serde_json::json!(true));
     }
 

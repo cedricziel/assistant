@@ -75,6 +75,7 @@ import 'package:assistant_api/src/model/security_scheme.dart';
 import 'package:assistant_api/src/model/send_message_configuration.dart';
 import 'package:assistant_api/src/model/send_message_request.dart';
 import 'package:assistant_api/src/model/send_message_response.dart';
+import 'package:assistant_api/src/model/server_capabilities.dart';
 import 'package:assistant_api/src/model/set_active_persona_request.dart';
 import 'package:assistant_api/src/model/set_skill_access_mode_request.dart';
 import 'package:assistant_api/src/model/skill_detail.dart';
@@ -176,6 +177,7 @@ part 'serializers.g.dart';
   SendMessageConfiguration,
   SendMessageRequest,
   SendMessageResponse,
+  ServerCapabilities,
   SetActivePersonaRequest,
   SetSkillAccessModeRequest,
   SkillDetail,
@@ -229,6 +231,10 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(TraceSummaryResponse)]),
         () => ListBuilder<TraceSummaryResponse>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(int)]),
+        () => ListBuilder<int>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(LogEntryResponse)]),

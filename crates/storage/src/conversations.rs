@@ -305,6 +305,38 @@ impl ConversationStore {
             .collect()
     }
 
+    /// Fetch a single message by its ID (agent-scoped via the conversation join).
+    pub async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
+        let id_str = message_id.to_string();
+        let row = sqlx::query(
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at \
+             FROM messages m \
+             INNER JOIN conversations c ON c.id = m.conversation_id \
+             WHERE m.id = ?1 AND c.agent_id = ?2",
+        )
+        .bind(&id_str)
+        .bind(&self.agent_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|r| {
+            let id_s: String = r.get("id");
+            let conv_s: String = r.get("conversation_id");
+            let role_s: String = r.get("role");
+            Ok(Message {
+                id: Uuid::parse_str(&id_s)?,
+                conversation_id: Uuid::parse_str(&conv_s)?,
+                role: parse_role(&role_s)?,
+                content: r.get("content"),
+                skill_name: r.get("skill_name"),
+                tool_calls_json: r.get("tool_calls_json"),
+                turn: r.get("turn"),
+                created_at: r.get("created_at"),
+            })
+        })
+        .transpose()
+    }
+
     /// Return the last `limit` messages for a conversation, in chronological order.
     pub async fn last_messages(&self, conversation_id: Uuid, limit: i64) -> Result<Vec<Message>> {
         let conv_id_str = conversation_id.to_string();

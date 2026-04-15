@@ -8,7 +8,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:assistant_api/assistant_api.dart';
+import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:dio/dio.dart';
 
 import 'models/server_capabilities.dart';
@@ -112,7 +112,13 @@ class ApiClient {
     Uint8List audioBytes,
     String mimeType,
   ) async* {
-    final extension = mimeType.contains('webm') ? 'webm' : 'm4a';
+    final extension = switch (mimeType) {
+      String m when m.contains('webm') => 'webm',
+      String m when m.contains('ogg') => 'ogg',
+      String m when m.contains('wav') => 'wav',
+      String m when m.contains('aac') => 'aac',
+      _ => 'm4a',
+    };
     final formData = FormData.fromMap({
       'audio': MultipartFile.fromBytes(
         audioBytes,

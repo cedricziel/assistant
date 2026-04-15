@@ -72,14 +72,17 @@ where
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use assistant_transcription::{TranscriptionProvider, TtsProvider};
+use assistant_transcription::{
+    TranscriptionProvider, TranscriptionRequest, TtsProvider, TtsRequest,
+};
 
 use assistant_core::{Interface, MessageRole};
 use assistant_runtime::{AssistantInterface, OrchestratorEvent};
 use assistant_storage::ConversationStore;
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
+    body::Body,
+    extract::{Multipart, Path, State},
+    http::{header, StatusCode},
     response::{
         sse::{Event, Sse},
         IntoResponse, Response,
@@ -215,12 +218,16 @@ pub struct SendMessageRequest {
 /// Build the conversations API sub-router.  Mounted under `/api`.
 pub fn api_router() -> Router<ApiState> {
     Router::new()
+        .route("/capabilities", get(get_capabilities))
         .route("/conversations", get(list_conversations))
         .route("/conversations", post(create_conversation))
         .route("/conversations/{id}", get(get_conversation))
         .route("/conversations/{id}", delete(delete_conversation))
         .route("/conversations/{id}", patch(update_conversation))
         .route("/conversations/{id}/messages", post(send_message))
+        .route("/conversations/{id}/voice", post(send_voice_message))
+        .route("/messages/{id}/audio", get(get_message_audio))
+        .route("/audio/{id}", get(get_audio))
 }
 
 // -- Handlers ----------------------------------------------------------------
@@ -668,6 +675,361 @@ pub async fn send_message(
     });
 
     Sse::new(ReceiverStream::new(sse_rx)).into_response()
+}
+
+// -- Voice / capabilities handlers ------------------------------------------
+
+/// Server capability flags.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ServerCapabilities {
+    /// Whether the server can accept voice messages (STT configured).
+    pub voice_send: bool,
+    /// Whether the server can serve TTS audio for messages (TTS configured).
+    pub voice_receive: bool,
+}
+
+/// Multipart form body for `POST /api/conversations/{id}/voice`.
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+struct VoiceUploadForm {
+    /// Raw audio bytes (opus/aac/webm/wav …).
+    #[schema(format = Binary, content_encoding = "binary")]
+    audio: Vec<u8>,
+}
+
+/// `GET /api/capabilities` — return server capability flags.
+#[utoipa::path(
+    get,
+    path = "/api/capabilities",
+    tag = "capabilities",
+    responses(
+        (status = 200, description = "Server capabilities", body = ServerCapabilities),
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn get_capabilities(State(state): State<ApiState>) -> Response {
+    Json(ServerCapabilities {
+        voice_send: state.transcription_provider.is_some(),
+        voice_receive: state.tts_provider.is_some(),
+    })
+    .into_response()
+}
+
+/// `POST /api/conversations/{id}/voice` — upload audio, transcribe it, run
+/// through the orchestrator, and stream the response as SSE.
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{id}/voice",
+    tag = "conversations",
+    params(("id" = Uuid, Path, description = "Conversation ID")),
+    request_body(
+        content_type = "multipart/form-data",
+        content = inline(VoiceUploadForm),
+    ),
+    responses(
+        (status = 200, description = "SSE stream of assistant response", content_type = "text/event-stream"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 503, description = "Voice not configured"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn send_voice_message(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    mut multipart: Multipart,
+) -> Response {
+    let conv_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
+    };
+
+    let transcription_provider = match &state.transcription_provider {
+        Some(p) => p.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Voice transcription not configured",
+            )
+                .into_response();
+        }
+    };
+
+    // Parse the multipart body — expect a single "audio" field.
+    let mut audio_bytes: Option<Vec<u8>> = None;
+    let mut mime_type = "audio/webm".to_string();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() == Some("audio") {
+            if let Some(ct) = field.content_type() {
+                mime_type = ct.to_string();
+            }
+            match field.bytes().await {
+                Ok(b) => {
+                    // Enforce 25 MB limit.
+                    if b.len() > 25 * 1024 * 1024 {
+                        return (StatusCode::BAD_REQUEST, "Audio too large (max 25 MB)")
+                            .into_response();
+                    }
+                    audio_bytes = Some(b.to_vec());
+                }
+                Err(e) => {
+                    warn!("Failed to read audio field: {e}");
+                    return (StatusCode::BAD_REQUEST, "Failed to read audio data").into_response();
+                }
+            }
+        }
+    }
+
+    let audio_bytes = match audio_bytes {
+        Some(b) if !b.is_empty() => b,
+        _ => return (StatusCode::BAD_REQUEST, "Missing audio field").into_response(),
+    };
+
+    // Validate MIME type — must be audio/*.
+    if !mime_type.starts_with("audio/") {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Invalid MIME type — expected audio/*",
+        )
+            .into_response();
+    }
+
+    // Verify the conversation exists.
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    match store.get_conversation(conv_id).await {
+        Ok(None) => return (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
+        Err(e) => {
+            warn!("Failed to check conversation {conv_id}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+        _ => {}
+    }
+
+    // Transcribe.
+    let transcript = match transcription_provider
+        .transcribe(TranscriptionRequest {
+            audio_data: audio_bytes,
+            mime_type: mime_type.clone(),
+            filename: None,
+            language: None,
+        })
+        .await
+    {
+        Ok(r) => r.text,
+        Err(e) => {
+            warn!("Transcription failed: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Transcription failed").into_response();
+        }
+    };
+
+    if transcript.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, "Transcription returned empty text").into_response();
+    }
+
+    // Run through orchestrator (same flow as send_message).
+    let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+    let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(64);
+
+    state
+        .orchestrator
+        .register_token_sink(conv_id, event_tx)
+        .await;
+
+    let orchestrator = state.orchestrator.clone();
+    let content = transcript.clone();
+    let turn_result_rx = {
+        let (tx, rx) =
+            tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
+        tokio::spawn(async move {
+            let result = orchestrator
+                .submit_turn(&content, conv_id, Interface::Web, None)
+                .await;
+            let _ = tx.send(result);
+        });
+        rx
+    };
+
+    // Emit the user transcript as the first SSE event so the UI can display it.
+    let transcript_event = serde_json::json!({ "role": "user", "content": transcript });
+    let _ = sse_tx
+        .send(Ok(Event::default()
+            .event("transcript")
+            .data(transcript_event.to_string())))
+        .await;
+
+    let push_dispatcher_for_sse = state.push_dispatcher.clone();
+    let conv_id_for_push = conv_id;
+    tokio::spawn(async move {
+        let mut full_text = String::new();
+
+        while let Some(orch_event) = event_rx.recv().await {
+            let sse_event = match orch_event {
+                OrchestratorEvent::Token(token) => {
+                    full_text.push_str(&token);
+                    Event::default().event("token").data(token)
+                }
+                OrchestratorEvent::Status(msg) => Event::default().event("status").data(msg),
+                OrchestratorEvent::ToolResult { tool_name, status } => {
+                    let data = serde_json::json!({
+                        "tool_name": tool_name,
+                        "status": status,
+                    });
+                    Event::default().event("tool_result").data(data.to_string())
+                }
+                OrchestratorEvent::SkillComplete {
+                    skill_name,
+                    success,
+                    summary,
+                } => {
+                    let data = serde_json::json!({
+                        "skill_name": skill_name,
+                        "success": success,
+                        "summary": summary,
+                    });
+                    Event::default()
+                        .event("skill_complete")
+                        .data(data.to_string())
+                }
+                OrchestratorEvent::AgentError { message } => {
+                    Event::default().event("agent_error").data(message)
+                }
+                OrchestratorEvent::AudioReady { audio_id } => {
+                    let data = serde_json::json!({
+                        "audio_id": audio_id,
+                        "auto_play": true,
+                    });
+                    Event::default().event("audio_ready").data(data.to_string())
+                }
+            };
+            if sse_tx.send(Ok(sse_event)).await.is_err() {
+                return;
+            }
+        }
+
+        let reply_text = match turn_result_rx.await {
+            Ok(Ok(result)) => result.answer,
+            Ok(Err(_)) | Err(_) => full_text,
+        };
+
+        let done_data = serde_json::json!({
+            "role": "assistant",
+            "content": reply_text,
+        });
+        let done = Event::default().event("done").data(done_data.to_string());
+        let _ = sse_tx.send(Ok(done)).await;
+
+        if let Some(dispatcher) = push_dispatcher_for_sse {
+            let body = reply_text.chars().take(80).collect::<String>();
+            let conv_id_str = conv_id_for_push.to_string();
+            if let Err(e) = dispatcher
+                .send_to_all("New message", &body, Some(&conv_id_str))
+                .await
+            {
+                warn!("Push dispatch failed: {e}");
+            }
+        }
+    });
+
+    Sse::new(ReceiverStream::new(sse_rx)).into_response()
+}
+
+/// `GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant
+/// message and return it as `audio/mpeg`.
+#[utoipa::path(
+    get,
+    path = "/api/messages/{id}/audio",
+    tag = "conversations",
+    params(("id" = Uuid, Path, description = "Message ID")),
+    responses(
+        (status = 200, description = "MP3 audio bytes", content_type = "audio/mpeg"),
+        (status = 400, description = "Invalid ID or non-assistant message"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Message not found"),
+        (status = 503, description = "TTS not configured"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn get_message_audio(State(state): State<ApiState>, Path(id): Path<String>) -> Response {
+    let tts_provider = match &state.tts_provider {
+        Some(p) => p.clone(),
+        None => {
+            return (StatusCode::SERVICE_UNAVAILABLE, "TTS not configured").into_response();
+        }
+    };
+
+    let msg_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid message ID").into_response(),
+    };
+
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+
+    let msg = match store.get_message(msg_id).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Message not found").into_response(),
+        Err(e) => {
+            warn!("Failed to fetch message {msg_id}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+    };
+
+    if !matches!(msg.role, MessageRole::Assistant) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Only assistant messages can be synthesized",
+        )
+            .into_response();
+    }
+
+    match tts_provider
+        .synthesize(TtsRequest {
+            text: msg.content,
+            voice: None,
+            format: None,
+            speed: None,
+        })
+        .await
+    {
+        Ok(result) => (
+            [(header::CONTENT_TYPE, result.mime_type)],
+            Body::from(result.audio_data),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!("TTS synthesis failed for message {msg_id}: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "TTS synthesis failed").into_response()
+        }
+    }
+}
+
+/// `GET /api/audio/{id}` — serve a synthesized audio blob from the in-memory store.
+#[utoipa::path(
+    get,
+    path = "/api/audio/{id}",
+    tag = "conversations",
+    params(("id" = Uuid, Path, description = "Audio blob ID")),
+    responses(
+        (status = 200, description = "MP3 audio bytes", content_type = "audio/mpeg"),
+        (status = 400, description = "Invalid ID"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Audio not found or expired"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn get_audio(State(state): State<ApiState>, Path(id): Path<String>) -> Response {
+    let audio_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid audio ID").into_response(),
+    };
+
+    match state.audio_store.get(audio_id).await {
+        Some((bytes, mime)) => ([(header::CONTENT_TYPE, mime)], Body::from(bytes)).into_response(),
+        None => (StatusCode::NOT_FOUND, "Audio not found or expired").into_response(),
+    }
 }
 
 // -- Tests -------------------------------------------------------------------
@@ -1130,5 +1492,161 @@ mod tests {
         let arr = json.as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["title"], "Alice conv");
+    }
+
+    // -- GET /capabilities -----------------------------------------------------
+
+    #[tokio::test]
+    async fn capabilities_no_providers_returns_false() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+        // Both providers absent — both flags must be false.
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/capabilities")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["voice_send"], false);
+        assert_eq!(json["voice_receive"], false);
+    }
+
+    // -- POST /conversations/{id}/voice — MIME validation & size limit ---------
+
+    #[tokio::test]
+    async fn voice_upload_without_transcription_provider_returns_503() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(Some("test")).await.unwrap();
+
+        // Build a minimal multipart body
+        let boundary = "testboundary";
+        let body_bytes = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.webm\"\r\nContent-Type: audio/webm\r\n\r\nfakeaudio\r\n--{boundary}--\r\n",
+            boundary = boundary
+        );
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{}/voice", conv.id))
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body_bytes))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn voice_upload_invalid_conversation_id_returns_400() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let boundary = "testboundary";
+        let body_bytes = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"\r\nContent-Type: audio/webm\r\n\r\nfake\r\n--{boundary}--\r\n",
+            boundary = boundary
+        );
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations/not-a-uuid/voice")
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body_bytes))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // -- GET /audio/{id} -------------------------------------------------------
+
+    #[tokio::test]
+    async fn get_audio_unknown_id_returns_404() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/audio/{}", uuid::Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_audio_invalid_id_returns_400() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/audio/not-a-uuid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn get_audio_returns_stored_bytes() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let fake_audio = b"mp3-bytes".to_vec();
+        let audio_id = state
+            .audio_store
+            .insert(fake_audio.clone(), "audio/mpeg".to_string())
+            .await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/audio/{audio_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("audio/mpeg")
+        );
+        let bytes = body_bytes(resp.into_body()).await;
+        assert_eq!(bytes, fake_audio);
     }
 }

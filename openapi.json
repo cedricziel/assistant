@@ -6,7 +6,7 @@
     "license": {
       "name": "MIT"
     },
-    "version": "0.1.89"
+    "version": "0.1.97"
   },
   "servers": [
     {
@@ -362,6 +362,78 @@
         ]
       }
     },
+    "/api/audio/{id}": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`GET /api/audio/{id}` — serve a synthesized audio blob from the in-memory store.",
+        "operationId": "get_audio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Audio blob ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MP3 audio bytes",
+            "content": {
+              "audio/mpeg": {}
+            }
+          },
+          "400": {
+            "description": "Invalid ID"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Audio not found or expired"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/capabilities": {
+      "get": {
+        "tags": [
+          "capabilities"
+        ],
+        "summary": "`GET /api/capabilities` — return server capability flags.",
+        "operationId": "get_capabilities",
+        "responses": {
+          "200": {
+            "description": "Server capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerCapabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations": {
       "get": {
         "tags": [
@@ -631,6 +703,75 @@
         ]
       }
     },
+    "/api/conversations/{id}/voice": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/conversations/{id}/voice` — upload audio, transcribe it, run\nthrough the orchestrator, and stream the response as SSE.",
+        "operationId": "send_voice_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "description": "Multipart form body for `POST /api/conversations/{id}/voice`.",
+                "required": [
+                  "audio"
+                ],
+                "properties": {
+                  "audio": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "format": "binary",
+                      "minimum": 0
+                    },
+                    "description": "Raw audio bytes (opus/aac/webm/wav …).",
+                    "contentEncoding": "binary"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "SSE stream of assistant response",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Voice not configured"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/logs": {
       "get": {
         "tags": [
@@ -748,6 +889,52 @@
           },
           "401": {
             "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/messages/{id}/audio": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant\nmessage and return it as `audio/mpeg`.",
+        "operationId": "get_message_audio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Message ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MP3 audio bytes",
+            "content": {
+              "audio/mpeg": {}
+            }
+          },
+          "400": {
+            "description": "Invalid ID or non-assistant message"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Message not found"
+          },
+          "503": {
+            "description": "TTS not configured"
           }
         },
         "security": [
@@ -5027,6 +5214,24 @@
           }
         }
       },
+      "ServerCapabilities": {
+        "type": "object",
+        "description": "Server capability flags.",
+        "required": [
+          "voice_send",
+          "voice_receive"
+        ],
+        "properties": {
+          "voice_receive": {
+            "type": "boolean",
+            "description": "Whether the server can serve TTS audio for messages (TTS configured)."
+          },
+          "voice_send": {
+            "type": "boolean",
+            "description": "Whether the server can accept voice messages (STT configured)."
+          }
+        }
+      },
       "SetActivePersonaRequest": {
         "type": "object",
         "description": "Body for `POST /api/personas/active`.",
@@ -6010,6 +6215,10 @@
     }
   },
   "tags": [
+    {
+      "name": "capabilities",
+      "description": "Server capabilities — query which optional features (voice, TTS) are enabled"
+    },
     {
       "name": "conversations",
       "description": "Conversation management — list, create, fetch, update, delete, and send messages"

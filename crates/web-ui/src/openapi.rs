@@ -61,7 +61,7 @@ use crate::api::{
         WorkflowSummary, WorkflowUpsertRequest, WorkflowWebhookSecrets,
     },
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
-    SendMessageRequest as ApiSendMessageRequest, UpdateConversationRequest,
+    SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, UpdateConversationRequest,
 };
 
 /// API error response body (JSON-RPC style used by A2A handlers).
@@ -116,12 +116,16 @@ impl Modify for BearerTokenSecurityAddon {
     ),
     modifiers(&BearerTokenSecurityAddon),
     paths(
+        crate::api::get_capabilities,
         crate::api::list_conversations,
         crate::api::create_conversation,
         crate::api::get_conversation,
         crate::api::delete_conversation,
         crate::api::update_conversation,
         crate::api::send_message,
+        crate::api::send_voice_message,
+        crate::api::get_message_audio,
+        crate::api::get_audio,
         crate::api::personas::list_personas,
         crate::api::personas::create_persona,
         crate::api::personas::set_active_persona,
@@ -237,6 +241,8 @@ impl Modify for BearerTokenSecurityAddon {
             ImplicitOAuthFlow,
             PasswordOAuthFlow,
             DeviceCodeOAuthFlow,
+            // Capabilities
+            ServerCapabilities,
             // Conversation API types
             ConversationSummary,
             ConversationDetail,
@@ -298,6 +304,8 @@ impl Modify for BearerTokenSecurityAddon {
         )
     ),
     tags(
+        (name = "capabilities",
+         description = "Server capabilities — query which optional features (voice, TTS) are enabled"),
         (name = "conversations",
          description = "Conversation management — list, create, fetch, update, delete, and send messages"),
         (name = "agent-card",
