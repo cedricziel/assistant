@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.100](https://github.com/cedricziel/assistant/compare/v0.1.99...v0.1.100) (2026-04-15)
+
+
+### Features
+
+* **interfaces:** propose working-signals change (hourglass queue + typing indicators + Slack setStatus) ([#456](https://github.com/cedricziel/assistant/issues/456)) ([34e25ab](https://github.com/cedricziel/assistant/commit/34e25ab66525d2bdc5470de4c04021815030d9c9))
+
 ## [0.1.99](https://github.com/cedricziel/assistant/compare/v0.1.98...v0.1.99) (2026-04-15)
 
 
