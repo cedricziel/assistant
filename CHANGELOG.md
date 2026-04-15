@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.99](https://github.com/cedricziel/assistant/compare/v0.1.98...v0.1.99) (2026-04-15)
+
+
+### Features
+
+* **web-ui:** replace default Flutter PWA icons with app icon ([#452](https://github.com/cedricziel/assistant/issues/452)) ([a5a2b83](https://github.com/cedricziel/assistant/commit/a5a2b8326bc0b2fe3d4fa6cc23d29598ccfff6cd)), closes [#443](https://github.com/cedricziel/assistant/issues/443)
+* **web-ui:** voice messages — mic send (STT) + audio playback (TTS) ([#451](https://github.com/cedricziel/assistant/issues/451)) ([5b1c3e1](https://github.com/cedricziel/assistant/commit/5b1c3e1770af147d1ac1886c8866796bb813bbce))
+
+
+### Bug Fixes
+
+* **runtime:** increase default soft_threshold to 30k to prevent near-limit compaction miss ([#458](https://github.com/cedricziel/assistant/issues/458)) ([a2d415a](https://github.com/cedricziel/assistant/commit/a2d415a1911f576e2737306c6b6355e32ed12d3e))
+
 ## [0.1.98](https://github.com/cedricziel/assistant/compare/v0.1.97...v0.1.98) (2026-04-15)
 
 
