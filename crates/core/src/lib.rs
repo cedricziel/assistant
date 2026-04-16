@@ -1,4 +1,5 @@
 pub mod allowlist;
+pub mod attachment;
 pub mod bus;
 pub mod bus_messages;
 pub mod channel;
@@ -12,6 +13,10 @@ pub mod types;
 pub mod upload;
 
 pub use allowlist::AllowlistFilter;
+pub use attachment::{
+    is_resizable_mime_type, is_supported_mime_type, AttachmentMeta, MAX_ATTACHMENT_SIZE,
+    RESIZABLE_MIME_TYPES, SUPPORTED_MIME_TYPES,
+};
 pub use bus::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
 pub use bus_messages::{
     topic, AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase,

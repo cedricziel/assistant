@@ -132,6 +132,7 @@ impl SubagentRunner for Orchestrator {
                 &spawn.task,
                 conversation_id,
                 Vec::new(),
+                &[],
                 &execution_agent_id,
             )
             .await?;
@@ -365,8 +366,9 @@ impl SubagentRunner for Orchestrator {
                             let elapsed = start.elapsed();
 
                             // Subagent does not surface attachments to
-                            // the parent — pass a scratch vector.
+                            // the parent — pass scratch vectors.
                             let mut scratch_attachments = Vec::new();
+                            let mut scratch_attachment_ids = Vec::new();
                             self.finalize_tool_result(
                                 &name,
                                 Some(&params),
@@ -378,6 +380,7 @@ impl SubagentRunner for Orchestrator {
                                 conversation_id,
                                 turn_index,
                                 &mut scratch_attachments,
+                                &mut scratch_attachment_ids,
                                 None,
                             )
                             .await;

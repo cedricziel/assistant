@@ -272,7 +272,7 @@ impl Orchestrator {
                                 conversation_id: conv_id,
                                 content: turn_result.answer,
                                 turn: 0,
-                                attachments: turn_result.attachments,
+                                attachment_ids: turn_result.attachment_ids,
                                 message_id: turn_result.message_id,
                             };
 
@@ -333,7 +333,7 @@ impl Orchestrator {
                                         "conversation_id": conv_id,
                                         "content": bus_result.content,
                                         "turn": bus_result.turn,
-                                        "attachments": bus_result.attachments,
+                                        "attachment_ids": bus_result.attachment_ids,
                                         "interface": interface_name,
                                     });
                                     if let Err(e) = webhook_dispatch::dispatch_event(
@@ -430,7 +430,7 @@ impl Orchestrator {
                                 conversation_id: conv_id,
                                 content: format!("Turn failed: {e}"),
                                 turn: 0,
-                                attachments: vec![],
+                                attachment_ids: vec![],
                                 message_id: None,
                             };
                             let mut pub_req = PublishRequest::new(
@@ -488,7 +488,7 @@ impl Orchestrator {
                                 "conversation_id": conv_id,
                                 "content": err_result.content,
                                 "turn": err_result.turn,
-                                "attachments": err_result.attachments,
+                                "attachment_ids": err_result.attachment_ids,
                                 "interface": interface_name,
                             });
                             if let Err(dispatch_err) = webhook_dispatch::dispatch_event(
@@ -552,25 +552,47 @@ impl Orchestrator {
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
     ) -> Result<TurnResult> {
-        self.submit_turn_with_metadata(
+        self.submit_turn_internal(
             prompt,
             conversation_id,
             interface,
             timestamp,
             HashMap::new(),
+            vec![],
+        )
+        .await
+    }
+
+    /// Submit a turn with user-provided attachment IDs.
+    pub async fn submit_turn_with_attachments(
+        &self,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+        attachment_ids: Vec<Uuid>,
+    ) -> Result<TurnResult> {
+        self.submit_turn_internal(
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            HashMap::new(),
+            attachment_ids,
         )
         .await
     }
 
     /// Submit a turn through the message bus and wait for the result, enriched
-    /// with interface-provided metadata attributes.
-    pub async fn submit_turn_with_metadata(
+    /// with interface-provided metadata attributes and optional attachment IDs.
+    async fn submit_turn_internal(
         &self,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
         timestamp: Option<DateTime<Utc>>,
         submit_metadata: HashMap<String, String>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         let request_id = Uuid::new_v4();
         // Register a cancellation token so the worker can be interrupted if
@@ -610,6 +632,7 @@ impl Orchestrator {
             extension_tools: vec![],
             timestamp,
             traceparent: crate::otel_spans::traceparent_from_context(&interface_cx),
+            attachment_ids,
         };
 
         let mut produce_request_span = crate::otel_spans::start_bus_span(
@@ -768,7 +791,8 @@ impl Orchestrator {
                 }
                 return Ok(TurnResult {
                     answer: bus_result.content,
-                    attachments: bus_result.attachments,
+                    attachments: vec![],
+                    attachment_ids: bus_result.attachment_ids,
                     message_id: bus_result.message_id,
                 });
             }

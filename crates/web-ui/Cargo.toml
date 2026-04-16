@@ -52,6 +52,7 @@ getrandom = { workspace = true }
 aes-gcm = { workspace = true }
 hkdf = { workspace = true }
 base64 = { workspace = true }
+image = { workspace = true }
 toml_edit = { workspace = true }
 p256 = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras"] }

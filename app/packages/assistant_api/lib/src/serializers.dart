@@ -29,6 +29,7 @@ import 'package:assistant_api/src/model/api_error_response.dart';
 import 'package:assistant_api/src/model/api_key_security_scheme.dart';
 import 'package:assistant_api/src/model/api_send_message_request.dart';
 import 'package:assistant_api/src/model/artifact.dart';
+import 'package:assistant_api/src/model/attachment_meta_response.dart';
 import 'package:assistant_api/src/model/authentication_info.dart';
 import 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/cancel_task_request.dart';
@@ -126,6 +127,7 @@ part 'serializers.g.dart';
   ApiKeySecurityScheme,
   ApiSendMessageRequest,
   Artifact,
+  AttachmentMetaResponse,
   AuthenticationInfo,
   AuthorizationCodeOAuthFlow,
   CancelTaskRequest,

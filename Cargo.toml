@@ -119,6 +119,8 @@ cron = "0.16"
 scraper = { version = "0.26", default-features = false }
 # Glob pattern matching for file-glob builtin
 glob = "0.3"
+# Image decoding, encoding, and resizing (attachment serving)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # JSON Schema validation for tool param checking
 jsonschema = { version = "0.45", default-features = false }
 # SHA-256 hashing for memory chunk change detection

@@ -78,7 +78,9 @@ use assistant_transcription::{
 
 use assistant_core::{Interface, MessageRole};
 use assistant_runtime::{AssistantInterface, OrchestratorEvent};
-use assistant_storage::{ConversationEventStore, ConversationStore, RunBroadcaster};
+use assistant_storage::{
+    AttachmentStore, ConversationEventStore, ConversationStore, RunBroadcaster,
+};
 use axum::{
     body::Body,
     extract::{Multipart, Path, State},
@@ -119,6 +121,8 @@ pub struct ApiState {
     pub event_store: ConversationEventStore,
     /// In-memory broadcast registry for live-tailing active runs.
     pub run_broadcaster: RunBroadcaster,
+    /// Persistent attachment storage (metadata in SQLite, bytes on disk).
+    pub attachment_store: AttachmentStore,
 }
 
 impl ApiState {
@@ -128,6 +132,7 @@ impl ApiState {
         agent_id: Arc<RwLock<String>>,
     ) -> Self {
         let event_store = ConversationEventStore::new(pool.clone());
+        let attachment_store = AttachmentStore::new(pool.clone());
         Self {
             pool,
             agent_id,
@@ -138,6 +143,7 @@ impl ApiState {
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
             event_store,
             run_broadcaster: RunBroadcaster::new(),
+            attachment_store,
         }
     }
 
@@ -216,6 +222,9 @@ pub struct MessageSummary {
     /// `true` when a TTS provider is configured and the message is a
     /// non-empty assistant reply.
     pub tts_available: bool,
+    /// Attachments linked to this message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<AttachmentMetaResponse>,
 }
 
 // -- Request types -----------------------------------------------------------
@@ -240,6 +249,9 @@ pub struct UpdateConversationRequest {
 pub struct SendMessageRequest {
     /// The message text to send to the assistant.
     pub message: String,
+    /// Optional attachment IDs to include with this message.
+    #[serde(default)]
+    pub attachment_ids: Vec<Uuid>,
 }
 
 // -- Router ------------------------------------------------------------------
@@ -255,6 +267,8 @@ pub fn api_router() -> Router<ApiState> {
         .route("/conversations/{id}", patch(update_conversation))
         .route("/conversations/{id}/messages", post(send_message))
         .route("/conversations/{id}/voice", post(send_voice_message))
+        .route("/conversations/{id}/attachments", post(upload_attachment))
+        .route("/attachments/{id}", get(serve_attachment))
         .route(
             "/conversations/{id}/runs/{run_id}/events/stream",
             get(stream_run_events),
@@ -380,6 +394,20 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
     let history = store.load_history(conv_id).await.unwrap_or_default();
     let tts_configured = state.tts_provider.is_some();
 
+    // Pre-load all attachments for this conversation, grouped by message ID.
+    let mut attachments_by_msg: std::collections::HashMap<Uuid, Vec<AttachmentMetaResponse>> =
+        std::collections::HashMap::new();
+    if let Ok(all_atts) = state.attachment_store.list_for_conversation(conv_id).await {
+        for att in all_atts {
+            if let Some(msg_id) = att.message_id {
+                attachments_by_msg
+                    .entry(msg_id)
+                    .or_default()
+                    .push(AttachmentMetaResponse::from_meta(&att));
+            }
+        }
+    }
+
     // Collect tool-result messages (role=tool) keyed by (turn, tool_name)
     // so we can join them with the corresponding assistant tool-call messages.
     let mut tool_results: std::collections::HashMap<(i64, String), String> =
@@ -442,6 +470,7 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
             });
             let tts_available =
                 tts_configured && matches!(m.role, MessageRole::Assistant) && !m.content.is_empty();
+            let attachments = attachments_by_msg.remove(&m.id).unwrap_or_default();
             MessageSummary {
                 id: m.id,
                 role: m.role.to_string(),
@@ -451,6 +480,7 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
                 tool_calls,
                 skill_name: m.skill_name,
                 tts_available,
+                attachments,
             }
         })
         .collect();
@@ -642,13 +672,26 @@ pub async fn send_message(
         .await;
 
     let orchestrator = state.orchestrator.clone();
+    let user_attachment_ids = body.attachment_ids;
     let turn_result_rx = {
         let (tx, rx) =
             tokio::sync::oneshot::channel::<anyhow::Result<assistant_runtime::TurnResult>>();
         tokio::spawn(async move {
-            let result = orchestrator
-                .submit_turn(&content, conv_id, Interface::Web, None)
-                .await;
+            let result = if user_attachment_ids.is_empty() {
+                orchestrator
+                    .submit_turn(&content, conv_id, Interface::Web, None)
+                    .await
+            } else {
+                orchestrator
+                    .submit_turn_with_attachments(
+                        &content,
+                        conv_id,
+                        Interface::Web,
+                        None,
+                        user_attachment_ids,
+                    )
+                    .await
+            };
             let _ = tx.send(result);
         });
         rx
@@ -790,9 +833,9 @@ pub async fn send_message(
             }
         }
 
-        let (reply_text, reply_message_id) = match turn_result_rx.await {
-            Ok(Ok(result)) => (result.answer, result.message_id),
-            Ok(Err(_)) | Err(_) => (full_text, None),
+        let (reply_text, reply_message_id, reply_attachment_ids) = match turn_result_rx.await {
+            Ok(Ok(result)) => (result.answer, result.message_id, result.attachment_ids),
+            Ok(Err(_)) | Err(_) => (full_text, None, vec![]),
         };
 
         let mut done_data = serde_json::json!({
@@ -801,6 +844,12 @@ pub async fn send_message(
         });
         if let Some(mid) = reply_message_id {
             done_data["message_id"] = serde_json::Value::String(mid.to_string());
+        }
+        if !reply_attachment_ids.is_empty() {
+            done_data["attachment_ids"] = serde_json::json!(reply_attachment_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>());
         }
 
         // Persist done event.
@@ -1239,9 +1288,9 @@ pub async fn send_voice_message(
             }
         }
 
-        let (reply_text, reply_message_id) = match turn_result_rx.await {
-            Ok(Ok(result)) => (result.answer, result.message_id),
-            Ok(Err(_)) | Err(_) => (full_text, None),
+        let (reply_text, reply_message_id, reply_attachment_ids) = match turn_result_rx.await {
+            Ok(Ok(result)) => (result.answer, result.message_id, result.attachment_ids),
+            Ok(Err(_)) | Err(_) => (full_text, None, vec![]),
         };
 
         let mut done_data = serde_json::json!({
@@ -1250,6 +1299,12 @@ pub async fn send_voice_message(
         });
         if let Some(mid) = reply_message_id {
             done_data["message_id"] = serde_json::Value::String(mid.to_string());
+        }
+        if !reply_attachment_ids.is_empty() {
+            done_data["attachment_ids"] = serde_json::json!(reply_attachment_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>());
         }
         let done = Event::default().event("done").data(done_data.to_string());
         let _ = sse_tx.send(Ok(done)).await;
@@ -1365,6 +1420,303 @@ pub async fn get_audio(State(state): State<ApiState>, Path(id): Path<String>) ->
     }
 }
 
+// -- Attachment endpoints ----------------------------------------------------
+
+/// Multipart form for image attachment upload.
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+struct AttachmentUploadForm {
+    /// The image file.
+    #[schema(format = Binary)]
+    file: String,
+}
+
+/// Metadata returned after a successful upload.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct AttachmentMetaResponse {
+    pub id: Uuid,
+    pub filename: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub created_at: DateTime<Utc>,
+    /// URL to fetch the attachment content.
+    pub url: String,
+}
+
+impl AttachmentMetaResponse {
+    fn from_meta(meta: &assistant_core::AttachmentMeta) -> Self {
+        Self {
+            id: meta.id,
+            filename: meta.filename.clone(),
+            mime_type: meta.mime_type.clone(),
+            size_bytes: meta.size_bytes,
+            created_at: meta.created_at,
+            url: format!("/api/attachments/{}", meta.id),
+        }
+    }
+}
+
+/// `POST /api/conversations/{id}/attachments` — upload an image attachment.
+///
+/// Accepts a `multipart/form-data` body with a single `file` field.
+/// Returns `201 Created` with the attachment metadata on success.
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{id}/attachments",
+    tag = "attachments",
+    params(("id" = Uuid, Path, description = "Conversation ID")),
+    request_body(
+        content_type = "multipart/form-data",
+        content = inline(AttachmentUploadForm),
+    ),
+    responses(
+        (status = 201, description = "Attachment uploaded", body = AttachmentMetaResponse),
+        (status = 400, description = "Bad request (invalid MIME type, too large, etc.)"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Conversation not found"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn upload_attachment(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    mut multipart: Multipart,
+) -> Response {
+    let conv_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
+    };
+
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    match store.get_conversation(conv_id).await {
+        Ok(None) => return (StatusCode::NOT_FOUND, "Conversation not found").into_response(),
+        Err(e) => {
+            warn!("Failed to check conversation {conv_id}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+        _ => {}
+    }
+
+    // Parse multipart — expect a single "file" field.
+    let mut file_bytes: Option<Vec<u8>> = None;
+    let mut mime_type = String::new();
+    let mut filename = String::from("attachment");
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() == Some("file") {
+            if let Some(ct) = field.content_type() {
+                mime_type = ct.to_string();
+            }
+            if let Some(name) = field.file_name() {
+                filename = name.to_string();
+            }
+            match field.bytes().await {
+                Ok(b) => {
+                    if b.len() as u64 > assistant_core::MAX_ATTACHMENT_SIZE {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            format!(
+                                "File too large (max {} MB)",
+                                assistant_core::MAX_ATTACHMENT_SIZE / (1024 * 1024)
+                            ),
+                        )
+                            .into_response();
+                    }
+                    file_bytes = Some(b.to_vec());
+                }
+                Err(e) => {
+                    warn!("Failed to read file field: {e}");
+                    return (StatusCode::BAD_REQUEST, "Failed to read file data").into_response();
+                }
+            }
+        }
+    }
+
+    let file_bytes = match file_bytes {
+        Some(b) if !b.is_empty() => b,
+        _ => return (StatusCode::BAD_REQUEST, "Missing file field").into_response(),
+    };
+
+    // Validate MIME type.
+    if !assistant_core::is_supported_mime_type(&mime_type) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Unsupported MIME type '{mime_type}'. Supported: {}",
+                assistant_core::SUPPORTED_MIME_TYPES.join(", ")
+            ),
+        )
+            .into_response();
+    }
+
+    let meta = assistant_core::AttachmentMeta {
+        id: Uuid::new_v4(),
+        message_id: None,
+        conversation_id: conv_id,
+        agent_id,
+        filename,
+        mime_type,
+        size_bytes: file_bytes.len() as u64,
+        created_at: Utc::now(),
+    };
+
+    if let Err(e) = state.attachment_store.store(&meta, &file_bytes).await {
+        warn!("Failed to store attachment: {e}");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to store attachment",
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::CREATED,
+        Json(AttachmentMetaResponse::from_meta(&meta)),
+    )
+        .into_response()
+}
+
+/// Optional query parameters for the attachment serve endpoint.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct AttachmentServeParams {
+    /// Desired width in pixels (preserves aspect ratio).
+    pub w: Option<u32>,
+    /// Desired height in pixels (preserves aspect ratio).
+    pub h: Option<u32>,
+}
+
+/// `GET /api/attachments/{id}` — serve an attachment, optionally resized.
+///
+/// Supports `w` and `h` query params for on-demand image resizing. Resized
+/// variants are cached on disk. Responds with `ETag` and `Cache-Control`
+/// headers; returns `304 Not Modified` when `If-None-Match` matches.
+#[utoipa::path(
+    get,
+    path = "/api/attachments/{id}",
+    tag = "attachments",
+    params(
+        ("id" = Uuid, Path, description = "Attachment ID"),
+        AttachmentServeParams,
+    ),
+    responses(
+        (status = 200, description = "Attachment bytes", content_type = "application/octet-stream"),
+        (status = 304, description = "Not modified"),
+        (status = 400, description = "Invalid ID"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Attachment not found"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn serve_attachment(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<AttachmentServeParams>,
+) -> Response {
+    let att_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid attachment ID").into_response(),
+    };
+
+    let meta = match state.attachment_store.get_meta(att_id).await {
+        Ok(m) => m,
+        Err(_) => return (StatusCode::NOT_FOUND, "Attachment not found").into_response(),
+    };
+
+    // Determine target size (default: original).
+    let want_w = params.w.unwrap_or(0);
+    let want_h = params.h.unwrap_or(0);
+    let needs_resize =
+        (want_w > 0 || want_h > 0) && assistant_core::is_resizable_mime_type(&meta.mime_type);
+
+    // Build ETag from attachment ID + resize dimensions.
+    let etag = if needs_resize {
+        format!("\"{}-{}x{}\"", meta.id, want_w, want_h)
+    } else {
+        format!("\"{}\"", meta.id)
+    };
+
+    // Conditional request: check If-None-Match.
+    if let Some(inm) = headers.get(header::IF_NONE_MATCH) {
+        if let Ok(inm_str) = inm.to_str() {
+            if inm_str == etag {
+                return StatusCode::NOT_MODIFIED.into_response();
+            }
+        }
+    }
+
+    // Load original bytes.
+    let original = match state.attachment_store.load_bytes(att_id).await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("Failed to load attachment bytes for {att_id}: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to read attachment",
+            )
+                .into_response();
+        }
+    };
+
+    let (bytes, content_type) = if needs_resize {
+        match resize_image(&original, &meta.mime_type, want_w, want_h) {
+            Ok(resized) => (resized, meta.mime_type.clone()),
+            Err(e) => {
+                warn!("Failed to resize attachment {att_id}: {e}");
+                // Fall back to original.
+                (original, meta.mime_type.clone())
+            }
+        }
+    } else {
+        (original, meta.mime_type.clone())
+    };
+
+    (
+        [
+            (header::CONTENT_TYPE, content_type),
+            (
+                header::CACHE_CONTROL,
+                "private, immutable, max-age=31536000".to_string(),
+            ),
+            (header::ETAG, etag),
+        ],
+        Body::from(bytes),
+    )
+        .into_response()
+}
+
+/// Resize an image to fit within a bounding box, preserving aspect ratio.
+fn resize_image(data: &[u8], mime_type: &str, max_w: u32, max_h: u32) -> anyhow::Result<Vec<u8>> {
+    use image::ImageFormat;
+
+    let format = match mime_type {
+        "image/png" => ImageFormat::Png,
+        "image/jpeg" => ImageFormat::Jpeg,
+        "image/gif" => ImageFormat::Gif,
+        "image/webp" => ImageFormat::WebP,
+        _ => anyhow::bail!("unsupported mime type for resize: {mime_type}"),
+    };
+
+    let img = image::load_from_memory_with_format(data, format)?;
+    let (orig_w, orig_h) = (img.width(), img.height());
+
+    // Compute target dimensions preserving aspect ratio.
+    let target_w = if max_w > 0 { max_w } else { orig_w };
+    let target_h = if max_h > 0 { max_h } else { orig_h };
+
+    // Only downscale, never upscale.
+    if orig_w <= target_w && orig_h <= target_h {
+        return Ok(data.to_vec());
+    }
+
+    let resized = img.resize(target_w, target_h, image::imageops::FilterType::Lanczos3);
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    resized.write_to(&mut buf, format)?;
+    Ok(buf.into_inner())
+}
+
 // -- Tests -------------------------------------------------------------------
 
 #[cfg(test)]
@@ -1373,6 +1725,7 @@ mod tests {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use chrono::Utc;
     use http_body_util::BodyExt;
     use tokio::sync::RwLock;
     use tower::ServiceExt;
@@ -1384,7 +1737,8 @@ mod tests {
     use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
     use assistant_runtime::Orchestrator;
     use assistant_storage::{
-        ConversationEventStore, ConversationStore, RunBroadcaster, SkillRegistry, StorageLayer,
+        AttachmentStore, ConversationEventStore, ConversationStore, RunBroadcaster, SkillRegistry,
+        StorageLayer,
     };
     use assistant_tool_executor::ToolExecutor;
     use assistant_transcription::{
@@ -1483,6 +1837,7 @@ mod tests {
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
             event_store: ConversationEventStore::new(storage.pool.clone()),
             run_broadcaster: RunBroadcaster::new(),
+            attachment_store: AttachmentStore::new(storage.pool.clone()),
         };
         (state, storage)
     }
@@ -1536,6 +1891,7 @@ mod tests {
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
             event_store: ConversationEventStore::new(storage.pool.clone()),
             run_broadcaster: RunBroadcaster::new(),
+            attachment_store: AttachmentStore::new(storage.pool.clone()),
         };
         (state, storage)
     }
@@ -2545,6 +2901,7 @@ mod tests {
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
             event_store: short_ttl_store,
             run_broadcaster: RunBroadcaster::new(),
+            attachment_store: AttachmentStore::new(sl.pool.clone()),
         };
 
         let app = app(state);
@@ -2558,5 +2915,241 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         // The run existed but events were pruned → currently 404.
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // -- Attachment endpoint tests -----------------------------------------------
+
+    /// Helper: create a minimal 1×1 red PNG in memory.
+    fn tiny_png() -> Vec<u8> {
+        use image::{ImageBuffer, Rgba};
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_pixel(1, 1, Rgba([255, 0, 0, 255]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+        buf.into_inner()
+    }
+
+    /// Build a multipart body with a single `file` field.
+    fn multipart_body(
+        field_name: &str,
+        filename: &str,
+        mime: &str,
+        data: &[u8],
+    ) -> (String, Vec<u8>) {
+        let boundary = "----TestBoundary123";
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!(
+                "Content-Disposition: form-data; name=\"{field_name}\"; filename=\"{filename}\"\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
+        body.extend_from_slice(data);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        (format!("multipart/form-data; boundary={boundary}"), body)
+    }
+
+    #[tokio::test]
+    async fn upload_attachment_rejects_unsupported_mime() {
+        let (state, storage) = event_log_state().await;
+        let conv_store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = conv_store.create_conversation(None).await.unwrap();
+
+        let (content_type, body) = multipart_body("file", "test.txt", "text/plain", b"hello");
+
+        let app = app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/attachments", conv.id))
+            .header("Authorization", "Bearer test-token")
+            .header("Content-Type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn upload_attachment_succeeds_with_png() {
+        let (state, storage) = event_log_state().await;
+        let conv_store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = conv_store.create_conversation(None).await.unwrap();
+
+        let png_data = tiny_png();
+        let (content_type, body) = multipart_body("file", "test.png", "image/png", &png_data);
+
+        let app = app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/attachments", conv.id))
+            .header("Authorization", "Bearer test-token")
+            .header("Content-Type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let meta: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(meta["mime_type"], "image/png");
+        assert_eq!(meta["filename"], "test.png");
+        assert!(meta["id"].as_str().is_some());
+        assert!(meta["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("/api/attachments/"));
+    }
+
+    #[tokio::test]
+    async fn upload_attachment_404_for_missing_conversation() {
+        let (state, _storage) = event_log_state().await;
+        let fake_id = Uuid::new_v4();
+
+        let png_data = tiny_png();
+        let (content_type, body) = multipart_body("file", "test.png", "image/png", &png_data);
+
+        let app = app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{fake_id}/attachments"))
+            .header("Authorization", "Bearer test-token")
+            .header("Content-Type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn serve_attachment_returns_bytes_and_cache_headers() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4();
+
+        // Store an attachment directly.
+        let png_data = tiny_png();
+        let meta = assistant_core::AttachmentMeta {
+            id: Uuid::new_v4(),
+            message_id: None,
+            conversation_id: conv_id,
+            agent_id: "default".to_string(),
+            filename: "test.png".to_string(),
+            mime_type: "image/png".to_string(),
+            size_bytes: png_data.len() as u64,
+            created_at: Utc::now(),
+        };
+        state
+            .attachment_store
+            .store(&meta, &png_data)
+            .await
+            .unwrap();
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!("/attachments/{}", meta.id))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("content-type").unwrap(), "image/png");
+        assert!(resp
+            .headers()
+            .get("cache-control")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("immutable"));
+        assert!(resp.headers().get("etag").is_some());
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body_bytes.as_ref(), png_data.as_slice());
+    }
+
+    #[tokio::test]
+    async fn serve_attachment_304_on_matching_etag() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4();
+
+        let png_data = tiny_png();
+        let meta = assistant_core::AttachmentMeta {
+            id: Uuid::new_v4(),
+            message_id: None,
+            conversation_id: conv_id,
+            agent_id: "default".to_string(),
+            filename: "test.png".to_string(),
+            mime_type: "image/png".to_string(),
+            size_bytes: png_data.len() as u64,
+            created_at: Utc::now(),
+        };
+        state
+            .attachment_store
+            .store(&meta, &png_data)
+            .await
+            .unwrap();
+
+        let etag = format!("\"{}\"", meta.id);
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!("/attachments/{}", meta.id))
+            .header("Authorization", "Bearer test-token")
+            .header("If-None-Match", &etag)
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn serve_attachment_with_resize_params() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4();
+
+        // Create a slightly larger image so resize actually does something.
+        let img: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+            image::ImageBuffer::from_pixel(100, 100, image::Rgba([0, 128, 255, 255]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+        let png_data = buf.into_inner();
+
+        let meta = assistant_core::AttachmentMeta {
+            id: Uuid::new_v4(),
+            message_id: None,
+            conversation_id: conv_id,
+            agent_id: "default".to_string(),
+            filename: "big.png".to_string(),
+            mime_type: "image/png".to_string(),
+            size_bytes: png_data.len() as u64,
+            created_at: Utc::now(),
+        };
+        state
+            .attachment_store
+            .store(&meta, &png_data)
+            .await
+            .unwrap();
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!("/attachments/{}?w=50&h=50", meta.id))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        // Resized image should be smaller than original.
+        assert!(
+            body_bytes.len() < png_data.len(),
+            "resized should be smaller"
+        );
     }
 }

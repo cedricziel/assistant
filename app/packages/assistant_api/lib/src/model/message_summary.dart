@@ -5,6 +5,7 @@
 // ignore_for_file: unused_element
 import 'package:built_collection/built_collection.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
+import 'package:assistant_api/src/model/attachment_meta_response.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -13,6 +14,7 @@ part 'message_summary.g.dart';
 /// A single message in a conversation.
 ///
 /// Properties:
+/// * [attachments] - Attachments linked to this message.
 /// * [content] 
 /// * [createdAt] 
 /// * [id] 
@@ -23,6 +25,10 @@ part 'message_summary.g.dart';
 /// * [turn] 
 @BuiltValue()
 abstract class MessageSummary implements Built<MessageSummary, MessageSummaryBuilder> {
+  /// Attachments linked to this message.
+  @BuiltValueField(wireName: r'attachments')
+  BuiltList<AttachmentMetaResponse>? get attachments;
+
   @BuiltValueField(wireName: r'content')
   String get content;
 
@@ -73,6 +79,13 @@ class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> 
     MessageSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
+    if (object.attachments != null) {
+      yield r'attachments';
+      yield serializers.serialize(
+        object.attachments,
+        specifiedType: const FullType(BuiltList, [FullType(AttachmentMetaResponse)]),
+      );
+    }
     yield r'content';
     yield serializers.serialize(
       object.content,
@@ -140,6 +153,13 @@ class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> 
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'attachments':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType(BuiltList, [FullType(AttachmentMetaResponse)]),
+          ) as BuiltList<AttachmentMetaResponse>;
+          result.attachments.replace(valueDes);
+          break;
         case r'content':
           final valueDes = serializers.deserialize(
             value,

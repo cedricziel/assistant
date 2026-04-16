@@ -167,6 +167,7 @@ pub(crate) async fn run_due_tasks(
             extension_tools: vec![],
             timestamp: Some(Utc::now()),
             traceparent: traceparent_from_context(&interface_cx),
+            attachment_ids: vec![],
         };
 
         let mut produce_turn_span = crate::otel_spans::start_bus_span(
@@ -343,6 +344,7 @@ pub(crate) async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
         extension_tools: vec![],
         timestamp: Some(Utc::now()),
         traceparent: traceparent_from_context(&interface_cx),
+        attachment_ids: vec![],
     };
 
     let mut produce_turn_span = crate::otel_spans::start_bus_span(

@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod attachments;
 pub mod conversation_events;
 pub mod conversations;
 pub mod logs;
@@ -17,6 +18,7 @@ pub mod webhooks;
 pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
+pub use attachments::AttachmentStore;
 pub use conversation_events::{
     ConversationEventRow, ConversationEventStore, LiveEvent, RunBroadcaster,
 };
@@ -176,6 +178,11 @@ impl StorageLayer {
     /// Convenience: build a [`SlackActiveThreadStore`] backed by this pool.
     pub fn slack_active_thread_store(&self) -> SlackActiveThreadStore {
         SlackActiveThreadStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build an [`AttachmentStore`] backed by this pool.
+    pub fn attachment_store(&self) -> AttachmentStore {
+        AttachmentStore::new(self.pool.clone())
     }
 
     /// Convenience: build a [`WebhookStore`] scoped to a Persona.
@@ -349,6 +356,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "033_conversation_events",
             include_str!("../../../migrations/033_conversation_events.sql"),
+        ),
+        (
+            "034_message_attachments",
+            include_str!("../../../migrations/034_message_attachments.sql"),
         ),
     ];
 

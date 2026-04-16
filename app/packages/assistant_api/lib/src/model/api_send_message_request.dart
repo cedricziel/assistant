@@ -3,6 +3,7 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:built_collection/built_collection.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -11,9 +12,14 @@ part 'api_send_message_request.g.dart';
 /// Body for `POST /api/conversations/{id}/messages`.
 ///
 /// Properties:
+/// * [attachmentIds] - Optional attachment IDs to include with this message.
 /// * [message] - The message text to send to the assistant.
 @BuiltValue()
 abstract class ApiSendMessageRequest implements Built<ApiSendMessageRequest, ApiSendMessageRequestBuilder> {
+  /// Optional attachment IDs to include with this message.
+  @BuiltValueField(wireName: r'attachment_ids')
+  BuiltList<String>? get attachmentIds;
+
   /// The message text to send to the assistant.
   @BuiltValueField(wireName: r'message')
   String get message;
@@ -41,6 +47,13 @@ class _$ApiSendMessageRequestSerializer implements PrimitiveSerializer<ApiSendMe
     ApiSendMessageRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
+    if (object.attachmentIds != null) {
+      yield r'attachment_ids';
+      yield serializers.serialize(
+        object.attachmentIds,
+        specifiedType: const FullType(BuiltList, [FullType(String)]),
+      );
+    }
     yield r'message';
     yield serializers.serialize(
       object.message,
@@ -69,6 +82,13 @@ class _$ApiSendMessageRequestSerializer implements PrimitiveSerializer<ApiSendMe
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
+        case r'attachment_ids':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType(BuiltList, [FullType(String)]),
+          ) as BuiltList<String>;
+          result.attachmentIds.replace(valueDes);
+          break;
         case r'message':
           final valueDes = serializers.deserialize(
             value,

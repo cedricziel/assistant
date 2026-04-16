@@ -12,6 +12,7 @@ import 'package:assistant_api/src/auth/oauth.dart';
 import 'package:assistant_api/src/api/agent_card_api.dart';
 import 'package:assistant_api/src/api/agents_api.dart';
 import 'package:assistant_api/src/api/analytics_api.dart';
+import 'package:assistant_api/src/api/attachments_api.dart';
 import 'package:assistant_api/src/api/capabilities_api.dart';
 import 'package:assistant_api/src/api/conversations_api.dart';
 import 'package:assistant_api/src/api/logs_api.dart';
@@ -95,6 +96,12 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   AnalyticsApi getAnalyticsApi() {
     return AnalyticsApi(dio, serializers);
+  }
+
+  /// Get AttachmentsApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  AttachmentsApi getAttachmentsApi() {
+    return AttachmentsApi(dio, serializers);
   }
 
   /// Get CapabilitiesApi instance, base route and serializer can be overridden by a given but be careful,

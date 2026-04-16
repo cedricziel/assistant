@@ -41,6 +41,19 @@ pub trait AssistantInterface: Send + Sync {
         conversation_id: Uuid,
         interface: Interface,
         timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<TurnResult> {
+        self.submit_turn_with_attachments(prompt, conversation_id, interface, timestamp, vec![])
+            .await
+    }
+
+    /// Submit a user turn with image attachment IDs.
+    async fn submit_turn_with_attachments(
+        &self,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<chrono::DateTime<chrono::Utc>>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult>;
 
     /// Run the BOOT.md startup hook for the given conversation.
@@ -60,15 +73,22 @@ impl AssistantInterface for Orchestrator {
         self.register_token_sink(conversation_id, sink).await;
     }
 
-    async fn submit_turn(
+    async fn submit_turn_with_attachments(
         &self,
         prompt: &str,
         conversation_id: Uuid,
         interface: Interface,
         timestamp: Option<chrono::DateTime<chrono::Utc>>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
-        self.submit_turn(prompt, conversation_id, interface, timestamp)
-            .await
+        self.submit_turn_with_attachments(
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            attachment_ids,
+        )
+        .await
     }
 
     async fn run_boot(&self, conversation_id: Uuid, interface: Interface) -> Result<bool> {

@@ -920,7 +920,7 @@ async fn prepare_history_with_attachments_emits_multimodal_user() {
     }];
 
     let (_conv_store, history, _turn) = orch
-        .prepare_history("look at this", conv_id, attachments, &orch.agent_id)
+        .prepare_history("look at this", conv_id, attachments, &[], &orch.agent_id)
         .await
         .unwrap();
 
@@ -950,7 +950,7 @@ async fn prepare_history_without_attachments_emits_plain_text() {
 
     let conv_id = Uuid::new_v4();
     let (_conv_store, history, _turn) = orch
-        .prepare_history("hello", conv_id, Vec::new(), &orch.agent_id)
+        .prepare_history("hello", conv_id, Vec::new(), &[], &orch.agent_id)
         .await
         .unwrap();
 
@@ -1475,6 +1475,7 @@ async fn run_worker_processes_turn_request() {
         extension_tools: vec![],
         timestamp: None,
         traceparent: None,
+        attachment_ids: vec![],
     };
     orch.bus()
         .publish(
@@ -1566,6 +1567,7 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
         extension_tools: vec![],
         timestamp: None,
         traceparent: None,
+        attachment_ids: vec![],
     };
 
     let request_msg_id = orch
@@ -2674,5 +2676,58 @@ async fn worker_routes_ext_plus_sink_to_streaming_path() {
         received, "streamed answer",
         "worker must route to streaming path when ext tools + token_sink are both registered; \
          sink received: {received:?}"
+    );
+}
+
+// ── resize_and_encode tests ──────────────────────────────────────────────
+
+#[test]
+fn resize_and_encode_small_image_returns_base64_without_resize() {
+    use base64::Engine as _;
+
+    let raw = b"tiny image bytes";
+    let encoded = super::resize_and_encode(raw, "image/png", "anthropic");
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&encoded)
+        .unwrap();
+    assert_eq!(
+        decoded, raw,
+        "small images should be returned as-is (base64-encoded)"
+    );
+}
+
+#[test]
+fn resize_and_encode_unknown_mime_returns_base64() {
+    use base64::Engine as _;
+
+    let raw = b"some pdf content";
+    let encoded = super::resize_and_encode(raw, "application/pdf", "openai");
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&encoded)
+        .unwrap();
+    assert_eq!(decoded, raw, "unknown MIME types should be returned as-is");
+}
+
+#[test]
+fn max_image_bytes_anthropic_is_5mb() {
+    assert_eq!(
+        super::max_image_bytes_for_provider("anthropic"),
+        5 * 1024 * 1024
+    );
+}
+
+#[test]
+fn max_image_bytes_openai_is_20mb() {
+    assert_eq!(
+        super::max_image_bytes_for_provider("openai"),
+        20 * 1024 * 1024
+    );
+}
+
+#[test]
+fn max_image_bytes_default_is_conservative() {
+    assert_eq!(
+        super::max_image_bytes_for_provider("ollama"),
+        5 * 1024 * 1024
     );
 }
