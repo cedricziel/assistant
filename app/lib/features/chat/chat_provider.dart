@@ -140,6 +140,20 @@ enum MessageStatus {
   failed,
 }
 
+/// Status of a single tool call within an assistant message.
+enum ToolCallStatus { pending, ok, error, denied }
+
+/// A single tool invocation recorded on an assistant message.
+class ToolCallRecord {
+  ToolCallRecord({required this.toolName, required this.status});
+
+  final String toolName;
+
+  /// Mutable so the pending chip can be updated to a resolved status in place
+  /// during streaming, matching the pattern used for [ChatMessage.content].
+  ToolCallStatus status;
+}
+
 /// A message shown in the chat UI (may be a streaming partial).
 class ChatMessage {
   ChatMessage({
@@ -149,7 +163,8 @@ class ChatMessage {
     this.isStreaming = false,
     this.status = MessageStatus.ok,
     this.audioId,
-  });
+    List<ToolCallRecord>? toolCalls,
+  }) : toolCalls = toolCalls ?? [];
 
   final String id;
   final String role;
@@ -160,6 +175,10 @@ class ChatMessage {
   /// Non-null when the server has produced audio for this assistant message.
   final String? audioId;
 
+  /// Tool calls associated with this assistant message, in invocation order.
+  /// Populated during streaming from [StatusEvent] and [ToolResultEvent].
+  List<ToolCallRecord> toolCalls;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -168,6 +187,7 @@ class ChatMessage {
     bool? isStreaming,
     MessageStatus? status,
     String? audioId,
+    List<ToolCallRecord>? toolCalls,
   }) {
     return ChatMessage(
       id: id,
@@ -176,6 +196,7 @@ class ChatMessage {
       isStreaming: isStreaming ?? this.isStreaming,
       status: status ?? this.status,
       audioId: audioId ?? this.audioId,
+      toolCalls: toolCalls ?? this.toolCalls,
     );
   }
 }
@@ -277,6 +298,78 @@ class ChatState {
 class ChatNotifier extends AsyncNotifier<ChatState> {
   bool _cancelled = false;
   bool _draining = false;
+
+  /// Extract a tool name from a [StatusEvent] message.
+  ///
+  /// The server emits messages like "Calling tool: web-search". Strip the
+  /// prefix; fall back to the full string if the format doesn't match.
+  static String _extractToolName(String statusMessage) {
+    const prefix = 'Calling tool: ';
+    if (statusMessage.startsWith(prefix)) {
+      return statusMessage.substring(prefix.length).trim();
+    }
+    return statusMessage;
+  }
+
+  /// Map a [ToolResultEvent.status] string to a [ToolCallStatus] value.
+  static ToolCallStatus _parseToolStatus(String status) {
+    return switch (status) {
+      'ok' => ToolCallStatus.ok,
+      'error' => ToolCallStatus.error,
+      'denied' => ToolCallStatus.denied,
+      _ => ToolCallStatus.ok,
+    };
+  }
+
+  /// Push a pending [ToolCallRecord] onto the streaming assistant message and
+  /// update state.  Called from both [_streamMessage] and [_streamVoiceMessage]
+  /// when a [StatusEvent] is received.
+  void _onStatusEvent(ChatState chatState, String statusMessage) {
+    final toolName = _extractToolName(statusMessage);
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+    if (idx != -1) {
+      msgs[idx].toolCalls.add(
+        ToolCallRecord(toolName: toolName, status: ToolCallStatus.pending),
+      );
+    }
+    state = AsyncData(
+      chatState.copyWith(messages: msgs, statusMessage: statusMessage),
+    );
+  }
+
+  /// Resolve the pending [ToolCallRecord] for [event] and update state.
+  /// Called from both [_streamMessage] and [_streamVoiceMessage].
+  void _onToolResultEvent(ChatState chatState, ToolResultEvent event) {
+    final resolvedStatus = _parseToolStatus(event.status);
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+    if (idx != -1) {
+      final callIdx = msgs[idx].toolCalls.indexWhere(
+        (tc) =>
+            tc.toolName == event.toolName &&
+            tc.status == ToolCallStatus.pending,
+      );
+      if (callIdx != -1) {
+        msgs[idx].toolCalls[callIdx].status = resolvedStatus;
+      } else {
+        // No matching pending chip — append a resolved record directly.
+        msgs[idx].toolCalls.add(
+          ToolCallRecord(toolName: event.toolName, status: resolvedStatus),
+        );
+      }
+    }
+    state = AsyncData(
+      chatState.copyWith(
+        messages: msgs,
+        clearStatusMessage: true,
+        lastToolResult: ChatToolResult(
+          toolName: event.toolName,
+          status: event.status,
+        ),
+      ),
+    );
+  }
 
   @override
   Future<ChatState> build() async {
@@ -539,7 +632,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
         } else if (event is StatusEvent) {
-          state = AsyncData(chatState.copyWith(statusMessage: event.message));
+          _onStatusEvent(chatState, event.message);
+        } else if (event is ToolResultEvent) {
+          _onToolResultEvent(chatState, event);
         } else if (event is AudioReadyEvent) {
           // Store audioId on the streaming assistant message for auto-play.
           final msgs = List<ChatMessage>.from(chatState.messages);
@@ -559,6 +654,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               status: MessageStatus.ok,
             );
           }
+          // Preserve tool call records and audio id on the final message.
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
             msgs[idx] = ChatMessage(
@@ -566,6 +662,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               role: 'assistant',
               content: event.content,
               audioId: msgs[idx].audioId,
+              toolCalls: msgs[idx].toolCalls,
             );
           }
           state = AsyncData(
@@ -668,17 +765,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
         } else if (event is StatusEvent) {
-          state = AsyncData(chatState.copyWith(statusMessage: event.message));
+          _onStatusEvent(chatState, event.message);
         } else if (event is ToolResultEvent) {
-          state = AsyncData(
-            chatState.copyWith(
-              clearStatusMessage: true,
-              lastToolResult: ChatToolResult(
-                toolName: event.toolName,
-                status: event.status,
-              ),
-            ),
-          );
+          _onToolResultEvent(chatState, event);
         } else if (event is DoneEvent) {
           final msgs = List<ChatMessage>.from(chatState.messages);
           // Mark user message as successfully acknowledged.
@@ -686,7 +775,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           if (userIdx != -1) {
             msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.ok);
           }
-          // Replace streaming placeholder with final assistant message.
+          // Replace streaming placeholder with final assistant message,
+          // preserving audio id and accumulated tool call records.
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
             msgs[idx] = ChatMessage(
@@ -694,6 +784,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               role: 'assistant',
               content: event.content,
               audioId: msgs[idx].audioId,
+              toolCalls: msgs[idx].toolCalls,
             );
           }
           state = AsyncData(
