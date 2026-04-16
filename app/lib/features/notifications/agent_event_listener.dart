@@ -22,8 +22,7 @@ class AgentEventListener extends ConsumerStatefulWidget {
   final Widget child;
 
   @override
-  ConsumerState<AgentEventListener> createState() =>
-      _AgentEventListenerState();
+  ConsumerState<AgentEventListener> createState() => _AgentEventListenerState();
 }
 
 class _AgentEventListenerState extends ConsumerState<AgentEventListener>
@@ -47,8 +46,8 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
     _lifecycleState = state;
   }
 
-  bool get _isResumed => _lifecycleState == null ||
-      _lifecycleState == AppLifecycleState.resumed;
+  bool get _isResumed =>
+      _lifecycleState == null || _lifecycleState == AppLifecycleState.resumed;
 
   @override
   Widget build(BuildContext context) {
@@ -73,11 +72,15 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
         !_isResumed &&
         prefs.notifyChatMessages) {
       final lastMsg = nextState.messages.lastOrNull;
-      if (lastMsg != null && lastMsg.isAssistant && lastMsg.content.isNotEmpty) {
+      if (lastMsg != null &&
+          lastMsg.isAssistant &&
+          lastMsg.content.isNotEmpty) {
         final truncated = lastMsg.content.length > 80
             ? '${lastMsg.content.substring(0, 77)}…'
             : lastMsg.content;
-        ref.read(notificationServiceProvider).show(
+        ref
+            .read(notificationServiceProvider)
+            .show(
               'New message',
               truncated,
               conversationId: nextState.conversationId,
@@ -90,17 +93,13 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
     final nextTool = nextState.lastToolResult;
     if (nextTool != null && nextTool != prevTool) {
       if (nextTool.isSuccess && prefs.notifySkillComplete) {
-        final skillName = nextTool.toolName;
-        ref.read(notificationServiceProvider).show(
-              'Skill complete',
-              skillName,
-            );
+        ref
+            .read(notificationServiceProvider)
+            .show('Skill complete', nextTool.toolName);
       } else if (!nextTool.isSuccess && prefs.notifyAgentErrors) {
-        final skillName = nextTool.toolName;
-        ref.read(notificationServiceProvider).show(
-              'Skill failed',
-              skillName,
-            );
+        ref
+            .read(notificationServiceProvider)
+            .show('Skill failed', nextTool.toolName);
       }
     }
 
@@ -109,12 +108,10 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
         nextState.error != prevState.error &&
         prefs.notifyAgentErrors) {
       final errMsg = nextState.error!;
-      final truncated =
-          errMsg.length > 80 ? '${errMsg.substring(0, 77)}…' : errMsg;
-      ref.read(notificationServiceProvider).show(
-            'Assistant error',
-            truncated,
-          );
+      final truncated = errMsg.length > 80
+          ? '${errMsg.substring(0, 77)}…'
+          : errMsg;
+      ref.read(notificationServiceProvider).show('Assistant error', truncated);
     }
   }
 }

@@ -23,11 +23,7 @@ class _FakeNotificationService extends NotificationService {
   Future<bool> requestPermission() async => true;
 
   @override
-  Future<void> show(
-    String title,
-    String body, {
-    String? conversationId,
-  }) async {
+  Future<void> show(String title, String body, {String? conversationId}) async {
     calls.add((title: title, body: body, conversationId: conversationId));
   }
 }
@@ -67,8 +63,9 @@ void main() {
 
   /// Pumps [AgentEventListener] with fakes, waits for providers to settle,
   /// and returns the chat notifier + fake notification service.
-  Future<({_FakeChatNotifier chatNotifier, _FakeNotificationService ns})>
-      pump(WidgetTester tester) async {
+  Future<({_FakeChatNotifier chatNotifier, _FakeNotificationService ns})> pump(
+    WidgetTester tester,
+  ) async {
     final chatNotifier = _FakeChatNotifier();
 
     await tester.pumpWidget(
@@ -76,15 +73,15 @@ void main() {
         overrides: [
           chatProvider.overrideWith(() => chatNotifier),
           // Use SynchronousFuture so prefs are immediately in AsyncData.
-          notificationPreferencesProvider
-              .overrideWith(() => _SyncPrefsNotifier(mockPrefs)),
-          notificationServiceProvider
-              .overrideWith((ref) => _FakeNotificationService(ref: ref)),
+          notificationPreferencesProvider.overrideWith(
+            () => _SyncPrefsNotifier(mockPrefs),
+          ),
+          notificationServiceProvider.overrideWith(
+            (ref) => _FakeNotificationService(ref: ref),
+          ),
         ],
         child: const MaterialApp(
-          home: AgentEventListener(
-            child: Scaffold(body: Text('content')),
-          ),
+          home: AgentEventListener(child: Scaffold(body: Text('content'))),
         ),
       ),
     );
@@ -103,14 +100,17 @@ void main() {
     return (chatNotifier: chatNotifier, ns: ns);
   }
 
-  testWidgets('fires "Skill complete" when tool result is success',
-      (tester) async {
+  testWidgets('fires "Skill complete" when tool result is success', (
+    tester,
+  ) async {
     final (:chatNotifier, :ns) = await pump(tester);
 
-    chatNotifier.push(const ChatState(
-      isSending: true,
-      lastToolResult: ChatToolResult(toolName: 'my-skill', status: 'ok'),
-    ));
+    chatNotifier.push(
+      const ChatState(
+        isSending: true,
+        lastToolResult: ChatToolResult(toolName: 'my-skill', status: 'ok'),
+      ),
+    );
     await tester.pump();
 
     expect(ns.calls, hasLength(1));
@@ -121,10 +121,12 @@ void main() {
   testWidgets('fires "Skill failed" when tool result is error', (tester) async {
     final (:chatNotifier, :ns) = await pump(tester);
 
-    chatNotifier.push(const ChatState(
-      isSending: true,
-      lastToolResult: ChatToolResult(toolName: 'bad-skill', status: 'error'),
-    ));
+    chatNotifier.push(
+      const ChatState(
+        isSending: true,
+        lastToolResult: ChatToolResult(toolName: 'bad-skill', status: 'error'),
+      ),
+    );
     await tester.pump();
 
     expect(ns.calls, hasLength(1));

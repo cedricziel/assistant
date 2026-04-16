@@ -14,6 +14,7 @@ import '../personas/personas_provider.dart';
 import 'audio_player_widget.dart';
 import 'chat_provider.dart';
 import 'conversation_list.dart';
+import 'tool_call_chip.dart';
 import 'voice_recorder_button.dart';
 
 /// Main chat screen.
@@ -350,30 +351,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     ),
                   ),
 
-                  // Progress indicator (shown while streaming).
-                  if (chatState.isSending && chatState.streamingContent.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            chatState.statusMessage ?? 'Thinking...',
-                            style: const TextStyle(
-                              color: Colors.black54,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
                   // Input row.
                   _InputRow(
                     controller: _inputController,
@@ -475,6 +452,25 @@ class _MessageBubble extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // Tool call chips — one per invocation, in order.
+                      if (message.toolCalls.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: message.toolCalls
+                                .map((tc) => ToolCallChip(record: tc))
+                                .toList(),
+                          ),
+                        ),
+                      // Divider between chips and reply text.
+                      if (message.toolCalls.isNotEmpty &&
+                          message.content.isNotEmpty)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 6),
+                          child: Divider(height: 1, thickness: 0.5),
+                        ),
                       MarkdownBody(
                         data: message.content,
                         styleSheet:
