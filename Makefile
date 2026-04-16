@@ -36,7 +36,7 @@ install-hooks:
 
 # Run dart_pre_commit (format, analyze, deps, OSV scanning) on the Flutter app.
 lint-flutter:
-	cd app && dart run dart_pre_commit
+	cd app && flutter pub run dart_pre_commit
 
 # Run Flutter unit and widget tests.
 test-flutter:
@@ -45,7 +45,7 @@ test-flutter:
 # Run all pre-commit checks manually (mirrors .githooks/pre-commit).
 precommit:
 	cargo fmt --all -- --check
-	cd app && dart run dart_pre_commit
+	cd app && flutter pub run dart_pre_commit
 	cargo clippy --workspace -- -D warnings
 	cargo machete --with-metadata
 	cd app && flutter test
