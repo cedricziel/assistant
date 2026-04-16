@@ -1,33 +1,13 @@
-# macOS Tray Spec
-
-## Requirements
-
-### Requirement: Tray icon is shown on macOS launch
-
-The app SHALL display a menu bar status icon when launched on macOS.
-The icon SHALL NOT appear when running as a web app.
-
-#### Scenario: App launches on macOS
-
-- **WHEN** the user launches the macOS build
-- **THEN** a tray icon appears in the macOS menu bar
-- **THEN** no icon appears in the macOS Dock
-
-#### Scenario: App launches as web
-
-- **WHEN** the app runs in a browser
-- **THEN** no tray initialization occurs and the app renders normally
-
----
+## MODIFIED Requirements
 
 ### Requirement: Tray context menu provides Open and Quit actions
 
-The tray icon SHALL present a context menu with at least two items: **Open** and **Quit**.
+The tray icon SHALL present a context menu with at least three items: the **active context name** (as a non-interactive label or submenu header), a **Switch Context** submenu listing all saved contexts, **Open**, and **Quit**. When no context is active the label SHALL read "No active context".
 
 #### Scenario: User right-clicks or left-clicks the tray icon
 
 - **WHEN** the user clicks the tray icon
-- **THEN** a context menu appears with "Open" and "Quit" items
+- **THEN** a context menu appears with the active context name, "Switch Context", "Open", and "Quit" items
 
 #### Scenario: User selects Open
 
@@ -39,32 +19,33 @@ The tray icon SHALL present a context menu with at least two items: **Open** and
 - **WHEN** the user selects "Quit" from the tray context menu
 - **THEN** the application exits completely
 
----
+#### Scenario: Active context name shown in tray menu
 
-### Requirement: Window hides instead of quitting on close
+- **WHEN** a context named "Work" is active
+- **THEN** the tray menu header or first item displays "Work"
 
-When running on macOS, closing the main window (red X button) SHALL hide the window rather than quitting the application, keeping the tray icon active.
+#### Scenario: No active context
 
-#### Scenario: User closes the main window
-
-- **WHEN** the user clicks the red close button on the main window
-- **THEN** the window is hidden
-- **THEN** the tray icon remains in the menu bar
-- **THEN** the application process continues running
-
-#### Scenario: App is re-opened after window is hidden
-
-- **WHEN** the window is hidden and the user selects "Open" from the tray
-- **THEN** the main window reappears and is focused
+- **WHEN** no context is currently active
+- **THEN** the tray menu header displays "No active context"
 
 ---
 
-### Requirement: App window is shown on first launch
+## ADDED Requirements
 
-On first launch the main window SHALL be visible so the user is not confused by an invisible app.
+### Requirement: Tray menu allows quick context switching
 
-#### Scenario: Fresh launch with no prior window state
+The "Switch Context" submenu SHALL list all saved contexts. Selecting a context from the submenu SHALL activate it immediately without opening the main window.
 
-- **WHEN** the user launches the app for the first time
-- **THEN** the main window opens and is visible
-- **THEN** the tray icon is also present in the menu bar
+#### Scenario: Switching context via tray submenu
+
+- **WHEN** the user opens the "Switch Context" submenu and selects a context named "Personal"
+- **THEN** "Personal" becomes the active context
+- **THEN** the tray menu header updates to "Personal"
+- **THEN** the main window (if open) reflects the new active context
+
+#### Scenario: Only one context exists
+
+- **WHEN** only one context is saved and it is already active
+- **THEN** the "Switch Context" submenu shows that single context with a checkmark
+- **THEN** selecting it has no effect
