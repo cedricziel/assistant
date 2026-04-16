@@ -54,8 +54,8 @@
 - [x] Widget test: meta row renders `Copy` for all messages
 - [x] Widget test: meta row renders `Read aloud` only for assistant + voiceReceive + no audioId
 - [x] Widget test: meta row renders `Retry` only for failed messages
-- [ ] Widget test: `_ReadAloudAction` state transitions
-- [ ] Widget test: error state auto-dismisses
+- [x] Widget test: `_ReadAloudAction` state transitions
+- [x] Widget test: error state auto-dismisses
 - [x] Widget test: inline audio player only when audioId present
 - [x] Rust test: Deepgram TTS `Token` auth header
 
