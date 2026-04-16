@@ -259,6 +259,12 @@ jobs:
           codesign --force --sign "$IDENTITY" --options runtime --timestamp \
             --entitlements app/macos/Runner/Release.entitlements "$APP"
 
+      - name: Verify code signature
+        run: |
+          APP="app/build/macos/Build/Products/Release/assistant_app.app"
+          codesign --verify --deep --strict "$APP"
+          echo "Code signature verification passed"
+
       - name: Notarize macOS app
         run: |
           APP="app/build/macos/Build/Products/Release/assistant_app.app"
@@ -299,8 +305,13 @@ jobs:
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
           ARCHIVE_NAME="assistant-app-${TAG}-${{ matrix.archive_suffix }}.zip"
-          cd app/build/macos/Build/Products/Release
-          zip -r "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}" "assistant_app.app"
+          # Use ditto instead of zip to preserve macOS framework symlinks.
+          # zip -r follows symlinks, turning them into real files, which breaks
+          # the framework bundle structure and causes Gatekeeper to reject the
+          # app with "bundle format is ambiguous (could be app or framework)".
+          ditto -c -k --keepParent \
+            "app/build/macos/Build/Products/Release/assistant_app.app" \
+            "${ARCHIVE_NAME}"
           echo "ARCHIVE=${ARCHIVE_NAME}" >> $GITHUB_ENV
 
       - name: Generate checksums
