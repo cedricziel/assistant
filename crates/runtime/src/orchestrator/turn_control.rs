@@ -50,6 +50,7 @@ impl Orchestrator {
             return Ok(FinalAnswerOutcome::Done(TurnResult {
                 answer: String::new(),
                 attachments: Vec::new(),
+                attachment_ids: Vec::new(),
                 message_id: None,
             }));
         }
@@ -137,6 +138,7 @@ impl Orchestrator {
         Ok(FinalAnswerOutcome::Done(TurnResult {
             answer: String::new(),
             attachments: Vec::new(),
+            attachment_ids: Vec::new(),
             message_id: None,
         }))
     }

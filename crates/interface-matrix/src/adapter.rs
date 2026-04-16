@@ -391,8 +391,26 @@ impl ChannelAdapter for MatrixAdapter {
     }
 
     async fn send(&self, user: &ChannelUser, content: ChannelContent) -> Result<()> {
-        if let ChannelContent::Text(text) = content {
-            self.client.send_message(&user.platform_id, &text).await?;
+        let room_id = &user.platform_id;
+        match content {
+            ChannelContent::Text(text) => {
+                self.client.send_message(room_id, &text).await?;
+            }
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type,
+            } => {
+                let size = data.len();
+                let mxc_uri = self
+                    .client
+                    .upload_media(data, &filename, &mime_type)
+                    .await?;
+                self.client
+                    .send_image(room_id, &mxc_uri, &filename, &mime_type, size)
+                    .await?;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -858,5 +876,51 @@ mod tests {
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
         assert!(result.is_err(), "non-allowed user image should be dropped");
+    }
+
+    // ── outbound attachment tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn send_file_data_uploads_and_sends_image() {
+        let server = MockServer::start().await;
+
+        // Media upload
+        Mock::given(method("POST"))
+            .and(wiremock::matchers::path_regex(r"/_matrix/media/v3/upload"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({ "content_uri": "mxc://example.com/outbound1" }),
+                ),
+            )
+            .mount(&server)
+            .await;
+
+        // m.image event send
+        Mock::given(method("PUT"))
+            .and(wiremock::matchers::path_regex(
+                r"/_matrix/client/v3/rooms/.+/send/m.room.message/.+",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "event_id": "$img_out" })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server);
+        let adapter = make_adapter(client);
+        let user = assistant_core::ChannelUser {
+            platform_id: "!room:example.com".into(),
+            display_name: None,
+        };
+
+        let content = ChannelContent::FileData {
+            data: b"fake-png-bytes".to_vec(),
+            filename: "result.png".into(),
+            mime_type: "image/png".into(),
+        };
+
+        adapter.send(&user, content).await.unwrap();
+        // wiremock asserts mocks were hit
     }
 }

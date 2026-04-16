@@ -72,6 +72,12 @@ pub struct TurnRequest {
     /// publish/claim async boundaries.
     #[serde(default)]
     pub traceparent: Option<String>,
+    /// IDs of user-provided attachments (images, etc.) for this turn.
+    ///
+    /// Lightweight references — the orchestrator loads actual bytes from
+    /// [`AttachmentStore`] at LLM-call time.
+    #[serde(default)]
+    pub attachment_ids: Vec<Uuid>,
 }
 
 /// The final result of a completed turn.
@@ -87,9 +93,12 @@ pub struct TurnResult {
     pub content: String,
     /// Turn number within the conversation.
     pub turn: i64,
-    /// File attachments collected from tool outputs during the turn.
+    /// IDs of attachments produced by tool outputs during the turn.
+    ///
+    /// Lightweight references — interfaces load actual bytes from
+    /// [`AttachmentStore`] when they need to deliver files.
     #[serde(default)]
-    pub attachments: Vec<crate::Attachment>,
+    pub attachment_ids: Vec<Uuid>,
     /// The UUID of the persisted assistant message in the database.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_id: Option<Uuid>,
@@ -244,6 +253,7 @@ mod tests {
             traceparent: Some(
                 "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
             ),
+            attachment_ids: vec![],
         };
         let json = serde_json::to_value(&req).unwrap();
         let back: TurnRequest = serde_json::from_value(json).unwrap();
@@ -269,7 +279,7 @@ mod tests {
             conversation_id: Uuid::new_v4(),
             content: "the answer is 42".into(),
             turn: 3,
-            attachments: vec![],
+            attachment_ids: vec![],
             message_id: None,
         };
         let json = serde_json::to_value(&res).unwrap();
@@ -286,7 +296,7 @@ mod tests {
             conversation_id: Uuid::new_v4(),
             content: "with id".into(),
             turn: 1,
-            attachments: vec![],
+            attachment_ids: vec![],
             message_id: Some(mid),
         };
         let json = serde_json::to_value(&res).unwrap();

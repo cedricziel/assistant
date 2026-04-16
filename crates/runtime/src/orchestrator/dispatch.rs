@@ -108,6 +108,7 @@ impl Orchestrator {
         conversation_id: Uuid,
         turn_index: i64,
         turn_attachments: &mut Vec<Attachment>,
+        turn_attachment_ids: &mut Vec<Uuid>,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
     ) -> String {
         let duration_ms = elapsed.as_millis() as i64;
@@ -147,6 +148,37 @@ impl Orchestrator {
                 otel_span.set_attribute(KeyValue::new("tool_status", "ok"));
                 otel_span.set_attribute(KeyValue::new("tool_observation", output.content.clone()));
                 if !output.attachments.is_empty() {
+                    // Persist each tool-produced attachment to the store.
+                    let store = self.storage.attachment_store();
+                    for att in &output.attachments {
+                        let meta = assistant_core::AttachmentMeta {
+                            id: Uuid::new_v4(),
+                            message_id: None,
+                            conversation_id,
+                            agent_id: self.agent_id.clone(),
+                            filename: att.filename.clone(),
+                            mime_type: att.mime_type.clone(),
+                            size_bytes: att.data.len() as u64,
+                            created_at: chrono::Utc::now(),
+                        };
+                        match store.store(&meta, &att.data).await {
+                            Ok(()) => {
+                                debug!(
+                                    attachment_id = %meta.id,
+                                    filename = %meta.filename,
+                                    "Persisted outbound tool attachment"
+                                );
+                                turn_attachment_ids.push(meta.id);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    filename = %att.filename,
+                                    error = %e,
+                                    "Failed to persist tool attachment"
+                                );
+                            }
+                        }
+                    }
                     turn_attachments.extend(output.attachments);
                 }
                 output.content.clone()
@@ -226,6 +258,7 @@ impl Orchestrator {
     /// in OTel/history/DB when refused, and otherwise executes and finalizes
     /// the result.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn dispatch_global_tool(
         &self,
         name: &str,
@@ -237,6 +270,7 @@ impl Orchestrator {
         conversation_id: Uuid,
         turn_index: i64,
         turn_attachments: &mut Vec<Attachment>,
+        turn_attachment_ids: &mut Vec<Uuid>,
         tool_handlers: &[Arc<dyn ToolHandler>],
         instrument_span: &tracing::Span,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
@@ -312,6 +346,7 @@ impl Orchestrator {
             conversation_id,
             turn_index,
             turn_attachments,
+            turn_attachment_ids,
             event_sink,
         )
         .await;

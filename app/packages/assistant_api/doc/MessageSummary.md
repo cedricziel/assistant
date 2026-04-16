@@ -8,6 +8,7 @@ import 'package:assistant_api/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**attachments** | [**BuiltList&lt;AttachmentMetaResponse&gt;**](AttachmentMetaResponse.md) | Attachments linked to this message. | [optional] 
 **content** | **String** |  | 
 **createdAt** | [**DateTime**](DateTime.md) |  | 
 **id** | **String** |  | 

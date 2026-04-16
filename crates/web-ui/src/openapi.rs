@@ -54,9 +54,9 @@ use crate::api::{
         WorkflowDetail, WorkflowRunDetail, WorkflowRunPreview, WorkflowRunStep, WorkflowRunSummary,
         WorkflowSummary, WorkflowUpsertRequest, WorkflowWebhookSecrets,
     },
-    ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
-    SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, StreamRunEventsQuery,
-    ToolCallSummary, UpdateConversationRequest,
+    AttachmentMetaResponse, ConversationDetail, ConversationSummary, CreateConversationRequest,
+    MessageSummary, SendMessageRequest as ApiSendMessageRequest, ServerCapabilities,
+    StreamRunEventsQuery, ToolCallSummary, UpdateConversationRequest,
 };
 
 /// Adds the Bearer token security scheme to the OpenAPI components.
@@ -122,6 +122,8 @@ pub struct ApiErrorResponse {
         crate::api::stream_run_events,
         crate::api::get_message_audio,
         crate::api::get_audio,
+        crate::api::upload_attachment,
+        crate::api::serve_attachment,
         crate::api::personas::list_personas,
         crate::api::personas::create_persona,
         crate::api::personas::set_active_persona,
@@ -234,6 +236,7 @@ pub struct ApiErrorResponse {
             // Capabilities
             ServerCapabilities,
             // Conversation API types
+            AttachmentMetaResponse,
             ConversationSummary,
             StreamRunEventsQuery,
             ConversationDetail,
@@ -319,6 +322,8 @@ pub struct ApiErrorResponse {
          description = "Usage analytics — token consumption, model usage, and tool metrics"),
         (name = "workflows",
          description = "Workflow management — create, update, activate, and run workflows"),
+        (name = "attachments",
+         description = "Image attachments — upload, serve, and resize images linked to messages"),
         (name = "web-push",
          description = "Web Push — VAPID key retrieval and push subscription management for PWA notifications"),
     ),

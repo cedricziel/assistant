@@ -37,6 +37,8 @@ const BACKOFF_MAX: Duration = Duration::from_secs(60);
 
 /// Maximum audio file size downloaded for transcription (25 MB — Whisper API limit).
 const MAX_AUDIO_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+/// Maximum image file size downloaded for vision (10 MB).
+const MAX_IMAGE_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
 
 /// Slack `ChannelAdapter`.  Connects via Socket Mode WebSocket and provides
 /// `send()` / `send_in_thread()` via `chat.postMessage`.
@@ -238,6 +240,33 @@ impl ChannelAdapter for SlackAdapter {
                                                 }
                                             }
                                         }
+
+                                        // Download image attachments from file_share events.
+                                        if let Some(image_content) =
+                                            extract_image_from_event(&inner, &client).await
+                                        {
+                                            // Preserve any text (caption) from the original message.
+                                            let caption = match &msg.content {
+                                                ChannelContent::Text(t) if !t.is_empty() => {
+                                                    Some(t.clone())
+                                                }
+                                                _ => None,
+                                            };
+                                            msg.content = image_content;
+
+                                            // If there was a caption, send it as a separate text
+                                            // message before the image so the LLM sees both.
+                                            if let Some(cap) = caption {
+                                                let text_msg = ChannelMessage {
+                                                    content: ChannelContent::Text(cap),
+                                                    ..msg.clone()
+                                                };
+                                                if tx.send(text_msg).await.is_err() {
+                                                    break;
+                                                }
+                                            }
+                                        }
+
                                         if tx.send(msg).await.is_err() {
                                             break; // receiver dropped
                                         }
@@ -265,10 +294,22 @@ impl ChannelAdapter for SlackAdapter {
 
     async fn send(&self, user: &ChannelUser, content: ChannelContent) -> Result<()> {
         let (channel, thread_ts) = parse_platform_id(&user.platform_id);
-        if let ChannelContent::Text(text) = content {
-            self.client
-                .post_message(&channel, &text, thread_ts.as_deref())
-                .await?;
+        match content {
+            ChannelContent::Text(text) => {
+                self.client
+                    .post_message(&channel, &text, thread_ts.as_deref())
+                    .await?;
+            }
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type: _,
+            } => {
+                self.client
+                    .upload_file(&channel, &filename, data, thread_ts.as_deref())
+                    .await?;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -297,10 +338,22 @@ impl ChannelAdapter for SlackAdapter {
         thread_id: &str,
     ) -> Result<()> {
         let (channel, _) = parse_platform_id(&user.platform_id);
-        if let ChannelContent::Text(text) = content {
-            self.client
-                .post_message(&channel, &text, Some(thread_id))
-                .await?;
+        match content {
+            ChannelContent::Text(text) => {
+                self.client
+                    .post_message(&channel, &text, Some(thread_id))
+                    .await?;
+            }
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type: _,
+            } => {
+                self.client
+                    .upload_file(&channel, &filename, data, Some(thread_id))
+                    .await?;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -602,6 +655,61 @@ async fn transcribe_audio_from_event(
     transcripts.join("\n")
 }
 
+/// Download image files attached to a Slack `file_share` event.
+///
+/// Returns `Some(ChannelContent::FileData)` for the first image found,
+/// or `None` when no images are present.
+async fn extract_image_from_event(
+    event: &serde_json::Value,
+    client: &SlackApiClient,
+) -> Option<ChannelContent> {
+    let files = event.get("files").and_then(|f| f.as_array())?;
+
+    for file in files {
+        let mime = file.get("mimetype").and_then(|v| v.as_str())?;
+        if !mime.starts_with("image/") {
+            continue;
+        }
+
+        let url = file
+            .get("url_private_download")
+            .or_else(|| file.get("url_private"))
+            .and_then(|v| v.as_str())?;
+
+        let filename = file
+            .get("name")
+            .or_else(|| file.get("title"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("image")
+            .to_string();
+
+        match client
+            .download_private_file(url, MAX_IMAGE_ATTACHMENT_BYTES)
+            .await
+        {
+            Ok(bytes) => {
+                info!(
+                    filename = %filename,
+                    size = bytes.len(),
+                    mime = %mime,
+                    "slack: downloaded image attachment"
+                );
+                return Some(ChannelContent::FileData {
+                    data: bytes,
+                    filename,
+                    mime_type: mime.to_string(),
+                });
+            }
+            Err(e) => {
+                warn!(error = %e, "slack: failed to download image file");
+                continue;
+            }
+        }
+    }
+
+    None
+}
+
 /// Seed Slack thread messages into the conversation store.
 ///
 /// Called once per new thread the first time the adapter handles a message in
@@ -786,5 +894,171 @@ mod tests {
             .on_turn_start(&user, uuid::Uuid::new_v4())
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn parse_event_accepts_file_share_subtype() {
+        let event = serde_json::json!({
+            "type": "message",
+            "subtype": "file_share",
+            "channel": "C123",
+            "user": "U456",
+            "text": "check this out",
+            "ts": "111.222",
+            "files": [{"mimetype": "image/png", "name": "screenshot.png"}]
+        });
+        let msg = parse_event(&event, &[], &[]);
+        assert!(msg.is_some(), "file_share subtype must be accepted");
+        let msg = msg.unwrap();
+        assert!(matches!(msg.content, ChannelContent::Text(ref t) if t == "check this out"));
+    }
+
+    #[tokio::test]
+    async fn extract_image_downloads_image_file() {
+        let server = MockServer::start().await;
+
+        let png_bytes = b"fakepngdata";
+        Mock::given(method("GET"))
+            .and(path("/files/image.png"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(png_bytes.to_vec()))
+            .mount(&server)
+            .await;
+
+        let client =
+            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
+                .unwrap();
+
+        let event = serde_json::json!({
+            "files": [{
+                "mimetype": "image/png",
+                "name": "screenshot.png",
+                "url_private_download": format!("{}/files/image.png", server.uri())
+            }]
+        });
+
+        let result = extract_image_from_event(&event, &client).await;
+        assert!(result.is_some(), "should extract image from file_share");
+        match result.unwrap() {
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type,
+            } => {
+                assert_eq!(data, png_bytes);
+                assert_eq!(filename, "screenshot.png");
+                assert_eq!(mime_type, "image/png");
+            }
+            other => panic!("expected FileData, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_file_data_calls_upload_file() {
+        let server = MockServer::start().await;
+
+        // Step 1: files.getUploadURLExternal
+        Mock::given(method("GET"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "upload_url": format!("{}/upload-target", server.uri()),
+                "file_id": "F123"
+            })))
+            .mount(&server)
+            .await;
+
+        // Step 2: upload target
+        Mock::given(method("POST"))
+            .and(path("/upload-target"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        // Step 3: files.completeUploadExternal
+        Mock::given(method("POST"))
+            .and(path("/api/files.completeUploadExternal"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = make_adapter(&server);
+        let user = ChannelUser {
+            platform_id: "C123/111.222".into(),
+            display_name: None,
+        };
+        let content = ChannelContent::FileData {
+            data: b"fake-image-bytes".to_vec(),
+            filename: "output.png".into(),
+            mime_type: "image/png".into(),
+        };
+
+        adapter.send(&user, content).await.unwrap();
+        // wiremock asserts all mocks were hit
+    }
+
+    #[tokio::test]
+    async fn send_in_thread_file_data_calls_upload_file() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "upload_url": format!("{}/upload-target", server.uri()),
+                "file_id": "F456"
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/upload-target"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.completeUploadExternal"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = make_adapter(&server);
+        let user = ChannelUser {
+            platform_id: "C123/111.222".into(),
+            display_name: None,
+        };
+        let content = ChannelContent::FileData {
+            data: b"fake-image-bytes".to_vec(),
+            filename: "output.png".into(),
+            mime_type: "image/png".into(),
+        };
+
+        adapter
+            .send_in_thread(&user, content, "111.222")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn extract_image_skips_non_image_files() {
+        let server = MockServer::start().await;
+        let client =
+            SlackApiClient::with_base_url("xoxb-test".into(), "xapp-test".into(), server.uri())
+                .unwrap();
+
+        let event = serde_json::json!({
+            "files": [{
+                "mimetype": "application/pdf",
+                "name": "doc.pdf",
+                "url_private_download": format!("{}/files/doc.pdf", server.uri())
+            }]
+        });
+
+        let result = extract_image_from_event(&event, &client).await;
+        assert!(result.is_none(), "should skip non-image files");
     }
 }

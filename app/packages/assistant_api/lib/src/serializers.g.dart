@@ -22,6 +22,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ApiKeySecurityScheme.serializer)
       ..add(ApiSendMessageRequest.serializer)
       ..add(Artifact.serializer)
+      ..add(AttachmentMetaResponse.serializer)
       ..add(AuthenticationInfo.serializer)
       ..add(AuthorizationCodeOAuthFlow.serializer)
       ..add(CancelTaskRequest.serializer)
@@ -116,6 +117,13 @@ Serializers _$serializers = (Serializers().toBuilder()
           ]),
           () => MapBuilder<String, JsonObject?>())
       ..addBuilderFactory(
+          const FullType(
+              BuiltList, const [const FullType(AttachmentMetaResponse)]),
+          () => ListBuilder<AttachmentMetaResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(ToolCallSummary)]),
+          () => ListBuilder<ToolCallSummary>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(MessageSummary)]),
           () => ListBuilder<MessageSummary>())
       ..addBuilderFactory(
@@ -139,6 +147,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpanEntryResponse)]),
           () => ListBuilder<SpanEntryResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
@@ -230,9 +241,6 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(
               BuiltList, const [const FullType(TaskPushNotificationConfig)]),
           () => ListBuilder<TaskPushNotificationConfig>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(ToolCallSummary)]),
-          () => ListBuilder<ToolCallSummary>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(WorkflowRunStep)]),
           () => ListBuilder<WorkflowRunStep>())

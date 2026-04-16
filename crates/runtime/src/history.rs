@@ -10,16 +10,48 @@ use assistant_storage::conversations::ConversationStore;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use std::collections::HashMap;
+
+use assistant_llm::ContentBlock;
+
+/// Pre-loaded attachment data keyed by message ID.
+///
+/// Each entry is `(mime_type, base64_data)`.  Built by callers that load
+/// bytes from the [`AttachmentStore`] and base64-encode them before
+/// replaying history.
+pub(crate) type AttachmentMap = HashMap<Uuid, Vec<(String, String)>>;
+
 /// Convert a sequence of persisted [`Message`] records into
 /// [`ChatHistoryMessage`] values suitable for sending to the LLM.
-pub(crate) fn messages_to_chat_history(messages: Vec<Message>) -> Vec<ChatHistoryMessage> {
+///
+/// When `attachment_map` is non-empty, user messages whose ID appears in the
+/// map are emitted as [`ChatHistoryMessage::MultimodalUser`] with inline
+/// image blocks so the LLM can see previously-sent images on history replay.
+pub(crate) fn messages_to_chat_history(
+    messages: Vec<Message>,
+    attachment_map: &AttachmentMap,
+) -> Vec<ChatHistoryMessage> {
     messages
         .into_iter()
         .filter_map(|m| match m.role {
-            MessageRole::User => Some(ChatHistoryMessage::Text {
-                role: ChatRole::User,
-                content: m.content,
-            }),
+            MessageRole::User => {
+                if let Some(atts) = attachment_map.get(&m.id) {
+                    if !atts.is_empty() {
+                        let mut blocks = vec![ContentBlock::Text(m.content)];
+                        for (mime_type, data) in atts {
+                            blocks.push(ContentBlock::Image {
+                                media_type: mime_type.clone(),
+                                data: data.clone(),
+                            });
+                        }
+                        return Some(ChatHistoryMessage::MultimodalUser { content: blocks });
+                    }
+                }
+                Some(ChatHistoryMessage::Text {
+                    role: ChatRole::User,
+                    content: m.content,
+                })
+            }
             MessageRole::Assistant => {
                 if let Some(tc_json) = m.tool_calls_json {
                     if let Ok(items) =
@@ -161,4 +193,101 @@ pub(crate) fn append_tool_result(history: &mut Vec<ChatHistoryMessage>, name: &s
         name: name.to_string(),
         content: content.to_string(),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_core::MessageRole;
+
+    fn make_user_msg(id: Uuid, content: &str) -> Message {
+        Message {
+            id,
+            conversation_id: Uuid::new_v4(),
+            role: MessageRole::User,
+            content: content.to_string(),
+            skill_name: None,
+            tool_calls_json: None,
+            turn: 0,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    fn make_assistant_msg(content: &str) -> Message {
+        Message {
+            id: Uuid::new_v4(),
+            conversation_id: Uuid::new_v4(),
+            role: MessageRole::Assistant,
+            content: content.to_string(),
+            skill_name: None,
+            tool_calls_json: None,
+            turn: 1,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn history_without_attachment_map_produces_plain_text() {
+        let msgs = vec![
+            make_user_msg(Uuid::new_v4(), "hello"),
+            make_assistant_msg("hi there"),
+        ];
+        let map = AttachmentMap::new();
+        let history = messages_to_chat_history(msgs, &map);
+
+        assert_eq!(history.len(), 2);
+        assert!(matches!(
+            &history[0],
+            ChatHistoryMessage::Text { role: ChatRole::User, content } if content == "hello"
+        ));
+    }
+
+    #[test]
+    fn history_with_attachment_map_produces_multimodal_user() {
+        let msg_id = Uuid::new_v4();
+        let msgs = vec![
+            make_user_msg(msg_id, "look at this image"),
+            make_assistant_msg("I see it"),
+        ];
+
+        let mut map = AttachmentMap::new();
+        map.insert(
+            msg_id,
+            vec![("image/png".to_string(), "base64data".to_string())],
+        );
+
+        let history = messages_to_chat_history(msgs, &map);
+        assert_eq!(history.len(), 2);
+
+        match &history[0] {
+            ChatHistoryMessage::MultimodalUser { content } => {
+                assert_eq!(content.len(), 2, "text + image");
+                assert!(matches!(&content[0], ContentBlock::Text(t) if t == "look at this image"));
+                assert!(matches!(
+                    &content[1],
+                    ContentBlock::Image { media_type, data }
+                    if media_type == "image/png" && data == "base64data"
+                ));
+            }
+            other => panic!("expected MultimodalUser, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn history_with_empty_attachment_list_produces_plain_text() {
+        let msg_id = Uuid::new_v4();
+        let msgs = vec![make_user_msg(msg_id, "no images")];
+
+        let mut map = AttachmentMap::new();
+        map.insert(msg_id, vec![]);
+
+        let history = messages_to_chat_history(msgs, &map);
+        assert!(matches!(
+            &history[0],
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                ..
+            }
+        ));
+    }
 }

@@ -161,6 +161,23 @@ impl ChannelRunner {
                         warn!(adapter = adapter.name(), error = %e, "failed to send reply");
                     }
                 }
+
+                // Send outbound attachments (tool-produced images, etc.).
+                for attachment in &turn_result.attachments {
+                    let content = ChannelContent::FileData {
+                        data: attachment.data.clone(),
+                        filename: attachment.filename.clone(),
+                        mime_type: attachment.mime_type.clone(),
+                    };
+                    let send_result = if let Some(tid) = &thread_id {
+                        adapter.send_in_thread(&user, content, tid).await
+                    } else {
+                        adapter.send(&user, content).await
+                    };
+                    if let Err(e) = send_result {
+                        warn!(adapter = adapter.name(), error = %e, "failed to send attachment");
+                    }
+                }
             }
             Err(ref e) => {
                 error!(

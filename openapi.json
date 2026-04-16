@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.1.103"
+    "version": "0.1.105"
   },
   "servers": [
     {
@@ -366,6 +366,81 @@
         ]
       }
     },
+    "/api/attachments/{id}": {
+      "get": {
+        "tags": [
+          "attachments"
+        ],
+        "summary": "`GET /api/attachments/{id}` — serve an attachment, optionally resized.",
+        "description": "Supports `w` and `h` query params for on-demand image resizing. Resized\nvariants are cached on disk. Responds with `ETag` and `Cache-Control`\nheaders; returns `304 Not Modified` when `If-None-Match` matches.",
+        "operationId": "serve_attachment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Attachment ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "w",
+            "in": "query",
+            "description": "Desired width in pixels (preserves aspect ratio).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "h",
+            "in": "query",
+            "description": "Desired height in pixels (preserves aspect ratio).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment bytes",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "400": {
+            "description": "Invalid ID"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Attachment not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/audio/{id}": {
       "get": {
         "tags": [
@@ -644,6 +719,75 @@
           },
           "500": {
             "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{id}/attachments": {
+      "post": {
+        "tags": [
+          "attachments"
+        ],
+        "summary": "`POST /api/conversations/{id}/attachments` — upload an image attachment.",
+        "description": "Accepts a `multipart/form-data` body with a single `file` field.\nReturns `201 Created` with the attachment metadata on success.",
+        "operationId": "upload_attachment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "description": "Multipart form for image attachment upload.",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The image file."
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Attachment uploaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentMetaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request (invalid MIME type, too large, etc.)"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Conversation not found"
           }
         },
         "security": [
@@ -3991,6 +4135,14 @@
           "message"
         ],
         "properties": {
+          "attachment_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Optional attachment IDs to include with this message."
+          },
           "message": {
             "type": "string",
             "description": "The message text to send to the assistant."
@@ -4044,6 +4196,43 @@
               "$ref": "#/components/schemas/Part"
             },
             "description": "The content of the artifact. Must contain at least one part."
+          }
+        }
+      },
+      "AttachmentMetaResponse": {
+        "type": "object",
+        "description": "Metadata returned after a successful upload.",
+        "required": [
+          "id",
+          "filename",
+          "mime_type",
+          "size_bytes",
+          "created_at",
+          "url"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "URL to fetch the attachment content."
           }
         }
       },
@@ -4597,6 +4786,13 @@
           "tts_available"
         ],
         "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetaResponse"
+            },
+            "description": "Attachments linked to this message."
+          },
           "content": {
             "type": "string"
           },
@@ -6331,6 +6527,10 @@
     {
       "name": "workflows",
       "description": "Workflow management — create, update, activate, and run workflows"
+    },
+    {
+      "name": "attachments",
+      "description": "Image attachments — upload, serve, and resize images linked to messages"
     },
     {
       "name": "web-push",

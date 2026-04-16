@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    context::agent_base_dir, strip_html_comments, Attachment, ExecutionContext, Interface,
-    MemoryLoader, Message, MessageBus, ToolHandler,
+    context::agent_base_dir, is_resizable_mime_type, strip_html_comments, Attachment,
+    ExecutionContext, Interface, MemoryLoader, Message, MessageBus, ToolHandler,
 };
 use assistant_llm::{
     ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, ToolSpec,
@@ -60,6 +60,11 @@ pub struct TurnResult {
     /// Interfaces should deliver these to the user (e.g. save to disk in the
     /// CLI, upload in Slack/Mattermost).
     pub attachments: Vec<Attachment>,
+    /// IDs of attachments persisted to the [`AttachmentStore`] during the turn.
+    ///
+    /// These are the durable references that can be passed on the bus and
+    /// used by interfaces to load bytes for delivery.
+    pub attachment_ids: Vec<Uuid>,
     /// The UUID of the persisted assistant message in the database.
     /// `None` when the message could not be saved or the ID was unavailable.
     pub message_id: Option<Uuid>,
@@ -471,7 +476,13 @@ impl Orchestrator {
 
         // 1-3. Set up conversation, load prior history, persist user message.
         let (conv_store, mut history, base_turn) = self
-            .prepare_history(user_message, conversation_id, attachments, &self.agent_id)
+            .prepare_history(
+                user_message,
+                conversation_id,
+                attachments,
+                &[],
+                &self.agent_id,
+            )
             .await?;
 
         // 4. Load global tool specs and merge with extensions.
@@ -494,6 +505,7 @@ impl Orchestrator {
         let mut turn_ended = false;
         let mut replied = false;
         let mut turn_attachments: Vec<Attachment> = Vec::new();
+        let mut turn_attachment_ids: Vec<Uuid> = Vec::new();
 
         // 5. Tool-calling loop.
         for iteration in 0..self.max_iterations {
@@ -614,6 +626,7 @@ impl Orchestrator {
                     match outcome {
                         FinalAnswerOutcome::Done(mut result) => {
                             result.attachments = turn_attachments;
+                            result.attachment_ids = turn_attachment_ids;
                             return Ok(result);
                         }
                         FinalAnswerOutcome::Retry => continue,
@@ -704,6 +717,7 @@ impl Orchestrator {
                                 conversation_id,
                                 turn_index,
                                 &mut turn_attachments,
+                                &mut turn_attachment_ids,
                                 token_sink.as_ref(),
                             )
                             .await;
@@ -725,6 +739,7 @@ impl Orchestrator {
                                     conversation_id,
                                     turn_index,
                                     &mut turn_attachments,
+                                    &mut turn_attachment_ids,
                                     &tool_handlers,
                                     &builtin_span,
                                     token_sink.as_ref(),
@@ -751,6 +766,7 @@ impl Orchestrator {
                         return Ok(TurnResult {
                             answer: String::new(),
                             attachments: turn_attachments,
+                            attachment_ids: turn_attachment_ids,
                             message_id: None,
                         });
                     }
@@ -815,7 +831,13 @@ impl Orchestrator {
 
         // 1-3. Set up conversation, load prior history, persist user message.
         let (conv_store, mut history, base_turn) = self
-            .prepare_history(user_message, conversation_id, Vec::new(), &self.agent_id)
+            .prepare_history(
+                user_message,
+                conversation_id,
+                Vec::new(),
+                &[],
+                &self.agent_id,
+            )
             .await?;
 
         // 4. Load all registered tool specs.
@@ -827,6 +849,7 @@ impl Orchestrator {
 
         // 6. Tool-calling loop.
         let mut turn_attachments: Vec<Attachment> = Vec::new();
+        let mut turn_attachment_ids: Vec<Uuid> = Vec::new();
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
@@ -966,6 +989,7 @@ impl Orchestrator {
                     return Ok(TurnResult {
                         answer: text,
                         attachments: turn_attachments,
+                        attachment_ids: turn_attachment_ids,
                         message_id: saved_message_id,
                     });
                 }
@@ -1013,6 +1037,7 @@ impl Orchestrator {
                                 conversation_id,
                                 turn_index,
                                 &mut turn_attachments,
+                                &mut turn_attachment_ids,
                                 &tool_handlers,
                                 &iteration_span,
                                 token_sink.as_ref(),
@@ -1064,6 +1089,48 @@ impl Orchestrator {
         );
     }
 
+    // ── Attachment helpers ─────────────────────────────────────────────────────
+
+    /// Build a map of `message_id → [(mime_type, base64_data)]` for all
+    /// attachments in a conversation that are linked to a message and have a
+    /// resizable MIME type (i.e. images).  Used to replay images in chat
+    /// history so the LLM can reference them.
+    async fn build_attachment_map(
+        &self,
+        conversation_id: Uuid,
+    ) -> anyhow::Result<crate::history::AttachmentMap> {
+        let store = self.storage.attachment_store();
+        let all_atts = store.list_for_conversation(conversation_id).await?;
+
+        let mut map = crate::history::AttachmentMap::new();
+        for meta in all_atts {
+            let msg_id = match meta.message_id {
+                Some(id) => id,
+                None => continue,
+            };
+            if !is_resizable_mime_type(&meta.mime_type) {
+                continue;
+            }
+            match store.load_bytes(meta.id).await {
+                Ok(bytes) => {
+                    let encoded =
+                        resize_and_encode(&bytes, &meta.mime_type, self.llm.provider_name());
+                    map.entry(msg_id)
+                        .or_default()
+                        .push((meta.mime_type.clone(), encoded));
+                }
+                Err(e) => {
+                    warn!(
+                        attachment_id = %meta.id,
+                        error = %e,
+                        "Failed to load attachment for history replay; skipping"
+                    );
+                }
+            }
+        }
+        Ok(map)
+    }
+
     // ── History setup ─────────────────────────────────────────────────────────
 
     pub(crate) async fn prepare_history(
@@ -1071,6 +1138,7 @@ impl Orchestrator {
         user_message: &str,
         conversation_id: Uuid,
         attachments: Vec<ContentBlock>,
+        attachment_ids: &[Uuid],
         agent_id: &str,
     ) -> Result<(ConversationStore, Vec<ChatHistoryMessage>, i64)> {
         let conv_store = self.storage.conversation_store_for_agent(agent_id);
@@ -1092,17 +1160,70 @@ impl Orchestrator {
         };
         conv_store.save_message(&user_msg).await?;
 
-        let mut history = crate::history::messages_to_chat_history(prior);
+        // Build an attachment map for history replay: load all attachments
+        // linked to messages in this conversation and base64-encode them so
+        // the LLM sees previously-sent images.
+        let att_map = self
+            .build_attachment_map(conversation_id)
+            .await
+            .unwrap_or_default();
+
+        let mut history = crate::history::messages_to_chat_history(prior, &att_map);
         crate::history::sanitize_history(&mut history);
 
-        if attachments.is_empty() {
+        // Load stored attachments by ID and convert to ContentBlock::Image.
+        let mut all_attachments = attachments;
+        if !attachment_ids.is_empty() {
+            let store = self.storage.attachment_store();
+            for &att_id in attachment_ids {
+                match store.load_bytes(att_id).await {
+                    Ok(bytes) => {
+                        let meta = store.get_meta(att_id).await?;
+                        if is_resizable_mime_type(&meta.mime_type) {
+                            let encoded = resize_and_encode(
+                                &bytes,
+                                &meta.mime_type,
+                                self.llm.provider_name(),
+                            );
+                            all_attachments.push(ContentBlock::Image {
+                                media_type: meta.mime_type.clone(),
+                                data: encoded,
+                            });
+                        } else {
+                            debug!(
+                                attachment_id = %att_id,
+                                mime_type = %meta.mime_type,
+                                "Skipping non-image attachment for LLM history"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            attachment_id = %att_id,
+                            error = %e,
+                            "Failed to load attachment bytes; skipping"
+                        );
+                    }
+                }
+            }
+
+            // Warn when sending images to Ollama — model may not support vision.
+            if !all_attachments.is_empty() && self.llm.provider_name() == "ollama" {
+                warn!(
+                    "Ollama model may not support vision. \
+                     Image attachments included but may be ignored by the model."
+                );
+            }
+        }
+
+        if all_attachments.is_empty() {
             history.push(ChatHistoryMessage::Text {
                 role: ChatRole::User,
                 content: user_message.to_string(),
             });
         } else {
             let mut blocks = vec![ContentBlock::Text(user_message.to_string())];
-            blocks.extend(attachments);
+            blocks.extend(all_attachments);
             history.push(ChatHistoryMessage::MultimodalUser { content: blocks });
         }
 
@@ -1154,4 +1275,73 @@ pub(crate) fn value_to_params_map(value: &serde_json::Value) -> HashMap<String, 
     } else {
         HashMap::new()
     }
+}
+
+// ── Image resize helpers ─────────────────────────────────────────────────────
+
+/// Maximum encoded image size per provider (bytes).  Images exceeding this
+/// limit are resized down before base64 encoding.
+fn max_image_bytes_for_provider(provider: &str) -> usize {
+    match provider {
+        "anthropic" => 5 * 1024 * 1024, // ~5 MB
+        "openai" => 20 * 1024 * 1024,   // ~20 MB
+        _ => 5 * 1024 * 1024,           // conservative default
+    }
+}
+
+/// Resize the raw image bytes (if necessary) and return a base64-encoded
+/// string suitable for `ContentBlock::Image`.
+///
+/// The image is decoded, resized to fit within the provider's size limit,
+/// and re-encoded in the original format.  If decoding or resizing fails,
+/// the original bytes are returned as-is (best-effort).
+fn resize_and_encode(raw: &[u8], mime_type: &str, provider: &str) -> String {
+    use base64::Engine as _;
+    use image::ImageFormat;
+
+    let limit = max_image_bytes_for_provider(provider);
+
+    // If already under the limit, skip decoding entirely.
+    if raw.len() <= limit {
+        return base64::engine::general_purpose::STANDARD.encode(raw);
+    }
+
+    let format = match mime_type {
+        "image/png" => ImageFormat::Png,
+        "image/jpeg" => ImageFormat::Jpeg,
+        "image/gif" => ImageFormat::Gif,
+        "image/webp" => ImageFormat::WebP,
+        _ => {
+            // Unknown format — return as-is.
+            return base64::engine::general_purpose::STANDARD.encode(raw);
+        }
+    };
+
+    let img = match image::load_from_memory_with_format(raw, format) {
+        Ok(img) => img,
+        Err(_) => {
+            return base64::engine::general_purpose::STANDARD.encode(raw);
+        }
+    };
+
+    // Iteratively halve dimensions until the encoded output fits.
+    let mut current = img;
+    for _ in 0..6 {
+        let (w, h) = (current.width() / 2, current.height() / 2);
+        if w == 0 || h == 0 {
+            break;
+        }
+        current = current.resize(w, h, image::imageops::FilterType::Lanczos3);
+
+        let mut buf = std::io::Cursor::new(Vec::new());
+        if current.write_to(&mut buf, format).is_ok() {
+            let encoded_bytes = buf.into_inner();
+            if encoded_bytes.len() <= limit {
+                return base64::engine::general_purpose::STANDARD.encode(&encoded_bytes);
+            }
+        }
+    }
+
+    // Fallback: return original bytes encoded.
+    base64::engine::general_purpose::STANDARD.encode(raw)
 }

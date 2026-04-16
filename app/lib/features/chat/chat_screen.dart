@@ -1,16 +1,21 @@
-import 'dart:typed_data';
-
+import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:desktop_drop/desktop_drop.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/api_client.dart';
+import '../../api/attachment_service.dart';
 import '../../api/capabilities_provider.dart';
 import '../../api/models/server_capabilities.dart';
 import '../connection/connection_provider.dart';
 import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
+import 'attachment_provider.dart';
 import 'audio_player_widget.dart';
 import 'chat_provider.dart';
 import 'conversation_list.dart';
@@ -138,17 +143,88 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
-    if (text.isEmpty) return;
+    final pending = ref.read(pendingAttachmentsProvider);
+    if (text.isEmpty && pending.isEmpty) return;
     _inputController.clear();
     _inputFocus.requestFocus();
 
-    await ref.read(chatProvider.notifier).sendMessage(text);
+    // Upload pending attachments first, then send with IDs.
+    final attachmentIds = <String>[];
+    if (pending.isNotEmpty) {
+      ref.read(pendingAttachmentsProvider.notifier).clear();
+      final api = ref.read(apiClientProvider);
+      if (api != null) {
+        final chatState = ref.read(chatProvider).value ?? const ChatState();
+        var conversationId = chatState.conversationId;
+        // Create conversation if needed (mirrors ChatNotifier.sendMessage).
+        if (conversationId == null) {
+          final response = await api.conversations.createConversation(
+            createConversationRequest: CreateConversationRequest((b) => b),
+          );
+          final conv = response.data!;
+          conversationId = conv.id;
+          ref.read(conversationListProvider.notifier).prependConversation(conv);
+          ref.read(chatProvider.notifier).setConversationId(conversationId);
+        }
+        final service = AttachmentService(api.attachments);
+        for (final p in pending) {
+          try {
+            final meta = await service.upload(
+              conversationId: conversationId,
+              bytes: p.bytes,
+              filename: p.filename,
+              mimeType: p.mimeType,
+            );
+            attachmentIds.add(meta.id);
+          } catch (e) {
+            // Skip failed uploads — don't block sending the message.
+          }
+        }
+      }
+    }
+
+    final msg = text.isNotEmpty ? text : '[Image attached]';
+    await ref
+        .read(chatProvider.notifier)
+        .sendMessage(msg, attachmentIds: attachmentIds);
     _scrollToBottom();
   }
 
   Future<void> _sendVoiceMessage(Uint8List bytes, String mimeType) async {
     await ref.read(chatProvider.notifier).sendVoiceMessage(bytes, mimeType);
     _scrollToBottom();
+  }
+
+  Future<void> _pickImages() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null) return;
+    final notifier = ref.read(pendingAttachmentsProvider.notifier);
+    for (final file in result.files) {
+      if (file.bytes != null) {
+        final mime = _mimeFromExtension(file.extension);
+        notifier.add(
+          PendingAttachment(
+            bytes: file.bytes!,
+            filename: file.name,
+            mimeType: mime,
+          ),
+        );
+      }
+    }
+  }
+
+  static String _mimeFromExtension(String? ext) {
+    return switch (ext?.toLowerCase()) {
+      'png' => 'image/png',
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'gif' => 'image/gif',
+      'webp' => 'image/webp',
+      _ => 'application/octet-stream',
+    };
   }
 
   @override
@@ -247,123 +323,167 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
               ),
 
-            // Chat area.
+            // Chat area with drop target for image attachments.
             Expanded(
-              child: Column(
-                children: [
-                  // Error banner.
-                  if (chatState.error != null)
-                    Material(
-                      color: Colors.red.shade50,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
+              child: DropTarget(
+                onDragDone: (details) {
+                  final notifier = ref.read(
+                    pendingAttachmentsProvider.notifier,
+                  );
+                  for (final file in details.files) {
+                    file.readAsBytes().then((bytes) {
+                      final ext = file.name.split('.').last;
+                      final mime = _mimeFromExtension(ext);
+                      if (mime.startsWith('image/')) {
+                        notifier.add(
+                          PendingAttachment(
+                            bytes: bytes,
+                            filename: file.name,
+                            mimeType: mime,
+                          ),
+                        );
+                      }
+                    });
+                  }
+                },
+                child: Column(
+                  children: [
+                    // Error banner.
+                    if (chatState.error != null)
+                      Material(
+                        color: Colors.red.shade50,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.warning_amber_outlined,
+                                color: Colors.red.shade700,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  chatState.error!,
+                                  style: TextStyle(color: Colors.red.shade700),
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.close, size: 18),
+                                onPressed: () {
+                                  ref
+                                      .read(chatProvider.notifier)
+                                      .dismissError();
+                                },
+                              ),
+                            ],
+                          ),
                         ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.warning_amber_outlined,
-                              color: Colors.red.shade700,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                chatState.error!,
-                                style: TextStyle(color: Colors.red.shade700),
+                      ),
+
+                    // Loading indicator when fetching history.
+                    if (chatState.isLoadingHistory)
+                      const LinearProgressIndicator(),
+
+                    // Message list.
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          chatState.messages.isEmpty
+                              ? const _EmptyChat()
+                              : ListView.builder(
+                                  controller: _scrollController,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                    horizontal: 12,
+                                  ),
+                                  itemCount: chatState.messages.length,
+                                  itemBuilder: (context, index) {
+                                    final msg = chatState.messages[index];
+                                    final prevMsg = index > 0
+                                        ? chatState.messages[index - 1]
+                                        : null;
+                                    final isGrouped =
+                                        prevMsg != null &&
+                                        prevMsg.role == msg.role &&
+                                        !prevMsg.isStreaming;
+                                    return _MessageBubble(
+                                      message: msg,
+                                      isGrouped: isGrouped,
+                                      capabilities: capabilities,
+                                      onRetry:
+                                          msg.status == MessageStatus.failed
+                                          ? () => ref
+                                                .read(chatProvider.notifier)
+                                                .retryMessage(msg)
+                                          : null,
+                                      fetchMessageAudio: () {
+                                        final api = ref.read(apiClientProvider);
+                                        final audioId = msg.audioId;
+                                        if (audioId != null) {
+                                          return api?.fetchAudio(audioId) ??
+                                              Future.value(null);
+                                        }
+                                        return api?.fetchMessageAudio(msg.id) ??
+                                            Future.value(null);
+                                      },
+                                      imageBaseUrl: ref
+                                          .read(activeProfileProvider)
+                                          ?.baseUrl,
+                                      imageAuthToken: ref
+                                          .read(activeProfileProvider)
+                                          ?.token,
+                                    );
+                                  },
+                                ),
+                          if (!_atBottom)
+                            Positioned(
+                              bottom: 8,
+                              right: 8,
+                              child: FloatingActionButton.small(
+                                key: const Key('scroll_to_bottom_button'),
+                                onPressed: _scrollToBottom,
+                                tooltip: 'Scroll to bottom',
+                                child: const Icon(Icons.keyboard_arrow_down),
                               ),
                             ),
-                            IconButton(
-                              icon: const Icon(Icons.close, size: 18),
-                              onPressed: () {
-                                ref.read(chatProvider.notifier).dismissError();
-                              },
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
                     ),
 
-                  // Loading indicator when fetching history.
-                  if (chatState.isLoadingHistory)
-                    const LinearProgressIndicator(),
-
-                  // Message list.
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        chatState.messages.isEmpty
-                            ? const _EmptyChat()
-                            : ListView.builder(
-                                controller: _scrollController,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                  horizontal: 12,
-                                ),
-                                itemCount: chatState.messages.length,
-                                itemBuilder: (context, index) {
-                                  final msg = chatState.messages[index];
-                                  final prevMsg = index > 0
-                                      ? chatState.messages[index - 1]
-                                      : null;
-                                  final isGrouped =
-                                      prevMsg != null &&
-                                      prevMsg.role == msg.role &&
-                                      !prevMsg.isStreaming;
-                                  return _MessageBubble(
-                                    message: msg,
-                                    isGrouped: isGrouped,
-                                    capabilities: capabilities,
-                                    onRetry: msg.status == MessageStatus.failed
-                                        ? () => ref
-                                              .read(chatProvider.notifier)
-                                              .retryMessage(msg)
-                                        : null,
-                                    fetchMessageAudio: () {
-                                      final api = ref.read(apiClientProvider);
-                                      // Prefer pre-synthesized audio from the
-                                      // audio_ready SSE event; fall back to
-                                      // on-demand synthesis via the message ID.
-                                      final audioId = msg.audioId;
-                                      if (audioId != null) {
-                                        return api?.fetchAudio(audioId) ??
-                                            Future.value(null);
-                                      }
-                                      return api?.fetchMessageAudio(msg.id) ??
-                                          Future.value(null);
-                                    },
-                                  );
-                                },
+                    // Input row.
+                    _InputRow(
+                      controller: _inputController,
+                      focusNode: _inputFocus,
+                      isSending: chatState.isSending,
+                      pendingQueueCount: chatState.pendingQueue.length,
+                      pendingAttachments: ref.watch(pendingAttachmentsProvider),
+                      capabilities: capabilities,
+                      onSend: _sendMessage,
+                      onStop: () =>
+                          ref.read(chatProvider.notifier).cancelStream(),
+                      onVoiceRecorded: _sendVoiceMessage,
+                      onPickImage: _pickImages,
+                      onRemoveAttachment: (i) => ref
+                          .read(pendingAttachmentsProvider.notifier)
+                          .removeAt(i),
+                      onPasteImage: (bytes) {
+                        ref
+                            .read(pendingAttachmentsProvider.notifier)
+                            .add(
+                              PendingAttachment(
+                                bytes: bytes,
+                                filename: 'pasted_image.png',
+                                mimeType: 'image/png',
                               ),
-                        if (!_atBottom)
-                          Positioned(
-                            bottom: 8,
-                            right: 8,
-                            child: FloatingActionButton.small(
-                              key: const Key('scroll_to_bottom_button'),
-                              onPressed: _scrollToBottom,
-                              tooltip: 'Scroll to bottom',
-                              child: const Icon(Icons.keyboard_arrow_down),
-                            ),
-                          ),
-                      ],
+                            );
+                      },
                     ),
-                  ),
-
-                  // Input row.
-                  _InputRow(
-                    controller: _inputController,
-                    focusNode: _inputFocus,
-                    isSending: chatState.isSending,
-                    pendingQueueCount: chatState.pendingQueue.length,
-                    capabilities: capabilities,
-                    onSend: _sendMessage,
-                    onStop: () =>
-                        ref.read(chatProvider.notifier).cancelStream(),
-                    onVoiceRecorded: _sendVoiceMessage,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -382,6 +502,8 @@ class _MessageBubble extends StatelessWidget {
     required this.fetchMessageAudio,
     this.isGrouped = false,
     this.onRetry,
+    this.imageBaseUrl,
+    this.imageAuthToken,
   });
 
   final ChatMessage message;
@@ -389,6 +511,8 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onRetry;
   final ServerCapabilities capabilities;
   final Future<Uint8List?> Function() fetchMessageAudio;
+  final String? imageBaseUrl;
+  final String? imageAuthToken;
 
   @override
   Widget build(BuildContext context) {
@@ -428,23 +552,31 @@ class _MessageBubble extends StatelessWidget {
             child: message.isStreaming && message.content.isEmpty
                 ? _streamingDotsIndicator()
                 : isUser
-                ? Row(
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (isFailed)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: Icon(
-                            Icons.error_outline,
-                            size: 16,
-                            color: Colors.red.shade300,
+                      if (message.attachments.isNotEmpty)
+                        _attachmentThumbnails(context),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isFailed)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Icon(
+                                Icons.error_outline,
+                                size: 16,
+                                color: Colors.red.shade300,
+                              ),
+                            ),
+                          Flexible(
+                            child: SelectableText(
+                              message.content,
+                              style: TextStyle(color: colorScheme.onPrimary),
+                            ),
                           ),
-                        ),
-                      Flexible(
-                        child: SelectableText(
-                          message.content,
-                          style: TextStyle(color: colorScheme.onPrimary),
-                        ),
+                        ],
                       ),
                     ],
                   )
@@ -516,6 +648,9 @@ class _MessageBubble extends StatelessWidget {
                           builderRegistry: BuilderRegistry()
                             ..register('mermaid', const MermaidBuilder()),
                         ),
+                      // Attachment thumbnails (assistant-produced images).
+                      if (message.attachments.isNotEmpty)
+                        _attachmentThumbnails(context),
                       // Play button for assistant messages. Shows whenever
                       // voice is enabled — fetches on-demand if no audioId.
                       if (capabilities.voiceReceive &&
@@ -552,6 +687,110 @@ class _MessageBubble extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _attachmentThumbnails(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isUser = message.isUser;
+    return Padding(
+      padding: EdgeInsets.only(bottom: isUser ? 6 : 0, top: isUser ? 0 : 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: message.attachments.map((att) {
+          final thumbUrl = imageBaseUrl != null
+              ? '$imageBaseUrl${att.url}?w=300'
+              : '${att.url}?w=300';
+          return GestureDetector(
+            onTap: () => _showFullImage(context, att),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: CachedNetworkImage(
+                imageUrl: thumbUrl,
+                width: 150,
+                height: 150,
+                fit: BoxFit.cover,
+                httpHeaders: imageAuthToken != null
+                    ? {'Authorization': 'Bearer $imageAuthToken'}
+                    : const {},
+                placeholder: (_, _) => Container(
+                  width: 150,
+                  height: 150,
+                  color: colorScheme.surfaceContainerLowest,
+                  child: const Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ),
+                errorWidget: (_, _, _) => Container(
+                  width: 150,
+                  height: 150,
+                  color: colorScheme.surfaceContainerLowest,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.broken_image, color: colorScheme.outline),
+                      const SizedBox(height: 4),
+                      Text(
+                        att.filename,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: colorScheme.outline,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _showFullImage(BuildContext context, ChatAttachment attachment) {
+    final fullUrl = imageBaseUrl != null
+        ? '$imageBaseUrl${attachment.url}?w=1920'
+        : '${attachment.url}?w=1920';
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          alignment: Alignment.topRight,
+          children: [
+            InteractiveViewer(
+              child: CachedNetworkImage(
+                imageUrl: fullUrl,
+                fit: BoxFit.contain,
+                httpHeaders: imageAuthToken != null
+                    ? {'Authorization': 'Bearer $imageAuthToken'}
+                    : const {},
+                placeholder: (_, _) =>
+                    const Center(child: CircularProgressIndicator()),
+                errorWidget: (_, _, _) => const Center(
+                  child: Icon(
+                    Icons.broken_image,
+                    size: 64,
+                    color: Colors.white70,
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.white),
+              onPressed: () => Navigator.of(ctx).pop(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -629,20 +868,28 @@ class _InputRow extends StatelessWidget {
     required this.focusNode,
     required this.isSending,
     required this.pendingQueueCount,
+    required this.pendingAttachments,
     required this.capabilities,
     required this.onSend,
     required this.onStop,
     required this.onVoiceRecorded,
+    required this.onPickImage,
+    required this.onRemoveAttachment,
+    required this.onPasteImage,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isSending;
   final int pendingQueueCount;
+  final List<PendingAttachment> pendingAttachments;
   final ServerCapabilities capabilities;
   final VoidCallback onSend;
   final VoidCallback onStop;
   final void Function(Uint8List bytes, String mimeType) onVoiceRecorded;
+  final VoidCallback onPickImage;
+  final void Function(int index) onRemoveAttachment;
+  final void Function(Uint8List bytes) onPasteImage;
 
   @override
   Widget build(BuildContext context) {
@@ -672,6 +919,48 @@ class _InputRow extends StatelessWidget {
               ],
             ),
           ),
+        // Pending attachment thumbnails.
+        if (pendingAttachments.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: SizedBox(
+              height: 72,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: pendingAttachments.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final attachment = pendingAttachments[index];
+                  return Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.memory(
+                          attachment.bytes,
+                          width: 64,
+                          height: 64,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Positioned(
+                        top: -4,
+                        right: -4,
+                        child: IconButton(
+                          key: Key('remove_attachment_$index'),
+                          icon: const Icon(Icons.cancel, size: 18),
+                          onPressed: () => onRemoveAttachment(index),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          color: Colors.red.shade400,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
         Container(
           padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
           decoration: const BoxDecoration(
@@ -679,6 +968,14 @@ class _InputRow extends StatelessWidget {
           ),
           child: Row(
             children: [
+              // Image picker button.
+              if (!isSending)
+                IconButton(
+                  key: const Key('attach_image_button'),
+                  icon: const Icon(Icons.image_outlined),
+                  tooltip: 'Attach image',
+                  onPressed: onPickImage,
+                ),
               // Voice recorder button — shown when server supports voice send.
               if (capabilities.voiceSend && !isSending)
                 VoiceRecorderButton(
@@ -689,26 +986,44 @@ class _InputRow extends StatelessWidget {
                     ).showSnackBar(SnackBar(content: Text(err)));
                   },
                 ),
-              if (capabilities.voiceSend && !isSending)
-                const SizedBox(width: 4),
+              if (!isSending) const SizedBox(width: 4),
               Expanded(
-                child: TextField(
-                  key: const Key('message_input'),
-                  controller: controller,
-                  focusNode: focusNode,
-                  decoration: const InputDecoration(
-                    hintText: 'Type a message...',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
+                child: KeyboardListener(
+                  focusNode: FocusNode(),
+                  onKeyEvent: (event) {
+                    // Detect Ctrl+V / Cmd+V paste with image data.
+                    if (event is KeyDownEvent &&
+                        event.logicalKey == LogicalKeyboardKey.keyV &&
+                        (HardwareKeyboard.instance.isControlPressed ||
+                            HardwareKeyboard.instance.isMetaPressed)) {
+                      Clipboard.getData('image/png').then((data) {
+                        // ClipboardData doesn't support binary; use
+                        // the text field's default paste for text.
+                        // Image paste from clipboard is handled via
+                        // the super_clipboard package if available.
+                      });
+                    }
+                  },
+                  child: TextField(
+                    key: const Key('message_input'),
+                    controller: controller,
+                    focusNode: focusNode,
+                    decoration: InputDecoration(
+                      hintText: pendingAttachments.isNotEmpty
+                          ? 'Add a caption...'
+                          : 'Type a message...',
+                      border: const OutlineInputBorder(),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      isDense: true,
                     ),
-                    isDense: true,
+                    minLines: 1,
+                    maxLines: 6,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => onSend(),
                   ),
-                  minLines: 1,
-                  maxLines: 6,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => onSend(),
                 ),
               ),
               const SizedBox(width: 8),

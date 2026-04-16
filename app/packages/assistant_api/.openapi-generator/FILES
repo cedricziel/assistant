@@ -19,6 +19,8 @@ doc/ApiErrorResponse.md
 doc/ApiKeySecurityScheme.md
 doc/ApiSendMessageRequest.md
 doc/Artifact.md
+doc/AttachmentMetaResponse.md
+doc/AttachmentsApi.md
 doc/AuthenticationInfo.md
 doc/AuthorizationCodeOAuthFlow.md
 doc/CancelTaskRequest.md
@@ -114,6 +116,7 @@ lib/src/api.dart
 lib/src/api/agent_card_api.dart
 lib/src/api/agents_api.dart
 lib/src/api/analytics_api.dart
+lib/src/api/attachments_api.dart
 lib/src/api/capabilities_api.dart
 lib/src/api/conversations_api.dart
 lib/src/api/logs_api.dart
@@ -148,6 +151,7 @@ lib/src/model/api_error_response.dart
 lib/src/model/api_key_security_scheme.dart
 lib/src/model/api_send_message_request.dart
 lib/src/model/artifact.dart
+lib/src/model/attachment_meta_response.dart
 lib/src/model/authentication_info.dart
 lib/src/model/authorization_code_o_auth_flow.dart
 lib/src/model/cancel_task_request.dart
@@ -229,4 +233,3 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/tool_call_summary_test.dart
