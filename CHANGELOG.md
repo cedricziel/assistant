@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.106](https://github.com/cedricziel/assistant/compare/v0.1.105...v0.1.106) (2026-04-16)
+
+
+### Bug Fixes
+
+* **chat:** gate audio button on per-message ttsAvailable flag ([#473](https://github.com/cedricziel/assistant/issues/473)) ([664a5f5](https://github.com/cedricziel/assistant/commit/664a5f5a8031e58dc1c289c719010b1a1fd8865d))
+
 ## [0.1.105](https://github.com/cedricziel/assistant/compare/v0.1.104...v0.1.105) (2026-04-16)
 
 
