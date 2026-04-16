@@ -83,7 +83,7 @@ use assistant_storage::{
 };
 use axum::{
     body::Body,
-    extract::{Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, State},
     http::{header, StatusCode},
     response::{
         sse::{Event, Sse},
@@ -267,7 +267,10 @@ pub fn api_router() -> Router<ApiState> {
         .route("/conversations/{id}", patch(update_conversation))
         .route("/conversations/{id}/messages", post(send_message))
         .route("/conversations/{id}/voice", post(send_voice_message))
-        .route("/conversations/{id}/attachments", post(upload_attachment))
+        .route(
+            "/conversations/{id}/attachments",
+            post(upload_attachment).layer(DefaultBodyLimit::max(12 * 1024 * 1024)), // 12 MB
+        )
         .route("/attachments/{id}", get(serve_attachment))
         .route(
             "/conversations/{id}/runs/{run_id}/events/stream",

@@ -1160,6 +1160,22 @@ impl Orchestrator {
         };
         conv_store.save_message(&user_msg).await?;
 
+        // Link uploaded attachments to the persisted user message so that
+        // `build_attachment_map()` can find them on subsequent turns.
+        if !attachment_ids.is_empty() {
+            let store = self.storage.attachment_store();
+            for &att_id in attachment_ids {
+                if let Err(e) = store.link_to_message(att_id, user_msg.id).await {
+                    warn!(
+                        attachment_id = %att_id,
+                        message_id = %user_msg.id,
+                        error = %e,
+                        "Failed to link attachment to message"
+                    );
+                }
+            }
+        }
+
         // Build an attachment map for history replay: load all attachments
         // linked to messages in this conversation and base64-encode them so
         // the LLM sees previously-sent images.

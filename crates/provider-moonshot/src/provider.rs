@@ -656,8 +656,32 @@ fn build_chat_messages(
                     .collect();
 
                 let msg_json = json!({"role": "user", "content": parts_json});
-                if let Ok(msg) = serde_json::from_value::<ChatCompletionRequestMessage>(msg_json) {
-                    messages.push(msg);
+                match serde_json::from_value::<ChatCompletionRequestMessage>(msg_json) {
+                    Ok(msg) => messages.push(msg),
+                    Err(e) => {
+                        // async-openai may not support content arrays; fall back
+                        // to extracting only the text parts so the message is not
+                        // silently dropped.
+                        warn!(
+                            error = %e,
+                            "Failed to deserialize multimodal message for Moonshot; \
+                             falling back to text-only"
+                        );
+                        let text: String = content
+                            .iter()
+                            .filter_map(|b| match b {
+                                ContentBlock::Text(t) => Some(t.as_str()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        if let Ok(msg) = ChatCompletionRequestUserMessageArgs::default()
+                            .content(text.as_str())
+                            .build()
+                        {
+                            messages.push(ChatCompletionRequestMessage::User(msg));
+                        }
+                    }
                 }
             }
 
