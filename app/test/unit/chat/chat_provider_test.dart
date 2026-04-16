@@ -661,4 +661,49 @@ void main() {
       },
     );
   });
+
+  // -- tokenStream tests ------------------------------------------------------
+
+  group('ChatNotifier.tokenStream', () {
+    testWidgets('streaming assistant message has a tokenStream', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+
+      // Grab the token stream from the streaming assistant message.
+      final streamingMsg = notifier.state.value!.messages.firstWhere(
+        (m) => m.id == 'assistant-streaming',
+      );
+      expect(
+        streamingMsg.tokenStream,
+        isNotNull,
+        reason: 'streaming message should expose a tokenStream',
+      );
+
+      // Complete the stream cleanly.
+      await tester.runAsync(() async {
+        ctrl
+          ..add(const DoneEvent(role: 'assistant', content: 'done'))
+          ..close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      // After DoneEvent, the final message should not have a tokenStream.
+      final finalMsg = notifier.state.value!.messages.firstWhere(
+        (m) => !m.isUser,
+      );
+      expect(
+        finalMsg.tokenStream,
+        isNull,
+        reason: 'finalized message should not carry a tokenStream',
+      );
+    });
+  });
 }

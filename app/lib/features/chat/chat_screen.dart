@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -471,21 +471,51 @@ class _MessageBubble extends StatelessWidget {
                           padding: EdgeInsets.only(bottom: 6),
                           child: Divider(height: 1, thickness: 0.5),
                         ),
-                      MarkdownBody(
-                        data: message.content,
-                        styleSheet:
-                            MarkdownStyleSheet.fromTheme(
-                              Theme.of(context),
-                            ).copyWith(
-                              p: TextStyle(color: colorScheme.onSurface),
-                              code: TextStyle(
-                                color: colorScheme.onSurface,
-                                backgroundColor:
-                                    colorScheme.surfaceContainerLowest,
+                      if (message.isStreaming && message.tokenStream != null)
+                        StreamMarkdown(
+                          stream: message.tokenStream!,
+                          styleSheet:
+                              MarkdownStyleSheet.fromTheme(
+                                Theme.of(context),
+                              ).copyWith(
+                                paragraphStyle: TextStyle(
+                                  color: colorScheme.onSurface,
+                                ),
+                                inlineCodeStyle: TextStyle(
+                                  color: colorScheme.onSurface,
+                                  backgroundColor:
+                                      colorScheme.surfaceContainerLowest,
+                                ),
                               ),
-                            ),
-                        selectable: true,
-                      ),
+                          useEnhancedComponents: true,
+                          plugins: ParserPluginRegistry()
+                            ..registerBlock(MermaidPlugin()),
+                          builderRegistry: BuilderRegistry()
+                            ..register('mermaid', const MermaidBuilder()),
+                        )
+                      else
+                        SmoothMarkdown(
+                          data: message.content,
+                          styleSheet:
+                              MarkdownStyleSheet.fromTheme(
+                                Theme.of(context),
+                              ).copyWith(
+                                paragraphStyle: TextStyle(
+                                  color: colorScheme.onSurface,
+                                ),
+                                inlineCodeStyle: TextStyle(
+                                  color: colorScheme.onSurface,
+                                  backgroundColor:
+                                      colorScheme.surfaceContainerLowest,
+                                ),
+                              ),
+                          selectable: true,
+                          useEnhancedComponents: true,
+                          plugins: ParserPluginRegistry()
+                            ..registerBlock(MermaidPlugin()),
+                          builderRegistry: BuilderRegistry()
+                            ..register('mermaid', const MermaidBuilder()),
+                        ),
                       // Play button for assistant messages. Shows whenever
                       // voice is enabled — fetches on-demand if no audioId.
                       if (capabilities.voiceReceive && !message.isStreaming)
