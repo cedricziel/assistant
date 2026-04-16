@@ -411,6 +411,119 @@ void main() {
     });
   });
 
+  group('Chat screen — read aloud state machine', () {
+    testWidgets(
+      'tapping Read aloud shows loading then returns to idle on fetch failure',
+      (tester) async {
+        final res = await pumpChatScreen(
+          tester,
+          capabilities: const ServerCapabilities(
+            voiceSend: false,
+            voiceReceive: true,
+          ),
+        );
+
+        final msg = ChatMessage(
+          id: 'a1',
+          role: 'assistant',
+          content: 'Hello there',
+        );
+
+        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+        await tester.pump();
+
+        // Should start in idle state with "Read aloud" label.
+        expect(find.text('Read aloud'), findsOneWidget);
+
+        // Tap the read aloud action — fetchMessageAudio returns null (no API).
+        await tester.tap(find.text('Read aloud'));
+        await tester.pump();
+
+        // Should transition to loading state.
+        expect(
+          find.text('Loading\u2026'),
+          findsOneWidget,
+          reason: 'Should show loading state after tap',
+        );
+
+        // Let the future complete (fetch returns null → error state).
+        await tester.pumpAndSettle();
+
+        // Error state shows warning text.
+        expect(
+          find.text('Could not generate audio'),
+          findsOneWidget,
+          reason: 'Should show error message when TTS fails',
+        );
+      },
+    );
+
+    testWidgets('error state auto-dismisses after timeout', (tester) async {
+      final res = await pumpChatScreen(
+        tester,
+        capabilities: const ServerCapabilities(
+          voiceSend: false,
+          voiceReceive: true,
+        ),
+      );
+
+      final msg = ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'Hello there',
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      // Trigger error state.
+      await tester.tap(find.text('Read aloud'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Could not generate audio'), findsOneWidget);
+
+      // Advance past the 4-second auto-dismiss timer.
+      await tester.pump(const Duration(seconds: 5));
+
+      expect(
+        find.text('Could not generate audio'),
+        findsNothing,
+        reason: 'Error should auto-dismiss after 4 seconds',
+      );
+      expect(
+        find.text('Read aloud'),
+        findsOneWidget,
+        reason: 'Should return to idle state after error dismissal',
+      );
+    });
+
+    testWidgets('stop action shown during streaming', (tester) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'assistant-streaming',
+        role: 'assistant',
+        content: 'Generating...',
+        isStreaming: true,
+      );
+
+      res.notifier.push(
+        ChatState(conversationId: 'c1', messages: [msg], isSending: true),
+      );
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('stop_action')),
+        findsOneWidget,
+        reason: 'Stop action should appear during streaming',
+      );
+      expect(
+        find.text('Stop'),
+        findsWidgets, // may find both in input row and meta row
+      );
+    });
+  });
+
   group('Chat screen — attachment thumbnails', () {
     testWidgets('user message with attachments renders CachedNetworkImage', (
       tester,
