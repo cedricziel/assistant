@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.102](https://github.com/cedricziel/assistant/compare/v0.1.101...v0.1.102) (2026-04-16)
+
+
+### Features
+
+* **app:** render tool call chips inline in assistant message bubbles ([#465](https://github.com/cedricziel/assistant/issues/465)) ([98280b5](https://github.com/cedricziel/assistant/commit/98280b57f73679efa4ae861c9a226192de83ce9e))
+
+
+### Bug Fixes
+
+* **app:** fix provider race condition on page open + widget tests ([#463](https://github.com/cedricziel/assistant/issues/463)) ([06fb0ef](https://github.com/cedricziel/assistant/commit/06fb0ef41a06c2415a4c6bd447c63fc01a853e54))
+
 ## [0.1.101](https://github.com/cedricziel/assistant/compare/v0.1.100...v0.1.101) (2026-04-15)
 
 
