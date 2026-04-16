@@ -16,7 +16,7 @@ Method | HTTP request | Description
 
 
 # **cancelTask**
-> Task cancelTask(id)
+> Task cancelTask(id, cancelTaskRequest)
 
 `POST /tasks/:id/cancel` -- Cancels a task.
 
@@ -26,9 +26,10 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getTasksApi();
 final String id = id_example; // String | Task ID to cancel
+final CancelTaskRequest cancelTaskRequest = ; // CancelTaskRequest | Optional cancellation metadata
 
 try {
-    final response = api.cancelTask(id);
+    final response = api.cancelTask(id, cancelTaskRequest);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling TasksApi->cancelTask: $e\n');
@@ -40,6 +41,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Task ID to cancel | 
+ **cancelTaskRequest** | [**CancelTaskRequest**](CancelTaskRequest.md)| Optional cancellation metadata | 
 
 ### Return type
 
@@ -51,13 +53,13 @@ Name | Type | Description  | Notes
 
 ### HTTP request headers
 
- - **Content-Type**: Not defined
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getTask**
-> Task getTask(id)
+> Task getTask(id, historyLength, tenant)
 
 `GET /tasks/:id` -- Gets the latest state of a task.
 
@@ -67,9 +69,11 @@ import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getTasksApi();
 final String id = id_example; // String | Task ID
+final int historyLength = 56; // int | Max number of recent messages to include in history.
+final String tenant = tenant_example; // String | Optional tenant ID.
 
 try {
-    final response = api.getTask(id);
+    final response = api.getTask(id, historyLength, tenant);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling TasksApi->getTask: $e\n');
@@ -81,6 +85,8 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **id** | **String**| Task ID | 
+ **historyLength** | **int**| Max number of recent messages to include in history. | [optional] 
+ **tenant** | **String**| Optional tenant ID. | [optional] 
 
 ### Return type
 
@@ -98,7 +104,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listTasks**
-> ListTasksResponse listTasks(contextId, status, pageSize)
+> ListTasksResponse listTasks(tenant, contextId, status, pageSize, pageToken, historyLength, statusTimestampAfter, includeArtifacts)
 
 `GET /tasks` -- Lists tasks matching optional filters.
 
@@ -107,12 +113,17 @@ Name | Type | Description  | Notes
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getTasksApi();
-final String contextId = contextId_example; // String | 
-final TaskState status = ; // TaskState | 
-final int pageSize = 56; // int | 
+final String tenant = tenant_example; // String | Tenant ID.
+final String contextId = contextId_example; // String | Filter tasks by context ID.
+final TaskState status = ; // TaskState | Filter tasks by current status state.
+final int pageSize = 56; // int | Max number of tasks to return (1..=100, default 50).
+final String pageToken = pageToken_example; // String | Page token from a previous `ListTasks` call.
+final int historyLength = 56; // int | Max number of messages to include in each task's history.
+final DateTime statusTimestampAfter = 2013-10-20T19:20:30+01:00; // DateTime | Filter tasks with status updated after this timestamp.
+final bool includeArtifacts = true; // bool | Whether to include artifacts in returned tasks.
 
 try {
-    final response = api.listTasks(contextId, status, pageSize);
+    final response = api.listTasks(tenant, contextId, status, pageSize, pageToken, historyLength, statusTimestampAfter, includeArtifacts);
     print(response);
 } on DioException catch (e) {
     print('Exception when calling TasksApi->listTasks: $e\n');
@@ -123,9 +134,14 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **contextId** | **String**|  | [optional] 
- **status** | [**TaskState**](.md)|  | [optional] 
- **pageSize** | **int**|  | [optional] 
+ **tenant** | **String**| Tenant ID. | [optional] 
+ **contextId** | **String**| Filter tasks by context ID. | [optional] 
+ **status** | [**TaskState**](.md)| Filter tasks by current status state. | [optional] 
+ **pageSize** | **int**| Max number of tasks to return (1..=100, default 50). | [optional] 
+ **pageToken** | **String**| Page token from a previous `ListTasks` call. | [optional] 
+ **historyLength** | **int**| Max number of messages to include in each task's history. | [optional] 
+ **statusTimestampAfter** | **DateTime**| Filter tasks with status updated after this timestamp. | [optional] 
+ **includeArtifacts** | **bool**| Whether to include artifacts in returned tasks. | [optional] 
 
 ### Return type
 
@@ -143,7 +159,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **subscribeToTask**
-> subscribeToTask(id)
+> StreamResponse subscribeToTask(id)
 
 `GET /tasks/:id/subscribe` -- Subscribes to task updates (SSE).
 
@@ -155,7 +171,8 @@ final api = AssistantApi().getTasksApi();
 final String id = id_example; // String | Task ID to subscribe to
 
 try {
-    api.subscribeToTask(id);
+    final response = api.subscribeToTask(id);
+    print(response);
 } on DioException catch (e) {
     print('Exception when calling TasksApi->subscribeToTask: $e\n');
 }
@@ -169,7 +186,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-void (empty response body)
+[**StreamResponse**](StreamResponse.md)
 
 ### Authorization
 
@@ -178,7 +195,7 @@ void (empty response body)
 ### HTTP request headers
 
  - **Content-Type**: Not defined
- - **Accept**: text/event-stream
+ - **Accept**: text/event-stream, application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

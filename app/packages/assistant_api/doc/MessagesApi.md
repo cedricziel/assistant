@@ -9,12 +9,12 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**sendMessage**](MessagesApi.md#sendmessage) | **POST** /message/send | &#x60;POST /message/send&#x60; -- Sends a message to the agent (unary).
-[**sendMessageStreaming**](MessagesApi.md#sendmessagestreaming) | **POST** /message/stream | &#x60;POST /message/stream&#x60; -- Sends a message with streaming response (SSE).
+[**a2aSendMessage**](MessagesApi.md#a2asendmessage) | **POST** /message/send | &#x60;POST /message/send&#x60; -- Sends a message to the agent (unary).
+[**a2aSendMessageStreaming**](MessagesApi.md#a2asendmessagestreaming) | **POST** /message/stream | &#x60;POST /message/stream&#x60; -- Sends a message with streaming response (SSE).
 
 
-# **sendMessage**
-> SendMessageResponse sendMessage(sendMessageRequest)
+# **a2aSendMessage**
+> SendMessageResponse a2aSendMessage(sendMessageRequest)
 
 `POST /message/send` -- Sends a message to the agent (unary).
 
@@ -28,10 +28,10 @@ final api = AssistantApi().getMessagesApi();
 final SendMessageRequest sendMessageRequest = ; // SendMessageRequest | 
 
 try {
-    final response = api.sendMessage(sendMessageRequest);
+    final response = api.a2aSendMessage(sendMessageRequest);
     print(response);
 } on DioException catch (e) {
-    print('Exception when calling MessagesApi->sendMessage: $e\n');
+    print('Exception when calling MessagesApi->a2aSendMessage: $e\n');
 }
 ```
 
@@ -56,8 +56,8 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **sendMessageStreaming**
-> sendMessageStreaming(sendMessageRequest)
+# **a2aSendMessageStreaming**
+> StreamResponse a2aSendMessageStreaming(sendMessageRequest)
 
 `POST /message/stream` -- Sends a message with streaming response (SSE).
 
@@ -69,9 +69,10 @@ final api = AssistantApi().getMessagesApi();
 final SendMessageRequest sendMessageRequest = ; // SendMessageRequest | 
 
 try {
-    api.sendMessageStreaming(sendMessageRequest);
+    final response = api.a2aSendMessageStreaming(sendMessageRequest);
+    print(response);
 } on DioException catch (e) {
-    print('Exception when calling MessagesApi->sendMessageStreaming: $e\n');
+    print('Exception when calling MessagesApi->a2aSendMessageStreaming: $e\n');
 }
 ```
 
@@ -83,7 +84,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-void (empty response body)
+[**StreamResponse**](StreamResponse.md)
 
 ### Authorization
 

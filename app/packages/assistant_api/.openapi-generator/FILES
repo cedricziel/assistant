@@ -14,7 +14,6 @@ doc/AgentSkill.md
 doc/AgentSummary.md
 doc/AgentsApi.md
 doc/AnalyticsApi.md
-doc/AnalyticsQueryParams.md
 doc/AnalyticsSummaryResponse.md
 doc/ApiErrorResponse.md
 doc/ApiKeySecurityScheme.md
@@ -34,14 +33,9 @@ doc/CreateSkillRequest.md
 doc/CreateTaskPushNotificationConfigRequest.md
 doc/CreateWebhookRequest.md
 doc/DeviceCodeOAuthFlow.md
-doc/GetExtendedAgentCardRequest.md
-doc/GetTaskPushNotificationConfigRequest.md
-doc/GetTaskRequest.md
 doc/HttpAuthSecurityScheme.md
 doc/ImplicitOAuthFlow.md
-doc/ListTaskPushNotificationConfigsRequest.md
 doc/ListTaskPushNotificationConfigsResponse.md
-doc/ListTasksRequest.md
 doc/ListTasksResponse.md
 doc/LogEntryResponse.md
 doc/LogsApi.md
@@ -81,7 +75,6 @@ doc/SpanEntryResponse.md
 doc/StreamResponse.md
 doc/StringList.md
 doc/SubscribeRequest.md
-doc/SubscribeToTaskRequest.md
 doc/Task.md
 doc/TaskArtifactUpdateEvent.md
 doc/TaskPushNotificationConfig.md
@@ -148,7 +141,6 @@ lib/src/model/agent_interface.dart
 lib/src/model/agent_provider.dart
 lib/src/model/agent_skill.dart
 lib/src/model/agent_summary.dart
-lib/src/model/analytics_query_params.dart
 lib/src/model/analytics_summary_response.dart
 lib/src/model/api_error_response.dart
 lib/src/model/api_key_security_scheme.dart
@@ -167,14 +159,9 @@ lib/src/model/create_task_push_notification_config_request.dart
 lib/src/model/create_webhook_request.dart
 lib/src/model/date.dart
 lib/src/model/device_code_o_auth_flow.dart
-lib/src/model/get_extended_agent_card_request.dart
-lib/src/model/get_task_push_notification_config_request.dart
-lib/src/model/get_task_request.dart
 lib/src/model/http_auth_security_scheme.dart
 lib/src/model/implicit_o_auth_flow.dart
-lib/src/model/list_task_push_notification_configs_request.dart
 lib/src/model/list_task_push_notification_configs_response.dart
-lib/src/model/list_tasks_request.dart
 lib/src/model/list_tasks_response.dart
 lib/src/model/log_entry_response.dart
 lib/src/model/message.dart
@@ -209,7 +196,6 @@ lib/src/model/span_entry_response.dart
 lib/src/model/stream_response.dart
 lib/src/model/string_list.dart
 lib/src/model/subscribe_request.dart
-lib/src/model/subscribe_to_task_request.dart
 lib/src/model/task.dart
 lib/src/model/task_artifact_update_event.dart
 lib/src/model/task_push_notification_config.dart

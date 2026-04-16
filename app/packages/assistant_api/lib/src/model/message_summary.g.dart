@@ -20,6 +20,8 @@ class _$MessageSummary extends MessageSummary {
   @override
   final BuiltList<String>? toolCalls;
   @override
+  final bool ttsAvailable;
+  @override
   final int turn;
 
   factory _$MessageSummary([void Function(MessageSummaryBuilder)? updates]) =>
@@ -32,6 +34,7 @@ class _$MessageSummary extends MessageSummary {
       required this.role,
       this.skillName,
       this.toolCalls,
+      required this.ttsAvailable,
       required this.turn})
       : super._();
   @override
@@ -51,6 +54,7 @@ class _$MessageSummary extends MessageSummary {
         role == other.role &&
         skillName == other.skillName &&
         toolCalls == other.toolCalls &&
+        ttsAvailable == other.ttsAvailable &&
         turn == other.turn;
   }
 
@@ -63,6 +67,7 @@ class _$MessageSummary extends MessageSummary {
     _$hash = $jc(_$hash, role.hashCode);
     _$hash = $jc(_$hash, skillName.hashCode);
     _$hash = $jc(_$hash, toolCalls.hashCode);
+    _$hash = $jc(_$hash, ttsAvailable.hashCode);
     _$hash = $jc(_$hash, turn.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -77,6 +82,7 @@ class _$MessageSummary extends MessageSummary {
           ..add('role', role)
           ..add('skillName', skillName)
           ..add('toolCalls', toolCalls)
+          ..add('ttsAvailable', ttsAvailable)
           ..add('turn', turn))
         .toString();
   }
@@ -112,6 +118,10 @@ class MessageSummaryBuilder
   set toolCalls(ListBuilder<String>? toolCalls) =>
       _$this._toolCalls = toolCalls;
 
+  bool? _ttsAvailable;
+  bool? get ttsAvailable => _$this._ttsAvailable;
+  set ttsAvailable(bool? ttsAvailable) => _$this._ttsAvailable = ttsAvailable;
+
   int? _turn;
   int? get turn => _$this._turn;
   set turn(int? turn) => _$this._turn = turn;
@@ -129,6 +139,7 @@ class MessageSummaryBuilder
       _role = $v.role;
       _skillName = $v.skillName;
       _toolCalls = $v.toolCalls?.toBuilder();
+      _ttsAvailable = $v.ttsAvailable;
       _turn = $v.turn;
       _$v = null;
     }
@@ -163,6 +174,8 @@ class MessageSummaryBuilder
                 role, r'MessageSummary', 'role'),
             skillName: skillName,
             toolCalls: _toolCalls?.build(),
+            ttsAvailable: BuiltValueNullFieldError.checkNotNull(
+                ttsAvailable, r'MessageSummary', 'ttsAvailable'),
             turn: BuiltValueNullFieldError.checkNotNull(
                 turn, r'MessageSummary', 'turn'),
           );

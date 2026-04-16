@@ -1,9 +1,11 @@
 import 'dart:typed_data';
 
-import 'package:assistant_api/assistant_api.dart';
+import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
+import '../../api/capabilities_provider.dart';
+import '../../api/models/server_capabilities.dart';
 import '../../api/models/stream_event.dart';
 import '../connection/connection_provider.dart';
 
@@ -163,6 +165,7 @@ class ChatMessage {
     this.isStreaming = false,
     this.status = MessageStatus.ok,
     this.audioId,
+    this.ttsAvailable = false,
     List<ToolCallRecord>? toolCalls,
   }) : toolCalls = toolCalls ?? [];
 
@@ -174,6 +177,12 @@ class ChatMessage {
 
   /// Non-null when the server has produced audio for this assistant message.
   final String? audioId;
+
+  /// Whether TTS audio can be synthesised for this message.
+  /// Set from history (`MessageSummary.ttsAvailable`) and updated during
+  /// streaming when an [AudioReadyEvent] is received or the stream completes
+  /// with content.
+  bool ttsAvailable;
 
   /// Tool calls associated with this assistant message, in invocation order.
   /// Populated during streaming from [StatusEvent] and [ToolResultEvent].
@@ -187,6 +196,7 @@ class ChatMessage {
     bool? isStreaming,
     MessageStatus? status,
     String? audioId,
+    bool? ttsAvailable,
     List<ToolCallRecord>? toolCalls,
   }) {
     return ChatMessage(
@@ -196,6 +206,7 @@ class ChatMessage {
       isStreaming: isStreaming ?? this.isStreaming,
       status: status ?? this.status,
       audioId: audioId ?? this.audioId,
+      ttsAvailable: ttsAvailable ?? this.ttsAvailable,
       toolCalls: toolCalls ?? this.toolCalls,
     );
   }
@@ -418,7 +429,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       );
       final detail = response.data!;
       final messages = detail.messages
-          .map((m) => ChatMessage(id: m.id, role: m.role, content: m.content))
+          .map(
+            (m) => ChatMessage(
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              ttsAvailable: m.ttsAvailable,
+            ),
+          )
           .toList();
 
       state = AsyncData(
@@ -651,7 +669,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
-            msgs[idx] = msgs[idx].copyWith(audioId: event.audioId);
+            msgs[idx] = msgs[idx].copyWith(
+              audioId: event.audioId,
+              ttsAvailable: true,
+            );
           }
           state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is DoneEvent) {
@@ -667,12 +688,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               'assistant-${DateTime.now().millisecondsSinceEpoch}';
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
+            final placeholder = msgs[idx];
+            final caps =
+                ref.read(capabilitiesProvider).value ??
+                ServerCapabilities.disabled;
+            final ttsAvail =
+                placeholder.ttsAvailable ||
+                (caps.voiceReceive && event.content.isNotEmpty);
             msgs[idx] = ChatMessage(
               id: assistantId,
               role: 'assistant',
               content: event.content,
-              audioId: msgs[idx].audioId,
-              toolCalls: msgs[idx].toolCalls,
+              audioId: placeholder.audioId,
+              ttsAvailable: ttsAvail,
+              toolCalls: placeholder.toolCalls,
             );
           }
           state = AsyncData(
@@ -792,12 +821,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               'assistant-${DateTime.now().millisecondsSinceEpoch}';
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
+            final placeholder = msgs[idx];
+            final caps =
+                ref.read(capabilitiesProvider).value ??
+                ServerCapabilities.disabled;
+            final ttsAvail =
+                placeholder.ttsAvailable ||
+                (caps.voiceReceive && event.content.isNotEmpty);
             msgs[idx] = ChatMessage(
               id: assistantId,
               role: 'assistant',
               content: event.content,
-              audioId: msgs[idx].audioId,
-              toolCalls: msgs[idx].toolCalls,
+              audioId: placeholder.audioId,
+              ttsAvailable: ttsAvail,
+              toolCalls: placeholder.toolCalls,
             );
           }
           state = AsyncData(
@@ -814,7 +851,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
-            msgs[idx] = msgs[idx].copyWith(audioId: event.audioId);
+            msgs[idx] = msgs[idx].copyWith(
+              audioId: event.audioId,
+              ttsAvailable: true,
+            );
           }
           state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is ErrorEvent) {

@@ -187,6 +187,10 @@ pub struct MessageSummary {
     /// `role == "tool"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_name: Option<String>,
+    /// Whether text-to-speech audio can be synthesised for this message.
+    /// `true` when a TTS provider is configured and the message is a
+    /// non-empty assistant reply.
+    pub tts_available: bool,
 }
 
 // -- Request types -----------------------------------------------------------
@@ -345,6 +349,7 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
     };
 
     let history = store.load_history(conv_id).await.unwrap_or_default();
+    let tts_configured = state.tts_provider.is_some();
     let messages = history
         .into_iter()
         .filter(|m| !matches!(m.role, MessageRole::System | MessageRole::Tool))
@@ -362,6 +367,8 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
                     })
                     .filter(|v: &Vec<_>| !v.is_empty())
             });
+            let tts_available =
+                tts_configured && matches!(m.role, MessageRole::Assistant) && !m.content.is_empty();
             MessageSummary {
                 id: m.id,
                 role: m.role.to_string(),
@@ -370,6 +377,7 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
                 created_at: m.created_at,
                 tool_calls,
                 skill_name: m.skill_name,
+                tts_available,
             }
         })
         .collect();

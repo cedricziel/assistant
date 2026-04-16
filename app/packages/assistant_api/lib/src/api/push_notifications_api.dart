@@ -9,6 +9,7 @@ import 'package:built_value/serializer.dart';
 import 'package:dio/dio.dart';
 
 import 'package:assistant_api/src/api_util.dart';
+import 'package:assistant_api/src/model/api_error_response.dart';
 import 'package:assistant_api/src/model/create_task_push_notification_config_request.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
 import 'package:assistant_api/src/model/task_push_notification_config.dart';

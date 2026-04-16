@@ -18,6 +18,7 @@ part 'message_summary.g.dart';
 /// * [role] 
 /// * [skillName] - Name of the tool or skill that produced this result (present when `role == \"tool\"`).
 /// * [toolCalls] - Tool names called in this message (present when `role == \"assistant\"` and the message contains tool invocations).
+/// * [ttsAvailable] - Whether text-to-speech audio can be synthesised for this message. `true` when a TTS provider is configured and the message is a non-empty assistant reply.
 /// * [turn] 
 @BuiltValue()
 abstract class MessageSummary implements Built<MessageSummary, MessageSummaryBuilder> {
@@ -40,6 +41,10 @@ abstract class MessageSummary implements Built<MessageSummary, MessageSummaryBui
   /// Tool names called in this message (present when `role == \"assistant\"` and the message contains tool invocations).
   @BuiltValueField(wireName: r'tool_calls')
   BuiltList<String>? get toolCalls;
+
+  /// Whether text-to-speech audio can be synthesised for this message. `true` when a TTS provider is configured and the message is a non-empty assistant reply.
+  @BuiltValueField(wireName: r'tts_available')
+  bool get ttsAvailable;
 
   @BuiltValueField(wireName: r'turn')
   int get turn;
@@ -101,6 +106,11 @@ class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> 
         specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
       );
     }
+    yield r'tts_available';
+    yield serializers.serialize(
+      object.ttsAvailable,
+      specifiedType: const FullType(bool),
+    );
     yield r'turn';
     yield serializers.serialize(
       object.turn,
@@ -172,6 +182,13 @@ class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> 
           ) as BuiltList<String>?;
           if (valueDes == null) continue;
           result.toolCalls.replace(valueDes);
+          break;
+        case r'tts_available':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType(bool),
+          ) as bool;
+          result.ttsAvailable = valueDes;
           break;
         case r'turn':
           final valueDes = serializers.deserialize(

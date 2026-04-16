@@ -24,7 +24,6 @@ import 'package:assistant_api/src/model/agent_interface.dart';
 import 'package:assistant_api/src/model/agent_provider.dart';
 import 'package:assistant_api/src/model/agent_skill.dart';
 import 'package:assistant_api/src/model/agent_summary.dart';
-import 'package:assistant_api/src/model/analytics_query_params.dart';
 import 'package:assistant_api/src/model/analytics_summary_response.dart';
 import 'package:assistant_api/src/model/api_error_response.dart';
 import 'package:assistant_api/src/model/api_key_security_scheme.dart';
@@ -42,14 +41,9 @@ import 'package:assistant_api/src/model/create_skill_request.dart';
 import 'package:assistant_api/src/model/create_task_push_notification_config_request.dart';
 import 'package:assistant_api/src/model/create_webhook_request.dart';
 import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
-import 'package:assistant_api/src/model/get_extended_agent_card_request.dart';
-import 'package:assistant_api/src/model/get_task_push_notification_config_request.dart';
-import 'package:assistant_api/src/model/get_task_request.dart';
 import 'package:assistant_api/src/model/http_auth_security_scheme.dart';
 import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
-import 'package:assistant_api/src/model/list_task_push_notification_configs_request.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
-import 'package:assistant_api/src/model/list_tasks_request.dart';
 import 'package:assistant_api/src/model/list_tasks_response.dart';
 import 'package:assistant_api/src/model/log_entry_response.dart';
 import 'package:assistant_api/src/model/message.dart';
@@ -84,7 +78,6 @@ import 'package:assistant_api/src/model/span_entry_response.dart';
 import 'package:assistant_api/src/model/stream_response.dart';
 import 'package:assistant_api/src/model/string_list.dart';
 import 'package:assistant_api/src/model/subscribe_request.dart';
-import 'package:assistant_api/src/model/subscribe_to_task_request.dart';
 import 'package:assistant_api/src/model/task.dart';
 import 'package:assistant_api/src/model/task_artifact_update_event.dart';
 import 'package:assistant_api/src/model/task_push_notification_config.dart';
@@ -126,7 +119,6 @@ part 'serializers.g.dart';
   AgentProvider,
   AgentSkill,
   AgentSummary,
-  AnalyticsQueryParams,
   AnalyticsSummaryResponse,
   ApiErrorResponse,
   ApiKeySecurityScheme,
@@ -144,14 +136,9 @@ part 'serializers.g.dart';
   CreateTaskPushNotificationConfigRequest,
   CreateWebhookRequest,
   DeviceCodeOAuthFlow,
-  GetExtendedAgentCardRequest,
-  GetTaskPushNotificationConfigRequest,
-  GetTaskRequest,
   HttpAuthSecurityScheme,
   ImplicitOAuthFlow,
-  ListTaskPushNotificationConfigsRequest,
   ListTaskPushNotificationConfigsResponse,
-  ListTasksRequest,
   ListTasksResponse,
   LogEntryResponse,
   Message,
@@ -186,7 +173,6 @@ part 'serializers.g.dart';
   StreamResponse,
   StringList,
   SubscribeRequest,
-  SubscribeToTaskRequest,
   Task,
   TaskArtifactUpdateEvent,
   TaskPushNotificationConfig,

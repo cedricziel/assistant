@@ -8,7 +8,7 @@ import 'package:built_value/serializer.dart';
 
 part 'api_error_response.g.dart';
 
-/// API error response body (JSON-RPC style used by A2A handlers).
+/// API error response body returned for 4xx and 5xx errors.
 ///
 /// Properties:
 /// * [code] - Numeric error code.
