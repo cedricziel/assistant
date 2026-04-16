@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.108](https://github.com/cedricziel/assistant/compare/v0.1.107...v0.1.108) (2026-04-16)
+
+
+### Features
+
+* bidirectional image attachment support ([#479](https://github.com/cedricziel/assistant/issues/479)) ([cb492e7](https://github.com/cedricziel/assistant/commit/cb492e76aa6e1afc3243df23452cd439c7f2c1d0))
+
 ## [0.1.107](https://github.com/cedricziel/assistant/compare/v0.1.106...v0.1.107) (2026-04-16)
 
 
