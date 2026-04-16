@@ -6,11 +6,7 @@ import '../connection/connection_provider.dart';
 
 /// State for the persona detail screen.
 class PersonaDetailState {
-  const PersonaDetailState({
-    this.detail,
-    this.isLoading = false,
-    this.error,
-  });
+  const PersonaDetailState({this.detail, this.isLoading = false, this.error});
 
   final PersonaDetail? detail;
   final bool isLoading;
@@ -25,14 +21,12 @@ class PersonaDetailNotifier extends AsyncNotifier<PersonaDetailState> {
 
   @override
   Future<PersonaDetailState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const PersonaDetailState();
     return _fetchDetail(_personaId);
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<PersonaDetailState> _fetchDetail(String personaId) async {
     final api = _api;
@@ -55,5 +49,5 @@ class PersonaDetailNotifier extends AsyncNotifier<PersonaDetailState> {
 /// Family provider for [PersonaDetailNotifier].
 final personaDetailProvider = AsyncNotifierProvider.autoDispose
     .family<PersonaDetailNotifier, PersonaDetailState, String>(
-  (arg) => PersonaDetailNotifier(arg),
-);
+      (arg) => PersonaDetailNotifier(arg),
+    );

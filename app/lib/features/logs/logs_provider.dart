@@ -41,14 +41,12 @@ class LogsState {
 class LogsNotifier extends AsyncNotifier<LogsState> {
   @override
   Future<LogsState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const LogsState();
     return _fetchLogs('');
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<LogsState> _fetchLogs(String search) async {
     final api = _api;
@@ -81,7 +79,6 @@ class LogsNotifier extends AsyncNotifier<LogsState> {
 }
 
 /// Provider for [LogsNotifier].
-final logsProvider =
-    AsyncNotifierProvider.autoDispose<LogsNotifier, LogsState>(
+final logsProvider = AsyncNotifierProvider.autoDispose<LogsNotifier, LogsState>(
   LogsNotifier.new,
 );

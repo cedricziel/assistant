@@ -34,14 +34,12 @@ class TracesState {
 class TracesNotifier extends AsyncNotifier<TracesState> {
   @override
   Future<TracesState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const TracesState();
     return _fetchTraces();
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<TracesState> _fetchTraces() async {
     final api = _api;
@@ -65,16 +63,12 @@ class TracesNotifier extends AsyncNotifier<TracesState> {
 /// Provider for [TracesNotifier].
 final tracesProvider =
     AsyncNotifierProvider.autoDispose<TracesNotifier, TracesState>(
-  TracesNotifier.new,
-);
+      TracesNotifier.new,
+    );
 
 /// State for a single trace detail.
 class TraceDetailState {
-  const TraceDetailState({
-    this.detail,
-    this.isLoading = false,
-    this.error,
-  });
+  const TraceDetailState({this.detail, this.isLoading = false, this.error});
 
   final TraceDetailResponse? detail;
   final bool isLoading;
@@ -93,14 +87,12 @@ class TraceDetailNotifier extends AsyncNotifier<TraceDetailState> {
 
   @override
   Future<TraceDetailState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const TraceDetailState();
     return _fetchDetail(_traceId);
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<TraceDetailState> _fetchDetail(String traceId) async {
     final api = _api;
@@ -119,5 +111,5 @@ class TraceDetailNotifier extends AsyncNotifier<TraceDetailState> {
 /// Family provider for [TraceDetailNotifier].
 final traceDetailProvider = AsyncNotifierProvider.autoDispose
     .family<TraceDetailNotifier, TraceDetailState, String>(
-  (arg) => TraceDetailNotifier(arg),
-);
+      (arg) => TraceDetailNotifier(arg),
+    );

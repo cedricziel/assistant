@@ -38,31 +38,22 @@ class AnalyticsState {
 class AnalyticsNotifier extends AsyncNotifier<AnalyticsState> {
   @override
   Future<AnalyticsState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const AnalyticsState();
     return _fetchAnalytics(24);
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<AnalyticsState> _fetchAnalytics(int windowHours) async {
     final api = _api;
     if (api == null) return AnalyticsState(windowHours: windowHours);
 
     try {
-      final response =
-          await api.analytics.getAnalytics(window: windowHours);
-      return AnalyticsState(
-        summary: response.data!,
-        windowHours: windowHours,
-      );
+      final response = await api.analytics.getAnalytics(window: windowHours);
+      return AnalyticsState(summary: response.data!, windowHours: windowHours);
     } catch (e) {
-      return AnalyticsState(
-        windowHours: windowHours,
-        error: e.toString(),
-      );
+      return AnalyticsState(windowHours: windowHours, error: e.toString());
     }
   }
 
@@ -81,5 +72,5 @@ class AnalyticsNotifier extends AsyncNotifier<AnalyticsState> {
 /// Provider for [AnalyticsNotifier].
 final analyticsProvider =
     AsyncNotifierProvider.autoDispose<AnalyticsNotifier, AnalyticsState>(
-  AnalyticsNotifier.new,
-);
+      AnalyticsNotifier.new,
+    );

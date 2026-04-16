@@ -6,11 +6,7 @@ import '../connection/connection_provider.dart';
 
 /// State for the skill detail screen.
 class SkillDetailState {
-  const SkillDetailState({
-    this.skill,
-    this.isLoading = false,
-    this.error,
-  });
+  const SkillDetailState({this.skill, this.isLoading = false, this.error});
 
   final SkillDetail? skill;
   final bool isLoading;
@@ -25,14 +21,12 @@ class SkillDetailNotifier extends AsyncNotifier<SkillDetailState> {
 
   @override
   Future<SkillDetailState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const SkillDetailState();
     return _fetch(_skillName);
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<SkillDetailState> _fetch(String name) async {
     final api = _api;
@@ -54,5 +48,5 @@ class SkillDetailNotifier extends AsyncNotifier<SkillDetailState> {
 /// Family provider for [SkillDetailNotifier], parameterised by skill name.
 final skillDetailProvider = AsyncNotifierProvider.autoDispose
     .family<SkillDetailNotifier, SkillDetailState, String>(
-  (arg) => SkillDetailNotifier(arg),
-);
+      (arg) => SkillDetailNotifier(arg),
+    );

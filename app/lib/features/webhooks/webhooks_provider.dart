@@ -21,14 +21,12 @@ class WebhooksState {
 class WebhooksNotifier extends AsyncNotifier<WebhooksState> {
   @override
   Future<WebhooksState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const WebhooksState();
     return _fetchWebhooks();
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<WebhooksState> _fetchWebhooks() async {
     final api = _api;
@@ -52,8 +50,8 @@ class WebhooksNotifier extends AsyncNotifier<WebhooksState> {
 /// Provider for [WebhooksNotifier].
 final webhooksProvider =
     AsyncNotifierProvider.autoDispose<WebhooksNotifier, WebhooksState>(
-  WebhooksNotifier.new,
-);
+      WebhooksNotifier.new,
+    );
 
 // ---------------------------------------------------------------------------
 // Webhook detail
@@ -81,14 +79,12 @@ class WebhookDetailNotifier extends AsyncNotifier<WebhookDetailState> {
 
   @override
   Future<WebhookDetailState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const WebhookDetailState();
     return _fetchDetail(_webhookId);
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<WebhookDetailState> _fetchDetail(String webhookId) async {
     final api = _api;
@@ -133,9 +129,7 @@ class WebhookDetailNotifier extends AsyncNotifier<WebhookDetailState> {
     try {
       await api.webhooks.rotateSecret(id: _webhookId);
       final updated = await _fetchDetail(_webhookId);
-      state = AsyncData(
-        updated.copyWith(actionMessage: 'Secret rotated'),
-      );
+      state = AsyncData(updated.copyWith(actionMessage: 'Secret rotated'));
     } catch (e) {
       state = AsyncData(
         current.copyWith(isLoading: false, error: e.toString()),
@@ -163,5 +157,5 @@ extension _WebhookDetailStateCopyWith on WebhookDetailState {
 /// Family provider for [WebhookDetailNotifier].
 final webhookDetailProvider = AsyncNotifierProvider.autoDispose
     .family<WebhookDetailNotifier, WebhookDetailState, String>(
-  (arg) => WebhookDetailNotifier(arg),
-);
+      (arg) => WebhookDetailNotifier(arg),
+    );

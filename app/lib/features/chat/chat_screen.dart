@@ -5,8 +5,10 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/api_client.dart';
 import '../../api/capabilities_provider.dart';
 import '../../api/models/server_capabilities.dart';
+import '../connection/connection_provider.dart';
 import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
 import 'audio_player_widget.dart';
@@ -93,6 +95,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _scrollToBottom();
   }
 
+  /// Retry loading the conversation once the API client becomes available.
+  ///
+  /// On a hard reload / deep link, [_loadConversation] fires from [initState]
+  /// before the active context has finished loading, so [loadConversation]
+  /// finds no API client and returns immediately.  This listener fires when
+  /// [apiClientProvider] transitions null → non-null (initial context load) or
+  /// switches to a different client (context switch) and retriggers the load
+  /// if the conversation hasn't been set on the chat state yet.
+  void _onApiClientAvailable(ApiClient? prev, ApiClient? next) {
+    if (next == null || identical(prev, next)) return;
+    final id = widget.conversationId;
+    if (id == null) return;
+    final chatState = ref.read(chatProvider).value;
+    if (prev != null || chatState?.conversationId != id) {
+      _loadConversation();
+    }
+  }
+
   @override
   void dispose() {
     _inputFocus.removeListener(_onInputFocusChange);
@@ -132,6 +152,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Retry loading the conversation once the API client becomes available.
+    // Handles deep-link / hard-reload races where the active context loads
+    // after the first _loadConversation() call.
+    ref.listen<ApiClient?>(apiClientProvider, _onApiClientAvailable);
+
     final chatAsync = ref.watch(chatProvider);
     final chatState = chatAsync.value ?? const ChatState();
     final isWide = MediaQuery.of(context).size.width > 700;
@@ -465,7 +490,8 @@ class _MessageBubble extends StatelessWidget {
                             ),
                         selectable: true,
                       ),
-                      // Play button for voice-capable assistant messages.
+                      // Play button for assistant messages. Shows whenever
+                      // voice is enabled — fetches on-demand if no audioId.
                       if (capabilities.voiceReceive && !message.isStreaming)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),

@@ -7,16 +7,6 @@ import '../../api/api_client.dart';
 import '../../api/models/stream_event.dart';
 import '../connection/connection_provider.dart';
 
-// -- Client provider ---------------------------------------------------------
-
-/// Creates an [ApiClient] from the active [ServerProfile].
-/// Returns `null` when not connected.
-final apiClientProvider = Provider<ApiClient?>((ref) {
-  final profile = ref.watch(activeProfileProvider);
-  if (profile == null) return null;
-  return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-});
-
 // -- Conversation list -------------------------------------------------------
 
 /// State for the conversation list.
@@ -49,13 +39,9 @@ class ConversationListState {
 class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   @override
   Future<ConversationListState> build() async {
-    return _fetchAll();
-  }
-
-  ApiClient? get _api => ref.read(apiClientProvider);
-
-  Future<ConversationListState> _fetchAll() async {
-    final api = _api;
+    // Watch so we rebuild reactively when the API client becomes available
+    // (e.g. after the active context loads asynchronously on first launch).
+    final api = ref.watch(apiClientProvider);
     if (api == null) return const ConversationListState();
 
     try {
@@ -67,10 +53,21 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     }
   }
 
+  ApiClient? get _api => ref.read(apiClientProvider);
+
   /// Reload conversations from the server.
   Future<void> refresh() async {
+    final api = _api;
+    if (api == null) return;
+
     state = const AsyncLoading();
-    state = AsyncData(await _fetchAll());
+    try {
+      final response = await api.conversations.listConversations();
+      final conversations = response.data!.toList();
+      state = AsyncData(ConversationListState(conversations: conversations));
+    } catch (e) {
+      state = AsyncData(ConversationListState(error: e.toString()));
+    }
   }
 
   /// Create a new conversation and add it to the list.

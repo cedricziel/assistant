@@ -5,6 +5,7 @@ import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
+import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

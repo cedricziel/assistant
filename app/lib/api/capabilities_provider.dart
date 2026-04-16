@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../features/chat/chat_provider.dart';
+import '../features/connection/connection_provider.dart';
 import 'models/server_capabilities.dart';
 
 /// Fetches and caches server capability flags.

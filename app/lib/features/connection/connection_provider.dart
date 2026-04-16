@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/api_client.dart';
 import '../../api/models/server_profile.dart';
 import '../contexts/providers/context_providers.dart';
 
@@ -45,6 +46,17 @@ final isConnectedProvider = Provider<bool>((ref) {
 /// Provides the active [ServerProfile], or `null` if no context is active.
 final activeProfileProvider = Provider<ServerProfile?>((ref) {
   return ref.watch(serverProfileProvider).value?.profile;
+});
+
+/// Provides a configured [ApiClient] for the active context, or `null` when
+/// no context is selected or the context is still loading.
+///
+/// All feature providers should watch this in their [AsyncNotifier.build]
+/// so they rebuild reactively when the connection becomes available.
+final apiClientProvider = Provider<ApiClient?>((ref) {
+  final profile = ref.watch(activeProfileProvider);
+  if (profile == null) return null;
+  return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
 });
 
 /// Returns `true` when running in a web browser.

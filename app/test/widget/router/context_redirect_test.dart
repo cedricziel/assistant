@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:assistant_app/api/capabilities_provider.dart';
 import 'package:assistant_app/api/models/server_capabilities.dart';
+import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/contexts/data/context_repository.dart';
 import 'package:assistant_app/features/contexts/models/context_model.dart';
 import 'package:assistant_app/features/contexts/providers/context_providers.dart';
@@ -40,6 +41,9 @@ Widget buildApp(ContextRepository repo) {
       capabilitiesProvider.overrideWith(
         (ref) async => ServerCapabilities.disabled,
       ),
+      // Prevent feature notifiers from firing real Dio HTTP requests.
+      // These are routing tests — API responses are irrelevant here.
+      apiClientProvider.overrideWithValue(null),
     ],
     child: Consumer(
       builder: (context, ref, child) {
