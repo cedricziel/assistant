@@ -6,6 +6,7 @@ import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,6 +53,44 @@ class _FakeApiClient extends ApiClient {
       return _voiceQueue.removeAt(0).stream;
     }
     return const Stream.empty();
+  }
+
+  // Replay queue: each entry is a StreamController<StreamEvent> (success)
+  // or a DioException (simulated 404/410).
+  final List<dynamic> _replayQueue = [];
+
+  StreamController<StreamEvent> enqueueReplayStream() {
+    final ctrl = StreamController<StreamEvent>();
+    _replayQueue.add(ctrl);
+    return ctrl;
+  }
+
+  void enqueueReplayError(int statusCode) {
+    _replayQueue.add(
+      DioException(
+        requestOptions: RequestOptions(path: ''),
+        response: Response<void>(
+          requestOptions: RequestOptions(path: ''),
+          statusCode: statusCode,
+        ),
+        type: DioExceptionType.badResponse,
+      ),
+    );
+  }
+
+  @override
+  Stream<StreamEvent> streamEventsFrom(
+    String conversationId,
+    String runId, {
+    int since = 0,
+  }) async* {
+    if (_replayQueue.isNotEmpty) {
+      final item = _replayQueue.removeAt(0);
+      if (item is DioException) throw item;
+      if (item is StreamController<StreamEvent>) {
+        yield* item.stream;
+      }
+    }
   }
 }
 
@@ -358,6 +397,157 @@ void main() {
         ),
         isTrue,
         reason: 'retried message must reappear in list during drain',
+      );
+    });
+  });
+
+  // -- reconnect via event-log replay -----------------------------------------
+
+  group('ChatNotifier event-log replay', () {
+    testWidgets('8.1: successful reconnect replays tokens into UI', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      // First stream: emits RunStartedEvent then throws (network drop).
+      final ctrl1 = fakeApi.enqueueStream();
+      // Replay stream: pre-populated with tokens and done.
+      fakeApi.enqueueReplayStream()
+        ..add(const TokenEvent('hello'))
+        ..add(const DoneEvent(role: 'assistant', content: 'hello'))
+        ..close();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('ping'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl1.add(const RunStartedEvent('run-abc'));
+        await Future<void>.delayed(Duration.zero); // deliver RunStartedEvent
+        ctrl1.addError(Exception('network drop'));
+        await ctrl1.close();
+        // Allow catch block + _replayRun to run.
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final chatState = notifier.state.value!;
+      final userMsg = chatState.messages.firstWhere((m) => m.isUser);
+      expect(
+        userMsg.status,
+        MessageStatus.ok,
+        reason: 'user message should be ok after successful replay',
+      );
+      final assistant = chatState.messages.firstWhere((m) => !m.isUser);
+      expect(
+        assistant.content,
+        'hello',
+        reason: 'replayed tokens should appear as assistant message',
+      );
+    });
+
+    testWidgets('8.2: replay 404 falls back to re-send', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl1 = fakeApi.enqueueStream();
+      fakeApi.enqueueReplayError(404);
+      // Re-send stream: success.
+      fakeApi.enqueueStream()
+        ..add(const DoneEvent(role: 'assistant', content: 'resent'))
+        ..close();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hi'));
+      await tester.pump();
+
+      // First stream: capture run ID, then ErrorEvent → failed.
+      await tester.runAsync(() async {
+        ctrl1
+          ..add(const RunStartedEvent('run-xyz'))
+          ..add(const ErrorEvent('server error'))
+          ..close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final failedMsg = notifier.state.value!.messages.firstWhere(
+        (m) => m.isUser,
+      );
+      expect(failedMsg.status, MessageStatus.failed);
+
+      // Retry: _replayRun → 404 → fallback → sendMessage → ctrl3 success.
+      unawaited(notifier.retryMessage(failedMsg));
+      await tester.runAsync(() async {
+        await Future<void>.delayed(Duration.zero); // _replayRun called
+        await Future<void>.delayed(Duration.zero); // 404 thrown + handled
+        await Future<void>.delayed(
+          Duration.zero,
+        ); // sendMessage queued + drained
+        await Future<void>.delayed(Duration.zero); // ctrl3 DoneEvent delivered
+      });
+      await tester.pumpAndSettle();
+
+      expect(
+        notifier.state.value!.messages.any((m) => m.id == failedMsg.id),
+        isFalse,
+        reason: 'original failed message should be removed on fallback retry',
+      );
+      expect(
+        notifier.state.value!.messages.any(
+          (m) => m.isUser && m.content == 'hi',
+        ),
+        isTrue,
+        reason: 're-sent message should reappear',
+      );
+    });
+
+    testWidgets('8.3: replay 410 falls back to re-send', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl1 = fakeApi.enqueueStream();
+      fakeApi.enqueueReplayError(410);
+      fakeApi.enqueueStream()
+        ..add(const DoneEvent(role: 'assistant', content: 'ok'))
+        ..close();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('test'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl1
+          ..add(const RunStartedEvent('run-410'))
+          ..add(const ErrorEvent('stream gone'))
+          ..close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final failedMsg = notifier.state.value!.messages.firstWhere(
+        (m) => m.isUser,
+      );
+      expect(failedMsg.status, MessageStatus.failed);
+
+      unawaited(notifier.retryMessage(failedMsg));
+      await tester.runAsync(() async {
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      expect(
+        notifier.state.value!.messages.any((m) => m.id == failedMsg.id),
+        isFalse,
+        reason: '410 replay should fall back and remove original failed msg',
+      );
+      expect(
+        notifier.state.value!.messages.any(
+          (m) => m.isUser && m.content == 'test',
+        ),
+        isTrue,
       );
     });
   });

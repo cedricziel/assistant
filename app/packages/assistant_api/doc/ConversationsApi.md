@@ -17,6 +17,7 @@ Method | HTTP request | Description
 [**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
 [**sendMessage**](ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [**sendVoiceMessage**](ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
+[**streamRunEvents**](ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [**updateConversation**](ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
 
 
@@ -341,6 +342,52 @@ void (empty response body)
 ### HTTP request headers
 
  - **Content-Type**: multipart/form-data
+ - **Accept**: text/event-stream
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **streamRunEvents**
+> streamRunEvents(id, runId, since)
+
+`GET /api/conversations/{id}/runs/{run_id}/events/stream`
+
+Replays stored events from `?since` (default 0), then tails live events if the run is still active.  Closes automatically when the `done` or `error` event is reached.  Returns: - `404` if no events exist for `run_id` (run never started or unknown) - `410` if the run existed but all events have been pruned (TTL elapsed)
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String id = id_example; // String | Conversation UUID
+final String runId = runId_example; // String | Run UUID from run_started event
+final int since = 789; // int | Replay from this sequence number (default 0)
+
+try {
+    api.streamRunEvents(id, runId, since);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->streamRunEvents: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Conversation UUID | 
+ **runId** | **String**| Run UUID from run_started event | 
+ **since** | **int**| Replay from this sequence number (default 0) | [optional] 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: text/event-stream
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

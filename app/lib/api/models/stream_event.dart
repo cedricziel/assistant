@@ -78,6 +78,18 @@ class DoneEvent extends StreamEvent {
   }
 }
 
+/// The server has started a new orchestrator run.
+///
+/// Corresponds to `event:run_started` in the SSE stream.  The JSON body is
+/// `{"run_id":"<uuid>"}`.  Clients should store this ID so they can reconnect
+/// via the event-log replay endpoint if the connection drops.
+class RunStartedEvent extends StreamEvent {
+  const RunStartedEvent(this.runId);
+
+  /// The UUID of the orchestrator run.
+  final String runId;
+}
+
 /// An error that occurred while processing the stream.
 ///
 /// May be produced by the client-side SSE parser when the stream closes

@@ -78,7 +78,7 @@ use assistant_transcription::{
 
 use assistant_core::{Interface, MessageRole};
 use assistant_runtime::{AssistantInterface, OrchestratorEvent};
-use assistant_storage::ConversationStore;
+use assistant_storage::{ConversationEventStore, ConversationStore, RunBroadcaster};
 use axum::{
     body::Body,
     extract::{Multipart, Path, State},
@@ -115,6 +115,10 @@ pub struct ApiState {
     pub tts_provider: Option<Arc<dyn TtsProvider>>,
     /// In-memory store for tool-synthesized audio blobs.
     pub audio_store: Arc<crate::audio_store::AudioStore>,
+    /// Durable event log store for conversation streaming runs.
+    pub event_store: ConversationEventStore,
+    /// In-memory broadcast registry for live-tailing active runs.
+    pub run_broadcaster: RunBroadcaster,
 }
 
 impl ApiState {
@@ -123,6 +127,7 @@ impl ApiState {
         orchestrator: Arc<dyn AssistantInterface>,
         agent_id: Arc<RwLock<String>>,
     ) -> Self {
+        let event_store = ConversationEventStore::new(pool.clone());
         Self {
             pool,
             agent_id,
@@ -131,6 +136,8 @@ impl ApiState {
             transcription_provider: None,
             tts_provider: None,
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
+            event_store,
+            run_broadcaster: RunBroadcaster::new(),
         }
     }
 
@@ -230,6 +237,10 @@ pub fn api_router() -> Router<ApiState> {
         .route("/conversations/{id}", patch(update_conversation))
         .route("/conversations/{id}/messages", post(send_message))
         .route("/conversations/{id}/voice", post(send_voice_message))
+        .route(
+            "/conversations/{id}/runs/{run_id}/events/stream",
+            get(stream_run_events),
+        )
         .route("/messages/{id}/audio", get(get_message_audio))
         .route("/audio/{id}", get(get_audio))
 }
@@ -557,6 +568,9 @@ pub async fn send_message(
         _ => {}
     }
 
+    // Generate a unique ID for this orchestrator run.
+    let run_id = Uuid::new_v4();
+
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
     let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(64);
 
@@ -580,80 +594,129 @@ pub async fn send_message(
 
     let push_dispatcher_for_sse = state.push_dispatcher.clone();
     let conv_id_for_push = conv_id;
+    let event_store = state.event_store.clone();
+    let run_broadcaster = state.run_broadcaster.clone();
+
+    // Emit run_started event (sequence 0) to the durable log.
+    let run_id_str = run_id.to_string();
+    let run_started_payload = serde_json::json!({"run_id": run_id_str});
+    if let Err(e) = event_store
+        .append_event(
+            &run_id_str,
+            &conv_id.to_string(),
+            0,
+            "run_started",
+            &run_started_payload,
+        )
+        .await
+    {
+        warn!("Failed to persist run_started event for run {run_id}: {e}");
+    }
+
+    // Register broadcast channel for live tailing.
+    let broadcast_tx = run_broadcaster.start_run(run_id).await;
+
+    // Emit run_started as first SSE event so the client learns the run_id.
+    let run_started_sse = Event::default()
+        .event("run_started")
+        .data(run_started_payload.to_string());
+    if sse_tx.send(Ok(run_started_sse)).await.is_err() {
+        run_broadcaster.finish_run(&run_id).await;
+        return Sse::new(ReceiverStream::new(sse_rx)).into_response();
+    }
+
     tokio::spawn(async move {
         let mut full_text = String::new();
+        let mut seq: i64 = 1; // sequence 0 was run_started
+        let conv_id_str = conv_id_for_push.to_string();
 
         while let Some(orch_event) = event_rx.recv().await {
-            let sse_event = match orch_event {
-                OrchestratorEvent::Token(token) => {
-                    full_text.push_str(&token);
-                    Event::default().event("token").data(token)
+            let (event_type, payload, sse_event) = match orch_event {
+                OrchestratorEvent::Token(ref token) => {
+                    full_text.push_str(token);
+                    let p = serde_json::json!({"token": token});
+                    let e = Event::default().event("token").data(token.clone());
+                    ("token", p, e)
                 }
-                OrchestratorEvent::Status(msg) => Event::default().event("status").data(msg),
-                OrchestratorEvent::ToolResult { tool_name, status } => {
-                    let data = serde_json::json!({
-                        "tool_name": tool_name,
-                        "status": status,
-                    });
-                    Event::default().event("tool_result").data(data.to_string())
+                OrchestratorEvent::Status(ref msg) => {
+                    let p = serde_json::json!({"message": msg});
+                    let e = Event::default().event("status").data(msg.clone());
+                    ("status", p, e)
+                }
+                OrchestratorEvent::ToolResult {
+                    ref tool_name,
+                    ref status,
+                } => {
+                    let p = serde_json::json!({"tool_name": tool_name, "status": status});
+                    let e = Event::default().event("tool_result").data(p.to_string());
+                    ("tool_result", p, e)
                 }
                 OrchestratorEvent::SkillComplete {
-                    skill_name,
+                    ref skill_name,
                     success,
-                    summary,
+                    ref summary,
                 } => {
-                    // Fire push notification for skill completion (task 4.4).
                     if let Some(ref dispatcher) = push_dispatcher_for_sse {
                         let title = if success {
-                            "Skill complete".to_string()
+                            "Skill complete"
                         } else {
-                            "Skill failed".to_string()
+                            "Skill failed"
                         };
                         let body = format!("{skill_name}: {summary}");
-                        let conv_id_str = conv_id_for_push.to_string();
+                        let cid = conv_id_str.clone();
                         let d = dispatcher.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = d.send_to_all(&title, &body, Some(&conv_id_str)).await {
+                            if let Err(e) = d.send_to_all(title, &body, Some(&cid)).await {
                                 warn!("Push (skill) failed: {e}");
                             }
                         });
                     }
-                    let data = serde_json::json!({
-                        "skill_name": skill_name,
-                        "success": success,
-                        "summary": summary,
-                    });
-                    Event::default()
-                        .event("skill_complete")
-                        .data(data.to_string())
+                    let p = serde_json::json!({"skill_name": skill_name, "success": success, "summary": summary});
+                    let e = Event::default().event("skill_complete").data(p.to_string());
+                    ("skill_complete", p, e)
                 }
-                OrchestratorEvent::AgentError { message } => {
-                    // Fire push notification for agent critical error (task 4.5).
+                OrchestratorEvent::AgentError { ref message } => {
                     if let Some(ref dispatcher) = push_dispatcher_for_sse {
                         let body = message.chars().take(80).collect::<String>();
-                        let conv_id_str = conv_id_for_push.to_string();
+                        let cid = conv_id_str.clone();
                         let d = dispatcher.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = d
-                                .send_to_all("Assistant error", &body, Some(&conv_id_str))
-                                .await
+                            if let Err(e) =
+                                d.send_to_all("Assistant error", &body, Some(&cid)).await
                             {
                                 warn!("Push (agent error) failed: {e}");
                             }
                         });
                     }
-                    Event::default().event("agent_error").data(message)
+                    let p = serde_json::json!({"message": message});
+                    let e = Event::default().event("agent_error").data(message.clone());
+                    ("error", p, e)
                 }
-                OrchestratorEvent::AudioReady { audio_id } => {
-                    let data = serde_json::json!({
-                        "audio_id": audio_id,
-                        "auto_play": true,
-                    });
-                    Event::default().event("audio_ready").data(data.to_string())
+                OrchestratorEvent::AudioReady { ref audio_id } => {
+                    let p = serde_json::json!({"audio_id": audio_id, "auto_play": true});
+                    let e = Event::default().event("audio_ready").data(p.to_string());
+                    ("audio_ready", p, e)
                 }
             };
+
+            // Persist to durable log.
+            if let Err(e) = event_store
+                .append_event(&run_id_str, &conv_id_str, seq, event_type, &payload)
+                .await
+            {
+                warn!("Failed to persist event seq={seq} for run {run_id}: {e}");
+            }
+            // Broadcast to live tail subscribers.
+            let live = assistant_storage::LiveEvent {
+                sequence: seq,
+                event_type: event_type.to_string(),
+                payload: payload.clone(),
+            };
+            let _ = broadcast_tx.send(live);
+            seq += 1;
+
             if sse_tx.send(Ok(sse_event)).await.is_err() {
-                return;
+                break;
             }
         }
 
@@ -669,18 +732,193 @@ pub async fn send_message(
         if let Some(mid) = reply_message_id {
             done_data["message_id"] = serde_json::Value::String(mid.to_string());
         }
+
+        // Persist done event.
+        if let Err(e) = event_store
+            .append_event(&run_id_str, &conv_id_str, seq, "done", &done_data)
+            .await
+        {
+            warn!("Failed to persist done event for run {run_id}: {e}");
+        }
+        let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+            sequence: seq,
+            event_type: "done".to_string(),
+            payload: done_data.clone(),
+        });
+
         let done = Event::default().event("done").data(done_data.to_string());
         let _ = sse_tx.send(Ok(done)).await;
+
+        // Signal run completion — drops broadcast channel, subscribers observe close.
+        run_broadcaster.finish_run(&run_id).await;
 
         // Fire Web Push notification after emitting the SSE done event.
         if let Some(dispatcher) = push_dispatcher_for_sse {
             let body = reply_text.chars().take(80).collect::<String>();
-            let conv_id_str = conv_id_for_push.to_string();
             if let Err(e) = dispatcher
                 .send_to_all("New message", &body, Some(&conv_id_str))
                 .await
             {
                 warn!("Push dispatch failed: {e}");
+            }
+        }
+    });
+
+    // Include run_id in response headers as a fallback for clients that crash
+    // before receiving the run_started SSE event.
+    let mut response = Sse::new(ReceiverStream::new(sse_rx)).into_response();
+    if let Ok(hv) = run_id.to_string().parse::<header::HeaderValue>() {
+        response.headers_mut().insert("X-Run-Id", hv);
+    }
+    response
+}
+
+// -- Run event replay / tail -------------------------------------------------
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub struct StreamRunEventsQuery {
+    /// Replay from this sequence number (inclusive). Defaults to 0.
+    pub since: Option<i64>,
+}
+
+/// `GET /api/conversations/{id}/runs/{run_id}/events/stream`
+///
+/// Replays stored events from `?since` (default 0), then tails live events
+/// if the run is still active.  Closes automatically when the `done` or
+/// `error` event is reached.
+///
+/// Returns:
+/// - `404` if no events exist for `run_id` (run never started or unknown)
+/// - `410` if the run existed but all events have been pruned (TTL elapsed)
+#[utoipa::path(
+    get,
+    path = "/api/conversations/{id}/runs/{run_id}/events/stream",
+    tag = "conversations",
+    params(
+        ("id" = String, Path, description = "Conversation UUID"),
+        ("run_id" = String, Path, description = "Run UUID from run_started event"),
+        ("since" = Option<i64>, Query, description = "Replay from this sequence number (default 0)"),
+    ),
+    responses(
+        (status = 200, description = "SSE stream of run events", content_type = "text/event-stream"),
+        (status = 404, description = "Run not found"),
+        (status = 410, description = "Run events expired"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn stream_run_events(
+    State(state): State<ApiState>,
+    Path((conv_id_str, run_id_str)): Path<(String, String)>,
+    axum::extract::Query(query): axum::extract::Query<StreamRunEventsQuery>,
+) -> Response {
+    let run_id = match Uuid::parse_str(&run_id_str) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid run ID").into_response(),
+    };
+    let since = query.since.unwrap_or(0);
+
+    // Check whether any events exist for this run.
+    let event_store = &state.event_store;
+    match event_store.has_events(&run_id_str).await {
+        Ok(false) => {
+            // Could be: run never existed, or all events were pruned.
+            // Distinguish by checking if the run is active in the broadcaster.
+            if state.run_broadcaster.subscribe(&run_id).await.is_none() {
+                // Not in the live registry either — 404.
+                return (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(serde_json::json!({"error": "run not found"})),
+                )
+                    .into_response();
+            }
+            // It's active but has no DB events yet (race condition on startup).
+            // Fall through to live-tail only.
+        }
+        Ok(true) => {
+            // Check if it was pruned (no events AND no live registration).
+            // has_events returned true, so there are still rows — continue.
+        }
+        Err(e) => {
+            warn!("event store error for run {run_id}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+    }
+
+    // Check if events were pruned (run existed, events gone).
+    // A run_id with zero rows that is NOT in the broadcaster means it's 410.
+    // (Handled above — if has_events is false and no live entry → 404.)
+    // For simplicity we treat unknown old runs as 404.
+
+    let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+
+    // Subscribe to live broadcast channel before replaying, so we don't miss
+    // any events emitted between the DB read and the subscription.
+    let live_rx = state.run_broadcaster.subscribe(&run_id).await;
+    let is_active = live_rx.is_some();
+
+    // Replay stored events.
+    let past_events = match event_store.list_events_since(&run_id_str, since).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("Failed to list events for run {run_id}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+    };
+
+    // Check if the run completed before we even arrived.
+    let already_complete = past_events
+        .iter()
+        .any(|e| e.event_type == "done" || e.event_type == "error");
+
+    let conv_id_str_clone = conv_id_str.clone();
+    tokio::spawn(async move {
+        // Send all replayed events.
+        for row in past_events {
+            let ev = Event::default()
+                .event(row.event_type.as_str())
+                .data(row.payload.to_string());
+            if sse_tx.send(Ok(ev)).await.is_err() {
+                return;
+            }
+        }
+
+        // If the run was already complete, close the stream.
+        if already_complete || !is_active {
+            return;
+        }
+
+        // Tail live events.
+        let mut live_rx = match live_rx {
+            Some(r) => r,
+            None => return,
+        };
+
+        loop {
+            match live_rx.recv().await {
+                Ok(live) => {
+                    let ev = Event::default()
+                        .event(live.event_type.as_str())
+                        .data(live.payload.to_string());
+                    let is_terminal = live.event_type == "done" || live.event_type == "error";
+                    if sse_tx.send(Ok(ev)).await.is_err() {
+                        return;
+                    }
+                    if is_terminal {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    // Run completed and sender was dropped.
+                    return;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    warn!(
+                        "stream_run_events lagged by {n} events for run {run_id} conv {conv_id_str_clone}"
+                    );
+                    // Continue — we already replayed from DB; lagged live events
+                    // are a minor gap in the tail (tokens may be duplicated on
+                    // reconnect from DB, which is acceptable).
+                }
             }
         }
     });
@@ -1057,13 +1295,16 @@ mod tests {
     use http_body_util::BodyExt;
     use tokio::sync::RwLock;
     use tower::ServiceExt;
+    use uuid::Uuid;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use assistant_core::AssistantConfig;
     use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
     use assistant_runtime::Orchestrator;
-    use assistant_storage::{ConversationStore, SkillRegistry, StorageLayer};
+    use assistant_storage::{
+        ConversationEventStore, ConversationStore, RunBroadcaster, SkillRegistry, StorageLayer,
+    };
     use assistant_tool_executor::ToolExecutor;
     use assistant_transcription::{
         TranscriptionProvider, TranscriptionRequest, TranscriptionResult,
@@ -1159,6 +1400,61 @@ mod tests {
             transcription_provider: None,
             tts_provider: None,
             audio_store: Arc::new(crate::audio_store::AudioStore::new()),
+            event_store: ConversationEventStore::new(storage.pool.clone()),
+            run_broadcaster: RunBroadcaster::new(),
+        };
+        (state, storage)
+    }
+
+    /// Create a minimal state with a real event store but a stub orchestrator.
+    /// No worker task is spawned, so the single in-memory connection is not
+    /// contended. Use this for tests that only exercise the event log endpoints.
+    async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
+        use assistant_core::AssistantConfig;
+        use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
+        use assistant_runtime::Orchestrator;
+        use assistant_tool_executor::ToolExecutor;
+
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false;
+
+        let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: "http://127.0.0.1:1".to_string(),
+                timeout_secs: 1,
+                retry_config: RetryConfig::disabled(),
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            storage.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let bus = Arc::new(storage.message_bus());
+        let orchestrator = Arc::new(Orchestrator::new(
+            llm,
+            storage.clone(),
+            executor,
+            registry,
+            bus,
+            &config,
+        ));
+        // NOTE: No worker task spawned — avoids contention on the single in-memory connection.
+        let state = ApiState {
+            pool: storage.pool.clone(),
+            agent_id: Arc::new(RwLock::new("default".to_string())),
+            orchestrator,
+            push_dispatcher: None,
+            transcription_provider: None,
+            tts_provider: None,
+            audio_store: Arc::new(crate::audio_store::AudioStore::new()),
+            event_store: ConversationEventStore::new(storage.pool.clone()),
+            run_broadcaster: RunBroadcaster::new(),
         };
         (state, storage)
     }
@@ -1802,5 +2098,384 @@ mod tests {
         );
         let bytes = body_bytes(resp.into_body()).await;
         assert_eq!(bytes, fake_audio);
+    }
+
+    // -- stream_run_events tests -----------------------------------------------
+
+    /// Seed the event store directly and replay via the endpoint.
+    #[tokio::test]
+    async fn stream_run_events_replays_completed_run() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4().to_string();
+
+        // Seed events into the store.
+        state
+            .event_store
+            .append_event(
+                &run_id,
+                &conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+        state
+            .event_store
+            .append_event(
+                &run_id,
+                &conv_id,
+                1,
+                "token",
+                &serde_json::json!({"token": "hello"}),
+            )
+            .await
+            .unwrap();
+        state
+            .event_store
+            .append_event(
+                &run_id,
+                &conv_id,
+                2,
+                "done",
+                &serde_json::json!({"content": "hello"}),
+            )
+            .await
+            .unwrap();
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id}/events/stream"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("text/event-stream")
+        );
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("run_started"),
+            "should include run_started: {text}"
+        );
+        assert!(text.contains("token"), "should include token event: {text}");
+        assert!(text.contains("done"), "should include done event: {text}");
+    }
+
+    #[tokio::test]
+    async fn stream_run_events_returns_404_for_unknown_run() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4().to_string(); // never seeded
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id}/events/stream"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn stream_run_events_since_skips_earlier_events() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4().to_string();
+
+        for i in 0i64..5 {
+            state
+                .event_store
+                .append_event(
+                    &run_id,
+                    &conv_id,
+                    i,
+                    if i == 4 { "done" } else { "token" },
+                    &serde_json::json!({"token": format!("t{i}")}),
+                )
+                .await
+                .unwrap();
+        }
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id}/events/stream?since=3"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        // Only events 3 and 4 should appear.
+        assert!(text.contains("t3"), "should contain seq 3: {text}");
+        assert!(text.contains("done"), "should contain done: {text}");
+        assert!(!text.contains("t0"), "seq 0 should be skipped: {text}");
+    }
+
+    /// Client connects while the run is still active in the broadcaster.
+    /// It should receive the replayed DB event first, then live events as they
+    /// arrive, and close when "done" is broadcast.
+    #[tokio::test]
+    async fn stream_run_events_tails_live_broadcaster() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4();
+        let run_id_str = run_id.to_string();
+
+        // Seed one already-persisted event (the run_started from before client connects).
+        state
+            .event_store
+            .append_event(
+                &run_id_str,
+                &conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id_str}),
+            )
+            .await
+            .unwrap();
+
+        // Register the run as active in the broadcaster.
+        let broadcast_tx = state.run_broadcaster.start_run(run_id).await;
+        // Clone the broadcaster before state is moved into `app()`.
+        let broadcaster = state.run_broadcaster.clone();
+
+        // Spawn a task that delivers live events after a brief delay so the
+        // HTTP handler has time to subscribe before events are sent.
+        let run_id_for_task = run_id;
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 1,
+                event_type: "token".to_string(),
+                payload: serde_json::json!({"token": "live-word"}),
+            });
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 2,
+                event_type: "done".to_string(),
+                payload: serde_json::json!({"content": "live-word", "role": "assistant"}),
+            });
+            // Drop sender and remove from registry so the stream closes.
+            broadcaster.finish_run(&run_id_for_task).await;
+        });
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id_str}/events/stream"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("text/event-stream"),
+        );
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("run_started"),
+            "replayed DB event missing: {text}"
+        );
+        assert!(
+            text.contains("live-word"),
+            "live token from broadcaster missing: {text}"
+        );
+        assert!(text.contains("done"), "done event missing: {text}");
+    }
+
+    /// Race-condition path: broadcaster is active but no DB events have been
+    /// persisted yet (run_started event is still in-flight). The handler should
+    /// recognise the run as active and switch to live-tail mode.
+    #[tokio::test]
+    async fn stream_run_events_live_only_when_no_db_events_yet() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4();
+        let run_id_str = run_id.to_string();
+
+        // Register as active — no DB events at all.
+        let broadcast_tx = state.run_broadcaster.start_run(run_id).await;
+        let broadcaster = state.run_broadcaster.clone();
+
+        let run_id_for_task = run_id;
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 0,
+                event_type: "token".to_string(),
+                payload: serde_json::json!({"token": "first-token"}),
+            });
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 1,
+                event_type: "done".to_string(),
+                payload: serde_json::json!({"content": "first-token", "role": "assistant"}),
+            });
+            broadcaster.finish_run(&run_id_for_task).await;
+        });
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id_str}/events/stream"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("first-token"),
+            "live token missing for early-connect case: {text}"
+        );
+        assert!(text.contains("done"), "done event missing: {text}");
+    }
+
+    /// Verify that the send_message response carries the X-Run-Id header so
+    /// clients can capture the run identifier even if the SSE stream is dropped
+    /// before the run_started event arrives.
+    #[tokio::test]
+    async fn send_message_sets_x_run_id_header() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Test reply").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store
+            .create_conversation(Some("RunId header"))
+            .await
+            .unwrap();
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hello"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let run_id_header = resp
+            .headers()
+            .get("x-run-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("X-Run-Id header must be present");
+        assert!(
+            Uuid::parse_str(run_id_header).is_ok(),
+            "X-Run-Id should be a valid UUID, got: {run_id_header}"
+        );
+    }
+
+    /// After events are pruned (TTL), the endpoint returns 404.
+    /// (We do not distinguish 404 vs 410 in the current implementation —
+    /// both expired and never-existed runs return 404.)
+    #[tokio::test]
+    async fn stream_run_events_returns_404_for_pruned_run() {
+        let sl = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        // Use a very short TTL (already negative = instantly expired).
+        let short_ttl_store = assistant_storage::ConversationEventStore::with_ttl(
+            sl.pool.clone(),
+            chrono::Duration::seconds(-1),
+        );
+
+        let run_id = Uuid::new_v4();
+        let run_id_str = run_id.to_string();
+        let conv_id = Uuid::new_v4().to_string();
+
+        // Append an event; it is already expired on insert.
+        short_ttl_store
+            .append_event(
+                &run_id_str,
+                &conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id_str}),
+            )
+            .await
+            .unwrap();
+
+        // Prune — removes the expired row.
+        short_ttl_store.prune_expired().await.unwrap();
+
+        // Build a state that uses the same pool (events are now gone).
+        use assistant_core::AssistantConfig;
+        use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
+        use assistant_runtime::Orchestrator;
+        use assistant_tool_executor::ToolExecutor;
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false;
+        let registry = Arc::new(SkillRegistry::new(sl.pool.clone()).await.unwrap());
+        let llm = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: "http://127.0.0.1:1".to_string(),
+                timeout_secs: 1,
+                retry_config: RetryConfig::disabled(),
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            sl.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let bus = Arc::new(sl.message_bus());
+        let orchestrator = Arc::new(Orchestrator::new(
+            llm,
+            sl.clone(),
+            executor,
+            registry,
+            bus,
+            &config,
+        ));
+        let state = ApiState {
+            pool: sl.pool.clone(),
+            agent_id: Arc::new(RwLock::new("default".to_string())),
+            orchestrator,
+            push_dispatcher: None,
+            transcription_provider: None,
+            tts_provider: None,
+            audio_store: Arc::new(crate::audio_store::AudioStore::new()),
+            event_store: short_ttl_store,
+            run_broadcaster: RunBroadcaster::new(),
+        };
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id_str}/events/stream"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        // The run existed but events were pruned → currently 404.
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }

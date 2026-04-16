@@ -486,9 +486,9 @@ class _MessageBubble extends StatelessWidget {
                             ),
                         selectable: true,
                       ),
-                      // Play button for assistant messages. Shows when the
-                      // server has declared this message TTS-synthesisable.
-                      if (message.ttsAvailable && !message.isStreaming)
+                      // Play button for assistant messages. Shows whenever
+                      // voice is enabled — fetches on-demand if no audioId.
+                      if (capabilities.voiceReceive && !message.isStreaming)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: AudioPlayerWidget(

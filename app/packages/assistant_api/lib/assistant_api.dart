@@ -88,6 +88,7 @@ export 'package:assistant_api/src/model/skill_detail.dart';
 export 'package:assistant_api/src/model/skill_entry_response.dart';
 export 'package:assistant_api/src/model/span_entry_response.dart';
 export 'package:assistant_api/src/model/stream_response.dart';
+export 'package:assistant_api/src/model/stream_run_events_query.dart';
 export 'package:assistant_api/src/model/string_list.dart';
 export 'package:assistant_api/src/model/subscribe_request.dart';
 export 'package:assistant_api/src/model/task.dart';

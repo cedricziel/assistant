@@ -76,6 +76,7 @@ import 'package:assistant_api/src/model/skill_detail.dart';
 import 'package:assistant_api/src/model/skill_entry_response.dart';
 import 'package:assistant_api/src/model/span_entry_response.dart';
 import 'package:assistant_api/src/model/stream_response.dart';
+import 'package:assistant_api/src/model/stream_run_events_query.dart';
 import 'package:assistant_api/src/model/string_list.dart';
 import 'package:assistant_api/src/model/subscribe_request.dart';
 import 'package:assistant_api/src/model/task.dart';
@@ -171,6 +172,7 @@ part 'serializers.g.dart';
   SkillEntryResponse,
   SpanEntryResponse,
   StreamResponse,
+  StreamRunEventsQuery,
   StringList,
   SubscribeRequest,
   Task,
