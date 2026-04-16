@@ -1,13 +1,73 @@
+---
 schema: spec-driven
 
 # Project context (optional)
 # This is shown to AI when creating artifacts.
 # Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Tech stack: Flutter for app, Rust for backend
+  We use conventional commits
+  Domain: AI assistant platform
+    (personas, skills, conversations, workflows, webhooks, agents)
+
+  ## API design
+
+  All HTTP APIs must follow REST principles and MUST be documented
+  in OpenAPI format.
+  All routes live under /api/ with no version segment.
+
+  ### Response shapes
+  Every resource uses a two-type split:
+  - `*Summary` — flat projection, no nested collections; used in list
+    responses
+  - `*Detail` — full object with nested children; used in single-item
+    GET responses
+  - `*Response` — direct DB row projection
+    (e.g. TraceSummaryResponse, LogEntryResponse)
+  - `*Request` — request body named `{Verb}{Resource}Request`
+    (e.g. CreateConversationRequest)
+
+  ### HTTP status codes
+  - POST (create) → 201 with created body
+  - DELETE → 204 with no body
+  - PATCH (partial update) → 200 with full updated object
+  - PUT (full replace) → 200 with updated object
+  - Duplicate create → 409 Conflict
+  - Input validation failure → 400 Bad Request
+  - Feature not configured (TTS, transcription, etc.)
+    → 503 Service Unavailable
+  - Payload too large → 413 Payload Too Large
+
+  ### Error responses
+  All error responses use the JSON envelope: {"error": "...message..."}
+  Never return plain string bodies or different error shapes.
+
+  ### List endpoints
+  Return a bare JSON array — never a paginated envelope like
+  {"items": [...], "total": N}.
+  Use limit/offset query params only where pagination is needed.
+
+  ### URL patterns
+  - Nested resources: /api/{resource}/{id}/{sub-resource}
+  - Non-CRUD actions: POST /api/{resource}/{id}/{verb-phrase}
+    Examples: /api/agents/{id}/set-default,
+              /api/personas/active,
+              /api/workflows/{id}/activate
+
+  ### Field conventions
+  - All JSON field names are snake_case
+  - Timestamps are always format: date-time (RFC 3339),
+    never epoch integers
+  - Optional fields that are absent are omitted entirely
+    (not serialized as null). Only use nullable when null carries
+    distinct meaning from absence.
+  - All UUID IDs must be documented with format: uuid in the schema
+
+  ### operationId
+  Always snake_case, pattern {verb}_{noun} or
+  {verb}_{noun}_{subresource}.
+  Examples: list_conversations, create_persona,
+            set_default_agent, list_workflow_runs
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
