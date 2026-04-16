@@ -488,7 +488,9 @@ class _MessageBubble extends StatelessWidget {
                       ),
                       // Play button for assistant messages. Shows whenever
                       // voice is enabled — fetches on-demand if no audioId.
-                      if (capabilities.voiceReceive && !message.isStreaming)
+                      if (capabilities.voiceReceive &&
+                          message.ttsAvailable &&
+                          !message.isStreaming)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: AudioPlayerWidget(

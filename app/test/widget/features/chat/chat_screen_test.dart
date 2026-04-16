@@ -1,6 +1,11 @@
-import 'package:assistant_api/assistant_api.dart';
+import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:assistant_app/api/api_client.dart';
+import 'package:assistant_app/api/capabilities_provider.dart';
+import 'package:assistant_app/api/models/server_capabilities.dart';
+import 'package:assistant_app/features/chat/audio_player_widget.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
+import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,8 +41,9 @@ class _FakeConversationListNotifier extends ConversationListNotifier {
 // Widget builder — wraps ChatScreen in MaterialApp with provider fakes.
 
 Future<({_FakeChatNotifier notifier})> pumpChatScreen(
-  WidgetTester tester,
-) async {
+  WidgetTester tester, {
+  ServerCapabilities? capabilities,
+}) async {
   final chatNotifier = _FakeChatNotifier();
 
   // Use a narrow portrait viewport so no sidebar is shown (isWide = false).
@@ -54,6 +60,12 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
         conversationListProvider.overrideWith(
           () => _FakeConversationListNotifier(),
         ),
+        if (capabilities != null) ...[
+          apiClientProvider.overrideWithValue(
+            ApiClient(baseUrl: 'http://localhost', token: 'test'),
+          ),
+          capabilitiesProvider.overrideWith((ref) async => capabilities),
+        ],
       ],
       child: const MaterialApp(home: ChatScreen()),
     ),
@@ -212,5 +224,95 @@ void main() {
 
       expect(find.byKey(const Key('retry_button')), findsNothing);
     });
+  });
+
+  group('Chat screen — audio button visibility', () {
+    testWidgets(
+      'audio button hidden when ttsAvailable is false even with voiceReceive',
+      (tester) async {
+        final res = await pumpChatScreen(
+          tester,
+          capabilities: const ServerCapabilities(
+            voiceSend: false,
+            voiceReceive: true,
+          ),
+        );
+
+        final msg = ChatMessage(
+          id: 'a1',
+          role: 'assistant',
+          content: 'Hello there',
+          ttsAvailable: false,
+        );
+
+        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+        await tester.pump();
+
+        expect(
+          find.byType(AudioPlayerWidget),
+          findsNothing,
+          reason: 'Audio button must not appear when ttsAvailable is false',
+        );
+      },
+    );
+
+    testWidgets(
+      'audio button shown when ttsAvailable is true and voiceReceive enabled',
+      (tester) async {
+        final res = await pumpChatScreen(
+          tester,
+          capabilities: const ServerCapabilities(
+            voiceSend: false,
+            voiceReceive: true,
+          ),
+        );
+
+        final msg = ChatMessage(
+          id: 'a2',
+          role: 'assistant',
+          content: 'Hello there',
+          ttsAvailable: true,
+        );
+
+        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+        await tester.pump();
+
+        expect(
+          find.byType(AudioPlayerWidget),
+          findsOneWidget,
+          reason:
+              'Audio button should appear when ttsAvailable and voiceReceive are both true',
+        );
+      },
+    );
+
+    testWidgets(
+      'audio button hidden when voiceReceive is false even with ttsAvailable',
+      (tester) async {
+        final res = await pumpChatScreen(
+          tester,
+          capabilities: const ServerCapabilities(
+            voiceSend: false,
+            voiceReceive: false,
+          ),
+        );
+
+        final msg = ChatMessage(
+          id: 'a3',
+          role: 'assistant',
+          content: 'Hello there',
+          ttsAvailable: true,
+        );
+
+        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+        await tester.pump();
+
+        expect(
+          find.byType(AudioPlayerWidget),
+          findsNothing,
+          reason: 'Audio button must not appear when voiceReceive is disabled',
+        );
+      },
+    );
   });
 }
