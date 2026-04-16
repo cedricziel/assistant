@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.110](https://github.com/cedricziel/assistant/compare/v0.1.109...v0.1.110) (2026-04-16)
+
+
+### Features
+
+* **chat:** add meta action row and fix Deepgram TTS auth ([#487](https://github.com/cedricziel/assistant/issues/487)) ([98b2242](https://github.com/cedricziel/assistant/commit/98b2242f31873f116fc4465e6c306f3c4290b4d9))
+
+
+### Bug Fixes
+
+* **hooks:** warm Flutter deps before dart_pre_commit ([#486](https://github.com/cedricziel/assistant/issues/486)) ([a3a7a06](https://github.com/cedricziel/assistant/commit/a3a7a065a75618f1f91ee2ddfb62ca6b5fd55124))
+* **images:** three bugs breaking image attachment flow ([#484](https://github.com/cedricziel/assistant/issues/484)) ([f7ae264](https://github.com/cedricziel/assistant/commit/f7ae26411627081730b59e8daaa57a2a9fdccabc))
+
 ## [0.1.109](https://github.com/cedricziel/assistant/compare/v0.1.108...v0.1.109) (2026-04-16)
 
 
