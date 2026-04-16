@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.103](https://github.com/cedricziel/assistant/compare/v0.1.102...v0.1.103) (2026-04-16)
+
+
+### Features
+
+* **chat:** add tts_available field to MessageSummary for accurate audio button visibility ([#467](https://github.com/cedricziel/assistant/issues/467)) ([af6ac56](https://github.com/cedricziel/assistant/commit/af6ac5677f7ca9f00416e6322da0bfb31c1284db))
+
+
+### Bug Fixes
+
+* **app:** repair web voice audio bugs — transcript bubble and play button 400 ([#464](https://github.com/cedricziel/assistant/issues/464)) ([7c64076](https://github.com/cedricziel/assistant/commit/7c6407623103652e989f4af5c230eeec770ba54e))
+
 ## [0.1.102](https://github.com/cedricziel/assistant/compare/v0.1.101...v0.1.102) (2026-04-16)
 
 
