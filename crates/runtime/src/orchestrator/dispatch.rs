@@ -90,10 +90,16 @@ impl Orchestrator {
     /// and persist the tool-result message to the database.
     ///
     /// Returns the observation string that was fed back to the LLM.
+    /// Maximum length for the tool result string included in SSE events and
+    /// API responses.  Keeps payloads small while still giving clients useful
+    /// context.
+    const TOOL_RESULT_DISPLAY_LIMIT: usize = 512;
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn finalize_tool_result(
         &self,
         tool_name: &str,
+        tool_arguments: Option<&serde_json::Value>,
         exec_result: anyhow::Result<assistant_core::ToolOutput>,
         elapsed: std::time::Duration,
         otel_span: &mut opentelemetry::global::BoxedSpan,
@@ -186,10 +192,19 @@ impl Orchestrator {
         }
 
         if let Some(sink) = event_sink {
+            let truncated_result = if observation.len() > Self::TOOL_RESULT_DISPLAY_LIMIT {
+                let mut s = observation[..Self::TOOL_RESULT_DISPLAY_LIMIT].to_string();
+                s.push('…');
+                Some(s)
+            } else {
+                Some(observation.clone())
+            };
             let _ = sink
                 .send(OrchestratorEvent::ToolResult {
                     tool_name: tool_name.to_string(),
                     status: tool_status.to_string(),
+                    arguments: tool_arguments.cloned(),
+                    result: truncated_result,
                 })
                 .await;
 
@@ -260,6 +275,8 @@ impl Orchestrator {
                             .send(OrchestratorEvent::ToolResult {
                                 tool_name: name.to_string(),
                                 status: "denied".to_string(),
+                                arguments: Some(params.clone()),
+                                result: Some(observation.clone()),
                             })
                             .await;
                     }
@@ -286,6 +303,7 @@ impl Orchestrator {
 
         self.finalize_tool_result(
             name,
+            Some(params),
             exec_result,
             elapsed,
             otel_span,

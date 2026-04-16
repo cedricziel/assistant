@@ -13,7 +13,7 @@ Name | Type | Description | Notes
 **id** | **String** |  | 
 **role** | **String** |  | 
 **skillName** | **String** | Name of the tool or skill that produced this result (present when `role == \"tool\"`). | [optional] 
-**toolCalls** | **BuiltList&lt;String&gt;** | Tool names called in this message (present when `role == \"assistant\"` and the message contains tool invocations). | [optional] 
+**toolCalls** | [**BuiltList&lt;ToolCallSummary&gt;**](ToolCallSummary.md) | Tool calls made in this message (present when `role == \"assistant\"` and the message contains tool invocations). | [optional] 
 **ttsAvailable** | **bool** | Whether text-to-speech audio can be synthesised for this message. `true` when a TTS provider is configured and the message is a non-empty assistant reply. | 
 **turn** | **int** |  | 
 

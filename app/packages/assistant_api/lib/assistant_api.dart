@@ -98,6 +98,7 @@ export 'package:assistant_api/src/model/task_state.dart';
 export 'package:assistant_api/src/model/task_status.dart';
 export 'package:assistant_api/src/model/task_status_update_event.dart';
 export 'package:assistant_api/src/model/time_series_response.dart';
+export 'package:assistant_api/src/model/tool_call_summary.dart';
 export 'package:assistant_api/src/model/tool_usage_response.dart';
 export 'package:assistant_api/src/model/trace_detail_response.dart';
 export 'package:assistant_api/src/model/trace_summary_response.dart';

@@ -695,6 +695,7 @@ impl Orchestrator {
 
                             self.finalize_tool_result(
                                 &name,
+                                Some(&params),
                                 exec_result,
                                 elapsed,
                                 &mut otel_span,

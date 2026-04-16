@@ -27,6 +27,10 @@ pub enum OrchestratorEvent {
         tool_name: String,
         /// `"ok"` on success, `"error"` or `"denied"` otherwise.
         status: String,
+        /// The arguments passed to the tool (JSON object).
+        arguments: Option<serde_json::Value>,
+        /// The tool's output, truncated to a reasonable display length.
+        result: Option<String>,
     },
 
     /// A skill run completed (success or failure).

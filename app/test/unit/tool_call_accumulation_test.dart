@@ -150,6 +150,61 @@ void main() {
       expect(msg.toolCalls[1].status, ToolCallStatus.error);
     });
 
+    test('history tool_calls mapped as resolved ToolCallRecords', () {
+      // Simulate what loadConversation does: map ToolCallSummary objects
+      // into resolved ToolCallRecords with arguments and result.
+      final records = [
+        ToolCallRecord(
+          toolName: 'web-search',
+          status: ToolCallStatus.ok,
+          arguments: {'query': 'flutter testing'},
+          result: 'Found 10 results.',
+        ),
+        ToolCallRecord(
+          toolName: 'file-read',
+          status: ToolCallStatus.error,
+          arguments: {'path': '/tmp/missing.txt'},
+          result: "Error executing 'file-read': File not found",
+        ),
+      ];
+
+      final msg = ChatMessage(
+        id: 'msg-1',
+        role: 'assistant',
+        content: 'Here are the results.',
+        toolCalls: records,
+      );
+
+      expect(msg.toolCalls.length, 2);
+      expect(msg.toolCalls[0].toolName, 'web-search');
+      expect(msg.toolCalls[0].status, ToolCallStatus.ok);
+      expect(msg.toolCalls[0].arguments, {'query': 'flutter testing'});
+      expect(msg.toolCalls[0].result, 'Found 10 results.');
+      expect(msg.toolCalls[1].toolName, 'file-read');
+      expect(msg.toolCalls[1].status, ToolCallStatus.error);
+    });
+
+    test('ToolResultEvent updates arguments and result on pending record', () {
+      final msg = ChatMessage(
+        id: 'assistant-streaming',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+      );
+      msg.toolCalls.add(
+        ToolCallRecord(toolName: 'bash', status: ToolCallStatus.pending),
+      );
+
+      // Simulate ToolResultEvent resolution with arguments and result.
+      msg.toolCalls[0].status = ToolCallStatus.ok;
+      msg.toolCalls[0].arguments = {'command': 'ls -la'};
+      msg.toolCalls[0].result = 'total 42\ndrwxr-xr-x ...';
+
+      expect(msg.toolCalls[0].status, ToolCallStatus.ok);
+      expect(msg.toolCalls[0].arguments, {'command': 'ls -la'});
+      expect(msg.toolCalls[0].result, contains('total 42'));
+    });
+
     test('toolCalls preserved on ChatMessage.copyWith', () {
       final record = ToolCallRecord(
         toolName: 'bash',

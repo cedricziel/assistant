@@ -53,5 +53,55 @@ void main() {
       expect(find.byIcon(Icons.block), findsOneWidget);
       expect(find.text('bash'), findsOneWidget);
     });
+
+    testWidgets('shows expand icon when arguments are present', (tester) async {
+      final record = ToolCallRecord(
+        toolName: 'web-search',
+        status: ToolCallStatus.ok,
+        arguments: {'query': 'flutter'},
+        result: 'Found 5 results.',
+      );
+      await tester.pumpWidget(_wrap(ToolCallChip(record: record)));
+
+      expect(find.byIcon(Icons.expand_more_rounded), findsOneWidget);
+      // Details not visible until tapped.
+      expect(find.text('Arguments'), findsNothing);
+    });
+
+    testWidgets('no expand icon when no details', (tester) async {
+      final record = ToolCallRecord(
+        toolName: 'web-search',
+        status: ToolCallStatus.ok,
+      );
+      await tester.pumpWidget(_wrap(ToolCallChip(record: record)));
+
+      expect(find.byIcon(Icons.expand_more_rounded), findsNothing);
+    });
+
+    testWidgets('expands to show arguments and result on tap', (tester) async {
+      final record = ToolCallRecord(
+        toolName: 'bash',
+        status: ToolCallStatus.ok,
+        arguments: {'command': 'ls'},
+        result: 'file1.txt\nfile2.txt',
+      );
+      await tester.pumpWidget(_wrap(ToolCallChip(record: record)));
+
+      // Tap to expand.
+      await tester.tap(find.text('bash'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Arguments'), findsOneWidget);
+      expect(find.text('Result'), findsOneWidget);
+      expect(find.textContaining('file1.txt'), findsOneWidget);
+      expect(find.byIcon(Icons.expand_less_rounded), findsOneWidget);
+
+      // Tap again to collapse.
+      await tester.tap(find.text('bash'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Arguments'), findsNothing);
+      expect(find.byIcon(Icons.expand_more_rounded), findsOneWidget);
+    });
   });
 }

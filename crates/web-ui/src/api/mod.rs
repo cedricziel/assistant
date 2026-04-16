@@ -178,6 +178,24 @@ pub struct ConversationDetail {
     pub messages: Vec<MessageSummary>,
 }
 
+/// Summary of a single tool invocation within an assistant message.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ToolCallSummary {
+    /// The tool that was called.
+    pub name: String,
+    /// The JSON arguments passed to the tool.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<serde_json::Value>,
+    /// The tool's output, truncated to a reasonable display length.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    /// `"ok"`, `"error"`, or `"denied"`.
+    pub status: String,
+}
+
+/// Maximum length for tool result strings in history summaries.
+const TOOL_RESULT_HISTORY_LIMIT: usize = 512;
+
 /// A single message in a conversation.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct MessageSummary {
@@ -186,10 +204,10 @@ pub struct MessageSummary {
     pub content: String,
     pub turn: i64,
     pub created_at: DateTime<Utc>,
-    /// Tool names called in this message (present when `role == "assistant"`
+    /// Tool calls made in this message (present when `role == "assistant"`
     /// and the message contains tool invocations).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<String>>,
+    pub tool_calls: Option<Vec<ToolCallSummary>>,
     /// Name of the tool or skill that produced this result (present when
     /// `role == "tool"`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -361,6 +379,19 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
 
     let history = store.load_history(conv_id).await.unwrap_or_default();
     let tts_configured = state.tts_provider.is_some();
+
+    // Collect tool-result messages (role=tool) keyed by (turn, tool_name)
+    // so we can join them with the corresponding assistant tool-call messages.
+    let mut tool_results: std::collections::HashMap<(i64, String), String> =
+        std::collections::HashMap::new();
+    for m in &history {
+        if matches!(m.role, MessageRole::Tool) {
+            if let Some(ref name) = m.skill_name {
+                tool_results.insert((m.turn, name.clone()), m.content.clone());
+            }
+        }
+    }
+
     let messages = history
         .into_iter()
         .filter(|m| !matches!(m.role, MessageRole::System | MessageRole::Tool))
@@ -372,7 +403,38 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
                         items
                             .into_iter()
                             .filter_map(|v| {
-                                v.get("name").and_then(|n| n.as_str()).map(str::to_string)
+                                let name =
+                                    v.get("name").and_then(|n| n.as_str()).map(str::to_string)?;
+                                let arguments = v.get("params").cloned();
+                                let raw_result = tool_results.get(&(m.turn, name.clone())).cloned();
+                                let result = raw_result.map(|r| {
+                                    if r.len() > TOOL_RESULT_HISTORY_LIMIT {
+                                        let mut s = r[..TOOL_RESULT_HISTORY_LIMIT].to_string();
+                                        s.push('…');
+                                        s
+                                    } else {
+                                        r
+                                    }
+                                });
+                                let status = if result
+                                    .as_ref()
+                                    .is_some_and(|r| r.starts_with("Error executing"))
+                                {
+                                    "error"
+                                } else if result
+                                    .as_ref()
+                                    .is_some_and(|r| r.starts_with("User denied"))
+                                {
+                                    "denied"
+                                } else {
+                                    "ok"
+                                };
+                                Some(ToolCallSummary {
+                                    name,
+                                    arguments,
+                                    result,
+                                    status: status.to_string(),
+                                })
                             })
                             .collect::<Vec<_>>()
                     })
@@ -646,8 +708,16 @@ pub async fn send_message(
                 OrchestratorEvent::ToolResult {
                     ref tool_name,
                     ref status,
+                    ref arguments,
+                    ref result,
                 } => {
-                    let p = serde_json::json!({"tool_name": tool_name, "status": status});
+                    let mut p = serde_json::json!({"tool_name": tool_name, "status": status});
+                    if let Some(args) = arguments {
+                        p["arguments"] = args.clone();
+                    }
+                    if let Some(res) = result {
+                        p["result"] = serde_json::Value::String(res.clone());
+                    }
                     let e = Event::default().event("tool_result").data(p.to_string());
                     ("tool_result", p, e)
                 }
@@ -1121,11 +1191,22 @@ pub async fn send_voice_message(
                     Event::default().event("token").data(token)
                 }
                 OrchestratorEvent::Status(msg) => Event::default().event("status").data(msg),
-                OrchestratorEvent::ToolResult { tool_name, status } => {
-                    let data = serde_json::json!({
+                OrchestratorEvent::ToolResult {
+                    tool_name,
+                    status,
+                    arguments,
+                    result,
+                } => {
+                    let mut data = serde_json::json!({
                         "tool_name": tool_name,
                         "status": status,
                     });
+                    if let Some(args) = arguments {
+                        data["arguments"] = args;
+                    }
+                    if let Some(res) = result {
+                        data["result"] = serde_json::Value::String(res);
+                    }
                     Event::default().event("tool_result").data(data.to_string())
                 }
                 OrchestratorEvent::SkillComplete {

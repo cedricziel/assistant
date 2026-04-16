@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.1.101"
+    "version": "0.1.103"
   },
   "servers": [
     {
@@ -4624,9 +4624,9 @@
               "null"
             ],
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ToolCallSummary"
             },
-            "description": "Tool names called in this message (present when `role == \"assistant\"`\nand the message contains tool invocations)."
+            "description": "Tool calls made in this message (present when `role == \"assistant\"`\nand the message contains tool invocations)."
           },
           "tts_available": {
             "type": "boolean",
@@ -5681,6 +5681,34 @@
           "value": {
             "type": "number",
             "format": "double"
+          }
+        }
+      },
+      "ToolCallSummary": {
+        "type": "object",
+        "description": "Summary of a single tool invocation within an assistant message.",
+        "required": [
+          "name",
+          "status"
+        ],
+        "properties": {
+          "arguments": {
+            "description": "The JSON arguments passed to the tool."
+          },
+          "name": {
+            "type": "string",
+            "description": "The tool that was called."
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The tool's output, truncated to a reasonable display length."
+          },
+          "status": {
+            "type": "string",
+            "description": "`\"ok\"`, `\"error\"`, or `\"denied\"`."
           }
         }
       },

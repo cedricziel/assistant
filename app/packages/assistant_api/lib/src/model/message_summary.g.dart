@@ -18,7 +18,7 @@ class _$MessageSummary extends MessageSummary {
   @override
   final String? skillName;
   @override
-  final BuiltList<String>? toolCalls;
+  final BuiltList<ToolCallSummary>? toolCalls;
   @override
   final bool ttsAvailable;
   @override
@@ -112,10 +112,10 @@ class MessageSummaryBuilder
   String? get skillName => _$this._skillName;
   set skillName(String? skillName) => _$this._skillName = skillName;
 
-  ListBuilder<String>? _toolCalls;
-  ListBuilder<String> get toolCalls =>
-      _$this._toolCalls ??= ListBuilder<String>();
-  set toolCalls(ListBuilder<String>? toolCalls) =>
+  ListBuilder<ToolCallSummary>? _toolCalls;
+  ListBuilder<ToolCallSummary> get toolCalls =>
+      _$this._toolCalls ??= ListBuilder<ToolCallSummary>();
+  set toolCalls(ListBuilder<ToolCallSummary>? toolCalls) =>
       _$this._toolCalls = toolCalls;
 
   bool? _ttsAvailable;
