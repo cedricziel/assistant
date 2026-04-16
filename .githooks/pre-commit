@@ -34,7 +34,7 @@ cargo fmt --all -- --check \
 # ── Flutter/Dart: dart_pre_commit (format, analyze, deps, OSV) ──────────────
 
 step "Running dart_pre_commit checks..."
-(cd app && flutter pub run dart_pre_commit) \
+(cd app && flutter pub get --suppress-analytics >/dev/null 2>&1 && flutter pub run dart_pre_commit) \
     || fail "dart_pre_commit failed — fix issues above before committing"
 
 # ── Rust: clippy ─────────────────────────────────────────────────────────────
