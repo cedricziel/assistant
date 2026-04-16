@@ -4,6 +4,7 @@
 
 // ignore_for_file: unused_element
 import 'package:built_collection/built_collection.dart';
+import 'package:assistant_api/src/model/tool_call_summary.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -17,7 +18,7 @@ part 'message_summary.g.dart';
 /// * [id] 
 /// * [role] 
 /// * [skillName] - Name of the tool or skill that produced this result (present when `role == \"tool\"`).
-/// * [toolCalls] - Tool names called in this message (present when `role == \"assistant\"` and the message contains tool invocations).
+/// * [toolCalls] - Tool calls made in this message (present when `role == \"assistant\"` and the message contains tool invocations).
 /// * [ttsAvailable] - Whether text-to-speech audio can be synthesised for this message. `true` when a TTS provider is configured and the message is a non-empty assistant reply.
 /// * [turn] 
 @BuiltValue()
@@ -38,9 +39,9 @@ abstract class MessageSummary implements Built<MessageSummary, MessageSummaryBui
   @BuiltValueField(wireName: r'skill_name')
   String? get skillName;
 
-  /// Tool names called in this message (present when `role == \"assistant\"` and the message contains tool invocations).
+  /// Tool calls made in this message (present when `role == \"assistant\"` and the message contains tool invocations).
   @BuiltValueField(wireName: r'tool_calls')
-  BuiltList<String>? get toolCalls;
+  BuiltList<ToolCallSummary>? get toolCalls;
 
   /// Whether text-to-speech audio can be synthesised for this message. `true` when a TTS provider is configured and the message is a non-empty assistant reply.
   @BuiltValueField(wireName: r'tts_available')
@@ -103,7 +104,7 @@ class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> 
       yield r'tool_calls';
       yield serializers.serialize(
         object.toolCalls,
-        specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
+        specifiedType: const FullType.nullable(BuiltList, [FullType(ToolCallSummary)]),
       );
     }
     yield r'tts_available';
@@ -178,8 +179,8 @@ class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> 
         case r'tool_calls':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
-          ) as BuiltList<String>?;
+            specifiedType: const FullType.nullable(BuiltList, [FullType(ToolCallSummary)]),
+          ) as BuiltList<ToolCallSummary>?;
           if (valueDes == null) continue;
           result.toolCalls.replace(valueDes);
           break;

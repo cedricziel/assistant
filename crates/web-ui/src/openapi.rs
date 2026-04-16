@@ -56,7 +56,7 @@ use crate::api::{
     },
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
     SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, StreamRunEventsQuery,
-    UpdateConversationRequest,
+    ToolCallSummary, UpdateConversationRequest,
 };
 
 /// Adds the Bearer token security scheme to the OpenAPI components.
@@ -238,6 +238,7 @@ pub struct ApiErrorResponse {
             StreamRunEventsQuery,
             ConversationDetail,
             MessageSummary,
+            ToolCallSummary,
             CreateConversationRequest,
             UpdateConversationRequest,
             ApiSendMessageRequest,

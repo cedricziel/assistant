@@ -148,13 +148,24 @@ enum ToolCallStatus { pending, ok, error, denied }
 
 /// A single tool invocation recorded on an assistant message.
 class ToolCallRecord {
-  ToolCallRecord({required this.toolName, required this.status});
+  ToolCallRecord({
+    required this.toolName,
+    required this.status,
+    this.arguments,
+    this.result,
+  });
 
   final String toolName;
 
   /// Mutable so the pending chip can be updated to a resolved status in place
   /// during streaming, matching the pattern used for [ChatMessage.content].
   ToolCallStatus status;
+
+  /// The JSON arguments passed to the tool (may be null while pending).
+  Map<String, dynamic>? arguments;
+
+  /// The tool's output, truncated for display (populated on completion).
+  String? result;
 }
 
 /// A message shown in the chat UI (may be a streaming partial).
@@ -364,10 +375,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       );
       if (callIdx != -1) {
         msgs[idx].toolCalls[callIdx].status = resolvedStatus;
+        msgs[idx].toolCalls[callIdx].arguments = event.arguments;
+        msgs[idx].toolCalls[callIdx].result = event.result;
       } else {
         // No matching pending chip — append a resolved record directly.
         msgs[idx].toolCalls.add(
-          ToolCallRecord(toolName: event.toolName, status: resolvedStatus),
+          ToolCallRecord(
+            toolName: event.toolName,
+            status: resolvedStatus,
+            arguments: event.arguments,
+            result: event.result,
+          ),
         );
       }
     }
@@ -444,6 +462,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               role: m.role,
               content: m.content,
               ttsAvailable: m.ttsAvailable,
+              toolCalls: m.toolCalls
+                  ?.map(
+                    (tc) => ToolCallRecord(
+                      toolName: tc.name,
+                      status: _parseToolStatus(tc.status),
+                      arguments: tc.arguments?.asMap.cast<String, dynamic>(),
+                      result: tc.result,
+                    ),
+                  )
+                  .toList(),
             ),
           )
           .toList();
@@ -656,7 +684,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           );
         } else if (event is StatusEvent) {
           _lastSeq++;
-          state = AsyncData(chatState.copyWith(statusMessage: event.message));
+          _onStatusEvent(chatState, event.message);
+        } else if (event is ToolResultEvent) {
+          _lastSeq++;
+          _onToolResultEvent(chatState, event);
         } else if (event is DoneEvent) {
           _lastSeq++;
           final ms = List<ChatMessage>.from(chatState.messages);
@@ -666,10 +697,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
           final aIdx = ms.indexWhere((m) => m.id == 'assistant-streaming');
           if (aIdx != -1) {
+            final placeholder = ms[aIdx];
             ms[aIdx] = ChatMessage(
               id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
               role: 'assistant',
               content: event.content,
+              toolCalls: placeholder.toolCalls,
             );
           }
           state = AsyncData(
@@ -1042,12 +1075,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         final msgs = List<ChatMessage>.from(finalState.messages);
         final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
         if (idx != -1) {
+          final placeholder = msgs[idx];
           msgs[idx] = ChatMessage(
             id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
             role: 'assistant',
             content: finalState.streamingContent.isNotEmpty
                 ? finalState.streamingContent
                 : '(incomplete response)',
+            toolCalls: placeholder.toolCalls,
           );
         }
         // Mark user message as ok — we got at least a partial response.

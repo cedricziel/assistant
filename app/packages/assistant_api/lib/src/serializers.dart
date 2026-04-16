@@ -86,6 +86,7 @@ import 'package:assistant_api/src/model/task_state.dart';
 import 'package:assistant_api/src/model/task_status.dart';
 import 'package:assistant_api/src/model/task_status_update_event.dart';
 import 'package:assistant_api/src/model/time_series_response.dart';
+import 'package:assistant_api/src/model/tool_call_summary.dart';
 import 'package:assistant_api/src/model/tool_usage_response.dart';
 import 'package:assistant_api/src/model/trace_detail_response.dart';
 import 'package:assistant_api/src/model/trace_summary_response.dart';
@@ -182,6 +183,7 @@ part 'serializers.g.dart';
   TaskStatus,
   TaskStatusUpdateEvent,
   TimeSeriesResponse,
+  ToolCallSummary,
   ToolUsageResponse,
   TraceDetailResponse,
   TraceSummaryResponse,

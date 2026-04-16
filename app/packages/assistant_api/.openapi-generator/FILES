@@ -84,6 +84,7 @@ doc/TaskStatus.md
 doc/TaskStatusUpdateEvent.md
 doc/TasksApi.md
 doc/TimeSeriesResponse.md
+doc/ToolCallSummary.md
 doc/ToolUsageResponse.md
 doc/TraceDetailResponse.md
 doc/TraceSummaryResponse.md
@@ -205,6 +206,7 @@ lib/src/model/task_state.dart
 lib/src/model/task_status.dart
 lib/src/model/task_status_update_event.dart
 lib/src/model/time_series_response.dart
+lib/src/model/tool_call_summary.dart
 lib/src/model/tool_usage_response.dart
 lib/src/model/trace_detail_response.dart
 lib/src/model/trace_summary_response.dart
@@ -227,4 +229,4 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/stream_run_events_query_test.dart
+test/tool_call_summary_test.dart

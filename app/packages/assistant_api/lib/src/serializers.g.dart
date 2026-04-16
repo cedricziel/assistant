@@ -79,6 +79,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(TaskStatus.serializer)
       ..add(TaskStatusUpdateEvent.serializer)
       ..add(TimeSeriesResponse.serializer)
+      ..add(ToolCallSummary.serializer)
       ..add(ToolUsageResponse.serializer)
       ..add(TraceDetailResponse.serializer)
       ..add(TraceSummaryResponse.serializer)
@@ -138,9 +139,6 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpanEntryResponse)]),
           () => ListBuilder<SpanEntryResponse>())
-      ..addBuilderFactory(
-          const FullType(BuiltList, const [const FullType(String)]),
-          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
@@ -232,6 +230,9 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(
               BuiltList, const [const FullType(TaskPushNotificationConfig)]),
           () => ListBuilder<TaskPushNotificationConfig>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(ToolCallSummary)]),
+          () => ListBuilder<ToolCallSummary>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(WorkflowRunStep)]),
           () => ListBuilder<WorkflowRunStep>())

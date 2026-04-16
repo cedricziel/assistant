@@ -32,9 +32,14 @@ class StatusEvent extends StreamEvent {
 /// A tool execution completed.
 ///
 /// Corresponds to `event:tool_result` in the SSE stream.  The JSON body is
-/// `{"tool_name":"...","status":"ok"|"error"|"denied"}`.
+/// `{"tool_name":"...","status":"ok"|"error"|"denied","arguments":{...},"result":"..."}`.
 class ToolResultEvent extends StreamEvent {
-  const ToolResultEvent({required this.toolName, required this.status});
+  const ToolResultEvent({
+    required this.toolName,
+    required this.status,
+    this.arguments,
+    this.result,
+  });
 
   /// The name of the tool that was called.
   final String toolName;
@@ -42,10 +47,18 @@ class ToolResultEvent extends StreamEvent {
   /// `"ok"` on success, `"error"` or `"denied"` otherwise.
   final String status;
 
+  /// The JSON arguments passed to the tool (may be null).
+  final Map<String, dynamic>? arguments;
+
+  /// The tool's output, truncated for display (may be null).
+  final String? result;
+
   factory ToolResultEvent.fromJson(Map<String, dynamic> json) {
     return ToolResultEvent(
       toolName: json['tool_name'] as String? ?? '',
       status: json['status'] as String? ?? 'ok',
+      arguments: json['arguments'] as Map<String, dynamic>?,
+      result: json['result'] as String?,
     );
   }
 }
