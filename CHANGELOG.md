@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.107](https://github.com/cedricziel/assistant/compare/v0.1.106...v0.1.107) (2026-04-16)
+
+
+### Features
+
+* **chat:** render mermaid diagrams and streaming markdown natively ([#477](https://github.com/cedricziel/assistant/issues/477)) ([15ed92e](https://github.com/cedricziel/assistant/commit/15ed92e1ecad3f25d4471b952a961392843429ed))
+* **hooks:** add Flutter quality checks to pre-commit hook ([#476](https://github.com/cedricziel/assistant/issues/476)) ([09d5fc1](https://github.com/cedricziel/assistant/commit/09d5fc1818c71263eee20703039b3309226cbfdd))
+
+
+### Bug Fixes
+
+* **ci:** use ditto instead of zip to preserve macOS framework symlinks ([#475](https://github.com/cedricziel/assistant/issues/475)) ([a38a035](https://github.com/cedricziel/assistant/commit/a38a035b01888e156f4591b029d158dd46a9a714))
+
 ## [0.1.106](https://github.com/cedricziel/assistant/compare/v0.1.105...v0.1.106) (2026-04-16)
 
 

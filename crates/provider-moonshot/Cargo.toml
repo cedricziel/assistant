@@ -1,6 +1,6 @@
 [package]
 name = "assistant-provider-moonshot"
-version = "0.1.106"
+version = "0.1.107"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
