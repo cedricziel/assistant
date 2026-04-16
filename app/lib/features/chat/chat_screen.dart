@@ -101,14 +101,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// On a hard reload / deep link, [_loadConversation] fires from [initState]
   /// before the active context has finished loading, so [loadConversation]
   /// finds no API client and returns immediately.  This listener fires when
-  /// [apiClientProvider] transitions null → non-null and retriggers the load
+  /// [apiClientProvider] transitions null → non-null (initial context load) or
+  /// switches to a different client (context switch) and retriggers the load
   /// if the conversation hasn't been set on the chat state yet.
   void _onApiClientAvailable(ApiClient? prev, ApiClient? next) {
-    if (prev != null || next == null) return; // only on null → non-null
+    if (next == null || identical(prev, next)) return;
     final id = widget.conversationId;
     if (id == null) return;
     final chatState = ref.read(chatProvider).value;
-    if (chatState?.conversationId != id) {
+    if (prev != null || chatState?.conversationId != id) {
       _loadConversation();
     }
   }
@@ -485,9 +486,9 @@ class _MessageBubble extends StatelessWidget {
                             ),
                         selectable: true,
                       ),
-                      // Play button for assistant messages. Shows when the
-                      // server has declared this message TTS-synthesisable.
-                      if (message.ttsAvailable && !message.isStreaming)
+                      // Play button for assistant messages. Shows whenever
+                      // voice is enabled — fetches on-demand if no audioId.
+                      if (capabilities.voiceReceive && !message.isStreaming)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: AudioPlayerWidget(
