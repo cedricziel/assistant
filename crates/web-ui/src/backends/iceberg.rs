@@ -317,7 +317,7 @@ impl TraceBackend for IcebergTraceBackend {
             })
             .collect();
 
-        summaries.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+        summaries.sort_by_key(|s| std::cmp::Reverse(s.start_time));
         summaries.truncate(limit as usize);
         Ok(summaries)
     }
@@ -484,7 +484,7 @@ impl LogBackend for IcebergLogBackend {
             }
         }
 
-        logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        logs.sort_by_key(|l| std::cmp::Reverse(l.timestamp));
         logs.truncate(limit as usize);
         Ok(logs)
     }
