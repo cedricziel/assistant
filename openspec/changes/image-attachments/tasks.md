@@ -74,28 +74,28 @@
 
 ## 8. Flutter App — Upload and Input
 
-- [ ] 8.1 Add `image_picker` package to `app/pubspec.yaml` and run `flutter pub get`
-- [ ] 8.2 Add camera/photo library usage descriptions to `app/macos/Runner/Info.plist` and `app/ios/Runner/Info.plist` (if applicable)
-- [ ] 8.3 Create `AttachmentService` in `app/lib/api/` — wraps multipart upload to `POST /api/conversations/{id}/attachments`, returns `AttachmentMeta`
-- [ ] 8.4 Create `attachmentProvider` Riverpod provider for managing pending attachments (selected but not yet sent)
-- [ ] 8.5 Add image picker button to chat input row in `chat_screen.dart`
-- [ ] 8.6 Implement drag-and-drop zone on web/desktop — show visual drop indicator, add dropped images to pending attachments
-- [ ] 8.7 Implement paste-from-clipboard detection on web/desktop — detect image paste, add to pending attachments
-- [ ] 8.8 Show thumbnail previews of pending attachments in the input area (with remove button)
-- [ ] 8.9 Wire send button to upload pending attachments, then send message with `attachment_ids`
+- [x] 8.1 Add `image_picker` package to `app/pubspec.yaml` and run `flutter pub get`
+- [x] 8.2 Add camera/photo library usage descriptions to `app/macos/Runner/Info.plist` and `app/ios/Runner/Info.plist` (if applicable)
+- [x] 8.3 Create `AttachmentService` in `app/lib/api/` — wraps multipart upload to `POST /api/conversations/{id}/attachments`, returns `AttachmentMeta`
+- [x] 8.4 Create `attachmentProvider` Riverpod provider for managing pending attachments (selected but not yet sent)
+- [x] 8.5 Add image picker button to chat input row in `chat_screen.dart`
+- [x] 8.6 Implement drag-and-drop zone on web/desktop — show visual drop indicator, add dropped images to pending attachments
+- [x] 8.7 Implement paste-from-clipboard detection on web/desktop — detect image paste, add to pending attachments
+- [x] 8.8 Show thumbnail previews of pending attachments in the input area (with remove button)
+- [x] 8.9 Wire send button to upload pending attachments, then send message with `attachment_ids`
 
 ## 9. Flutter App — Rendering
 
-- [ ] 9.1 Update chat message bubble widget to detect attachments in message metadata
-- [ ] 9.2 Render inline thumbnails via `GET /api/attachments/{id}?w=300` with auth headers
-- [ ] 9.3 Implement tap-to-expand full-size image viewer (e.g. dialog or hero animation) at `GET /api/attachments/{id}?w=1920`
-- [ ] 9.4 Handle assistant messages with attachments (same rendering as user messages)
-- [ ] 9.5 Handle chat history replay — render images from attachment metadata in message list response
-- [ ] 9.6 Write widget tests for image attachment rendering in chat bubbles
+- [x] 9.1 Update chat message bubble widget to detect attachments in message metadata
+- [x] 9.2 Render inline thumbnails via `GET /api/attachments/{id}?w=300` with auth headers
+- [x] 9.3 Implement tap-to-expand full-size image viewer (e.g. dialog or hero animation) at `GET /api/attachments/{id}?w=1920`
+- [x] 9.4 Handle assistant messages with attachments (same rendering as user messages)
+- [x] 9.5 Handle chat history replay — render images from attachment metadata in message list response
+- [x] 9.6 Write widget tests for image attachment rendering in chat bubbles
 
 ## 10. Workspace Dependencies
 
 - [x] 10.1 Add `image` crate to `[workspace.dependencies]` in root `Cargo.toml` (for server-side resizing)
-- [ ] 10.2 Verify `image` crate features are minimal (only decode/encode for PNG, JPEG, GIF, WebP)
-- [ ] 10.3 Run `make lint && make format` — ensure clean
-- [ ] 10.4 Run `make test` — ensure all existing tests pass with `TurnResult` change
+- [x] 10.2 Verify `image` crate features are minimal (only decode/encode for PNG, JPEG, GIF, WebP)
+- [x] 10.3 Run `make lint && make format` — ensure clean
+- [x] 10.4 Run `make test` — ensure all existing tests pass with `TurnResult` change

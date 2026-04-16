@@ -23,7 +23,7 @@ dependencies:
   path_provider: ^2.1.5
   url_launcher: ^6.3.2
   package_info_plus: ^9.0.1
-  built_value: '>=8.4.0 <9.0.0'
+  built_value: ">=8.4.0 <9.0.0"
   assistant_api:
     path: packages/assistant_api
   tray_manager: ^0.5.2
@@ -34,6 +34,10 @@ dependencies:
   web: ^1.1.1
   record: ^6.2.0
   audioplayers: ^6.1.0
+  file_picker: ^8.3.7
+  cached_network_image: ^3.4.1
+  desktop_drop: ^0.5.0
+  super_clipboard: ^0.8.23
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -46,8 +50,8 @@ flutter_launcher_icons:
   web:
     generate: true
     image_path: macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png
-    background_color: '#080C1A'
-    theme_color: '#080C1A'
+    background_color: "#080C1A"
+    theme_color: "#080C1A"
 flutter:
   uses-material-design: true
   assets:

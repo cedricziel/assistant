@@ -36,7 +36,11 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
-  Stream<StreamEvent> streamMessages(String conversationId, String message) {
+  Stream<StreamEvent> streamMessages(
+    String conversationId,
+    String message, {
+    List<String>? attachmentIds,
+  }) {
     if (_queue.isNotEmpty) {
       return _queue.removeAt(0).stream;
     }

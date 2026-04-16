@@ -8,6 +8,8 @@ part of 'message_summary.dart';
 
 class _$MessageSummary extends MessageSummary {
   @override
+  final BuiltList<AttachmentMetaResponse>? attachments;
+  @override
   final String content;
   @override
   final DateTime createdAt;
@@ -28,7 +30,8 @@ class _$MessageSummary extends MessageSummary {
       (MessageSummaryBuilder()..update(updates))._build();
 
   _$MessageSummary._(
-      {required this.content,
+      {this.attachments,
+      required this.content,
       required this.createdAt,
       required this.id,
       required this.role,
@@ -48,6 +51,7 @@ class _$MessageSummary extends MessageSummary {
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
     return other is MessageSummary &&
+        attachments == other.attachments &&
         content == other.content &&
         createdAt == other.createdAt &&
         id == other.id &&
@@ -61,6 +65,7 @@ class _$MessageSummary extends MessageSummary {
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, attachments.hashCode);
     _$hash = $jc(_$hash, content.hashCode);
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
@@ -76,6 +81,7 @@ class _$MessageSummary extends MessageSummary {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'MessageSummary')
+          ..add('attachments', attachments)
           ..add('content', content)
           ..add('createdAt', createdAt)
           ..add('id', id)
@@ -91,6 +97,12 @@ class _$MessageSummary extends MessageSummary {
 class MessageSummaryBuilder
     implements Builder<MessageSummary, MessageSummaryBuilder> {
   _$MessageSummary? _$v;
+
+  ListBuilder<AttachmentMetaResponse>? _attachments;
+  ListBuilder<AttachmentMetaResponse> get attachments =>
+      _$this._attachments ??= ListBuilder<AttachmentMetaResponse>();
+  set attachments(ListBuilder<AttachmentMetaResponse>? attachments) =>
+      _$this._attachments = attachments;
 
   String? _content;
   String? get content => _$this._content;
@@ -133,6 +145,7 @@ class MessageSummaryBuilder
   MessageSummaryBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _attachments = $v.attachments?.toBuilder();
       _content = $v.content;
       _createdAt = $v.createdAt;
       _id = $v.id;
@@ -164,6 +177,7 @@ class MessageSummaryBuilder
     try {
       _$result = _$v ??
           _$MessageSummary._(
+            attachments: _attachments?.build(),
             content: BuiltValueNullFieldError.checkNotNull(
                 content, r'MessageSummary', 'content'),
             createdAt: BuiltValueNullFieldError.checkNotNull(
@@ -182,6 +196,9 @@ class MessageSummaryBuilder
     } catch (_) {
       late String _$failedField;
       try {
+        _$failedField = 'attachments';
+        _attachments?.build();
+
         _$failedField = 'toolCalls';
         _toolCalls?.build();
       } catch (e) {

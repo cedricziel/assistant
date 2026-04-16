@@ -33,6 +33,7 @@ class ApiClient {
   late final AssistantApi _generatedApi;
 
   ConversationsApi get conversations => _generatedApi.getConversationsApi();
+  AttachmentsApi get attachments => _generatedApi.getAttachmentsApi();
   PersonasApi get personas => _generatedApi.getPersonasApi();
   SkillsApi get skills => _generatedApi.getSkillsApi();
   LogsApi get logs => _generatedApi.getLogsApi();
@@ -50,13 +51,18 @@ class ApiClient {
   /// [DoneEvent] when the server closes the stream.
   Stream<StreamEvent> streamMessages(
     String conversationId,
-    String message,
-  ) async* {
+    String message, {
+    List<String>? attachmentIds,
+  }) async* {
+    final body = <String, dynamic>{'message': message};
+    if (attachmentIds != null && attachmentIds.isNotEmpty) {
+      body['attachment_ids'] = attachmentIds;
+    }
     final Response<ResponseBody> response;
     try {
       response = await _dio.post<ResponseBody>(
         '/api/conversations/$conversationId/messages',
-        data: jsonEncode({'message': message}),
+        data: jsonEncode(body),
         options: Options(
           responseType: ResponseType.stream,
           headers: {

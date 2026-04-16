@@ -233,5 +233,3 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/attachment_meta_response_test.dart
-test/attachments_api_test.dart

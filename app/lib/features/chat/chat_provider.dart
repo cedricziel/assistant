@@ -170,6 +170,21 @@ class ToolCallRecord {
 }
 
 /// A message shown in the chat UI (may be a streaming partial).
+/// Metadata for an image attachment on a message.
+class ChatAttachment {
+  const ChatAttachment({
+    required this.id,
+    required this.filename,
+    required this.mimeType,
+    required this.url,
+  });
+
+  final String id;
+  final String filename;
+  final String mimeType;
+  final String url;
+}
+
 class ChatMessage {
   ChatMessage({
     required this.id,
@@ -181,7 +196,9 @@ class ChatMessage {
     this.ttsAvailable = false,
     this.tokenStream,
     List<ToolCallRecord>? toolCalls,
-  }) : toolCalls = toolCalls ?? [];
+    List<ChatAttachment>? attachments,
+  }) : toolCalls = toolCalls ?? [],
+       attachments = attachments ?? [];
 
   final String id;
   final String role;
@@ -206,6 +223,9 @@ class ChatMessage {
   /// for throttled incremental rendering. Null for non-streaming messages.
   Stream<String>? tokenStream;
 
+  /// Image attachments linked to this message.
+  List<ChatAttachment> attachments;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -218,6 +238,7 @@ class ChatMessage {
     List<ToolCallRecord>? toolCalls,
     Stream<String>? tokenStream,
     bool clearTokenStream = false,
+    List<ChatAttachment>? attachments,
   }) {
     return ChatMessage(
       id: id,
@@ -229,6 +250,7 @@ class ChatMessage {
       ttsAvailable: ttsAvailable ?? this.ttsAvailable,
       toolCalls: toolCalls ?? this.toolCalls,
       tokenStream: clearTokenStream ? null : (tokenStream ?? this.tokenStream),
+      attachments: attachments ?? this.attachments,
     );
   }
 }
@@ -239,9 +261,14 @@ class ChatMessage {
 /// at enqueue time, so messages are always routed to the correct conversation
 /// even if the user navigates away while the queue is draining.
 class PendingMessage {
-  const PendingMessage({required this.text, required this.conversationId});
+  const PendingMessage({
+    required this.text,
+    required this.conversationId,
+    this.attachmentIds = const [],
+  });
   final String text;
   final String conversationId;
+  final List<String> attachmentIds;
 }
 
 /// A completed tool result recorded during streaming — used by
@@ -481,6 +508,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
                     ),
                   )
                   .toList(),
+              attachments: m.attachments
+                  ?.map(
+                    (a) => ChatAttachment(
+                      id: a.id,
+                      filename: a.filename,
+                      mimeType: a.mimeType,
+                      url: a.url,
+                    ),
+                  )
+                  .toList(),
             ),
           )
           .toList();
@@ -522,8 +559,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// The input can be called at any time, including while a response is
   /// streaming — the message is held in [ChatState.pendingQueue] until the
   /// current response completes.
-  Future<void> sendMessage(String message) async {
-    if (message.trim().isEmpty) return;
+  Future<void> sendMessage(
+    String message, {
+    List<String> attachmentIds = const [],
+  }) async {
+    if (message.trim().isEmpty && attachmentIds.isEmpty) return;
 
     final api = _api;
     if (api == null) return;
@@ -559,7 +599,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       afterCreate.copyWith(
         pendingQueue: [
           ...afterCreate.pendingQueue,
-          PendingMessage(text: message, conversationId: conversationId),
+          PendingMessage(
+            text: message,
+            conversationId: conversationId,
+            attachmentIds: attachmentIds,
+          ),
         ],
       ),
     );
@@ -773,7 +817,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           current.copyWith(pendingQueue: current.pendingQueue.sublist(1)),
         );
 
-        await _streamMessage(pending.text, pending.conversationId);
+        await _streamMessage(
+          pending.text,
+          pending.conversationId,
+          attachmentIds: pending.attachmentIds,
+        );
       }
     } finally {
       _draining = false;
@@ -947,7 +995,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   }
 
   /// Stream a single [message] to the server and update state from SSE events.
-  Future<void> _streamMessage(String message, String conversationId) async {
+  Future<void> _streamMessage(
+    String message,
+    String conversationId, {
+    List<String> attachmentIds = const [],
+  }) async {
     final api = _api;
     if (api == null) return;
 
@@ -985,7 +1037,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
     // Stream SSE events.
     try {
-      await for (final event in api.streamMessages(conversationId, message)) {
+      await for (final event in api.streamMessages(
+        conversationId,
+        message,
+        attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
+      )) {
         if (_cancelled) break;
         final chatState = state.value ?? const ChatState();
 

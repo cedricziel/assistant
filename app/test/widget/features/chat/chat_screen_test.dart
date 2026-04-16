@@ -7,6 +7,7 @@ import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -314,5 +315,128 @@ void main() {
         );
       },
     );
+  });
+
+  group('Chat screen — attachment thumbnails', () {
+    testWidgets('user message with attachments renders CachedNetworkImage', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'user-att-1',
+        role: 'user',
+        content: 'Look at this image',
+        attachments: [
+          const ChatAttachment(
+            id: 'att-1',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            url: '/api/attachments/att-1',
+          ),
+        ],
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      // CachedNetworkImage widget should be present for the attachment.
+      expect(
+        find.byType(CachedNetworkImage),
+        findsOneWidget,
+        reason: 'Attachment thumbnail should render a CachedNetworkImage',
+      );
+
+      // Should be wrapped in a GestureDetector for tap-to-expand.
+      expect(
+        find.byType(GestureDetector),
+        findsWidgets,
+        reason: 'Attachment thumbnails should be tappable',
+      );
+    });
+
+    testWidgets('assistant message with attachments renders thumbnails', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'asst-att-1',
+        role: 'assistant',
+        content: 'Here is the generated image',
+        attachments: [
+          const ChatAttachment(
+            id: 'att-2',
+            filename: 'result.jpg',
+            mimeType: 'image/jpeg',
+            url: '/api/attachments/att-2',
+          ),
+        ],
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      expect(
+        find.byType(CachedNetworkImage),
+        findsOneWidget,
+        reason: 'Assistant attachment thumbnails should be rendered',
+      );
+    });
+
+    testWidgets('message without attachments has no CachedNetworkImage', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'user-noatt',
+        role: 'user',
+        content: 'Plain text message',
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      expect(
+        find.byType(CachedNetworkImage),
+        findsNothing,
+        reason: 'No CachedNetworkImage when message has no attachments',
+      );
+    });
+
+    testWidgets('tapping thumbnail opens full-size dialog', (tester) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'user-tap-1',
+        role: 'user',
+        content: 'Check this',
+        attachments: [
+          const ChatAttachment(
+            id: 'att-3',
+            filename: 'photo.png',
+            mimeType: 'image/png',
+            url: '/api/attachments/att-3',
+          ),
+        ],
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      // Tap the CachedNetworkImage (thumbnail).
+      await tester.tap(find.byType(CachedNetworkImage).first);
+      // Use pump() instead of pumpAndSettle() — CachedNetworkImage's
+      // internal loading animation never settles in the test environment.
+      await tester.pump();
+
+      // A Dialog should now be visible with an InteractiveViewer.
+      expect(
+        find.byType(InteractiveViewer),
+        findsOneWidget,
+        reason: 'Tapping thumbnail should open full-size image dialog',
+      );
+    });
   });
 }
