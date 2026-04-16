@@ -147,6 +147,85 @@ impl MatrixClient {
         Ok(())
     }
 
+    // ── Media upload ──────────────────────────────────────────────────────────
+
+    /// Upload a file to the Matrix Content Repository.
+    ///
+    /// Returns the `mxc://` URI of the uploaded media.
+    pub async fn upload_media(
+        &self,
+        data: Vec<u8>,
+        filename: &str,
+        content_type: &str,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/_matrix/media/v3/upload?filename={}",
+            self.homeserver_url,
+            urlencoding::encode(filename)
+        );
+        debug!(url = %url, filename, content_type, "Matrix upload_media");
+        let resp = self
+            .client
+            .post(&url)
+            .header(reqwest::header::CONTENT_TYPE, content_type)
+            .body(data)
+            .send()
+            .await
+            .context("Matrix upload_media request")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Matrix upload_media failed ({status}): {err}");
+        }
+        let body: serde_json::Value = resp.json().await.context("Matrix upload_media body")?;
+        let mxc_uri = body["content_uri"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Matrix upload_media: missing content_uri in response"))?
+            .to_string();
+        Ok(mxc_uri)
+    }
+
+    /// Send an `m.image` message to a room using an already-uploaded `mxc://` URI.
+    pub async fn send_image(
+        &self,
+        room_id: &str,
+        mxc_uri: &str,
+        filename: &str,
+        mime_type: &str,
+        size_bytes: usize,
+    ) -> Result<()> {
+        let txn_id = Uuid::new_v4().to_string();
+        let path = format!(
+            "rooms/{}/send/m.room.message/{}",
+            urlencoding::encode(room_id),
+            txn_id
+        );
+        let url = self.cs_url(&path);
+        let body = serde_json::json!({
+            "msgtype": "m.image",
+            "body": filename,
+            "url": mxc_uri,
+            "info": {
+                "mimetype": mime_type,
+                "size": size_bytes
+            }
+        });
+        debug!(url = %url, room_id, filename, "Matrix send_image");
+        let resp = self
+            .client
+            .put(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("Matrix send_image")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Matrix send_image failed ({status}): {err}");
+        }
+        Ok(())
+    }
+
     // ── Media download ────────────────────────────────────────────────────────
 
     /// Download a Matrix Content Repository resource identified by an `mxc://` URI.
@@ -462,6 +541,66 @@ mod tests {
             result.is_err(),
             "expected error when body exceeds max_bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn upload_media_returns_mxc_uri() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(wiremock::matchers::path_regex(r"/_matrix/media/v3/upload"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({ "content_uri": "mxc://example.com/uploaded1" }),
+                ),
+            )
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        let mxc = client
+            .upload_media(b"fake-png".to_vec(), "image.png", "image/png")
+            .await
+            .unwrap();
+        assert_eq!(mxc, "mxc://example.com/uploaded1");
+    }
+
+    #[tokio::test]
+    async fn upload_media_fails_on_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(413).set_body_string("too large"))
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        let result = client
+            .upload_media(b"data".to_vec(), "big.png", "image/png")
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn send_image_calls_put() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(wiremock::matchers::path_regex(
+                r"/_matrix/client/v3/rooms/.+/send/m.room.message/.+",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "event_id": "$img1" })),
+            )
+            .mount(&server)
+            .await;
+        let client = mock_client(&server).await;
+        client
+            .send_image(
+                "!room:example.com",
+                "mxc://example.com/uploaded1",
+                "photo.png",
+                "image/png",
+                1024,
+            )
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

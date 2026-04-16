@@ -60,11 +60,11 @@
 
 ## 6. Interface Adapters — Outbound
 
-- [ ] 6.1 In `ChannelRunner`, after sending text reply, iterate `TurnResult.attachment_ids` and deliver per-adapter
-- [ ] 6.2 Slack adapter: implement image upload — load bytes from `AttachmentStore`, upload via `files.upload` API to the conversation thread
-- [ ] 6.3 Matrix adapter: implement image upload — load bytes, upload via `PUT /_matrix/media/.../upload`, send `m.image` event
-- [ ] 6.4 Web UI: no additional work needed (SSE events + serving endpoint handle it)
-- [ ] 6.5 Write tests for outbound attachment delivery (mock HTTP for Slack/Matrix)
+- [x] 6.1 In `ChannelRunner`, after sending text reply, iterate `TurnResult.attachment_ids` and deliver per-adapter
+- [x] 6.2 Slack adapter: implement image upload — load bytes from `AttachmentStore`, upload via `files.upload` API to the conversation thread
+- [x] 6.3 Matrix adapter: implement image upload — load bytes, upload via `PUT /_matrix/media/.../upload`, send `m.image` event
+- [x] 6.4 Web UI: no additional work needed (SSE events + serving endpoint handle it)
+- [x] 6.5 Write tests for outbound attachment delivery (mock HTTP for Slack/Matrix)
 
 ## 7. OpenAPI and Flutter Client Generation
 

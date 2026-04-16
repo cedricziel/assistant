@@ -294,10 +294,22 @@ impl ChannelAdapter for SlackAdapter {
 
     async fn send(&self, user: &ChannelUser, content: ChannelContent) -> Result<()> {
         let (channel, thread_ts) = parse_platform_id(&user.platform_id);
-        if let ChannelContent::Text(text) = content {
-            self.client
-                .post_message(&channel, &text, thread_ts.as_deref())
-                .await?;
+        match content {
+            ChannelContent::Text(text) => {
+                self.client
+                    .post_message(&channel, &text, thread_ts.as_deref())
+                    .await?;
+            }
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type: _,
+            } => {
+                self.client
+                    .upload_file(&channel, &filename, data, thread_ts.as_deref())
+                    .await?;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -326,10 +338,22 @@ impl ChannelAdapter for SlackAdapter {
         thread_id: &str,
     ) -> Result<()> {
         let (channel, _) = parse_platform_id(&user.platform_id);
-        if let ChannelContent::Text(text) = content {
-            self.client
-                .post_message(&channel, &text, Some(thread_id))
-                .await?;
+        match content {
+            ChannelContent::Text(text) => {
+                self.client
+                    .post_message(&channel, &text, Some(thread_id))
+                    .await?;
+            }
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type: _,
+            } => {
+                self.client
+                    .upload_file(&channel, &filename, data, Some(thread_id))
+                    .await?;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -926,6 +950,97 @@ mod tests {
             }
             other => panic!("expected FileData, got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn send_file_data_calls_upload_file() {
+        let server = MockServer::start().await;
+
+        // Step 1: files.getUploadURLExternal
+        Mock::given(method("GET"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "upload_url": format!("{}/upload-target", server.uri()),
+                "file_id": "F123"
+            })))
+            .mount(&server)
+            .await;
+
+        // Step 2: upload target
+        Mock::given(method("POST"))
+            .and(path("/upload-target"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        // Step 3: files.completeUploadExternal
+        Mock::given(method("POST"))
+            .and(path("/api/files.completeUploadExternal"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = make_adapter(&server);
+        let user = ChannelUser {
+            platform_id: "C123/111.222".into(),
+            display_name: None,
+        };
+        let content = ChannelContent::FileData {
+            data: b"fake-image-bytes".to_vec(),
+            filename: "output.png".into(),
+            mime_type: "image/png".into(),
+        };
+
+        adapter.send(&user, content).await.unwrap();
+        // wiremock asserts all mocks were hit
+    }
+
+    #[tokio::test]
+    async fn send_in_thread_file_data_calls_upload_file() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/files.getUploadURLExternal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "upload_url": format!("{}/upload-target", server.uri()),
+                "file_id": "F456"
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/upload-target"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/files.completeUploadExternal"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .mount(&server)
+            .await;
+
+        let adapter = make_adapter(&server);
+        let user = ChannelUser {
+            platform_id: "C123/111.222".into(),
+            display_name: None,
+        };
+        let content = ChannelContent::FileData {
+            data: b"fake-image-bytes".to_vec(),
+            filename: "output.png".into(),
+            mime_type: "image/png".into(),
+        };
+
+        adapter
+            .send_in_thread(&user, content, "111.222")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
