@@ -21,14 +21,12 @@ class AgentsState {
 class AgentsNotifier extends AsyncNotifier<AgentsState> {
   @override
   Future<AgentsState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const AgentsState();
     return _fetchAgents();
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<AgentsState> _fetchAgents() async {
     final api = _api;
@@ -52,19 +50,15 @@ class AgentsNotifier extends AsyncNotifier<AgentsState> {
 /// Provider for [AgentsNotifier].
 final agentsProvider =
     AsyncNotifierProvider.autoDispose<AgentsNotifier, AgentsState>(
-  AgentsNotifier.new,
-);
+      AgentsNotifier.new,
+    );
 
 // ---------------------------------------------------------------------------
 // Agent detail
 
 /// State for a single agent detail screen.
 class AgentDetailState {
-  const AgentDetailState({
-    this.agent,
-    this.isLoading = false,
-    this.error,
-  });
+  const AgentDetailState({this.agent, this.isLoading = false, this.error});
 
   final AgentDetail? agent;
   final bool isLoading;
@@ -79,14 +73,12 @@ class AgentDetailNotifier extends AsyncNotifier<AgentDetailState> {
 
   @override
   Future<AgentDetailState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const AgentDetailState();
     return _fetchDetail(_agentId);
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<AgentDetailState> _fetchDetail(String agentId) async {
     final api = _api;
@@ -109,5 +101,5 @@ class AgentDetailNotifier extends AsyncNotifier<AgentDetailState> {
 /// Family provider for [AgentDetailNotifier].
 final agentDetailProvider = AsyncNotifierProvider.autoDispose
     .family<AgentDetailNotifier, AgentDetailState, String>(
-  (arg) => AgentDetailNotifier(arg),
-);
+      (arg) => AgentDetailNotifier(arg),
+    );

@@ -50,14 +50,12 @@ class SkillsNotifier extends AsyncNotifier<SkillsState> {
       }
     });
 
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const SkillsState();
     return _fetchSkills();
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<SkillsState> _fetchSkills() async {
     final api = _api;
@@ -149,5 +147,5 @@ class SkillsNotifier extends AsyncNotifier<SkillsState> {
 /// Provider for [SkillsNotifier].
 final skillsProvider =
     AsyncNotifierProvider.autoDispose<SkillsNotifier, SkillsState>(
-  SkillsNotifier.new,
-);
+      SkillsNotifier.new,
+    );

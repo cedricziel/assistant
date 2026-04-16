@@ -8,11 +8,7 @@ import '../connection/connection_provider.dart';
 // ---------------------------------------------------------------------------
 // API client helper
 
-ApiClient? _apiClient(Ref ref) {
-  final profile = ref.read(activeProfileProvider);
-  if (profile == null) return null;
-  return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-}
+ApiClient? _apiClient(Ref ref) => ref.read(apiClientProvider);
 
 // ---------------------------------------------------------------------------
 // Workflows list
@@ -20,7 +16,11 @@ ApiClient? _apiClient(Ref ref) {
 /// Notifier for the workflows list.
 class WorkflowsNotifier extends AsyncNotifier<List<WorkflowSummary>> {
   @override
-  Future<List<WorkflowSummary>> build() => _fetch();
+  Future<List<WorkflowSummary>> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return [];
+    return _fetch();
+  }
 
   Future<List<WorkflowSummary>> _fetch() async {
     final client = _apiClient(ref);
@@ -129,32 +129,33 @@ class WorkflowsNotifier extends AsyncNotifier<List<WorkflowSummary>> {
 /// Provider for [WorkflowsNotifier].
 final workflowsProvider =
     AsyncNotifierProvider.autoDispose<WorkflowsNotifier, List<WorkflowSummary>>(
-  WorkflowsNotifier.new,
-);
+      WorkflowsNotifier.new,
+    );
 
 // ---------------------------------------------------------------------------
 // Workflow detail
 
 /// Combined detail + runs state.
 class WorkflowDetailState {
-  const WorkflowDetailState({
-    required this.detail,
-    required this.runs,
-  });
+  const WorkflowDetailState({required this.detail, required this.runs});
 
   final WorkflowDetail detail;
   final List<WorkflowRunSummary> runs;
 }
 
 /// Notifier for a single workflow detail (detail + recent runs).
-class WorkflowDetailNotifier
-    extends AsyncNotifier<WorkflowDetailState> {
+class WorkflowDetailNotifier extends AsyncNotifier<WorkflowDetailState> {
   WorkflowDetailNotifier(this._workflowId);
 
   final String _workflowId;
 
   @override
-  Future<WorkflowDetailState> build() => _fetch();
+  Future<WorkflowDetailState> build() async {
+    // Establish reactive dependency — rebuilds when the active context loads.
+    // _fetch() throws 'Not connected' if null, shown as error state.
+    ref.watch(apiClientProvider);
+    return _fetch();
+  }
 
   Future<WorkflowDetailState> _fetch() async {
     final client = _apiClient(ref);
@@ -184,18 +185,15 @@ class WorkflowDetailNotifier
 /// Family provider for [WorkflowDetailNotifier].
 final workflowDetailProvider = AsyncNotifierProvider.autoDispose
     .family<WorkflowDetailNotifier, WorkflowDetailState, String>(
-  (arg) => WorkflowDetailNotifier(arg),
-);
+      (arg) => WorkflowDetailNotifier(arg),
+    );
 
 // ---------------------------------------------------------------------------
 // Workflow run detail
 
 /// State for a single workflow run detail.
 class WorkflowRunDetailState {
-  const WorkflowRunDetailState({
-    this.runDetail,
-    this.error,
-  });
+  const WorkflowRunDetailState({this.runDetail, this.error});
 
   final WorkflowRunDetail? runDetail;
   final String? error;
@@ -205,14 +203,17 @@ class WorkflowRunDetailState {
 typedef WorkflowRunKey = ({String workflowId, String runId});
 
 /// Notifier for a single workflow run detail.
-class WorkflowRunDetailNotifier
-    extends AsyncNotifier<WorkflowRunDetailState> {
+class WorkflowRunDetailNotifier extends AsyncNotifier<WorkflowRunDetailState> {
   WorkflowRunDetailNotifier(this._key);
 
   final WorkflowRunKey _key;
 
   @override
-  Future<WorkflowRunDetailState> build() => _fetch();
+  Future<WorkflowRunDetailState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const WorkflowRunDetailState();
+    return _fetch();
+  }
 
   Future<WorkflowRunDetailState> _fetch() async {
     final client = _apiClient(ref);
@@ -237,5 +238,5 @@ class WorkflowRunDetailNotifier
 /// Family provider for [WorkflowRunDetailNotifier].
 final workflowRunDetailProvider = AsyncNotifierProvider.autoDispose
     .family<WorkflowRunDetailNotifier, WorkflowRunDetailState, WorkflowRunKey>(
-  (arg) => WorkflowRunDetailNotifier(arg),
-);
+      (arg) => WorkflowRunDetailNotifier(arg),
+    );

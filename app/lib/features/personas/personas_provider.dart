@@ -38,14 +38,12 @@ class PersonasState {
 class PersonasNotifier extends AsyncNotifier<PersonasState> {
   @override
   Future<PersonasState> build() async {
+    final api = ref.watch(apiClientProvider);
+    if (api == null) return const PersonasState();
     return _fetchPersonas();
   }
 
-  ApiClient? get _api {
-    final profile = ref.read(activeProfileProvider);
-    if (profile == null) return null;
-    return ApiClient(baseUrl: profile.baseUrl, token: profile.token);
-  }
+  ApiClient? get _api => ref.read(apiClientProvider);
 
   Future<PersonasState> _fetchPersonas() async {
     final api = _api;
@@ -55,11 +53,9 @@ class PersonasNotifier extends AsyncNotifier<PersonasState> {
       final response = await api.personas.listPersonas();
       final personas = response.data!.toList();
       final defaultPersona =
-          personas.where((p) => p.isDefault).firstOrNull ?? personas.firstOrNull;
-      return PersonasState(
-        personas: personas,
-        activePersona: defaultPersona,
-      );
+          personas.where((p) => p.isDefault).firstOrNull ??
+          personas.firstOrNull;
+      return PersonasState(personas: personas, activePersona: defaultPersona);
     } catch (e) {
       return PersonasState(error: e.toString());
     }
@@ -85,17 +81,11 @@ class PersonasNotifier extends AsyncNotifier<PersonasState> {
       );
       final updated = response.data!;
       state = AsyncData(
-        current.copyWith(
-          activePersona: updated,
-          isLoading: false,
-        ),
+        current.copyWith(activePersona: updated, isLoading: false),
       );
     } catch (e) {
       state = AsyncData(
-        current.copyWith(
-          isLoading: false,
-          error: e.toString(),
-        ),
+        current.copyWith(isLoading: false, error: e.toString()),
       );
     }
   }
@@ -104,5 +94,5 @@ class PersonasNotifier extends AsyncNotifier<PersonasState> {
 /// Provider for [PersonasNotifier].
 final personasProvider =
     AsyncNotifierProvider.autoDispose<PersonasNotifier, PersonasState>(
-  PersonasNotifier.new,
-);
+      PersonasNotifier.new,
+    );
