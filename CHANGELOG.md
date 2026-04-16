@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.104](https://github.com/cedricziel/assistant/compare/v0.1.103...v0.1.104) (2026-04-16)
+
+
+### Features
+
+* durable conversation event log with SSE replay ([#469](https://github.com/cedricziel/assistant/issues/469)) ([afad95e](https://github.com/cedricziel/assistant/commit/afad95eff6bfc379e0fd1c209f30078f0c7b4cea))
+
 ## [0.1.103](https://github.com/cedricziel/assistant/compare/v0.1.102...v0.1.103) (2026-04-16)
 
 
