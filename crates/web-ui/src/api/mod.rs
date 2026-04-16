@@ -2225,4 +2225,257 @@ mod tests {
         assert!(text.contains("done"), "should contain done: {text}");
         assert!(!text.contains("t0"), "seq 0 should be skipped: {text}");
     }
+
+    /// Client connects while the run is still active in the broadcaster.
+    /// It should receive the replayed DB event first, then live events as they
+    /// arrive, and close when "done" is broadcast.
+    #[tokio::test]
+    async fn stream_run_events_tails_live_broadcaster() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4();
+        let run_id_str = run_id.to_string();
+
+        // Seed one already-persisted event (the run_started from before client connects).
+        state
+            .event_store
+            .append_event(
+                &run_id_str,
+                &conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id_str}),
+            )
+            .await
+            .unwrap();
+
+        // Register the run as active in the broadcaster.
+        let broadcast_tx = state.run_broadcaster.start_run(run_id).await;
+        // Clone the broadcaster before state is moved into `app()`.
+        let broadcaster = state.run_broadcaster.clone();
+
+        // Spawn a task that delivers live events after a brief delay so the
+        // HTTP handler has time to subscribe before events are sent.
+        let run_id_for_task = run_id;
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 1,
+                event_type: "token".to_string(),
+                payload: serde_json::json!({"token": "live-word"}),
+            });
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 2,
+                event_type: "done".to_string(),
+                payload: serde_json::json!({"content": "live-word", "role": "assistant"}),
+            });
+            // Drop sender and remove from registry so the stream closes.
+            broadcaster.finish_run(&run_id_for_task).await;
+        });
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id_str}/events/stream"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("text/event-stream"),
+        );
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("run_started"),
+            "replayed DB event missing: {text}"
+        );
+        assert!(
+            text.contains("live-word"),
+            "live token from broadcaster missing: {text}"
+        );
+        assert!(text.contains("done"), "done event missing: {text}");
+    }
+
+    /// Race-condition path: broadcaster is active but no DB events have been
+    /// persisted yet (run_started event is still in-flight). The handler should
+    /// recognise the run as active and switch to live-tail mode.
+    #[tokio::test]
+    async fn stream_run_events_live_only_when_no_db_events_yet() {
+        let (state, _storage) = event_log_state().await;
+        let conv_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4();
+        let run_id_str = run_id.to_string();
+
+        // Register as active — no DB events at all.
+        let broadcast_tx = state.run_broadcaster.start_run(run_id).await;
+        let broadcaster = state.run_broadcaster.clone();
+
+        let run_id_for_task = run_id;
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 0,
+                event_type: "token".to_string(),
+                payload: serde_json::json!({"token": "first-token"}),
+            });
+            let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+                sequence: 1,
+                event_type: "done".to_string(),
+                payload: serde_json::json!({"content": "first-token", "role": "assistant"}),
+            });
+            broadcaster.finish_run(&run_id_for_task).await;
+        });
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id_str}/events/stream"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("first-token"),
+            "live token missing for early-connect case: {text}"
+        );
+        assert!(text.contains("done"), "done event missing: {text}");
+    }
+
+    /// Verify that the send_message response carries the X-Run-Id header so
+    /// clients can capture the run identifier even if the SSE stream is dropped
+    /// before the run_started event arrives.
+    #[tokio::test]
+    async fn send_message_sets_x_run_id_header() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Test reply").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store
+            .create_conversation(Some("RunId header"))
+            .await
+            .unwrap();
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hello"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let run_id_header = resp
+            .headers()
+            .get("x-run-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("X-Run-Id header must be present");
+        assert!(
+            Uuid::parse_str(run_id_header).is_ok(),
+            "X-Run-Id should be a valid UUID, got: {run_id_header}"
+        );
+    }
+
+    /// After events are pruned (TTL), the endpoint returns 404.
+    /// (We do not distinguish 404 vs 410 in the current implementation —
+    /// both expired and never-existed runs return 404.)
+    #[tokio::test]
+    async fn stream_run_events_returns_404_for_pruned_run() {
+        let sl = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+        // Use a very short TTL (already negative = instantly expired).
+        let short_ttl_store = assistant_storage::ConversationEventStore::with_ttl(
+            sl.pool.clone(),
+            chrono::Duration::seconds(-1),
+        );
+
+        let run_id = Uuid::new_v4();
+        let run_id_str = run_id.to_string();
+        let conv_id = Uuid::new_v4().to_string();
+
+        // Append an event; it is already expired on insert.
+        short_ttl_store
+            .append_event(
+                &run_id_str,
+                &conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id_str}),
+            )
+            .await
+            .unwrap();
+
+        // Prune — removes the expired row.
+        short_ttl_store.prune_expired().await.unwrap();
+
+        // Build a state that uses the same pool (events are now gone).
+        use assistant_core::AssistantConfig;
+        use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
+        use assistant_runtime::Orchestrator;
+        use assistant_tool_executor::ToolExecutor;
+        let mut config = AssistantConfig::default();
+        config.memory.enabled = false;
+        let registry = Arc::new(SkillRegistry::new(sl.pool.clone()).await.unwrap());
+        let llm = Arc::new(
+            LlmClient::new(LlmClientConfig {
+                model: "test".to_string(),
+                base_url: "http://127.0.0.1:1".to_string(),
+                timeout_secs: 1,
+                retry_config: RetryConfig::disabled(),
+            })
+            .unwrap(),
+        );
+        let executor = Arc::new(ToolExecutor::new(
+            sl.clone(),
+            llm.clone(),
+            registry.clone(),
+            Arc::new(config.clone()),
+        ));
+        let bus = Arc::new(sl.message_bus());
+        let orchestrator = Arc::new(Orchestrator::new(
+            llm,
+            sl.clone(),
+            executor,
+            registry,
+            bus,
+            &config,
+        ));
+        let state = ApiState {
+            pool: sl.pool.clone(),
+            agent_id: Arc::new(RwLock::new("default".to_string())),
+            orchestrator,
+            push_dispatcher: None,
+            transcription_provider: None,
+            tts_provider: None,
+            audio_store: Arc::new(crate::audio_store::AudioStore::new()),
+            event_store: short_ttl_store,
+            run_broadcaster: RunBroadcaster::new(),
+        };
+
+        let app = app(state);
+        let req = Request::builder()
+            .uri(format!(
+                "/conversations/{conv_id}/runs/{run_id_str}/events/stream"
+            ))
+            .header("Authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        // The run existed but events were pruned → currently 404.
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }

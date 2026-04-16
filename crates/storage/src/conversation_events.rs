@@ -329,4 +329,151 @@ mod tests {
         let events = store.list_events_since(run_id, 0).await.unwrap();
         assert!(events.is_empty(), "pruned events should not be returned");
     }
+
+    // -- RunBroadcaster tests --------------------------------------------------
+
+    #[tokio::test]
+    async fn broadcaster_subscribe_returns_none_before_start() {
+        let broadcaster = RunBroadcaster::new();
+        let run_id = Uuid::new_v4();
+        assert!(
+            broadcaster.subscribe(&run_id).await.is_none(),
+            "no subscription before start_run"
+        );
+    }
+
+    #[tokio::test]
+    async fn broadcaster_start_subscribe_receive_finish() {
+        let broadcaster = RunBroadcaster::new();
+        let run_id = Uuid::new_v4();
+
+        let tx = broadcaster.start_run(run_id).await;
+        let mut rx = broadcaster
+            .subscribe(&run_id)
+            .await
+            .expect("subscribe after start_run should succeed");
+
+        // Send one event.
+        tx.send(LiveEvent {
+            sequence: 0,
+            event_type: "token".to_string(),
+            payload: serde_json::json!({"token": "hello"}),
+        })
+        .expect("send should succeed while receiver exists");
+
+        let event = rx.recv().await.expect("recv should return the sent event");
+        assert_eq!(event.event_type, "token");
+        assert_eq!(event.sequence, 0);
+        assert_eq!(event.payload["token"], "hello");
+
+        // Finish the run: removing from registry drops the sender.
+        broadcaster.finish_run(&run_id).await;
+        drop(tx); // also drop our local handle so the channel closes
+
+        assert!(
+            matches!(
+                rx.recv().await,
+                Err(tokio::sync::broadcast::error::RecvError::Closed)
+            ),
+            "channel should be closed after finish_run"
+        );
+    }
+
+    #[tokio::test]
+    async fn broadcaster_concurrent_subscribers_both_receive() {
+        let broadcaster = RunBroadcaster::new();
+        let run_id = Uuid::new_v4();
+        let tx = broadcaster.start_run(run_id).await;
+
+        let mut rx1 = broadcaster.subscribe(&run_id).await.unwrap();
+        let mut rx2 = broadcaster.subscribe(&run_id).await.unwrap();
+
+        tx.send(LiveEvent {
+            sequence: 7,
+            event_type: "status".to_string(),
+            payload: serde_json::json!({"message": "thinking"}),
+        })
+        .unwrap();
+
+        let e1 = rx1.recv().await.unwrap();
+        let e2 = rx2.recv().await.unwrap();
+
+        assert_eq!(e1.event_type, "status");
+        assert_eq!(e2.event_type, "status");
+        assert_eq!(e1.sequence, 7);
+        assert_eq!(
+            e2.sequence, e1.sequence,
+            "both subscribers see the same sequence"
+        );
+    }
+
+    #[tokio::test]
+    async fn broadcaster_subscribe_returns_none_after_finish() {
+        let broadcaster = RunBroadcaster::new();
+        let run_id = Uuid::new_v4();
+        let tx = broadcaster.start_run(run_id).await;
+        broadcaster.finish_run(&run_id).await;
+        drop(tx);
+
+        assert!(
+            broadcaster.subscribe(&run_id).await.is_none(),
+            "no subscription after finish_run"
+        );
+    }
+
+    #[tokio::test]
+    async fn is_run_complete_detects_error_event() {
+        let store = make_store().await;
+        let run_id = "run-004";
+        let conv_id = "conv-004";
+
+        store
+            .append_event(
+                run_id,
+                conv_id,
+                0,
+                "token",
+                &serde_json::json!({"token": "oops"}),
+            )
+            .await
+            .unwrap();
+        assert!(!store.is_run_complete(run_id).await.unwrap());
+
+        store
+            .append_event(
+                run_id,
+                conv_id,
+                1,
+                "error",
+                &serde_json::json!({"message": "LLM failed"}),
+            )
+            .await
+            .unwrap();
+        assert!(
+            store.is_run_complete(run_id).await.unwrap(),
+            "error event should mark run as complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn has_events_returns_true_after_append() {
+        let store = make_store().await;
+        let run_id = "run-005";
+        let conv_id = "conv-005";
+
+        assert!(!store.has_events(run_id).await.unwrap());
+
+        store
+            .append_event(
+                run_id,
+                conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+
+        assert!(store.has_events(run_id).await.unwrap());
+    }
 }
