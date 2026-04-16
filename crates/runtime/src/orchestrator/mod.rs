@@ -60,6 +60,9 @@ pub struct TurnResult {
     /// Interfaces should deliver these to the user (e.g. save to disk in the
     /// CLI, upload in Slack/Mattermost).
     pub attachments: Vec<Attachment>,
+    /// The UUID of the persisted assistant message in the database.
+    /// `None` when the message could not be saved or the ID was unavailable.
+    pub message_id: Option<Uuid>,
 }
 
 // ── Internal enums ────────────────────────────────────────────────────────────
@@ -747,6 +750,7 @@ impl Orchestrator {
                         return Ok(TurnResult {
                             answer: String::new(),
                             attachments: turn_attachments,
+                            message_id: None,
                         });
                     }
                 }
@@ -936,17 +940,21 @@ impl Orchestrator {
                 LlmResponse::FinalAnswer(text, _meta) => {
                     info!(iteration, "LLM returned final answer");
 
-                    if !text.trim().is_empty() {
+                    let saved_message_id = if !text.trim().is_empty() {
                         let assistant_msg = {
                             let mut m = Message::assistant(conversation_id, &text);
                             m.turn = base_turn + iteration as i64 + 1;
                             m
                         };
+                        let msg_id = assistant_msg.id;
                         conv_store
                             .save_message(&assistant_msg)
                             .instrument(iteration_span.clone())
                             .await?;
-                    }
+                        Some(msg_id)
+                    } else {
+                        None
+                    };
 
                     crate::conversation_indexer::spawn_index(
                         conversation_id,
@@ -957,6 +965,7 @@ impl Orchestrator {
                     return Ok(TurnResult {
                         answer: text,
                         attachments: turn_attachments,
+                        message_id: saved_message_id,
                     });
                 }
 

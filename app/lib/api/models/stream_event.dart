@@ -53,20 +53,27 @@ class ToolResultEvent extends StreamEvent {
 /// The stream is complete; contains the full, canonical reply.
 ///
 /// Corresponds to `event:done` in the SSE stream.  The JSON body is
-/// `{"role":"assistant","content":"<full text>"}`.  On receiving this event
-/// the caller should discard the accumulated buffer and persist `content`.
+/// `{"role":"assistant","content":"<full text>","message_id":"<uuid>"}`.
+/// On receiving this event the caller should discard the accumulated buffer
+/// and persist `content`.  `messageId` is the DB UUID of the saved assistant
+/// message and should be used as [ChatMessage.id] when present.
 class DoneEvent extends StreamEvent {
-  const DoneEvent({required this.role, required this.content});
+  const DoneEvent({required this.role, required this.content, this.messageId});
 
   final String role;
 
   /// The complete, server-authoritative reply text.
   final String content;
 
+  /// The UUID of the persisted assistant message in the database.
+  /// Null when the server did not include a `message_id` field (old server).
+  final String? messageId;
+
   factory DoneEvent.fromJson(Map<String, dynamic> json) {
     return DoneEvent(
       role: json['role'] as String? ?? 'assistant',
       content: json['content'] as String? ?? '',
+      messageId: json['message_id'] as String?,
     );
   }
 }
@@ -79,6 +86,22 @@ class ErrorEvent extends StreamEvent {
   const ErrorEvent(this.message);
 
   final String message;
+}
+
+/// The voice endpoint has transcribed the user's audio.
+///
+/// Corresponds to `event:transcript` in the SSE stream emitted by
+/// `POST /api/conversations/{id}/voice`.  The JSON body is
+/// `{"role":"user","content":"<transcribed text>"}`.
+class TranscriptEvent extends StreamEvent {
+  const TranscriptEvent(this.transcript);
+
+  /// The transcribed text of the user's spoken message.
+  final String transcript;
+
+  factory TranscriptEvent.fromJson(Map<String, dynamic> json) {
+    return TranscriptEvent(json['content'] as String? ?? '');
+  }
 }
 
 /// The server has produced audio for the most recent assistant response.

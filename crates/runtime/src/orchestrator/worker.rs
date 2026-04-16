@@ -273,6 +273,7 @@ impl Orchestrator {
                                 content: turn_result.answer,
                                 turn: 0,
                                 attachments: turn_result.attachments,
+                                message_id: turn_result.message_id,
                             };
 
                             // Propagate batch_id from the request so submit_turn
@@ -430,6 +431,7 @@ impl Orchestrator {
                                 content: format!("Turn failed: {e}"),
                                 turn: 0,
                                 attachments: vec![],
+                                message_id: None,
                             };
                             let mut pub_req = PublishRequest::new(
                                 topic::TURN_RESULT,
@@ -767,6 +769,7 @@ impl Orchestrator {
                 return Ok(TurnResult {
                     answer: bus_result.content,
                     attachments: bus_result.attachments,
+                    message_id: bus_result.message_id,
                 });
             }
 

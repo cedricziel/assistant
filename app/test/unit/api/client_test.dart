@@ -75,6 +75,8 @@ void main() {
             errorCount++;
           case AudioReadyEvent():
             audioReadyCount++;
+          case TranscriptEvent():
+            break;
         }
       }
 
