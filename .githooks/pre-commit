@@ -4,7 +4,6 @@ set -euo pipefail
 BOLD='\033[1m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 RESET='\033[0m'
 
 fail() {
@@ -16,16 +15,44 @@ step() {
     echo -e "${BOLD}==> $1${RESET}"
 }
 
-step "Checking formatting..."
+# ── Preflight: verify required toolchains ────────────────────────────────────
+
+step "Checking required tools..."
+command -v cargo >/dev/null 2>&1 \
+    || fail "cargo not found on PATH — install Rust: https://rustup.rs"
+command -v flutter >/dev/null 2>&1 \
+    || fail "flutter not found on PATH — install Flutter: https://docs.flutter.dev/get-started/install"
+command -v dart >/dev/null 2>&1 \
+    || fail "dart not found on PATH — install Flutter/Dart: https://docs.flutter.dev/get-started/install"
+
+# ── Rust: formatting ────────────────────────────────────────────────────────
+
+step "Checking Rust formatting..."
 cargo fmt --all -- --check \
     || fail "cargo fmt check failed — run 'make format' to fix"
+
+# ── Flutter/Dart: dart_pre_commit (format, analyze, deps, OSV) ──────────────
+
+step "Running dart_pre_commit checks..."
+(cd app && dart run dart_pre_commit) \
+    || fail "dart_pre_commit failed — fix issues above before committing"
+
+# ── Rust: clippy ─────────────────────────────────────────────────────────────
 
 step "Running clippy..."
 cargo clippy --workspace -- -D warnings \
     || fail "cargo clippy failed — fix warnings before committing"
 
+# ── Rust: unused dependencies ────────────────────────────────────────────────
+
 step "Checking for unused dependencies (machete)..."
 cargo machete --with-metadata \
     || fail "cargo machete found unused dependencies — remove them before committing"
+
+# ── Flutter: tests ───────────────────────────────────────────────────────────
+
+step "Running Flutter tests..."
+(cd app && flutter test) \
+    || fail "flutter test failed — fix failing tests before committing"
 
 echo -e "${GREEN}All pre-commit checks passed.${RESET}"

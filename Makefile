@@ -1,4 +1,4 @@
-.PHONY: all build test lint lint-signal format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal build-macos-binary build-macos-bundle
+.PHONY: all build test lint lint-signal lint-flutter format clean check install-hooks run run-mcp run-slack run-mattermost run-matrix run-nextcloud run-signal run-webui run-worker build-signal build-macos-binary build-macos-bundle test-flutter precommit
 
 all: build
 
@@ -31,6 +31,24 @@ clean:
 
 install-hooks:
 	git config core.hooksPath .githooks
+
+# ── Flutter quality checks ───────────────────────────────────────────────────
+
+# Run dart_pre_commit (format, analyze, deps, OSV scanning) on the Flutter app.
+lint-flutter:
+	cd app && dart run dart_pre_commit
+
+# Run Flutter unit and widget tests.
+test-flutter:
+	cd app && flutter test
+
+# Run all pre-commit checks manually (mirrors .githooks/pre-commit).
+precommit:
+	cargo fmt --all -- --check
+	cd app && dart run dart_pre_commit
+	cargo clippy --workspace -- -D warnings
+	cargo machete --with-metadata
+	cd app && flutter test
 
 # Run the interactive REPL (Slack/Mattermost start in background if configured)
 run:
