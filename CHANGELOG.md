@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.105](https://github.com/cedricziel/assistant/compare/v0.1.104...v0.1.105) (2026-04-16)
+
+
+### Features
+
+* **chat:** include tool call arguments and results in UI and API ([#471](https://github.com/cedricziel/assistant/issues/471)) ([b3a2b53](https://github.com/cedricziel/assistant/commit/b3a2b53ca0eab7c4f070c5c57fb7acad14824b50))
+
 ## [0.1.104](https://github.com/cedricziel/assistant/compare/v0.1.103...v0.1.104) (2026-04-16)
 
 
