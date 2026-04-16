@@ -77,6 +77,8 @@ void main() {
             audioReadyCount++;
           case TranscriptEvent():
             break;
+          case RunStartedEvent():
+            break; // not counted in this test
         }
       }
 

@@ -85,6 +85,7 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**listConversations**](doc/ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendMessage**](doc/ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**sendVoiceMessage**](doc/ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
+[*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
 [*LogsApi*](doc/LogsApi.md) | [**listLogs**](doc/LogsApi.md#listlogs) | **GET** /api/logs | &#x60;GET /api/logs&#x60; — list recent log entries, newest first.
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessage**](doc/MessagesApi.md#a2asendmessage) | **POST** /message/send | &#x60;POST /message/send&#x60; -- Sends a message to the agent (unary).
@@ -203,6 +204,7 @@ Class | Method | HTTP request | Description
  - [SkillEntryResponse](doc/SkillEntryResponse.md)
  - [SpanEntryResponse](doc/SpanEntryResponse.md)
  - [StreamResponse](doc/StreamResponse.md)
+ - [StreamRunEventsQuery](doc/StreamRunEventsQuery.md)
  - [StringList](doc/StringList.md)
  - [SubscribeRequest](doc/SubscribeRequest.md)
  - [Task](doc/Task.md)

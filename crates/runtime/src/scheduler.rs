@@ -33,6 +33,9 @@ use crate::webhook_dispatch;
 /// How often the heartbeat prompt is run (30 minutes).
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
+/// How often expired conversation events are pruned (60 minutes).
+const EVENT_PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
 /// `user_id` stamped on every bus message produced by the scheduler subsystem
 /// (both scheduled tasks and heartbeats).
 const SCHEDULER_USER_ID: &str = "scheduler";
@@ -53,6 +56,12 @@ pub fn spawn_scheduler(
         let mut last_heartbeat = Instant::now()
             .checked_sub(HEARTBEAT_INTERVAL)
             .unwrap_or_else(Instant::now);
+        let mut last_event_prune = Instant::now()
+            .checked_sub(EVENT_PRUNE_INTERVAL)
+            .unwrap_or_else(Instant::now);
+
+        // Prune once on startup.
+        prune_conversation_events(&storage).await;
 
         loop {
             tokio::time::sleep(poll_interval).await;
@@ -66,6 +75,11 @@ pub fn spawn_scheduler(
                     Ok(()) => last_heartbeat = Instant::now(),
                     Err(e) => error!("Heartbeat error: {e}"),
                 }
+            }
+
+            if last_event_prune.elapsed() >= EVENT_PRUNE_INTERVAL {
+                prune_conversation_events(&storage).await;
+                last_event_prune = Instant::now();
             }
         }
     })
@@ -369,6 +383,18 @@ pub(crate) async fn run_heartbeat(orchestrator: &Orchestrator) -> Result<()> {
     );
 
     Ok(())
+}
+
+// -- Conversation event pruning --------------------------------------------
+
+/// Delete expired conversation events. Logs the result at debug level.
+async fn prune_conversation_events(storage: &StorageLayer) {
+    let store = storage.conversation_event_store();
+    match store.prune_expired().await {
+        Ok(n) if n > 0 => info!("Pruned {n} expired conversation event(s)"),
+        Ok(_) => {}
+        Err(e) => warn!("Failed to prune conversation events: {e}"),
+    }
 }
 
 // -- Tests ------------------------------------------------------------------

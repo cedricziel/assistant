@@ -595,6 +595,68 @@ class ConversationsApi {
     return _response;
   }
 
+  /// &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
+  /// Replays stored events from &#x60;?since&#x60; (default 0), then tails live events if the run is still active.  Closes automatically when the &#x60;done&#x60; or &#x60;error&#x60; event is reached.  Returns: - &#x60;404&#x60; if no events exist for &#x60;run_id&#x60; (run never started or unknown) - &#x60;410&#x60; if the run existed but all events have been pruned (TTL elapsed)
+  ///
+  /// Parameters:
+  /// * [id] - Conversation UUID
+  /// * [runId] - Run UUID from run_started event
+  /// * [since] - Replay from this sequence number (default 0)
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future]
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<void>> streamRunEvents({ 
+    required String id,
+    required String runId,
+    int? since,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/api/conversations/{id}/runs/{run_id}/events/stream'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString()).replaceAll('{' r'run_id' '}', encodeQueryParameter(_serializers, runId, const FullType(String)).toString());
+    final _options = Options(
+      method: r'GET',
+      headers: <String, dynamic>{
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      validateStatus: validateStatus,
+    );
+
+    final _queryParameters = <String, dynamic>{
+      if (since != null) r'since': encodeQueryParameter(_serializers, since, const FullType(int)),
+    };
+
+    final _response = await _dio.request<Object>(
+      _path,
+      options: _options,
+      queryParameters: _queryParameters,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    return _response;
+  }
+
   /// &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
   /// 
   ///

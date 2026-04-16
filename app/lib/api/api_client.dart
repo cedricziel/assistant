@@ -45,8 +45,9 @@ class ApiClient {
 
   /// Stream assistant tokens for a conversation message.
   ///
-  /// Yields [TokenEvent] for each incremental chunk and a final [DoneEvent]
-  /// when the server closes the stream.
+  /// Yields [RunStartedEvent] first (from the `X-Run-Id` response header),
+  /// then yields [TokenEvent]s for each incremental chunk and a final
+  /// [DoneEvent] when the server closes the stream.
   Stream<StreamEvent> streamMessages(
     String conversationId,
     String message,
@@ -68,6 +69,43 @@ class ApiClient {
     } on DioException catch (e) {
       yield ErrorEvent(e.message ?? 'Request failed');
       return;
+    }
+
+    // Eagerly surface the run ID from the response header so callers can
+    // capture it before the first SSE event arrives.
+    final runIdHeader = response.headers.value('X-Run-Id');
+    if (runIdHeader != null) {
+      yield RunStartedEvent(runIdHeader);
+    }
+
+    yield* _parseSse(response.data!.stream);
+  }
+
+  /// Replay events for an existing orchestrator run.
+  ///
+  /// Calls `GET /api/conversations/{id}/runs/{runId}/events/stream?since={since}`
+  /// and streams the SSE response.  Throws [DioException] with status 404 if
+  /// the run is unknown or 410 if its events were pruned.
+  Stream<StreamEvent> streamEventsFrom(
+    String conversationId,
+    String runId, {
+    int since = 0,
+  }) async* {
+    final Response<ResponseBody> response;
+    try {
+      response = await _dio.get<ResponseBody>(
+        '/api/conversations/$conversationId/runs/$runId/events/stream',
+        queryParameters: {'since': since},
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {
+            'Accept': 'text/event-stream',
+            'Authorization': 'Bearer $_token',
+          },
+        ),
+      );
+    } on DioException {
+      rethrow; // 404 / 410 propagate to caller
     }
 
     yield* _parseSse(response.data!.stream);
@@ -211,6 +249,13 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           yield ToolResultEvent.fromJson(json);
         } catch (_) {
           // ignore malformed tool_result events
+        }
+      } else if (eventType == 'run_started' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield RunStartedEvent(json['run_id'] as String? ?? '');
+        } catch (_) {
+          // ignore malformed run_started events
         }
       } else if (eventType == 'done' && dataLine != null) {
         try {

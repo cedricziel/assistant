@@ -707,6 +707,65 @@
         ]
       }
     },
+    "/api/conversations/{id}/runs/{run_id}/events/stream": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`GET /api/conversations/{id}/runs/{run_id}/events/stream`",
+        "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active.  Closes automatically when the `done` or\n`error` event is reached.\n\nReturns:\n- `404` if no events exist for `run_id` (run never started or unknown)\n- `410` if the run existed but all events have been pruned (TTL elapsed)",
+        "operationId": "stream_run_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run UUID from run_started event",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Replay from this sequence number (default 0)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream of run events",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "404": {
+            "description": "Run not found"
+          },
+          "410": {
+            "description": "Run events expired"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/{id}/voice": {
       "post": {
         "tags": [
@@ -5369,6 +5428,19 @@
                 "description": "A Task object containing the current state of the task."
               }
             ]
+          }
+        }
+      },
+      "StreamRunEventsQuery": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Replay from this sequence number (inclusive). Defaults to 0."
           }
         }
       },

@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod conversation_events;
 pub mod conversations;
 pub mod logs;
 pub mod memory_chunks;
@@ -16,6 +17,9 @@ pub mod webhooks;
 pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
+pub use conversation_events::{
+    ConversationEventRow, ConversationEventStore, LiveEvent, RunBroadcaster,
+};
 pub use conversations::{ConversationRecord, ConversationStore};
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
@@ -66,8 +70,15 @@ impl StorageLayer {
     }
 
     /// Create an in-memory SQLite database (useful for tests).
+    ///
+    /// Uses `max_connections(1)` to ensure all operations share the same
+    /// connection — required for `:memory:` databases where each SQLite
+    /// connection has its own isolated in-memory store.
     pub async fn new_in_memory() -> Result<Self> {
-        let pool = SqlitePool::connect("sqlite::memory:").await?;
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
         run_migrations(&pool).await?;
         Ok(Self { pool })
     }
@@ -75,6 +86,11 @@ impl StorageLayer {
     /// Convenience: build a `TraceStore` backed by this pool.
     pub fn trace_store(&self) -> TraceStore {
         TraceStore::new(self.pool.clone())
+    }
+
+    /// Convenience: build a [`ConversationEventStore`] backed by this pool.
+    pub fn conversation_event_store(&self) -> ConversationEventStore {
+        ConversationEventStore::new(self.pool.clone())
     }
 
     /// Convenience: build a `LogStore` backed by this pool.
@@ -329,6 +345,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "032_persona_home_channel",
             include_str!("../../../migrations/032_persona_home_channel.sql"),
+        ),
+        (
+            "033_conversation_events",
+            include_str!("../../../migrations/033_conversation_events.sql"),
         ),
     ];
 

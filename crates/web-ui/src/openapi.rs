@@ -55,7 +55,8 @@ use crate::api::{
         WorkflowSummary, WorkflowUpsertRequest, WorkflowWebhookSecrets,
     },
     ConversationDetail, ConversationSummary, CreateConversationRequest, MessageSummary,
-    SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, UpdateConversationRequest,
+    SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, StreamRunEventsQuery,
+    UpdateConversationRequest,
 };
 
 /// Adds the Bearer token security scheme to the OpenAPI components.
@@ -118,6 +119,7 @@ pub struct ApiErrorResponse {
         crate::api::update_conversation,
         crate::api::send_message,
         crate::api::send_voice_message,
+        crate::api::stream_run_events,
         crate::api::get_message_audio,
         crate::api::get_audio,
         crate::api::personas::list_personas,
@@ -233,6 +235,7 @@ pub struct ApiErrorResponse {
             ServerCapabilities,
             // Conversation API types
             ConversationSummary,
+            StreamRunEventsQuery,
             ConversationDetail,
             MessageSummary,
             CreateConversationRequest,

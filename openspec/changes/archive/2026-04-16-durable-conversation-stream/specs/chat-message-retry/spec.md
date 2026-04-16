@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Failed user messages persist with a Retry affordance
 
@@ -30,28 +30,3 @@ If the failure occurred after a `run_started` event was received (i.e., a `run_i
 - **AND** the replay endpoint returns `404` or `410`
 - **THEN** the client SHALL re-send the original message text via `POST /api/conversations/{id}/messages`
 - **AND** the new run_id SHALL be stored for future reconnects
-
-### Requirement: Retrying a failed message re-sends it
-
-Tapping Retry on a failed message SHALL re-enqueue the original message text through the same `sendMessage` path when no run_id is available or the replay endpoint has expired.
-
-#### Scenario: Retry re-sends the message
-
-- **WHEN** the user taps Retry on a failed message
-- **THEN** the failed status indicator is cleared
-- **AND** the message text is sent via `sendMessage`, entering the queue or sending immediately
-
-#### Scenario: Retry respects the queue
-
-- **WHEN** the user taps Retry while another response is in-flight
-- **THEN** the retried message is added to the pending queue and drains after the current response
-
-### Requirement: Successful messages carry a confirmed status
-
-User messages that are successfully acknowledged by the server SHALL transition from `sending` to `ok` status when the corresponding `DoneEvent` is received.
-
-#### Scenario: Message marked ok after DoneEvent
-
-- **WHEN** the assistant stream for a user message completes with a `DoneEvent`
-- **THEN** the corresponding user message bubble transitions to `status == ok`
-- **AND** no error indicator is shown

@@ -73,6 +73,7 @@ doc/SkillEntryResponse.md
 doc/SkillsApi.md
 doc/SpanEntryResponse.md
 doc/StreamResponse.md
+doc/StreamRunEventsQuery.md
 doc/StringList.md
 doc/SubscribeRequest.md
 doc/Task.md
@@ -194,6 +195,7 @@ lib/src/model/skill_detail.dart
 lib/src/model/skill_entry_response.dart
 lib/src/model/span_entry_response.dart
 lib/src/model/stream_response.dart
+lib/src/model/stream_run_events_query.dart
 lib/src/model/string_list.dart
 lib/src/model/subscribe_request.dart
 lib/src/model/task.dart
@@ -225,3 +227,4 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
+test/stream_run_events_query_test.dart

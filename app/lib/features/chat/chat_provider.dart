@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
@@ -382,6 +383,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
   }
 
+  /// Run ID of the most recent (or current) orchestrator run.
+  /// Captured from the `RunStartedEvent` so we can reconnect if the stream drops.
+  String? _currentRunId;
+
+  /// Sequence number of the last event received from the current run.
+  /// Used as the `since` cursor when requesting event-log replay.
+  int _lastSeq = 0;
+
   @override
   Future<ChatState> build() async {
     return const ChatState();
@@ -560,14 +569,149 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   /// Retry a failed message.
   ///
-  /// Removes the failed [msg] from the message list and re-enqueues its
-  /// content through [sendMessage].
+  /// If a [_currentRunId] is available, attempts to reconnect via the event-log
+  /// replay endpoint before re-sending the message.  Falls back to re-sending
+  /// on 404 (unknown run) or 410 (events pruned).
   Future<void> retryMessage(ChatMessage msg) async {
+    final api = _api;
     final current = state.value ?? const ChatState();
+    final conversationId = current.conversationId;
+
+    if (api != null && _currentRunId != null && conversationId != null) {
+      // Attempt replay before re-sending.
+      final replayed = await _replayRun(
+        api,
+        conversationId,
+        msg.id,
+        _currentRunId!,
+        _lastSeq,
+      );
+      if (replayed) return;
+    }
+
+    // Fallback: remove the failed message and re-enqueue it.
     final msgs = List<ChatMessage>.from(current.messages)
       ..removeWhere((m) => m.id == msg.id);
     state = AsyncData(current.copyWith(messages: msgs));
     await sendMessage(msg.content);
+  }
+
+  /// Attempt to resume streaming via the event-log replay endpoint.
+  ///
+  /// Returns `true` if the run completed successfully via replay, `false` if
+  /// the replay endpoint returned 404/410 or another error (caller should
+  /// fall back to re-sending).
+  Future<bool> _replayRun(
+    ApiClient api,
+    String conversationId,
+    String userMsgId,
+    String runId,
+    int since,
+  ) async {
+    final current = state.value ?? const ChatState();
+
+    // Put the user message back into sending state and add streaming placeholder.
+    final msgs = List<ChatMessage>.from(current.messages);
+    final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+    if (userIdx != -1) {
+      msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.sending);
+    }
+    final placeholder = ChatMessage(
+      id: 'assistant-streaming',
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+    );
+    state = AsyncData(
+      current.copyWith(
+        messages: [...msgs, placeholder],
+        isSending: true,
+        streamingContent: '',
+      ),
+    );
+
+    try {
+      await for (final event in api.streamEventsFrom(
+        conversationId,
+        runId,
+        since: since,
+      )) {
+        if (_cancelled) break;
+        final chatState = state.value ?? const ChatState();
+
+        if (event is RunStartedEvent) {
+          _lastSeq++;
+        } else if (event is TokenEvent) {
+          _lastSeq++;
+          final newContent = chatState.streamingContent + event.token;
+          final ms = List<ChatMessage>.from(chatState.messages);
+          final idx = ms.indexWhere((m) => m.id == 'assistant-streaming');
+          if (idx != -1) ms[idx].content = newContent;
+          state = AsyncData(
+            chatState.copyWith(
+              messages: ms,
+              streamingContent: newContent,
+              clearStatusMessage: true,
+            ),
+          );
+        } else if (event is StatusEvent) {
+          _lastSeq++;
+          state = AsyncData(chatState.copyWith(statusMessage: event.message));
+        } else if (event is DoneEvent) {
+          _lastSeq++;
+          final ms = List<ChatMessage>.from(chatState.messages);
+          final uIdx = ms.indexWhere((m) => m.id == userMsgId);
+          if (uIdx != -1) {
+            ms[uIdx] = ms[uIdx].copyWith(status: MessageStatus.ok);
+          }
+          final aIdx = ms.indexWhere((m) => m.id == 'assistant-streaming');
+          if (aIdx != -1) {
+            ms[aIdx] = ChatMessage(
+              id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
+              role: 'assistant',
+              content: event.content,
+            );
+          }
+          state = AsyncData(
+            ChatState(
+              conversationId: conversationId,
+              messages: ms,
+              pendingQueue: chatState.pendingQueue,
+            ),
+          );
+          ref.read(conversationListProvider.notifier).refresh();
+          return true;
+        } else if (event is ErrorEvent) {
+          _lastSeq++;
+          return false;
+        }
+      }
+      return false;
+    } on DioException catch (e) {
+      // 404 = run not found, 410 = run expired → caller re-sends.
+      final status = e.response?.statusCode;
+      if (status == 404 || status == 410) {
+        // Restore UI to clean failed state.
+        final chatState = state.value ?? const ChatState();
+        final ms = List<ChatMessage>.from(chatState.messages)
+          ..removeWhere((m) => m.id == 'assistant-streaming');
+        final uIdx = ms.indexWhere((m) => m.id == userMsgId);
+        if (uIdx != -1) {
+          ms[uIdx] = ms[uIdx].copyWith(status: MessageStatus.failed);
+        }
+        state = AsyncData(
+          chatState.copyWith(
+            messages: ms,
+            isSending: false,
+            streamingContent: '',
+          ),
+        );
+        return false;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Pop messages from [ChatState.pendingQueue] and stream them one at a time.
@@ -758,6 +902,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (api == null) return;
 
     _cancelled = false;
+    _currentRunId = null;
+    _lastSeq = 0;
     final current = state.value ?? const ChatState();
 
     // Add user message with status=sending and assistant streaming placeholder.
@@ -789,7 +935,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (_cancelled) break;
         final chatState = state.value ?? const ChatState();
 
-        if (event is TokenEvent) {
+        if (event is RunStartedEvent) {
+          // Capture the run ID for potential reconnect; don't change UI.
+          _currentRunId = event.runId;
+          _lastSeq++;
+          continue;
+        } else if (event is TokenEvent) {
+          _lastSeq++;
           final newContent = chatState.streamingContent + event.token;
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
@@ -804,10 +956,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
         } else if (event is StatusEvent) {
+          _lastSeq++;
           _onStatusEvent(chatState, event.message);
         } else if (event is ToolResultEvent) {
+          _lastSeq++;
           _onToolResultEvent(chatState, event);
         } else if (event is DoneEvent) {
+          _lastSeq++;
           final msgs = List<ChatMessage>.from(chatState.messages);
           // Mark user message as successfully acknowledged.
           final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
@@ -848,6 +1003,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           ref.read(conversationListProvider.notifier).refresh();
           return;
         } else if (event is AudioReadyEvent) {
+          _lastSeq++;
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
@@ -858,6 +1014,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
           state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is ErrorEvent) {
+          _lastSeq++;
           final msgs = List<ChatMessage>.from(chatState.messages)
             ..removeWhere((m) => m.id == 'assistant-streaming');
           // Mark user message as failed (keep it in the list for retry).
@@ -910,6 +1067,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         );
       }
     } catch (e) {
+      // If we have a run ID, attempt replay before marking as failed.
+      if (_currentRunId != null) {
+        final replayed = await _replayRun(
+          api,
+          conversationId,
+          userMsgId,
+          _currentRunId!,
+          _lastSeq,
+        );
+        if (replayed) return;
+      }
+
       final chatState = state.value ?? const ChatState();
       final msgs = List<ChatMessage>.from(chatState.messages)
         ..removeWhere((m) => m.id == 'assistant-streaming');
