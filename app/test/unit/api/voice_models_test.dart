@@ -41,6 +41,51 @@ void main() {
     });
   });
 
+  group('TranscriptEvent', () {
+    test('stores transcript text', () {
+      const event = TranscriptEvent('Hallo Welt');
+      expect(event.transcript, equals('Hallo Welt'));
+    });
+
+    test('fromJson reads content field', () {
+      final event = TranscriptEvent.fromJson({
+        'role': 'user',
+        'content': 'Hello from voice',
+      });
+      expect(event.transcript, equals('Hello from voice'));
+    });
+
+    test('fromJson defaults missing content to empty string', () {
+      final event = TranscriptEvent.fromJson({});
+      expect(event.transcript, equals(''));
+    });
+
+    test('is a StreamEvent subtype', () {
+      const StreamEvent event = TranscriptEvent('hi');
+      expect(event, isA<TranscriptEvent>());
+    });
+  });
+
+  group('DoneEvent.messageId', () {
+    test('parses message_id when present', () {
+      final event = DoneEvent.fromJson({
+        'role': 'assistant',
+        'content': 'reply',
+        'message_id': 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      });
+      expect(event.messageId, equals('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'));
+      expect(event.content, equals('reply'));
+    });
+
+    test('messageId is null when field absent', () {
+      final event = DoneEvent.fromJson({
+        'role': 'assistant',
+        'content': 'reply',
+      });
+      expect(event.messageId, isNull);
+    });
+  });
+
   group('AudioReadyEvent', () {
     test('stores audioId', () {
       const event = AudioReadyEvent('abc-123');

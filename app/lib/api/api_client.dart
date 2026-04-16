@@ -222,6 +222,13 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
         } catch (_) {
           yield DoneEvent(role: 'assistant', content: dataLine);
         }
+      } else if (eventType == 'transcript' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield TranscriptEvent.fromJson(json);
+        } catch (_) {
+          // ignore malformed transcript events
+        }
       } else if (eventType == 'audio_ready' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;

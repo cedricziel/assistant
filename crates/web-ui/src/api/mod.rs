@@ -649,15 +649,18 @@ pub async fn send_message(
             }
         }
 
-        let reply_text = match turn_result_rx.await {
-            Ok(Ok(result)) => result.answer,
-            Ok(Err(_)) | Err(_) => full_text,
+        let (reply_text, reply_message_id) = match turn_result_rx.await {
+            Ok(Ok(result)) => (result.answer, result.message_id),
+            Ok(Err(_)) | Err(_) => (full_text, None),
         };
 
-        let done_data = serde_json::json!({
+        let mut done_data = serde_json::json!({
             "role": "assistant",
             "content": reply_text,
         });
+        if let Some(mid) = reply_message_id {
+            done_data["message_id"] = serde_json::Value::String(mid.to_string());
+        }
         let done = Event::default().event("done").data(done_data.to_string());
         let _ = sse_tx.send(Ok(done)).await;
 
@@ -909,15 +912,18 @@ pub async fn send_voice_message(
             }
         }
 
-        let reply_text = match turn_result_rx.await {
-            Ok(Ok(result)) => result.answer,
-            Ok(Err(_)) | Err(_) => full_text,
+        let (reply_text, reply_message_id) = match turn_result_rx.await {
+            Ok(Ok(result)) => (result.answer, result.message_id),
+            Ok(Err(_)) | Err(_) => (full_text, None),
         };
 
-        let done_data = serde_json::json!({
+        let mut done_data = serde_json::json!({
             "role": "assistant",
             "content": reply_text,
         });
+        if let Some(mid) = reply_message_id {
+            done_data["message_id"] = serde_json::Value::String(mid.to_string());
+        }
         let done = Event::default().event("done").data(done_data.to_string());
         let _ = sse_tx.send(Ok(done)).await;
 
@@ -1051,8 +1057,37 @@ mod tests {
     use assistant_runtime::Orchestrator;
     use assistant_storage::{ConversationStore, SkillRegistry, StorageLayer};
     use assistant_tool_executor::ToolExecutor;
+    use assistant_transcription::{
+        TranscriptionProvider, TranscriptionRequest, TranscriptionResult,
+    };
+    use async_trait::async_trait;
 
     use super::{api_router, ApiState};
+
+    // -- Stubs -----------------------------------------------------------------
+
+    /// Stub transcription provider that returns a fixed transcript.
+    struct StubTranscriptionProvider {
+        transcript: String,
+    }
+
+    #[async_trait]
+    impl TranscriptionProvider for StubTranscriptionProvider {
+        fn name(&self) -> &str {
+            "stub"
+        }
+
+        async fn transcribe(
+            &self,
+            _request: TranscriptionRequest,
+        ) -> anyhow::Result<TranscriptionResult> {
+            Ok(TranscriptionResult {
+                text: self.transcript.clone(),
+                language: None,
+                duration_secs: None,
+            })
+        }
+    }
 
     // -- Helpers ---------------------------------------------------------------
 
@@ -1456,6 +1491,117 @@ mod tests {
         assert!(
             text.contains("event:") || text.contains("data:"),
             "expected SSE framing, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_message_done_event_contains_message_id() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Hello world").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(Some("MsgId")).await.unwrap();
+        let id = conv.id;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hi"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+        // Find the done event data line (role == "assistant").
+        let done_line = text
+            .lines()
+            .find(|l| l.starts_with("data:") && l.contains("\"assistant\""))
+            .expect("expected a done data line with assistant role");
+        let data = done_line.trim_start_matches("data:").trim();
+        let json: serde_json::Value = serde_json::from_str(data).expect("valid JSON");
+        assert_eq!(json["role"], "assistant", "done role should be assistant");
+        assert!(
+            json.get("message_id").and_then(|v| v.as_str()).is_some(),
+            "done event should contain message_id, got: {json}"
+        );
+        // message_id must be a valid UUID.
+        let mid = json["message_id"].as_str().unwrap();
+        assert!(
+            uuid::Uuid::parse_str(mid).is_ok(),
+            "message_id should be a valid UUID, got: {mid}"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_voice_message_done_event_contains_message_id() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Voice reply").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.create_conversation(Some("VoiceMsgId")).await.unwrap();
+
+        // Wire up the stub transcription provider.
+        let state = ApiState {
+            transcription_provider: Some(Arc::new(StubTranscriptionProvider {
+                transcript: "hello from voice".to_string(),
+            })),
+            ..state
+        };
+
+        let boundary = "testboundary";
+        let body_str = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.webm\"\r\nContent-Type: audio/webm\r\n\r\nfakeaudio\r\n--{boundary}--\r\n",
+        );
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{}/voice", conv.id))
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body_str))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+
+        // The stream should contain a transcript event with the stub text.
+        assert!(
+            text.contains("transcript"),
+            "expected transcript event in SSE stream, got: {text}"
+        );
+
+        // Find the done event data line (role == "assistant").
+        let done_line = text
+            .lines()
+            .find(|l| l.starts_with("data:") && l.contains("\"assistant\""))
+            .expect("expected a done data line with assistant role");
+        let data = done_line.trim_start_matches("data:").trim();
+        let json: serde_json::Value = serde_json::from_str(data).expect("valid JSON");
+        assert_eq!(json["role"], "assistant");
+        assert!(
+            json.get("message_id").and_then(|v| v.as_str()).is_some(),
+            "voice done event should contain message_id, got: {json}"
+        );
+        let mid = json["message_id"].as_str().unwrap();
+        assert!(
+            uuid::Uuid::parse_str(mid).is_ok(),
+            "message_id should be a valid UUID, got: {mid}"
         );
     }
 

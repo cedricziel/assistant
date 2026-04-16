@@ -619,7 +619,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (_cancelled) break;
         final chatState = state.value ?? const ChatState();
 
-        if (event is TokenEvent) {
+        if (event is TranscriptEvent) {
+          // Update the user bubble with the actual spoken text.
+          final msgs = List<ChatMessage>.from(chatState.messages);
+          final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+          if (userIdx != -1) {
+            msgs[userIdx] = msgs[userIdx].copyWith(
+              content: event.transcript,
+              status: MessageStatus.ok,
+            );
+          }
+          state = AsyncData(chatState.copyWith(messages: msgs));
+        } else if (event is TokenEvent) {
           final newContent = chatState.streamingContent + event.token;
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
@@ -645,20 +656,19 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is DoneEvent) {
           final msgs = List<ChatMessage>.from(chatState.messages);
+          // User bubble is already correct from TranscriptEvent; just ensure ok status.
           final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
           if (userIdx != -1) {
-            msgs[userIdx] = msgs[userIdx].copyWith(
-              content: event.content.isNotEmpty
-                  ? '[Voice] ${event.content}'
-                  : '🎤 Voice message',
-              status: MessageStatus.ok,
-            );
+            msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.ok);
           }
           // Preserve tool call records and audio id on the final message.
+          final assistantId =
+              event.messageId ??
+              'assistant-${DateTime.now().millisecondsSinceEpoch}';
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
             msgs[idx] = ChatMessage(
-              id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
+              id: assistantId,
               role: 'assistant',
               content: event.content,
               audioId: msgs[idx].audioId,
@@ -777,10 +787,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
           // Replace streaming placeholder with final assistant message,
           // preserving audio id and accumulated tool call records.
+          final assistantId =
+              event.messageId ??
+              'assistant-${DateTime.now().millisecondsSinceEpoch}';
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
             msgs[idx] = ChatMessage(
-              id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
+              id: assistantId,
               role: 'assistant',
               content: event.content,
               audioId: msgs[idx].audioId,

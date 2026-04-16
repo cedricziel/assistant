@@ -90,6 +90,9 @@ pub struct TurnResult {
     /// File attachments collected from tool outputs during the turn.
     #[serde(default)]
     pub attachments: Vec<crate::Attachment>,
+    /// The UUID of the persisted assistant message in the database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<Uuid>,
 }
 
 /// A status update emitted during turn processing.
@@ -267,11 +270,46 @@ mod tests {
             content: "the answer is 42".into(),
             turn: 3,
             attachments: vec![],
+            message_id: None,
         };
         let json = serde_json::to_value(&res).unwrap();
         let back: TurnResult = serde_json::from_value(json).unwrap();
         assert_eq!(back.content, res.content);
         assert_eq!(back.turn, res.turn);
+        assert!(back.message_id.is_none());
+    }
+
+    #[test]
+    fn turn_result_message_id_roundtrips_json() {
+        let mid = Uuid::new_v4();
+        let res = TurnResult {
+            conversation_id: Uuid::new_v4(),
+            content: "with id".into(),
+            turn: 1,
+            attachments: vec![],
+            message_id: Some(mid),
+        };
+        let json = serde_json::to_value(&res).unwrap();
+        // message_id should be present in the serialised form.
+        assert_eq!(
+            json["message_id"].as_str(),
+            Some(mid.to_string().as_str()),
+            "message_id should serialise to its UUID string"
+        );
+        let back: TurnResult = serde_json::from_value(json).unwrap();
+        assert_eq!(back.message_id, Some(mid));
+    }
+
+    #[test]
+    fn turn_result_message_id_absent_deserialises_as_none() {
+        // A payload from an older server that omits message_id should still parse.
+        let json = serde_json::json!({
+            "conversation_id": Uuid::new_v4().to_string(),
+            "content": "old server",
+            "turn": 0,
+        });
+        let res: TurnResult = serde_json::from_value(json).unwrap();
+        assert!(res.message_id.is_none());
     }
 
     #[test]
