@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
@@ -178,6 +179,7 @@ class ChatMessage {
     this.status = MessageStatus.ok,
     this.audioId,
     this.ttsAvailable = false,
+    this.tokenStream,
     List<ToolCallRecord>? toolCalls,
   }) : toolCalls = toolCalls ?? [];
 
@@ -200,6 +202,10 @@ class ChatMessage {
   /// Populated during streaming from [StatusEvent] and [ToolResultEvent].
   List<ToolCallRecord> toolCalls;
 
+  /// Live stream of token chunks during streaming. Used by [StreamMarkdown]
+  /// for throttled incremental rendering. Null for non-streaming messages.
+  Stream<String>? tokenStream;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -210,6 +216,8 @@ class ChatMessage {
     String? audioId,
     bool? ttsAvailable,
     List<ToolCallRecord>? toolCalls,
+    Stream<String>? tokenStream,
+    bool clearTokenStream = false,
   }) {
     return ChatMessage(
       id: id,
@@ -220,6 +228,7 @@ class ChatMessage {
       audioId: audioId ?? this.audioId,
       ttsAvailable: ttsAvailable ?? this.ttsAvailable,
       toolCalls: toolCalls ?? this.toolCalls,
+      tokenStream: clearTokenStream ? null : (tokenStream ?? this.tokenStream),
     );
   }
 }
@@ -783,6 +792,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     _cancelled = false;
     final current = state.value ?? const ChatState();
 
+    // Create a broadcast stream controller for token-by-token rendering.
+    final tokenController = StreamController<String>.broadcast();
+
     // Show a placeholder user message while transcribing.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
     final userMsg = ChatMessage(
@@ -796,6 +808,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       role: 'assistant',
       content: '',
       isStreaming: true,
+      tokenStream: tokenController.stream,
     );
     state = AsyncData(
       current.copyWith(
@@ -826,6 +839,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
           state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is TokenEvent) {
+          tokenController.add(event.token);
           final newContent = chatState.streamingContent + event.token;
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
@@ -853,6 +867,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
           state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is DoneEvent) {
+          unawaited(tokenController.close());
           final msgs = List<ChatMessage>.from(chatState.messages);
           // User bubble is already correct from TranscriptEvent; just ensure ok status.
           final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
@@ -891,6 +906,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           ref.read(conversationListProvider.notifier).refresh();
           return;
         } else if (event is ErrorEvent) {
+          unawaited(tokenController.close());
           final msgs = List<ChatMessage>.from(chatState.messages)
             ..removeWhere((m) => m.id == 'assistant-streaming');
           final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
@@ -911,6 +927,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         }
       }
     } catch (e) {
+      unawaited(tokenController.close());
       final chatState = state.value ?? const ChatState();
       final msgs = List<ChatMessage>.from(chatState.messages)
         ..removeWhere((m) => m.id == 'assistant-streaming');
@@ -939,6 +956,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     _lastSeq = 0;
     final current = state.value ?? const ChatState();
 
+    // Create a broadcast stream controller for token-by-token rendering.
+    final tokenController = StreamController<String>.broadcast();
+
     // Add user message with status=sending and assistant streaming placeholder.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
     final userMsg = ChatMessage(
@@ -952,6 +972,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       role: 'assistant',
       content: '',
       isStreaming: true,
+      tokenStream: tokenController.stream,
     );
 
     state = AsyncData(
@@ -975,6 +996,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           continue;
         } else if (event is TokenEvent) {
           _lastSeq++;
+          tokenController.add(event.token);
           final newContent = chatState.streamingContent + event.token;
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
@@ -996,6 +1018,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _onToolResultEvent(chatState, event);
         } else if (event is DoneEvent) {
           _lastSeq++;
+          unawaited(tokenController.close());
           final msgs = List<ChatMessage>.from(chatState.messages);
           // Mark user message as successfully acknowledged.
           final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
@@ -1048,6 +1071,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is ErrorEvent) {
           _lastSeq++;
+          unawaited(tokenController.close());
           final msgs = List<ChatMessage>.from(chatState.messages)
             ..removeWhere((m) => m.id == 'assistant-streaming');
           // Mark user message as failed (keep it in the list for retry).
@@ -1069,7 +1093,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         }
       }
 
-      // Stream ended without DoneEvent — treat accumulated buffer as final.
+      // Stream ended without DoneEvent — close token controller and treat
+      // accumulated buffer as final.
+      unawaited(tokenController.close());
       final finalState = state.value ?? const ChatState();
       if (finalState.isSending) {
         final msgs = List<ChatMessage>.from(finalState.messages);
@@ -1102,6 +1128,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         );
       }
     } catch (e) {
+      unawaited(tokenController.close());
       // If we have a run ID, attempt replay before marking as failed.
       if (_currentRunId != null) {
         final replayed = await _replayRun(
