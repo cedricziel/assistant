@@ -22,6 +22,9 @@ make check            # cargo check --workspace  (fast, no codegen)
 make test             # cargo test --workspace
 make lint             # cargo clippy --workspace -- -D warnings
 make format           # cargo fmt --all
+make lint-flutter     # dart_pre_commit (format, analyze, deps, OSV)
+make test-flutter     # flutter test
+make precommit        # run all pre-commit checks manually
 make test-integration # cargo test -p assistant-integration-tests --test smoke -- --ignored --nocapture
 ```
 
@@ -35,7 +38,8 @@ cargo test -p assistant-tool-executor test_name -- --nocapture
 Run targets: `make run` (orchestrator), `make run-mcp` (MCP stdio), `make run-slack`, `make run-mattermost`, `make run-matrix`, `make run-nextcloud`, `make run-signal`, `make run-webui`, `make run-worker`.
 
 **Always run `make lint` and `make format` before committing.** Pre-commit hooks
-enforce `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo machete --with-metadata`.
+enforce `cargo fmt --check`, `cargo clippy -D warnings`, `cargo machete --with-metadata`,
+`dart_pre_commit` (format, analyze, deps, OSV), and `flutter test`.
 Install hooks after cloning: `make install-hooks`.
 
 **Note:** `cargo check --all-features` may require `protoc` (protobuf compiler) for certain features.
