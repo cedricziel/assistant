@@ -6,8 +6,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
-import '../../api/capabilities_provider.dart';
-import '../../api/models/server_capabilities.dart';
 import '../../api/models/stream_event.dart';
 import '../connection/connection_provider.dart';
 
@@ -929,18 +927,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
             final placeholder = msgs[idx];
-            final caps =
-                ref.read(capabilitiesProvider).value ??
-                ServerCapabilities.disabled;
-            final ttsAvail =
-                placeholder.ttsAvailable ||
-                (caps.voiceReceive && event.content.isNotEmpty);
             msgs[idx] = ChatMessage(
               id: assistantId,
               role: 'assistant',
               content: event.content,
               audioId: placeholder.audioId,
-              ttsAvailable: ttsAvail,
+              ttsAvailable: placeholder.ttsAvailable,
               toolCalls: placeholder.toolCalls,
             );
           }
@@ -1089,18 +1081,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
             final placeholder = msgs[idx];
-            final caps =
-                ref.read(capabilitiesProvider).value ??
-                ServerCapabilities.disabled;
-            final ttsAvail =
-                placeholder.ttsAvailable ||
-                (caps.voiceReceive && event.content.isNotEmpty);
             msgs[idx] = ChatMessage(
               id: assistantId,
               role: 'assistant',
               content: event.content,
               audioId: placeholder.audioId,
-              ttsAvailable: ttsAvail,
+              ttsAvailable: placeholder.ttsAvailable,
               toolCalls: placeholder.toolCalls,
             );
           }

@@ -64,7 +64,7 @@ impl TtsProvider for DeepgramTtsProvider {
         let resp = self
             .client
             .post(&url)
-            .bearer_auth(&self.api_key)
+            .header("Authorization", format!("Token {}", self.api_key))
             .json(&body)
             .send()
             .await
@@ -93,7 +93,7 @@ impl TtsProvider for DeepgramTtsProvider {
 
 #[cfg(test)]
 mod tests {
-    use wiremock::matchers::{header_exists, method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -111,7 +111,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/speak"))
-            .and(header_exists("authorization"))
+            .and(header("authorization", "Token test-key"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_bytes(fake_audio.clone())
