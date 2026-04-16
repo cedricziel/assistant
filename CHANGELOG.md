@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.109](https://github.com/cedricziel/assistant/compare/v0.1.108...v0.1.109) (2026-04-16)
+
+
+### Bug Fixes
+
+* **hooks:** use flutter pub run for dart_pre_commit ([#483](https://github.com/cedricziel/assistant/issues/483)) ([14730ff](https://github.com/cedricziel/assistant/commit/14730ffd4ab907c2eb40a6db676b942519a565be))
+* **macos:** add file picker entitlement for sandboxed app ([#481](https://github.com/cedricziel/assistant/issues/481)) ([99b8cc8](https://github.com/cedricziel/assistant/commit/99b8cc8c5f6ee1e6ffc0041e4e247887cc001493))
+
 ## [0.1.108](https://github.com/cedricziel/assistant/compare/v0.1.107...v0.1.108) (2026-04-16)
 
 
