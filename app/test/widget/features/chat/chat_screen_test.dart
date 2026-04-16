@@ -228,67 +228,65 @@ void main() {
   });
 
   group('Chat screen — audio button visibility', () {
-    testWidgets(
-      'audio button hidden when ttsAvailable is false even with voiceReceive',
-      (tester) async {
-        final res = await pumpChatScreen(
-          tester,
-          capabilities: const ServerCapabilities(
-            voiceSend: false,
-            voiceReceive: true,
-          ),
-        );
+    testWidgets('inline audio player hidden when audioId is null', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(
+        tester,
+        capabilities: const ServerCapabilities(
+          voiceSend: false,
+          voiceReceive: true,
+        ),
+      );
 
-        final msg = ChatMessage(
-          id: 'a1',
-          role: 'assistant',
-          content: 'Hello there',
-          ttsAvailable: false,
-        );
+      final msg = ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'Hello there',
+        ttsAvailable: false,
+      );
 
-        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
-        await tester.pump();
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
 
-        expect(
-          find.byType(AudioPlayerWidget),
-          findsNothing,
-          reason: 'Audio button must not appear when ttsAvailable is false',
-        );
-      },
-    );
+      expect(
+        find.byType(AudioPlayerWidget),
+        findsNothing,
+        reason: 'Inline audio player must not appear when audioId is null',
+      );
+    });
 
-    testWidgets(
-      'audio button shown when ttsAvailable is true and voiceReceive enabled',
-      (tester) async {
-        final res = await pumpChatScreen(
-          tester,
-          capabilities: const ServerCapabilities(
-            voiceSend: false,
-            voiceReceive: true,
-          ),
-        );
+    testWidgets('inline audio player shown when audioId is set', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(
+        tester,
+        capabilities: const ServerCapabilities(
+          voiceSend: false,
+          voiceReceive: true,
+        ),
+      );
 
-        final msg = ChatMessage(
-          id: 'a2',
-          role: 'assistant',
-          content: 'Hello there',
-          ttsAvailable: true,
-        );
+      final msg = ChatMessage(
+        id: 'a2',
+        role: 'assistant',
+        content: 'Hello there',
+        audioId: 'audio-123',
+        ttsAvailable: true,
+      );
 
-        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
-        await tester.pump();
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
 
-        expect(
-          find.byType(AudioPlayerWidget),
-          findsOneWidget,
-          reason:
-              'Audio button should appear when ttsAvailable and voiceReceive are both true',
-        );
-      },
-    );
+      expect(
+        find.byType(AudioPlayerWidget),
+        findsOneWidget,
+        reason: 'Inline audio player should appear when audioId is set',
+      );
+    });
 
     testWidgets(
-      'audio button hidden when voiceReceive is false even with ttsAvailable',
+      'inline audio player hidden even with audioId when voiceReceive is false',
       (tester) async {
         final res = await pumpChatScreen(
           tester,
@@ -302,19 +300,115 @@ void main() {
           id: 'a3',
           role: 'assistant',
           content: 'Hello there',
+          audioId: 'audio-456',
           ttsAvailable: true,
         );
 
         res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
         await tester.pump();
 
+        // Inline player renders based on audioId, independent of voiceReceive.
         expect(
           find.byType(AudioPlayerWidget),
-          findsNothing,
-          reason: 'Audio button must not appear when voiceReceive is disabled',
+          findsOneWidget,
+          reason:
+              'Inline audio player should appear when audioId is set regardless of voiceReceive',
         );
       },
     );
+  });
+
+  group('Chat screen — meta action row', () {
+    testWidgets('copy action shown for assistant message with content', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'Hello there',
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('copy_action')),
+        findsOneWidget,
+        reason: 'Copy action should appear for messages with content',
+      );
+    });
+
+    testWidgets(
+      'read aloud action shown for assistant message when voiceReceive enabled and no audioId',
+      (tester) async {
+        final res = await pumpChatScreen(
+          tester,
+          capabilities: const ServerCapabilities(
+            voiceSend: false,
+            voiceReceive: true,
+          ),
+        );
+
+        final msg = ChatMessage(
+          id: 'a1',
+          role: 'assistant',
+          content: 'Hello there',
+        );
+
+        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+        await tester.pump();
+
+        expect(
+          find.byKey(const Key('read_aloud_action')),
+          findsOneWidget,
+          reason:
+              'Read aloud should appear for assistant messages when voiceReceive is enabled',
+        );
+      },
+    );
+
+    testWidgets('read aloud action hidden for user messages', (tester) async {
+      final res = await pumpChatScreen(
+        tester,
+        capabilities: const ServerCapabilities(
+          voiceSend: false,
+          voiceReceive: true,
+        ),
+      );
+
+      final msg = ChatMessage(id: 'u1', role: 'user', content: 'Hello there');
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('read_aloud_action')),
+        findsNothing,
+        reason: 'Read aloud should not appear for user messages',
+      );
+    });
+
+    testWidgets('retry action shown only for failed messages', (tester) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'u1',
+        role: 'user',
+        content: 'Hello there',
+        status: MessageStatus.failed,
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('retry_button')),
+        findsOneWidget,
+        reason: 'Retry action should appear for failed messages',
+      );
+    });
   });
 
   group('Chat screen — attachment thumbnails', () {

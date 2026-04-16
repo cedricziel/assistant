@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -420,6 +423,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                                 .read(chatProvider.notifier)
                                                 .retryMessage(msg)
                                           : null,
+                                      onStop: () => ref
+                                          .read(chatProvider.notifier)
+                                          .cancelStream(),
                                       fetchMessageAudio: () {
                                         final api = ref.read(apiClientProvider);
                                         final audioId = msg.audioId;
@@ -427,6 +433,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                           return api?.fetchAudio(audioId) ??
                                               Future.value(null);
                                         }
+                                        // On-demand TTS synthesis.
                                         return api?.fetchMessageAudio(msg.id) ??
                                             Future.value(null);
                                       },
@@ -502,6 +509,7 @@ class _MessageBubble extends StatelessWidget {
     required this.fetchMessageAudio,
     this.isGrouped = false,
     this.onRetry,
+    this.onStop,
     this.imageBaseUrl,
     this.imageAuthToken,
   });
@@ -509,6 +517,7 @@ class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
   final bool isGrouped;
   final VoidCallback? onRetry;
+  final VoidCallback? onStop;
   final ServerCapabilities capabilities;
   final Future<Uint8List?> Function() fetchMessageAudio;
   final String? imageBaseUrl;
@@ -651,11 +660,9 @@ class _MessageBubble extends StatelessWidget {
                       // Attachment thumbnails (assistant-produced images).
                       if (message.attachments.isNotEmpty)
                         _attachmentThumbnails(context),
-                      // Play button for assistant messages. Shows whenever
-                      // voice is enabled — fetches on-demand if no audioId.
-                      if (capabilities.voiceReceive &&
-                          message.ttsAvailable &&
-                          !message.isStreaming)
+                      // Inline audio player for messages with real audio
+                      // (agent intentionally produced voice via AudioReadyEvent).
+                      if (message.audioId != null && !message.isStreaming)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: AudioPlayerWidget(
@@ -665,27 +672,14 @@ class _MessageBubble extends StatelessWidget {
                     ],
                   ),
           ),
-          // Retry button shown below the bubble for failed user messages.
-          if (isFailed && onRetry != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: TextButton.icon(
-                key: const Key('retry_button'),
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh, size: 14),
-                label: const Text('Retry'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  textStyle: const TextStyle(fontSize: 12),
-                ),
-              ),
-            ),
+          // Meta action row below the bubble.
+          _MetaActionRow(
+            message: message,
+            capabilities: capabilities,
+            fetchMessageAudio: fetchMessageAudio,
+            onRetry: onRetry,
+            onStop: onStop,
+          ),
         ],
       ),
     );
@@ -807,6 +801,290 @@ class _MessageBubble extends StatelessWidget {
           _Dot(delay: Duration(milliseconds: 300)),
         ],
       ),
+    );
+  }
+}
+
+// -- Meta action row ---------------------------------------------------------
+
+/// Contextual action row rendered below each message bubble.
+///
+/// Shows actions like Copy, Read aloud, Retry, and Stop depending on
+/// the message type and state.
+class _MetaActionRow extends StatelessWidget {
+  const _MetaActionRow({
+    required this.message,
+    required this.capabilities,
+    required this.fetchMessageAudio,
+    this.onRetry,
+    this.onStop,
+  });
+
+  final ChatMessage message;
+  final ServerCapabilities capabilities;
+  final Future<Uint8List?> Function() fetchMessageAudio;
+  final VoidCallback? onRetry;
+  final VoidCallback? onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final isUser = message.isUser;
+    final isFailed = message.status == MessageStatus.failed;
+    final colorScheme = Theme.of(context).colorScheme;
+    final mutedColor = colorScheme.onSurface.withValues(alpha: 0.6);
+
+    if (message.isStreaming) {
+      if (onStop == null) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: _MetaActionButton(
+          key: const Key('stop_action'),
+          icon: Icons.stop_rounded,
+          label: 'Stop',
+          color: mutedColor,
+          onTap: onStop!,
+        ),
+      );
+    }
+
+    final actions = <Widget>[];
+
+    // Read aloud: assistant messages without real audio, when TTS is available.
+    if (!isUser &&
+        capabilities.voiceReceive &&
+        message.audioId == null &&
+        message.content.isNotEmpty) {
+      actions.add(
+        _ReadAloudAction(
+          key: const Key('read_aloud_action'),
+          fetchAudio: fetchMessageAudio,
+          color: mutedColor,
+        ),
+      );
+    }
+
+    // Copy: all messages with content.
+    if (message.content.isNotEmpty) {
+      actions.add(
+        _MetaActionButton(
+          key: const Key('copy_action'),
+          icon: Icons.copy_outlined,
+          label: 'Copy',
+          color: mutedColor,
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: message.content));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Copied to clipboard'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    // Retry: failed messages only.
+    if (isFailed && onRetry != null) {
+      actions.add(
+        _MetaActionButton(
+          key: const Key('retry_button'),
+          icon: Icons.refresh,
+          label: 'Retry',
+          color: Colors.red.shade700,
+          onTap: onRetry!,
+        ),
+      );
+    }
+
+    if (actions.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        mainAxisAlignment: isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < actions.length; i++) ...[
+            if (i > 0) const SizedBox(width: 16),
+            actions[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A small icon + label button used in the meta action row.
+class _MetaActionButton extends StatelessWidget {
+  const _MetaActionButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(fontSize: 12, color: color)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -- Read aloud action -------------------------------------------------------
+
+/// State for the read-aloud TTS action.
+enum _ReadAloudState { idle, loading, playing, error }
+
+/// Stateful meta action that fetches on-demand TTS and plays it back.
+class _ReadAloudAction extends StatefulWidget {
+  const _ReadAloudAction({
+    super.key,
+    required this.fetchAudio,
+    required this.color,
+  });
+
+  final Future<Uint8List?> Function() fetchAudio;
+  final Color color;
+
+  @override
+  State<_ReadAloudAction> createState() => _ReadAloudActionState();
+}
+
+class _ReadAloudActionState extends State<_ReadAloudAction> {
+  final _player = AudioPlayer();
+  _ReadAloudState _state = _ReadAloudState.idle;
+  Uint8List? _cachedBytes;
+  Timer? _errorTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _player.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _state = _ReadAloudState.idle);
+    });
+  }
+
+  @override
+  void dispose() {
+    _errorTimer?.cancel();
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _toggle() async {
+    switch (_state) {
+      case _ReadAloudState.playing:
+        await _player.stop();
+        setState(() => _state = _ReadAloudState.idle);
+      case _ReadAloudState.idle:
+      case _ReadAloudState.error:
+        setState(() => _state = _ReadAloudState.loading);
+        try {
+          _cachedBytes ??= await widget.fetchAudio();
+          final bytes = _cachedBytes;
+          if (bytes == null || !mounted) {
+            _showError();
+            return;
+          }
+          await _player.play(BytesSource(bytes));
+          if (mounted) setState(() => _state = _ReadAloudState.playing);
+        } catch (_) {
+          _showError();
+        }
+      case _ReadAloudState.loading:
+        break; // ignore taps while loading
+    }
+  }
+
+  void _showError() {
+    if (!mounted) return;
+    setState(() => _state = _ReadAloudState.error);
+    _errorTimer?.cancel();
+    _errorTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _state = _ReadAloudState.idle);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final errorColor = Theme.of(context).colorScheme.error;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        switch (_state) {
+          _ReadAloudState.idle => _MetaActionButton(
+            icon: Icons.volume_up_outlined,
+            label: 'Read aloud',
+            color: widget.color,
+            onTap: _toggle,
+          ),
+          _ReadAloudState.loading => Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: widget.color,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Loading\u2026',
+                  style: TextStyle(fontSize: 12, color: widget.color),
+                ),
+              ],
+            ),
+          ),
+          _ReadAloudState.playing => _MetaActionButton(
+            icon: Icons.stop_rounded,
+            label: 'Stop reading',
+            color: widget.color,
+            onTap: _toggle,
+          ),
+          _ReadAloudState.error => _MetaActionButton(
+            icon: Icons.volume_up_outlined,
+            label: 'Read aloud',
+            color: widget.color,
+            onTap: _toggle,
+          ),
+        },
+        if (_state == _ReadAloudState.error)
+          Padding(
+            padding: const EdgeInsets.only(top: 2, left: 4),
+            child: Text(
+              'Could not generate audio',
+              style: TextStyle(fontSize: 11, color: errorColor),
+            ),
+          ),
+      ],
     );
   }
 }
