@@ -96,7 +96,7 @@ async fn first_turn_sends_only_current_message() {
     let (orch, _) = build(&server.uri()).await;
     let conv_id = Uuid::new_v4();
 
-    orch.run_turn("hello", conv_id, Interface::Cli, None)
+    orch.run_turn("hello", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -118,10 +118,10 @@ async fn second_turn_includes_prior_history() {
     let (orch, _) = build(&server.uri()).await;
     let conv_id = Uuid::new_v4();
 
-    orch.run_turn("first message", conv_id, Interface::Cli, None)
+    orch.run_turn("first message", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
-    orch.run_turn("second message", conv_id, Interface::Cli, None)
+    orch.run_turn("second message", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -147,10 +147,10 @@ async fn current_message_not_duplicated() {
     let (orch, _) = build(&server.uri()).await;
     let conv_id = Uuid::new_v4();
 
-    orch.run_turn("turn one", conv_id, Interface::Cli, None)
+    orch.run_turn("turn one", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
-    orch.run_turn("turn two", conv_id, Interface::Cli, None)
+    orch.run_turn("turn two", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -189,7 +189,7 @@ async fn seeded_history_included_in_llm_call() {
     seed_bot.turn = 1;
     conv_store.save_message(&seed_bot).await.unwrap();
 
-    orch.run_turn("follow-up", conv_id, Interface::Slack, None)
+    orch.run_turn("follow-up", conv_id, Interface::Slack, None, vec![])
         .await
         .unwrap();
 
@@ -214,13 +214,13 @@ async fn three_turns_accumulate_history() {
     let (orch, _) = build(&server.uri()).await;
     let conv_id = Uuid::new_v4();
 
-    orch.run_turn("turn 1", conv_id, Interface::Cli, None)
+    orch.run_turn("turn 1", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
-    orch.run_turn("turn 2", conv_id, Interface::Cli, None)
+    orch.run_turn("turn 2", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
-    orch.run_turn("turn 3", conv_id, Interface::Cli, None)
+    orch.run_turn("turn 3", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -245,10 +245,10 @@ async fn different_conversations_are_isolated() {
     let conv_a = Uuid::new_v4();
     let conv_b = Uuid::new_v4();
 
-    orch.run_turn("conv-a message", conv_a, Interface::Cli, None)
+    orch.run_turn("conv-a message", conv_a, Interface::Cli, None, vec![])
         .await
         .unwrap();
-    orch.run_turn("conv-b message", conv_b, Interface::Cli, None)
+    orch.run_turn("conv-b message", conv_b, Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -300,7 +300,7 @@ async fn single_tool_call_adds_observation_to_next_request() {
 
     let (orch, _) = build(&server.uri()).await;
     let result = orch
-        .run_turn("go", Uuid::new_v4(), Interface::Cli, None)
+        .run_turn("go", Uuid::new_v4(), Interface::Cli, None, vec![])
         .await
         .unwrap();
     assert_eq!(result.answer, "done");
@@ -342,7 +342,7 @@ async fn two_tool_calls_handled_in_single_iteration() {
         .await;
 
     let (orch, _) = build(&server.uri()).await;
-    orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None)
+    orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -375,7 +375,7 @@ async fn two_tool_calls_both_observations_sent_to_llm() {
         .await;
 
     let (orch, _) = build(&server.uri()).await;
-    orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None)
+    orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -422,7 +422,7 @@ async fn three_tool_calls_handled_in_single_iteration() {
         .await;
 
     let (orch, _) = build(&server.uri()).await;
-    orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None)
+    orch.run_turn("go", Uuid::new_v4(), Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -587,6 +587,7 @@ async fn end_turn_rejected_when_reply_tool_exists_but_not_called() {
         vec![reply_handler.clone() as Arc<dyn ToolHandler>],
         None,
         vec![],
+        vec![],
     )
     .await
     .unwrap();
@@ -638,9 +639,17 @@ async fn end_turn_accepted_without_reply_tool_in_cli_mode() {
     let (orch, _) = build(&server.uri()).await;
 
     // No extension tools — CLI mode, end_turn should be accepted.
-    orch.run_turn_with_tools("hi", Uuid::new_v4(), Interface::Cli, vec![], None, vec![])
-        .await
-        .unwrap();
+    orch.run_turn_with_tools(
+        "hi",
+        Uuid::new_v4(),
+        Interface::Cli,
+        vec![],
+        None,
+        vec![],
+        vec![],
+    )
+    .await
+    .unwrap();
 
     let reqs = server.received_requests().await.unwrap();
     assert_eq!(
@@ -675,6 +684,7 @@ async fn end_turn_accepted_after_reply_tool_called() {
         Interface::Slack,
         vec![reply_handler.clone() as Arc<dyn ToolHandler>],
         None,
+        vec![],
         vec![],
     )
     .await
@@ -719,6 +729,7 @@ async fn end_turn_accepted_after_react_tool_called() {
             react_handler.clone() as Arc<dyn ToolHandler>,
         ],
         None,
+        vec![],
         vec![],
     )
     .await
@@ -782,6 +793,7 @@ async fn empty_final_answer_not_persisted_and_retries() {
         Interface::Slack,
         vec![reply_handler.clone() as Arc<dyn ToolHandler>],
         None,
+        vec![],
         vec![],
     )
     .await
@@ -850,7 +862,7 @@ async fn empty_final_answer_not_persisted_in_run_turn() {
     let conv_id = Uuid::new_v4();
 
     let result = orch
-        .run_turn("hello", conv_id, Interface::Cli, None)
+        .run_turn("hello", conv_id, Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -1074,7 +1086,7 @@ async fn run_turn_collects_attachments_from_tool_output() {
     ])));
 
     let result = orch
-        .run_turn("make a chart", Uuid::new_v4(), Interface::Cli, None)
+        .run_turn("make a chart", Uuid::new_v4(), Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -1117,7 +1129,7 @@ async fn run_turn_collects_multiple_attachments_across_tool_calls() {
     ])));
 
     let result = orch
-        .run_turn("go", Uuid::new_v4(), Interface::Cli, None)
+        .run_turn("go", Uuid::new_v4(), Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -1138,7 +1150,7 @@ async fn run_turn_no_attachments_when_tools_return_none() {
     let (orch, _, _) = build_with_executor(&server.uri()).await;
 
     let result = orch
-        .run_turn("hello", Uuid::new_v4(), Interface::Cli, None)
+        .run_turn("hello", Uuid::new_v4(), Interface::Cli, None, vec![])
         .await
         .unwrap();
 
@@ -1180,7 +1192,14 @@ async fn run_turn_streaming_collects_attachments() {
     tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
     let result = orch
-        .run_turn_streaming("generate report", Uuid::new_v4(), Interface::Cli, tx, None)
+        .run_turn_streaming(
+            "generate report",
+            Uuid::new_v4(),
+            Interface::Cli,
+            tx,
+            None,
+            vec![],
+        )
         .await
         .unwrap();
 
@@ -1248,6 +1267,7 @@ async fn run_turn_with_tools_collects_attachments_from_extension() {
             reply_handler.clone() as Arc<dyn ToolHandler>,
         ],
         None,
+        vec![],
         vec![],
     )
     .await
@@ -1705,7 +1725,13 @@ async fn conversation_can_delegate_to_anonymous_subagent() {
     let conv_id = Uuid::new_v4();
 
     let turn = orch
-        .run_turn("please delegate anonymously", conv_id, Interface::Cli, None)
+        .run_turn(
+            "please delegate anonymously",
+            conv_id,
+            Interface::Cli,
+            None,
+            vec![],
+        )
         .await
         .unwrap();
     assert_eq!(turn.answer, "parent acknowledged anonymous result");
@@ -1788,7 +1814,13 @@ async fn conversation_can_delegate_to_existing_agent_context() {
 
     let conv_id = Uuid::new_v4();
     let turn = orch
-        .run_turn("please use marketing", conv_id, Interface::Cli, None)
+        .run_turn(
+            "please use marketing",
+            conv_id,
+            Interface::Cli,
+            None,
+            vec![],
+        )
         .await
         .unwrap();
     assert_eq!(turn.answer, "parent acknowledged marketing result");
@@ -2155,7 +2187,7 @@ async fn run_turn_max_iterations_returns_error() {
     let (orch, _) = build_with_config(&server.uri(), config).await;
 
     let result = orch
-        .run_turn("trigger loop", Uuid::new_v4(), Interface::Cli, None)
+        .run_turn("trigger loop", Uuid::new_v4(), Interface::Cli, None, vec![])
         .await;
 
     match result {
@@ -2343,7 +2375,9 @@ async fn failed_turn_propagates_error() {
     let (orch, _storage) = build(&server.uri()).await;
     let conv_id = Uuid::new_v4();
 
-    let result = orch.run_turn("test", conv_id, Interface::Cli, None).await;
+    let result = orch
+        .run_turn("test", conv_id, Interface::Cli, None, vec![])
+        .await;
     assert!(
         result.is_err(),
         "expected run_turn to return Err on LLM failure"
@@ -2466,6 +2500,7 @@ async fn failed_turn_with_tools_llm_error_propagates() {
             vec![],
             None,
             vec![],
+            vec![],
         )
         .await;
     assert!(
@@ -2500,6 +2535,7 @@ async fn failed_turn_with_tools_max_iterations_returns_error() {
             Interface::Cli,
             vec![],
             None,
+            vec![],
             vec![],
         )
         .await;
@@ -2566,6 +2602,7 @@ async fn run_turn_with_tools_streaming_emits_tokens_through_sink() {
         None,
         vec![],
         tx,
+        vec![],
     )
     .await
     .unwrap();
@@ -2607,6 +2644,7 @@ async fn run_turn_with_tools_streaming_tokens_arrive_in_order() {
         None,
         vec![],
         tx,
+        vec![],
     )
     .await
     .unwrap();

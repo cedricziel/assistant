@@ -232,7 +232,13 @@ async fn test_tool_loop_terminates() -> Result<()> {
 
     let result = f
         .orchestrator
-        .run_turn("What is 2 + 2?", f.conversation_id, Interface::Cli, None)
+        .run_turn(
+            "What is 2 + 2?",
+            f.conversation_id,
+            Interface::Cli,
+            None,
+            vec![],
+        )
         .await?;
 
     assert!(!result.answer.is_empty());
@@ -255,6 +261,7 @@ async fn test_self_analyze_runs() -> Result<()> {
             f.conversation_id,
             Interface::Cli,
             None,
+            vec![],
         )
         .await?;
 
@@ -266,6 +273,7 @@ async fn test_self_analyze_runs() -> Result<()> {
             f.conversation_id,
             Interface::Cli,
             None,
+            vec![],
         )
         .await?;
 
