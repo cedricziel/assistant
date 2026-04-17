@@ -250,10 +250,10 @@ impl MatrixClient {
             "mimetype": mime_type,
             "size": size_bytes
         });
-        if let Some(duration) = duration_ms {
-            if let serde_json::Value::Object(ref mut map) = info {
-                map.insert("duration".to_string(), serde_json::json!(duration));
-            }
+        if let Some(duration) = duration_ms
+            && let serde_json::Value::Object(ref mut map) = info
+        {
+            map.insert("duration".to_string(), serde_json::json!(duration));
         }
 
         let body = serde_json::json!({
