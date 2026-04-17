@@ -15,7 +15,7 @@ use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
 use assistant_core::{
-    base_dir, resolve_dir, resolve_path, AssistantConfig, ExecutionContext, ToolHandler, ToolOutput,
+    AssistantConfig, ExecutionContext, ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path,
 };
 
 /// Canonicalize as much of `p` as exists, then re-append non-existent tail
@@ -144,20 +144,20 @@ impl ToolHandler for MemoryAppendHandler {
             Some(p) => p,
             None => {
                 return Ok(ToolOutput::error(format!(
-                "Unknown target '{target}'. Use: soul, identity, user, tools, memory, or notes/YYYY-MM-DD"
-            )))
+                    "Unknown target '{target}'. Use: soul, identity, user, tools, memory, or notes/YYYY-MM-DD"
+                )));
             }
         };
 
         // Create parent directories if they don't exist yet (e.g. for a new notes/ day).
-        if let Some(parent) = path.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                return Ok(ToolOutput::error(format!(
-                    "Failed to create directories for '{}': {}",
-                    path.display(),
-                    e
-                )));
-            }
+        if let Some(parent) = path.parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            return Ok(ToolOutput::error(format!(
+                "Failed to create directories for '{}': {}",
+                path.display(),
+                e
+            )));
         }
 
         let mut file = match OpenOptions::new()
@@ -172,7 +172,7 @@ impl ToolHandler for MemoryAppendHandler {
                     "Failed to open '{}': {}",
                     path.display(),
                     e
-                )))
+                )));
             }
         };
 

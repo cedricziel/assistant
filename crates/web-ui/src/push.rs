@@ -51,12 +51,11 @@ pub async fn ensure_vapid_keys(
     private_key: Option<&str>,
     public_key: Option<&str>,
 ) -> Result<(String, String)> {
-    if let (Some(priv_k), Some(pub_k)) = (private_key, public_key) {
-        if !priv_k.is_empty() && !pub_k.is_empty() {
+    if let (Some(priv_k), Some(pub_k)) = (private_key, public_key)
+        && !priv_k.is_empty() && !pub_k.is_empty() {
             debug!("VAPID keys already present in config");
             return Ok((priv_k.to_string(), pub_k.to_string()));
         }
-    }
 
     info!("Generating new VAPID key pair…");
     let (priv_b64, pub_b64) = generate_vapid_keypair()?;

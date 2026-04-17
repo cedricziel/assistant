@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use gray_matter::{engine::YAML, Matter};
+use gray_matter::{Matter, engine::YAML};
 use serde::Deserialize;
 use serde_json::Value;
 

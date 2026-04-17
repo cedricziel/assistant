@@ -68,14 +68,14 @@ impl ToolHandler for FileWriteHandler {
         debug!(path = %path.display(), "file-write access");
 
         // Create parent directories if needed.
-        if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                return Ok(ToolOutput::error(format!(
-                    "Failed to create directories for '{}': {}",
-                    path.display(),
-                    e
-                )));
-            }
+        if let Some(parent) = path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            return Ok(ToolOutput::error(format!(
+                "Failed to create directories for '{}': {}",
+                path.display(),
+                e
+            )));
         }
 
         match fs::write(&path, content.as_bytes()) {

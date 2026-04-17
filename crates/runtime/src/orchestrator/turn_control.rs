@@ -10,8 +10,8 @@ use anyhow::Result;
 use assistant_core::{ExecutionContext, Interface, Message, ToolHandler};
 use assistant_llm::ChatHistoryMessage;
 use assistant_storage::conversations::ConversationStore;
-use opentelemetry::trace::Span as _;
 use opentelemetry::KeyValue;
+use opentelemetry::trace::Span as _;
 use tracing::{info, warn};
 use uuid::Uuid;
 

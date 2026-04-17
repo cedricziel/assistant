@@ -1,6 +1,6 @@
 //! Deepgram TTS provider — `POST /v1/speak`.
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use async_trait::async_trait;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::debug;

@@ -81,7 +81,7 @@ impl ToolHandler for VoiceResponseHandler {
             _ => {
                 return Ok(ToolOutput::error(
                     "voice-response: `text` parameter is required",
-                ))
+                ));
             }
         };
         let voice = params

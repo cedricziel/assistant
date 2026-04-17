@@ -1,7 +1,7 @@
 //! Skill registry — maps skill names to `SkillDef` and keeps the `skills` SQLite table in sync.
 
 use anyhow::{Context, Result};
-use assistant_skills::{parse_skill_content, SkillDef, SkillSource};
+use assistant_skills::{SkillDef, SkillSource, parse_skill_content};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::{collections::HashMap, path::Path, sync::Arc};

@@ -8,28 +8,28 @@ use arrow_schema::Schema as ArrowSchema;
 use assistant_core::IcebergConfig;
 use iceberg::spec::DataFileFormat;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
+use iceberg::writer::IcebergWriter;
+use iceberg::writer::IcebergWriterBuilder;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
+use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
 };
 use iceberg::writer::file_writer::rolling_writer::RollingFileWriterBuilder;
-use iceberg::writer::file_writer::ParquetWriterBuilder;
-use iceberg::writer::IcebergWriter;
-use iceberg::writer::IcebergWriterBuilder;
 use iceberg::{TableCreation, TableIdent};
 use opentelemetry::Key;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogBatch, LogExporter};
-use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::attribute::SERVICE_NAME;
 use parquet::file::properties::WriterProperties;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::catalog::{build_catalog, build_file_io, ensure_namespace, CatalogRef};
+use crate::catalog::{CatalogRef, build_catalog, build_file_io, ensure_namespace};
 use crate::partition::{batch_partition_key, partition_spec};
-use crate::schema::{arc, logs_schema, LOGS_TIMESTAMP_FIELD_ID};
+use crate::schema::{LOGS_TIMESTAMP_FIELD_ID, arc, logs_schema};
 
 /// OpenTelemetry log exporter that persists log records into an Apache Iceberg
 /// `assistant_logs` table using Parquet files.

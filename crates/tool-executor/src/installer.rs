@@ -7,8 +7,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
-use assistant_skills::{parse_skill_dir, SkillSource};
+use anyhow::{Context, Result, anyhow};
+use assistant_skills::{SkillSource, parse_skill_dir};
 use assistant_storage::SkillRegistry;
 use tracing::{debug, info};
 
@@ -137,13 +137,13 @@ async fn install_from_github(
         if resp.status().is_success() {
             // Guard against unexpectedly large responses (1 MB cap).
             const MAX_SKILL_MD_BYTES: u64 = 1024 * 1024;
-            if let Some(len) = resp.content_length() {
-                if len > MAX_SKILL_MD_BYTES {
-                    last_error = format!(
-                        "SKILL.md at '{url}' is too large ({len} bytes, limit {MAX_SKILL_MD_BYTES})"
-                    );
-                    continue;
-                }
+            if let Some(len) = resp.content_length()
+                && len > MAX_SKILL_MD_BYTES
+            {
+                last_error = format!(
+                    "SKILL.md at '{url}' is too large ({len} bytes, limit {MAX_SKILL_MD_BYTES})"
+                );
+                continue;
             }
             let bytes = resp.bytes().await.context("Failed to read response body")?;
             if bytes.len() as u64 > MAX_SKILL_MD_BYTES {

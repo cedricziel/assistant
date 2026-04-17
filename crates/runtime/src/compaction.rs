@@ -341,10 +341,10 @@ pub async fn maybe_compact(
     );
 
     // Persist so the next turn does not reload the full history.
-    if let Some((store, conv_id)) = conv_store {
-        if let Err(e) = persist_compacted(store, conv_id, history).await {
-            warn!(error = %e, "Failed to persist compacted history; in-memory compaction still applies");
-        }
+    if let Some((store, conv_id)) = conv_store
+        && let Err(e) = persist_compacted(store, conv_id, history).await
+    {
+        warn!(error = %e, "Failed to persist compacted history; in-memory compaction still applies");
     }
 
     true

@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use rmcp::model::Tool;
 use rmcp::ServiceExt;
+use rmcp::model::Tool;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -317,19 +317,19 @@ impl McpClientManager {
                 };
 
                 // Check if a connected server has died.
-                if let Some(ref client) = state.client {
-                    if !client.is_connected() {
-                        warn!(server = %name, "MCP server disconnected, removing tools");
-                        let prefix = bridge::namespaced_name(&name, "");
-                        unregister_prefix(&prefix);
+                if let Some(ref client) = state.client
+                    && !client.is_connected()
+                {
+                    warn!(server = %name, "MCP server disconnected, removing tools");
+                    let prefix = bridge::namespaced_name(&name, "");
+                    unregister_prefix(&prefix);
 
-                        let mut handlers = self.handlers.write().await;
-                        handlers.retain(|h| !h.name().starts_with(&prefix));
-                        drop(handlers);
+                    let mut handlers = self.handlers.write().await;
+                    handlers.retain(|h| !h.name().starts_with(&prefix));
+                    drop(handlers);
 
-                        state.client = None;
-                        state.consecutive_failures = 0;
-                    }
+                    state.client = None;
+                    state.consecutive_failures = 0;
                 }
 
                 // Collect disconnected servers for parallel reconnection.
@@ -448,10 +448,10 @@ impl McpClientManager {
     pub async fn shutdown(&self) -> Result<()> {
         let servers = self.servers.read().await;
         for (name, state) in servers.iter() {
-            if let Some(ref client) = state.client {
-                if let Err(e) = client.shutdown().await {
-                    warn!(server = %name, error = %e, "error shutting down MCP client");
-                }
+            if let Some(ref client) = state.client
+                && let Err(e) = client.shutdown().await
+            {
+                warn!(server = %name, error = %e, "error shutting down MCP client");
             }
         }
         Ok(())

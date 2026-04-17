@@ -15,14 +15,14 @@ use std::time::Duration;
 use anyhow::Result;
 use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser};
 use async_trait::async_trait;
-use base64::engine::general_purpose::STANDARD as B64_STANDARD;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64_STANDARD;
 use chrono::Utc;
 use futures::stream::Stream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::http::Request;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
+use tokio_tungstenite::tungstenite::http::Request;
 use tracing::{debug, error, info, warn};
 
 use crate::config::{SignalConfig, SignalConfigExt};
@@ -165,11 +165,10 @@ impl ChannelAdapter for SignalAdapter {
                                                 continue;
                                             }
 
-                                            if let Some(msg) = envelope_to_channel_message(env) {
-                                                if tx.send(msg).await.is_err() {
+                                            if let Some(msg) = envelope_to_channel_message(env)
+                                                && tx.send(msg).await.is_err() {
                                                     return; // receiver dropped
                                                 }
-                                            }
                                         }
                                     }
                                 }
@@ -304,10 +303,10 @@ impl ChannelAdapter for SignalAdapter {
 
     fn conversation_key(&self, msg: &ChannelMessage) -> String {
         // Use group_id as the conversation key for group messages, else use source.
-        if let Some(gid) = msg.metadata.get("group_id").and_then(|v| v.as_str()) {
-            if !gid.is_empty() {
-                return gid.to_string();
-            }
+        if let Some(gid) = msg.metadata.get("group_id").and_then(|v| v.as_str())
+            && !gid.is_empty()
+        {
+            return gid.to_string();
         }
         msg.sender.platform_id.clone()
     }

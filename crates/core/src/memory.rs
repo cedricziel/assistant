@@ -137,12 +137,11 @@ impl MemoryLoader {
         let mut total_chars: usize = 0;
 
         // Bootstrap goes first (only present on first run).
-        if self.bootstrap_path.exists() {
-            if let Some(section) =
+        if self.bootstrap_path.exists()
+            && let Some(section) =
                 self.read_section("Bootstrap", &self.bootstrap_path, &mut total_chars)
-            {
-                parts.push(section);
-            }
+        {
+            parts.push(section);
         }
 
         // Core memory files in load order.
@@ -529,11 +528,11 @@ fn move_path_if_needed(from: &Path, to: &Path) {
         );
         return;
     }
-    if let Some(parent) = to.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            warn!(path = %parent.display(), error = %e, "Failed to create destination directory");
-            return;
-        }
+    if let Some(parent) = to.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        warn!(path = %parent.display(), error = %e, "Failed to create destination directory");
+        return;
     }
 
     match fs::rename(from, to) {
@@ -570,15 +569,15 @@ fn move_dir_if_needed(from: &Path, to: &Path) {
     }
 
     if !to.exists() {
-        if let Some(parent) = to.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                warn!(
-                    path = %parent.display(),
-                    error = %e,
-                    "Failed to create destination parent directory"
-                );
-                return;
-            }
+        if let Some(parent) = to.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            warn!(
+                path = %parent.display(),
+                error = %e,
+                "Failed to create destination parent directory"
+            );
+            return;
         }
         match fs::rename(from, to) {
             Ok(_) => {
@@ -685,10 +684,10 @@ pub fn resolve_dir(opt: &Option<String>, base: &Path, dirname: &str) -> PathBuf 
 
 /// Expand a leading `~/` to the current user's home directory.
 pub fn expand_tilde(s: &str) -> PathBuf {
-    if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = s.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
     }
     PathBuf::from(s)
 }
@@ -709,11 +708,11 @@ fn write_default(path: &Path, content: &str) {
     if path.exists() {
         return;
     }
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            warn!(path = %parent.display(), error = %e, "Failed to create memory directory");
-            return;
-        }
+    if let Some(parent) = path.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        warn!(path = %parent.display(), error = %e, "Failed to create memory directory");
+        return;
     }
     if let Err(e) = fs::write(path, content) {
         warn!(path = %path.display(), error = %e, "Failed to write default memory file");

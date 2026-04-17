@@ -2,7 +2,7 @@ use anyhow::Context as _;
 use async_trait::async_trait;
 use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::debug;
 
@@ -302,15 +302,16 @@ impl LlmClient {
         // the Slack auto-post path) to send an empty message.  Instead, if content is
         // empty but thinking is present, surface it as a Thinking step so the
         // orchestrator adds it to history and re-prompts the model for a visible reply.
-        if content.trim().is_empty() {
-            if let Some(thinking) = json
+        if content.trim().is_empty()
+            && let Some(thinking) = json
                 .pointer("/message/thinking")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.trim().is_empty())
-            {
-                debug!("Model returned empty content with non-empty thinking; surfacing as Thinking step");
-                return Ok(LlmResponse::Thinking(thinking.to_string(), meta));
-            }
+        {
+            debug!(
+                "Model returned empty content with non-empty thinking; surfacing as Thinking step"
+            );
+            return Ok(LlmResponse::Thinking(thinking.to_string(), meta));
         }
 
         debug!("Native request returned no tool_calls; treating as final answer");
@@ -386,10 +387,10 @@ impl LlmClient {
                             }
                         }
 
-                        if let Some(tc) = json.pointer("/message/tool_calls") {
-                            if tc.as_array().is_some_and(|a| !a.is_empty()) {
-                                tool_calls_json = Some(tc.clone());
-                            }
+                        if let Some(tc) = json.pointer("/message/tool_calls")
+                            && tc.as_array().is_some_and(|a| !a.is_empty())
+                        {
+                            tool_calls_json = Some(tc.clone());
                         }
 
                         // The final chunk carries `done: true` and the metadata.
@@ -403,26 +404,26 @@ impl LlmClient {
             }
         }
 
-        if !line_buf.is_empty() {
-            if let Ok(json) = serde_json::from_str::<Value>(&line_buf) {
-                if let Some(token) = json
-                    .pointer("/message/content")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                {
-                    content.push_str(token);
-                    if let Some(ref sink) = token_sink {
-                        let _ = sink.send(token.to_string()).await;
-                    }
+        if !line_buf.is_empty()
+            && let Ok(json) = serde_json::from_str::<Value>(&line_buf)
+        {
+            if let Some(token) = json
+                .pointer("/message/content")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                content.push_str(token);
+                if let Some(ref sink) = token_sink {
+                    let _ = sink.send(token.to_string()).await;
                 }
-                if let Some(tc) = json.pointer("/message/tool_calls") {
-                    if tc.as_array().is_some_and(|a| !a.is_empty()) {
-                        tool_calls_json = Some(tc.clone());
-                    }
-                }
-                if json.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    final_json = Some(json);
-                }
+            }
+            if let Some(tc) = json.pointer("/message/tool_calls")
+                && tc.as_array().is_some_and(|a| !a.is_empty())
+            {
+                tool_calls_json = Some(tc.clone());
+            }
+            if json.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                final_json = Some(json);
             }
         }
 
@@ -433,34 +434,34 @@ impl LlmClient {
             .map(extract_ollama_meta)
             .unwrap_or_default();
 
-        if let Some(tc) = tool_calls_json {
-            if let Some(arr) = tc.as_array() {
-                let items: Vec<ToolCallItem> = arr
-                    .iter()
-                    .filter_map(|entry| {
-                        let name = entry
-                            .pointer("/function/name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        if name.is_empty() {
-                            return None;
-                        }
-                        let params = entry
-                            .pointer("/function/arguments")
-                            .cloned()
-                            .unwrap_or(Value::Object(serde_json::Map::new()));
-                        Some(ToolCallItem {
-                            name,
-                            params,
-                            id: None,
-                        })
+        if let Some(tc) = tool_calls_json
+            && let Some(arr) = tc.as_array()
+        {
+            let items: Vec<ToolCallItem> = arr
+                .iter()
+                .filter_map(|entry| {
+                    let name = entry
+                        .pointer("/function/name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    let params = entry
+                        .pointer("/function/arguments")
+                        .cloned()
+                        .unwrap_or(Value::Object(serde_json::Map::new()));
+                    Some(ToolCallItem {
+                        name,
+                        params,
+                        id: None,
                     })
-                    .collect();
-                if !items.is_empty() {
-                    debug!(count = items.len(), "Native streaming: tool calls received");
-                    return Ok(LlmResponse::ToolCalls(items, meta));
-                }
+                })
+                .collect();
+            if !items.is_empty() {
+                debug!(count = items.len(), "Native streaming: tool calls received");
+                return Ok(LlmResponse::ToolCalls(items, meta));
             }
         }
 
@@ -634,8 +635,8 @@ fn build_json_messages(
 #[cfg(test)]
 mod tests {
     use wiremock::{
-        matchers::{method, path},
         Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
     };
 
     use super::*;

@@ -16,12 +16,12 @@ use assistant_core::{
     SlackConfig, ToolHandler,
 };
 use assistant_storage::StorageLayer;
-use assistant_transcription::{is_audio_mime, TranscriptionProvider, TranscriptionRequest};
+use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;
 use chrono::Utc;
-use futures::stream::Stream;
 use futures::SinkExt;
-use tokio::sync::{mpsc, Mutex};
+use futures::stream::Stream;
+use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info, warn};
@@ -227,8 +227,8 @@ impl ChannelAdapter for SlackAdapter {
                                                 transcription_language.as_deref(),
                                             )
                                             .await;
-                                            if !transcript.is_empty() {
-                                                if let ChannelContent::Text(ref mut text) =
+                                            if !transcript.is_empty()
+                                                && let ChannelContent::Text(ref mut text) =
                                                     msg.content
                                                 {
                                                     if text.is_empty() {
@@ -238,7 +238,6 @@ impl ChannelAdapter for SlackAdapter {
                                                             format!("{transcript}\n{text}");
                                                     }
                                                 }
-                                            }
                                         }
 
                                         // Download image attachments from file_share events.
@@ -382,13 +381,14 @@ impl ChannelAdapter for SlackAdapter {
     /// Add ⏳ reaction immediately when a message arrives (before the conv lock).
     async fn on_message_received(&self, msg: &ChannelMessage) -> Result<()> {
         let (channel, _) = parse_platform_id(&msg.sender.platform_id);
-        if let Some(ts) = &msg.platform_message_id {
-            if !channel.is_empty() && !ts.is_empty() {
-                let _ = self
-                    .client
-                    .add_reaction(&channel, ts, "hourglass_flowing_sand")
-                    .await;
-            }
+        if let Some(ts) = &msg.platform_message_id
+            && !channel.is_empty()
+            && !ts.is_empty()
+        {
+            let _ = self
+                .client
+                .add_reaction(&channel, ts, "hourglass_flowing_sand")
+                .await;
         }
         Ok(())
     }
@@ -520,10 +520,10 @@ fn parse_event(
     if event.get("bot_id").is_some() {
         return None;
     }
-    if let Some(subtype) = event.get("subtype").and_then(|v| v.as_str()) {
-        if subtype != "file_share" {
-            return None;
-        }
+    if let Some(subtype) = event.get("subtype").and_then(|v| v.as_str())
+        && subtype != "file_share"
+    {
+        return None;
     }
 
     let channel_id = event.get("channel").and_then(|v| v.as_str())?.to_string();
@@ -722,10 +722,10 @@ async fn seed_thread_history(
 ) -> Result<()> {
     for msg in messages {
         let subtype = msg.get("subtype").and_then(|v| v.as_str());
-        if let Some(st) = subtype {
-            if st != "file_share" {
-                continue;
-            }
+        if let Some(st) = subtype
+            && st != "file_share"
+        {
+            continue;
         }
 
         let is_bot = msg.get("bot_id").is_some()

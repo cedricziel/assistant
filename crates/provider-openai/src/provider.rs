@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use async_openai::Client;
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::types::embeddings::CreateEmbeddingRequestArgs;
 use async_openai::types::responses::{
@@ -19,19 +20,18 @@ use async_openai::types::responses::{
     Tool, WebSearchApproximateLocation, WebSearchApproximateLocationType, WebSearchTool,
     WebSearchToolSearchContextSize,
 };
-use async_openai::Client;
 use async_trait::async_trait;
 use futures::StreamExt as _;
 use serde_json::Value;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, warn};
 
-use assistant_core::types::OpenAIUserLocation;
 use assistant_core::LlmConfig;
+use assistant_core::types::OpenAIUserLocation;
 use assistant_llm::{
-    build_reqwest_client, is_transient_error_message, with_retry, Capabilities, ChatHistoryMessage,
-    ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, RetryConfig,
-    ToolCallItem, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
+    LlmResponseMeta, RetryConfig, ToolCallItem, ToolSpec, ToolSupport, build_reqwest_client,
+    is_transient_error_message, with_retry,
 };
 
 use crate::oauth::OAuthManager;

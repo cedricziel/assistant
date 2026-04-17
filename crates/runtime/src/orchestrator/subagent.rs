@@ -6,22 +6,21 @@
 
 use anyhow::Result;
 use assistant_core::{
-    AgentReport, AgentReportStatus, AgentSpawn, ExecutionContext, Interface, Message,
-    SubagentRunner, DEFAULT_MAX_AGENT_DEPTH,
+    AgentReport, AgentReportStatus, AgentSpawn, DEFAULT_MAX_AGENT_DEPTH, ExecutionContext,
+    Interface, Message, SubagentRunner,
 };
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmResponse};
 use async_trait::async_trait;
 use opentelemetry::{
-    global,
+    Context as OtelContext, KeyValue, global,
     trace::{Span as _, TraceContextExt, Tracer as _},
-    Context as OtelContext, KeyValue,
 };
 use opentelemetry_semantic_conventions::attribute::ERROR_MESSAGE;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, info_span, warn, Instrument};
+use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
-use super::{value_to_params_map, Orchestrator};
+use super::{Orchestrator, value_to_params_map};
 use crate::webhook_dispatch;
 
 #[async_trait]

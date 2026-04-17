@@ -134,16 +134,14 @@ pub async fn list_logs(
                 .into_iter()
                 .filter(|l| {
                     // Apply post-fetch time and conversation filters.
-                    if let Some(since) = params.since {
-                        if l.timestamp < since {
+                    if let Some(since) = params.since
+                        && l.timestamp < since {
                             return false;
                         }
-                    }
-                    if let Some(until) = params.until {
-                        if l.timestamp > until {
+                    if let Some(until) = params.until
+                        && l.timestamp > until {
                             return false;
                         }
-                    }
                     true
                 })
                 .map(|l| {

@@ -80,7 +80,7 @@ impl ToolHandler for FileEditHandler {
                     "Failed to read '{}': {}",
                     path.display(),
                     e
-                )))
+                )));
             }
         };
 

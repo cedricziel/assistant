@@ -2,14 +2,14 @@
 
 use async_trait::async_trait;
 use futures::StreamExt as _;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use assistant_core::LlmConfig;
 use assistant_core::types::{
     AnthropicUserLocation, AnthropicWebFetchOptions, AnthropicWebSearchOptions,
 };
-use assistant_core::LlmConfig;
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
     LlmResponseMeta, ToolCallItem, ToolSpec, ToolSupport,
@@ -762,27 +762,23 @@ async fn process_sse_event(
                     }
                 }
                 "input_json_delta" => {
-                    if let Some(idx) = *current_block_idx {
-                        if let Some(partial) =
+                    if let Some(idx) = *current_block_idx
+                        && let Some(partial) =
                             json.pointer("/delta/partial_json").and_then(|v| v.as_str())
+                        && idx < tool_blocks.len()
+                    {
+                        tool_blocks[idx].partial_json.push_str(partial);
+                        // Stream the decoded text value of this tool block
+                        // so the caller can update a live preview (e.g. the
+                        // Slack placeholder message).
+                        if let Some(sink) = token_sink
+                            && let Some(text) = extract_partial_text(&tool_blocks[idx].partial_json)
                         {
-                            if idx < tool_blocks.len() {
-                                tool_blocks[idx].partial_json.push_str(partial);
-                                // Stream the decoded text value of this tool block
-                                // so the caller can update a live preview (e.g. the
-                                // Slack placeholder message).
-                                if let Some(sink) = token_sink {
-                                    if let Some(text) =
-                                        extract_partial_text(&tool_blocks[idx].partial_json)
-                                    {
-                                        let already = tool_blocks[idx].text_chars_sent;
-                                        if text.len() > already {
-                                            let new_text = text[already..].to_string();
-                                            tool_blocks[idx].text_chars_sent = text.len();
-                                            let _ = sink.send(new_text).await;
-                                        }
-                                    }
-                                }
+                            let already = tool_blocks[idx].text_chars_sent;
+                            if text.len() > already {
+                                let new_text = text[already..].to_string();
+                                tool_blocks[idx].text_chars_sent = text.len();
+                                let _ = sink.send(new_text).await;
                             }
                         }
                     }

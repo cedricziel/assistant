@@ -201,7 +201,9 @@ fn inject_sw_version(app_dir: &Path, web_out: &Path) {
 
     let injected = sw_src.replace("__APP_VERSION__", &version);
     if injected == sw_src {
-        println!("cargo:warning=sw.js does not contain __APP_VERSION__ placeholder — version injection skipped");
+        println!(
+            "cargo:warning=sw.js does not contain __APP_VERSION__ placeholder — version injection skipped"
+        );
         return;
     }
     if let Err(e) = std::fs::write(&sw_path, injected) {

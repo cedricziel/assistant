@@ -54,7 +54,7 @@ pub fn resolve_upload_bytes(params: &HashMap<String, Value>) -> Result<Vec<u8>, 
 #[cfg(test)]
 mod tests {
     use super::resolve_upload_bytes;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use std::collections::HashMap;
 
     fn params(pairs: &[(&str, Value)]) -> HashMap<String, Value> {

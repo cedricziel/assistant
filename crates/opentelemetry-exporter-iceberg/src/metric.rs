@@ -11,29 +11,29 @@ use arrow_schema::Schema as ArrowSchema;
 use assistant_core::IcebergConfig;
 use iceberg::spec::DataFileFormat;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
+use iceberg::writer::IcebergWriter;
+use iceberg::writer::IcebergWriterBuilder;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
+use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
 };
 use iceberg::writer::file_writer::rolling_writer::RollingFileWriterBuilder;
-use iceberg::writer::file_writer::ParquetWriterBuilder;
-use iceberg::writer::IcebergWriter;
-use iceberg::writer::IcebergWriterBuilder;
 use iceberg::{TableCreation, TableIdent};
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::data::{
     AggregatedMetrics, Gauge, Histogram, MetricData, ResourceMetrics, Sum,
 };
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-use opentelemetry_sdk::metrics::Temporality;
 use parquet::file::properties::WriterProperties;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::catalog::{build_catalog, build_file_io, ensure_namespace, CatalogRef};
+use crate::catalog::{CatalogRef, build_catalog, build_file_io, ensure_namespace};
 use crate::partition::{batch_partition_key, partition_spec};
-use crate::schema::{arc, metrics_schema, METRICS_RECORDED_AT_FIELD_ID};
+use crate::schema::{METRICS_RECORDED_AT_FIELD_ID, arc, metrics_schema};
 
 /// OpenTelemetry metric exporter that persists metric points into an Apache
 /// Iceberg `assistant_metric_points` table using Parquet files.

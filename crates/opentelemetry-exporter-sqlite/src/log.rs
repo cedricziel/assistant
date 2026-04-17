@@ -1,11 +1,11 @@
 //! OpenTelemetry log exporter that persists log records into the `logs` SQLite table.
 
 use chrono::{DateTime, Utc};
-use opentelemetry::logs::{AnyValue, Severity};
 use opentelemetry::Key;
+use opentelemetry::logs::{AnyValue, Severity};
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
-use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::attribute::SERVICE_NAME;
 use serde_json::{Map, Number};
 use sqlx::{SqliteConnection, SqlitePool};
@@ -221,11 +221,11 @@ fn any_value_to_json(value: &AnyValue) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::InstrumentationScope;
     use opentelemetry::logs::{
         AnyValue, LogRecord as _, Logger as _, LoggerProvider as _, Severity,
     };
     use opentelemetry::trace::{SpanId, TraceFlags, TraceId};
-    use opentelemetry::InstrumentationScope;
     use opentelemetry_sdk::logs::{SdkLogRecord, SdkLoggerProvider};
 
     /// Create a logger from a no-op provider so we can call

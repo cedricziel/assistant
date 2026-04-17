@@ -4,7 +4,7 @@
 //! observations against the global `MeterProvider`.
 
 use opentelemetry::metrics::{Counter, Histogram};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{KeyValue, global};
 use opentelemetry_semantic_conventions::attribute::{
     ERROR_TYPE, GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL, GEN_AI_TOKEN_TYPE,
 };

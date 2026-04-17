@@ -8,7 +8,7 @@
 //! - `conversations.replies` — fetch thread history for context seeding
 //! - `files.getUploadURLExternal` + `files.completeUploadExternal` — upload files
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use tracing::debug;
 

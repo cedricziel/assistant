@@ -19,14 +19,14 @@ use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use chrono::Utc;
 use tracing::{info, warn};
 
 use crate::archive::{extract_tar_gz, read_tar_gz_manifest, write_tar_gz};
 use crate::checksum::sha256_hex;
-use crate::manifest::{BackupManifest, ManifestEntry, MANIFEST_VERSION};
+use crate::manifest::{BackupManifest, MANIFEST_VERSION, ManifestEntry};
 use crate::paths::{
     checkpoint_sqlite, default_archive_name, default_backups_dir, default_install_dir,
     discover_files,
@@ -291,10 +291,10 @@ impl BackupEngine {
             .db_path
             .clone()
             .unwrap_or_else(|| opts.install_dir.join("assistant.db"));
-        if self.fs.file_exists(&db_path).await {
-            if let Err(e) = checkpoint_sqlite(&db_path).await {
-                warn!("WAL checkpoint failed (continuing): {}", e);
-            }
+        if self.fs.file_exists(&db_path).await
+            && let Err(e) = checkpoint_sqlite(&db_path).await
+        {
+            warn!("WAL checkpoint failed (continuing): {}", e);
         }
 
         // Discover files

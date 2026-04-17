@@ -1,6 +1,6 @@
 //! OpenAI TTS provider — `POST /v1/audio/speech`.
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use async_trait::async_trait;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::debug;

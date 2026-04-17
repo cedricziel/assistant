@@ -1,7 +1,7 @@
 //! Persistent attachment storage — filesystem for bytes, SQLite for metadata.
 
 use anyhow::{Context, Result};
-use assistant_core::{agent_base_dir, AttachmentMeta};
+use assistant_core::{AttachmentMeta, agent_base_dir};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use std::path::PathBuf;

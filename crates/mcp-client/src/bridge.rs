@@ -172,16 +172,15 @@ fn extract_text(content: &[Content]) -> String {
 fn extract_image_attachments(content: &[Content]) -> Vec<assistant_core::Attachment> {
     let mut attachments = Vec::new();
     for item in content {
-        if let RawContent::Image(img) = &item.raw {
-            if let Ok(bytes) =
+        if let RawContent::Image(img) = &item.raw
+            && let Ok(bytes) =
                 base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &img.data)
-            {
-                attachments.push(assistant_core::Attachment::new(
-                    "image",
-                    img.mime_type.clone(),
-                    bytes,
-                ));
-            }
+        {
+            attachments.push(assistant_core::Attachment::new(
+                "image",
+                img.mime_type.clone(),
+                bytes,
+            ));
         }
     }
     attachments

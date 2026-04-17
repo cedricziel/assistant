@@ -8,19 +8,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use assistant_core::{bus_messages, topic, ClaimFilter, Interface, PublishRequest, ToolHandler};
+use assistant_core::{ClaimFilter, Interface, PublishRequest, ToolHandler, bus_messages, topic};
 use assistant_llm::ContentBlock;
 use chrono::{DateTime, Local, Utc};
 use opentelemetry::{
-    trace::{Span as _, SpanKind, TraceContextExt},
     Context as OtelContext, KeyValue,
+    trace::{Span as _, SpanKind, TraceContextExt},
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::{parse_interface, ExtensionRegistration, Orchestrator, TurnResult};
+use super::{ExtensionRegistration, Orchestrator, TurnResult, parse_interface};
 use crate::webhook_dispatch;
 
 impl Orchestrator {

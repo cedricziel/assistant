@@ -69,10 +69,10 @@ impl HttpRequestActionExecutor {
         if self.blocked_hosts.contains(&host) {
             anyhow::bail!("host '{host}' is blocked by workflow policy");
         }
-        if let Some(allowed_hosts) = &self.allowed_hosts {
-            if !allowed_hosts.contains(&host) {
-                anyhow::bail!("host '{host}' is not in allowed workflow host list");
-            }
+        if let Some(allowed_hosts) = &self.allowed_hosts
+            && !allowed_hosts.contains(&host)
+        {
+            anyhow::bail!("host '{host}' is not in allowed workflow host list");
         }
         Ok(())
     }

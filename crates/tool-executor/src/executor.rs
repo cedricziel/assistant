@@ -185,13 +185,13 @@ impl ToolExecutor {
         ctx: &ExecutionContext,
     ) -> Result<ToolOutput> {
         // Enforce the per-context tool allowlist when present.
-        if let Some(ref allowed) = ctx.allowed_tools {
-            if !allowed.iter().any(|a| a == name) {
-                return Ok(ToolOutput::error(format!(
-                    "Tool '{}' is not available in this execution context",
-                    name
-                )));
-            }
+        if let Some(ref allowed) = ctx.allowed_tools
+            && !allowed.iter().any(|a| a == name)
+        {
+            return Ok(ToolOutput::error(format!(
+                "Tool '{}' is not available in this execution context",
+                name
+            )));
         }
 
         // Clone Arc before releasing the read lock to avoid holding it across an await.

@@ -15,9 +15,9 @@ use assistant_core::{
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use futures::stream::Stream;
 use futures::SinkExt;
-use tokio::sync::{mpsc, Mutex};
+use futures::stream::Stream;
+use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info, warn};
@@ -171,11 +171,10 @@ impl ChannelAdapter for MattermostAdapter {
                                         &bot_user_id,
                                         &allowed_channels,
                                         &allowed_users,
-                                    ) {
-                                        if tx.send(msg).await.is_err() {
+                                    )
+                                        && tx.send(msg).await.is_err() {
                                             break; // receiver dropped
                                         }
-                                    }
                                 }
                                 Some(Ok(WsMessage::Ping(data))) => {
                                     let _ = ws_write.send(WsMessage::Pong(data)).await;
@@ -294,14 +293,13 @@ impl ChannelAdapter for MattermostAdapter {
             .unwrap_or_default();
         if !bot_user_id.is_empty() {
             let post_id = self.pending_post_ids.lock().await.remove(&user.platform_id);
-            if let Some(pid) = post_id {
-                if let Err(e) = self
+            if let Some(pid) = post_id
+                && let Err(e) = self
                     .client
                     .remove_reaction(&bot_user_id, &pid, "hourglass_flowing_sand")
                     .await
-                {
-                    debug!(error = %e, "mattermost: failed to remove hourglass reaction (best-effort)");
-                }
+            {
+                debug!(error = %e, "mattermost: failed to remove hourglass reaction (best-effort)");
             }
         }
         if let Err(e) = self.client.send_typing(&channel_id).await {

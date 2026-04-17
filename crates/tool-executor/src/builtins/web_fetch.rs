@@ -180,10 +180,10 @@ fn extract_text(document: &Html) -> String {
 
     let mut text_parts: Vec<&str> = Vec::new();
     for node in root.descendants() {
-        if let Some(el) = scraper::ElementRef::wrap(node) {
-            if skip_ids.contains(&el.id()) {
-                continue;
-            }
+        if let Some(el) = scraper::ElementRef::wrap(node)
+            && skip_ids.contains(&el.id())
+        {
+            continue;
         }
         if let Some(text) = node.value().as_text() {
             let t = text.trim();

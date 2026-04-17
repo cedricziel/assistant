@@ -11,7 +11,7 @@ use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 
 /// Default TTL for conversation events: 24 hours.

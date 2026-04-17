@@ -7,22 +7,21 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    context::agent_base_dir, is_resizable_mime_type, strip_html_comments, Attachment,
-    ExecutionContext, Interface, MemoryLoader, Message, MessageBus, ToolHandler,
+    Attachment, ExecutionContext, Interface, MemoryLoader, Message, MessageBus, ToolHandler,
+    context::agent_base_dir, is_resizable_mime_type, strip_html_comments,
 };
 use assistant_llm::{
     ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, ToolSpec,
 };
-use assistant_storage::{conversations::ConversationStore, SkillRegistry, StorageLayer};
+use assistant_storage::{SkillRegistry, StorageLayer, conversations::ConversationStore};
 use assistant_tool_executor::ToolExecutor;
 use opentelemetry::{
-    global,
+    Context as OtelContext, KeyValue, global,
     trace::{Span as _, Status as OtelStatus, TraceContextExt, Tracer as _},
-    Context as OtelContext, KeyValue,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, info_span, warn, Instrument};
+use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 // ── Submodules ────────────────────────────────────────────────────────────────
@@ -597,16 +596,16 @@ impl Orchestrator {
             // Post-call compaction: use the accurate token count reported by
             // the provider as a secondary signal to catch any cases the pre-call
             // estimator missed.
-            if let Some(tokens) = response.meta().input_tokens {
-                if crate::compaction::should_compact(tokens, &self.compaction_config) {
-                    crate::compaction::maybe_compact(
-                        &mut history,
-                        &self.llm,
-                        &self.compaction_config,
-                        Some((&conv_store, conversation_id)),
-                    )
-                    .await;
-                }
+            if let Some(tokens) = response.meta().input_tokens
+                && crate::compaction::should_compact(tokens, &self.compaction_config)
+            {
+                crate::compaction::maybe_compact(
+                    &mut history,
+                    &self.llm,
+                    &self.compaction_config,
+                    Some((&conv_store, conversation_id)),
+                )
+                .await;
             }
 
             match response {
@@ -948,16 +947,16 @@ impl Orchestrator {
             );
 
             // Post-call compaction using the accurate provider-reported token count.
-            if let Some(tokens) = response.meta().input_tokens {
-                if crate::compaction::should_compact(tokens, &self.compaction_config) {
-                    crate::compaction::maybe_compact(
-                        &mut history,
-                        &self.llm,
-                        &self.compaction_config,
-                        Some((&conv_store, conversation_id)),
-                    )
-                    .await;
-                }
+            if let Some(tokens) = response.meta().input_tokens
+                && crate::compaction::should_compact(tokens, &self.compaction_config)
+            {
+                crate::compaction::maybe_compact(
+                    &mut history,
+                    &self.llm,
+                    &self.compaction_config,
+                    Some((&conv_store, conversation_id)),
+                )
+                .await;
             }
 
             match response {

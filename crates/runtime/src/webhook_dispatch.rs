@@ -1,9 +1,8 @@
 use anyhow::Result;
 use hmac::{Hmac, KeyInit, Mac};
 use opentelemetry::{
-    global,
+    Context as OtelContext, KeyValue, global,
     trace::{Span as _, TraceContextExt, Tracer as _},
-    Context as OtelContext, KeyValue,
 };
 use serde_json::Value;
 use sha2::Sha256;
@@ -125,9 +124,5 @@ fn compute_signature(secret: &str, body: &str) -> String {
 }
 
 fn payload_count_hint(payload: &Value) -> usize {
-    if payload.is_null() {
-        0
-    } else {
-        1
-    }
+    if payload.is_null() { 0 } else { 1 }
 }

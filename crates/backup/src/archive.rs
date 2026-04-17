@@ -3,10 +3,10 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
+use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression;
 use tar::Archive;
 use tracing::debug;
 
@@ -222,7 +222,7 @@ pub fn extract_tar_gz(
 #[cfg(test)]
 pub fn make_test_archive(files: &[(&str, &[u8])]) -> Vec<u8> {
     use crate::checksum::sha256_hex;
-    use crate::manifest::{BackupManifest, ManifestEntry, MANIFEST_VERSION};
+    use crate::manifest::{BackupManifest, MANIFEST_VERSION, ManifestEntry};
 
     let entries: Vec<ManifestEntry> = files
         .iter()
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_write_and_read_manifest() {
-        use crate::manifest::{BackupManifest, ManifestEntry, MANIFEST_VERSION};
+        use crate::manifest::{BackupManifest, MANIFEST_VERSION, ManifestEntry};
 
         let dir = TempDir::new().unwrap();
         let archive_path = dir.path().join("test.tar.gz");
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_path_traversal_guard() {
-        use crate::manifest::{BackupManifest, ManifestEntry, MANIFEST_VERSION};
+        use crate::manifest::{BackupManifest, MANIFEST_VERSION, ManifestEntry};
 
         // The tar crate rejects '..' components on append_data, so we cannot
         // inject unsafe paths via the archive itself.  Instead we craft a manifest
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_checksum_mismatch_rejected() {
-        use crate::manifest::{BackupManifest, ManifestEntry, MANIFEST_VERSION};
+        use crate::manifest::{BackupManifest, MANIFEST_VERSION, ManifestEntry};
 
         let dir = TempDir::new().unwrap();
         let archive_path = dir.path().join("mismatch.tar.gz");

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{base_dir, resolve_dir, resolve_path, AssistantConfig};
+use assistant_core::{AssistantConfig, base_dir, resolve_dir, resolve_path};
 use assistant_llm::LlmProvider;
 use assistant_storage::{MemoryChunkStore, StorageLayer};
 use sha2::{Digest, Sha256};
@@ -207,14 +207,13 @@ fn chunk_text(text: &str) -> impl Iterator<Item = String> {
 
         if para.len() <= MAX_CHUNK_BYTES {
             // Merge tiny fragment into the last chunk if it fits.
-            if para.len() < 50 {
-                if let Some(last) = chunks.last_mut() {
-                    if last.len() + 1 + para.len() <= MAX_CHUNK_BYTES {
-                        last.push('\n');
-                        last.push_str(para);
-                        continue;
-                    }
-                }
+            if para.len() < 50
+                && let Some(last) = chunks.last_mut()
+                && last.len() + 1 + para.len() <= MAX_CHUNK_BYTES
+            {
+                last.push('\n');
+                last.push_str(para);
+                continue;
             }
             chunks.push(para.to_string());
         } else {

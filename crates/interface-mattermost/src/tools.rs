@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{resolve_upload_bytes, ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{ExecutionContext, ToolHandler, ToolOutput, resolve_upload_bytes};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{debug, warn};
 
 use crate::client::MattermostClient;
