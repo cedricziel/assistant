@@ -35,17 +35,17 @@ pub(crate) fn messages_to_chat_history(
         .into_iter()
         .filter_map(|m| match m.role {
             MessageRole::User => {
-                if let Some(atts) = attachment_map.get(&m.id) {
-                    if !atts.is_empty() {
-                        let mut blocks = vec![ContentBlock::Text(m.content)];
-                        for (mime_type, data) in atts {
-                            blocks.push(ContentBlock::Image {
-                                media_type: mime_type.clone(),
-                                data: data.clone(),
-                            });
-                        }
-                        return Some(ChatHistoryMessage::MultimodalUser { content: blocks });
+                if let Some(atts) = attachment_map.get(&m.id)
+                    && !atts.is_empty()
+                {
+                    let mut blocks = vec![ContentBlock::Text(m.content)];
+                    for (mime_type, data) in atts {
+                        blocks.push(ContentBlock::Image {
+                            media_type: mime_type.clone(),
+                            data: data.clone(),
+                        });
                     }
+                    return Some(ChatHistoryMessage::MultimodalUser { content: blocks });
                 }
                 Some(ChatHistoryMessage::Text {
                     role: ChatRole::User,
@@ -53,14 +53,12 @@ pub(crate) fn messages_to_chat_history(
                 })
             }
             MessageRole::Assistant => {
-                if let Some(tc_json) = m.tool_calls_json {
-                    if let Ok(items) =
+                if let Some(tc_json) = m.tool_calls_json
+                    && let Ok(items) =
                         serde_json::from_str::<Vec<assistant_llm::ToolCallItem>>(&tc_json)
-                    {
-                        if !items.is_empty() {
-                            return Some(ChatHistoryMessage::AssistantToolCalls(items));
-                        }
-                    }
+                    && !items.is_empty()
+                {
+                    return Some(ChatHistoryMessage::AssistantToolCalls(items));
                 }
                 Some(ChatHistoryMessage::Text {
                     role: ChatRole::Assistant,

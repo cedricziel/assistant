@@ -10,7 +10,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use assistant_core::{
-    runtime_workspace_dir, Attachment, ExecutionContext, ToolHandler, ToolOutput,
+    Attachment, ExecutionContext, ToolHandler, ToolOutput, runtime_workspace_dir,
 };
 use async_trait::async_trait;
 use tokio::time::Duration;

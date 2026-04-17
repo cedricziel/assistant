@@ -96,27 +96,22 @@ pub async fn require_auth(
     next: Next,
 ) -> Response {
     // 1. Check session cookie.
-    if let Some(cookie_header) = request.headers().get(COOKIE) {
-        if let Ok(cookies) = cookie_header.to_str() {
-            if extract_cookie(cookies, SESSION_COOKIE)
+    if let Some(cookie_header) = request.headers().get(COOKIE)
+        && let Ok(cookies) = cookie_header.to_str()
+            && extract_cookie(cookies, SESSION_COOKIE)
                 .map(|v| constant_time_eq(v.as_bytes(), auth.session_value.as_bytes()))
                 .unwrap_or(false)
             {
                 return next.run(request).await;
             }
-        }
-    }
 
     // 2. Check Authorization: Bearer <token>.
-    if let Some(auth_header) = request.headers().get("authorization") {
-        if let Ok(value) = auth_header.to_str() {
-            if let Some(bearer) = value.strip_prefix("Bearer ") {
-                if constant_time_eq(bearer.trim().as_bytes(), auth.token.as_bytes()) {
+    if let Some(auth_header) = request.headers().get("authorization")
+        && let Ok(value) = auth_header.to_str()
+            && let Some(bearer) = value.strip_prefix("Bearer ")
+                && constant_time_eq(bearer.trim().as_bytes(), auth.token.as_bytes()) {
                     return next.run(request).await;
                 }
-            }
-        }
-    }
 
     // 3. Not authenticated — decide response type.
     let accepts_html = request

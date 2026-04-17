@@ -9,8 +9,8 @@
 use std::time::Duration;
 
 use reqwest_middleware::ClientWithMiddleware;
-use reqwest_retry::policies::ExponentialBackoff;
 use reqwest_retry::RetryTransientMiddleware;
+use reqwest_retry::policies::ExponentialBackoff;
 use reqwest_tracing::TracingMiddleware;
 
 use crate::retry::RetryConfig;

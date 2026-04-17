@@ -7,14 +7,14 @@
 use chrono::{DateTime, Utc};
 use opentelemetry::InstrumentationScope;
 use opentelemetry::{KeyValue, Value};
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::data::{
     AggregatedMetrics, GaugeDataPoint, HistogramDataPoint, MetricData, ResourceMetrics,
     SumDataPoint,
 };
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-use opentelemetry_sdk::metrics::Temporality;
-use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::attribute::{GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL};
 use serde_json::{Map, Number};
 use sha2::{Digest, Sha256};

@@ -9,19 +9,19 @@ use assistant_core::IcebergConfig;
 use iceberg::spec::DataFileFormat;
 use iceberg::transaction::ApplyTransactionAction;
 use iceberg::transaction::Transaction;
+use iceberg::writer::IcebergWriter;
+use iceberg::writer::IcebergWriterBuilder;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
+use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
 };
 use iceberg::writer::file_writer::rolling_writer::RollingFileWriterBuilder;
-use iceberg::writer::file_writer::ParquetWriterBuilder;
-use iceberg::writer::IcebergWriter;
-use iceberg::writer::IcebergWriterBuilder;
 use iceberg::{TableCreation, TableIdent};
 use opentelemetry::{Key, Value};
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{SpanData, SpanExporter};
-use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::attribute::{
     GEN_AI_USAGE_INPUT_TOKENS, GEN_AI_USAGE_OUTPUT_TOKENS, SERVICE_NAME,
 };
@@ -29,9 +29,9 @@ use parquet::file::properties::WriterProperties;
 use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 
-use crate::catalog::{build_catalog, build_file_io, ensure_namespace, CatalogRef};
+use crate::catalog::{CatalogRef, build_catalog, build_file_io, ensure_namespace};
 use crate::partition::{batch_partition_key, partition_spec};
-use crate::schema::{arc, spans_schema, SPANS_START_TIME_FIELD_ID};
+use crate::schema::{SPANS_START_TIME_FIELD_ID, arc, spans_schema};
 
 /// OpenTelemetry span exporter that persists spans into an Apache Iceberg
 /// `assistant_spans` table using Parquet files.

@@ -3,18 +3,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assistant_core::{
-    bus_messages, topic, types::Interface, AssistantConfig, MessageBus, PublishRequest,
+    AssistantConfig, MessageBus, PublishRequest, bus_messages, topic, types::Interface,
 };
 use assistant_llm::{
     ChatHistoryMessage, ChatRole, LlmClient, LlmClientConfig, LlmProvider, ToolCallItem,
 };
-use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 use wiremock::{
-    matchers::{body_string_contains, method, path},
     Mock, MockServer, ResponseTemplate,
+    matchers::{body_string_contains, method, path},
 };
 
 use super::Orchestrator;
@@ -1621,7 +1621,7 @@ async fn worker_propagates_submit_correlation_fields_to_turn_result() {
 
 // ── Subagent integration tests ────────────────────────────────────────────
 
-use assistant_core::{AgentReportStatus, AgentSpawn, SubagentRunner, DEFAULT_MAX_AGENT_DEPTH};
+use assistant_core::{AgentReportStatus, AgentSpawn, DEFAULT_MAX_AGENT_DEPTH, SubagentRunner};
 
 #[tokio::test]
 async fn subagent_spawn_complete_round_trip() {

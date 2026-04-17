@@ -6,6 +6,7 @@
 //! because it uses the non-standard `"type": "builtin_function"` tool spec
 //! and requires an echo-back loop.
 
+use async_openai::Client;
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::types::chat::{
     ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,
@@ -14,18 +15,17 @@ use async_openai::types::chat::{
     ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionTools, CompletionUsage,
     CreateChatCompletionRequestArgs, FunctionCall, FunctionObjectArgs,
 };
-use async_openai::Client;
 use async_trait::async_trait;
 use futures::StreamExt as _;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use assistant_core::LlmConfig;
 use assistant_llm::{
-    build_reqwest_client, is_transient_error_message, with_retry, Capabilities, ChatHistoryMessage,
-    ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse, LlmResponseMeta, RetryConfig,
-    ToolCallItem, ToolSpec, ToolSupport,
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
+    LlmResponseMeta, RetryConfig, ToolCallItem, ToolSpec, ToolSupport, build_reqwest_client,
+    is_transient_error_message, with_retry,
 };
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
@@ -441,59 +441,59 @@ impl MoonshotProvider {
             };
 
             // Check for tool calls.
-            if finish_reason == "tool_calls" {
-                if let Some(tool_calls) = message["tool_calls"].as_array() {
-                    let mut web_search_calls: Vec<&Value> = Vec::new();
-                    let mut regular_calls: Vec<ToolCallItem> = Vec::new();
+            if finish_reason == "tool_calls"
+                && let Some(tool_calls) = message["tool_calls"].as_array()
+            {
+                let mut web_search_calls: Vec<&Value> = Vec::new();
+                let mut regular_calls: Vec<ToolCallItem> = Vec::new();
 
-                    for tc in tool_calls {
-                        let name = tc["function"]["name"].as_str().unwrap_or("");
-                        if name == "$web_search" {
-                            web_search_calls.push(tc);
-                        } else {
-                            let params: Value = serde_json::from_str(
-                                tc["function"]["arguments"].as_str().unwrap_or("{}"),
-                            )
-                            .unwrap_or(json!({}));
-                            regular_calls.push(ToolCallItem {
-                                name: name.to_string(),
-                                params,
-                                id: tc["id"].as_str().map(String::from),
-                            });
-                        }
+                for tc in tool_calls {
+                    let name = tc["function"]["name"].as_str().unwrap_or("");
+                    if name == "$web_search" {
+                        web_search_calls.push(tc);
+                    } else {
+                        let params: Value = serde_json::from_str(
+                            tc["function"]["arguments"].as_str().unwrap_or("{}"),
+                        )
+                        .unwrap_or(json!({}));
+                        regular_calls.push(ToolCallItem {
+                            name: name.to_string(),
+                            params,
+                            id: tc["id"].as_str().map(String::from),
+                        });
                     }
+                }
 
-                    if !regular_calls.is_empty() {
+                if !regular_calls.is_empty() {
+                    debug!(
+                        count = regular_calls.len(),
+                        "Moonshot: regular tool calls received alongside web search"
+                    );
+                    return Ok(LlmResponse::ToolCalls(regular_calls, meta));
+                }
+
+                if !web_search_calls.is_empty() {
+                    messages.push(message.clone());
+
+                    for tc in &web_search_calls {
+                        let call_id = tc["id"].as_str().unwrap_or("");
+                        let arguments = tc["function"]["arguments"].as_str().unwrap_or("{}");
+
                         debug!(
-                            count = regular_calls.len(),
-                            "Moonshot: regular tool calls received alongside web search"
+                            call_id,
+                            query = arguments,
+                            "Moonshot: echoing $web_search arguments"
                         );
-                        return Ok(LlmResponse::ToolCalls(regular_calls, meta));
+
+                        messages.push(json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": "$web_search",
+                            "content": arguments,
+                        }));
                     }
 
-                    if !web_search_calls.is_empty() {
-                        messages.push(message.clone());
-
-                        for tc in &web_search_calls {
-                            let call_id = tc["id"].as_str().unwrap_or("");
-                            let arguments = tc["function"]["arguments"].as_str().unwrap_or("{}");
-
-                            debug!(
-                                call_id,
-                                query = arguments,
-                                "Moonshot: echoing $web_search arguments"
-                            );
-
-                            messages.push(json!({
-                                "role": "tool",
-                                "tool_call_id": call_id,
-                                "name": "$web_search",
-                                "content": arguments,
-                            }));
-                        }
-
-                        continue;
-                    }
+                    continue;
                 }
             }
 
@@ -551,10 +551,10 @@ impl LlmProvider for MoonshotProvider {
             let result = self
                 .chat_with_web_search(system_prompt, history, tools)
                 .await?;
-            if let LlmResponse::FinalAnswer(ref text, _) = result {
-                if let Some(sink) = token_sink {
-                    let _ = sink.send(text.clone()).await;
-                }
+            if let LlmResponse::FinalAnswer(ref text, _) = result
+                && let Some(sink) = token_sink
+            {
+                let _ = sink.send(text.clone()).await;
             }
             Ok(result)
         } else {
@@ -594,13 +594,12 @@ fn build_chat_messages(
     let mut messages: Vec<ChatCompletionRequestMessage> = Vec::with_capacity(history.len() + 1);
     let mut pending_ids: Vec<(String, String)> = Vec::new();
 
-    if !system_prompt.is_empty() {
-        if let Ok(msg) = ChatCompletionRequestSystemMessageArgs::default()
+    if !system_prompt.is_empty()
+        && let Ok(msg) = ChatCompletionRequestSystemMessageArgs::default()
             .content(system_prompt)
             .build()
-        {
-            messages.push(ChatCompletionRequestMessage::System(msg));
-        }
+    {
+        messages.push(ChatCompletionRequestMessage::System(msg));
     }
 
     for entry in history {
@@ -972,10 +971,11 @@ mod tests {
             true,
         )
         .unwrap();
-        assert!(p
-            .capabilities()
-            .hosted_tools
-            .contains(&HostedTool::WebSearch));
+        assert!(
+            p.capabilities()
+                .hosted_tools
+                .contains(&HostedTool::WebSearch)
+        );
     }
 
     #[test]
@@ -989,10 +989,11 @@ mod tests {
             false,
         )
         .unwrap();
-        assert!(!p
-            .capabilities()
-            .hosted_tools
-            .contains(&HostedTool::WebSearch));
+        assert!(
+            !p.capabilities()
+                .hosted_tools
+                .contains(&HostedTool::WebSearch)
+        );
     }
 
     // ── Web-search echo-back tests (wiremock) ─────────────────────────────

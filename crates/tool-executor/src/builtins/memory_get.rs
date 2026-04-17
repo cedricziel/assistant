@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    base_dir, resolve_dir, resolve_path, AssistantConfig, ExecutionContext, ToolHandler, ToolOutput,
+    AssistantConfig, ExecutionContext, ToolHandler, ToolOutput, base_dir, resolve_dir, resolve_path,
 };
 use async_trait::async_trait;
 
@@ -99,8 +99,8 @@ impl ToolHandler for MemoryGetHandler {
             Some(p) => p,
             None => {
                 return Ok(ToolOutput::error(format!(
-                "Unknown target '{target}'. Use: soul, identity, user, tools, memory, or notes/YYYY-MM-DD"
-            )))
+                    "Unknown target '{target}'. Use: soul, identity, user, tools, memory, or notes/YYYY-MM-DD"
+                )));
             }
         };
 

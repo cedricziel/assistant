@@ -102,7 +102,7 @@ impl ToolHandler for WebSearchHandler {
                 return Ok(ToolOutput::error(format!(
                     "Failed to reach DuckDuckGo: {}",
                     e
-                )))
+                )));
             }
         };
 

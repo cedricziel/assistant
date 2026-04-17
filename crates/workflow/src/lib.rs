@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use assistant_core::{bus_messages, MessageBus, MessageStatus};
+use assistant_core::{MessageBus, MessageStatus, bus_messages};
 use assistant_storage::{
     StorageLayer, WorkflowGraph, WorkflowNode, WorkflowNodeKind, WorkflowRunRecord, WorkflowStore,
     WorkflowTriggerKind,
@@ -370,10 +370,10 @@ async fn process_event_triggers(
                         .get("event")
                         .or_else(|| node.config.get("topic"))
                         .and_then(|v| v.as_str());
-                    if let Some(expected_topic) = expected_topic {
-                        if expected_topic != msg.topic {
-                            continue;
-                        }
+                    if let Some(expected_topic) = expected_topic
+                        && expected_topic != msg.topic
+                    {
+                        continue;
                     }
 
                     let payload = serde_json::json!({

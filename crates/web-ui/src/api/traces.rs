@@ -136,21 +136,18 @@ pub async fn list_traces(
                             return false;
                         }
                     }
-                    if let Some(conv_id) = filter.conversation {
-                        if t.conversation_id != Some(conv_id) {
+                    if let Some(conv_id) = filter.conversation
+                        && t.conversation_id != Some(conv_id) {
                             return false;
                         }
-                    }
-                    if let Some(since) = filter.since {
-                        if t.start_time < since {
+                    if let Some(since) = filter.since
+                        && t.start_time < since {
                             return false;
                         }
-                    }
-                    if let Some(until) = filter.until {
-                        if t.start_time > until {
+                    if let Some(until) = filter.until
+                        && t.start_time > until {
                             return false;
                         }
-                    }
                     true
                 })
                 .map(|t| {

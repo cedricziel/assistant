@@ -13,16 +13,16 @@ use std::sync::Arc;
 use std::{env, time::Duration};
 
 use anyhow::Result;
-use assistant_core::{types::Interface, AssistantConfig, ExecutionContext, MessageBus};
+use assistant_core::{AssistantConfig, ExecutionContext, MessageBus, types::Interface};
 use assistant_llm::{LlmClient, LlmClientConfig};
 use assistant_runtime::Orchestrator;
 use assistant_skills::SkillSource;
-use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 use testcontainers::{
+    ContainerAsync, GenericImage,
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
-    ContainerAsync, GenericImage,
 };
 use uuid::Uuid;
 

@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    strip_cite_tags, strip_think_tags, ExecutionContext, ToolHandler, ToolOutput,
+    ExecutionContext, ToolHandler, ToolOutput, strip_cite_tags, strip_think_tags,
 };
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::warn;
 
 use crate::client::SlackApiClient;

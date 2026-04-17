@@ -218,9 +218,11 @@ mod tests {
 
         let result = embedder.embed("hello").await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("empty embedding data"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("empty embedding data")
+        );
     }
 }

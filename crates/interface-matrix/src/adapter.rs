@@ -20,7 +20,7 @@ use assistant_transcription::{TranscriptionProvider, TranscriptionRequest};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream::Stream;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -481,10 +481,10 @@ impl ChannelAdapter for MatrixAdapter {
             .await
             .get_mut(room_id)
             .and_then(|q| q.pop_front());
-        if let Some(rid) = reaction_id {
-            if let Err(e) = self.client.redact_event(room_id, &rid).await {
-                debug!(error = %e, "matrix: failed to redact hourglass reaction (best-effort)");
-            }
+        if let Some(rid) = reaction_id
+            && let Err(e) = self.client.redact_event(room_id, &rid).await
+        {
+            debug!(error = %e, "matrix: failed to redact hourglass reaction (best-effort)");
         }
         if let Err(e) = self.client.send_typing(room_id, true).await {
             debug!(error = %e, "matrix: failed to send typing indicator (best-effort)");

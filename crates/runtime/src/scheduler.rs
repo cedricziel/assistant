@@ -13,15 +13,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use assistant_core::{
-    bus_messages, strip_html_comments, topic, ChannelContent, ChannelMessage, ChannelType,
-    ChannelUser, Interface, PublishRequest,
+    ChannelContent, ChannelMessage, ChannelType, ChannelUser, Interface, PublishRequest,
+    bus_messages, strip_html_comments, topic,
 };
 use assistant_storage::StorageLayer;
 use chrono::Utc;
 use cron::Schedule;
 use opentelemetry::{
-    trace::{Span as _, SpanKind},
     KeyValue,
+    trace::{Span as _, SpanKind},
 };
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -405,13 +405,13 @@ async fn prune_conversation_events(storage: &StorageLayer) {
 mod tests {
     use std::sync::Arc;
 
-    use assistant_core::{topic, AssistantConfig, MessageBus};
+    use assistant_core::{AssistantConfig, MessageBus, topic};
     use assistant_storage::StorageLayer;
     use assistant_tool_executor::ToolExecutor;
     use chrono::{Duration, Timelike, Utc};
     use wiremock::{
-        matchers::{method, path},
         Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
     };
 
     use super::*;

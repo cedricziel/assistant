@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use opentelemetry::trace::SpanId;
 use opentelemetry::{Key, KeyValue, Value};
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{SpanData, SpanExporter};
-use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::attribute::{
     GEN_AI_USAGE_INPUT_TOKENS, GEN_AI_USAGE_OUTPUT_TOKENS, SERVICE_NAME,
 };
@@ -245,8 +245,8 @@ fn status_fields(status: &opentelemetry::trace::Status) -> (&'static str, Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::trace::{SpanContext, SpanKind, Status, TraceFlags, TraceId, TraceState};
     use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::{SpanContext, SpanKind, Status, TraceFlags, TraceId, TraceState};
     use opentelemetry_sdk::trace::{SpanData, SpanEvents, SpanLinks};
     use std::time::{Duration, SystemTime};
 

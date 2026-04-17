@@ -94,7 +94,7 @@ impl ToolHandler for FileGlobHandler {
                 return Ok(ToolOutput::error(format!(
                     "Invalid glob pattern '{}': {}",
                     pattern, e
-                )))
+                )));
             }
         };
 

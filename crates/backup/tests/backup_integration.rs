@@ -5,7 +5,7 @@ use std::path::Path;
 use tempfile::TempDir;
 
 use assistant_backup::{
-    archive::read_tar_gz_manifest, BackupEngine, BackupOptions, RestoreEngine, RestoreOptions,
+    BackupEngine, BackupOptions, RestoreEngine, RestoreOptions, archive::read_tar_gz_manifest,
 };
 
 /// Populate a fake installation directory.

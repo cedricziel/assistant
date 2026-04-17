@@ -15,9 +15,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use assistant_core::{
-    apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
-    validate_agent_id, AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, Interface,
-    LlmProviderKind, MemoryLoader, MessageBus,
+    AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, Interface, LlmProviderKind,
+    MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
+    set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_llm::{
     EmbeddingProvider, LlmEmbedder, LlmProvider, VoyageConfig, VoyageEmbedder,
@@ -28,14 +28,14 @@ use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::{OllamaConfig, OllamaProvider};
 use assistant_provider_openai::{OpenAIProvider, OpenAIProviderConfig};
 use assistant_runtime::{
-    init_tracing, orchestrator::ConfirmationCallback, spawn_memory_indexer, spawn_scheduler,
-    start_conversation_context, Orchestrator,
+    Orchestrator, init_tracing, orchestrator::ConfirmationCallback, spawn_memory_indexer,
+    spawn_scheduler, start_conversation_context,
 };
 use assistant_skills::SkillSource;
 use assistant_storage::{
-    registry::SkillRegistry, PersonaSkillAccessStore, PersonaStore, RefinementStatus, StorageLayer,
+    PersonaSkillAccessStore, PersonaStore, RefinementStatus, StorageLayer, registry::SkillRegistry,
 };
-use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
+use assistant_tool_executor::{ToolExecutor, install_skill_from_source};
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 

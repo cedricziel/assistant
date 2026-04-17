@@ -7,8 +7,8 @@ use std::sync::Arc;
 use assistant_core::{ExecutionContext, Interface};
 use assistant_runtime::Orchestrator;
 use assistant_storage::registry::SkillRegistry;
-use assistant_tool_executor::{install_skill_from_source, ToolExecutor};
-use serde_json::{json, Value};
+use assistant_tool_executor::{ToolExecutor, install_skill_from_source};
+use serde_json::{Value, json};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -265,10 +265,7 @@ pub async fn handle_request(
                                 match std::fs::read_to_string(&file_path) {
                                     Ok(text) => {
                                         let content = vec![ContentItem::text(text)];
-                                        JsonRpcResponse::ok(
-                                            req.id,
-                                            json!({ "contents": content }),
-                                        )
+                                        JsonRpcResponse::ok(req.id, json!({ "contents": content }))
                                     }
                                     Err(_) => JsonRpcResponse::err(
                                         req.id,

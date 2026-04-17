@@ -10,10 +10,9 @@ use assistant_llm::{
     ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, LlmResponseMeta, ToolSpec,
 };
 use opentelemetry::{
-    global,
+    Array, Context as OtelContext, KeyValue, StringValue, Value, global,
     propagation::{Extractor, Injector},
     trace::{Span as _, SpanKind, TraceContextExt, Tracer as _},
-    Array, Context as OtelContext, KeyValue, StringValue, Value,
 };
 use opentelemetry_semantic_conventions::attribute::{
     GEN_AI_CONVERSATION_ID, GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL,

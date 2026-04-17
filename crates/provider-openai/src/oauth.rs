@@ -14,8 +14,8 @@
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Context};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use anyhow::{Context, bail};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -105,10 +105,10 @@ impl OAuthManager {
         // Fast path: valid cached token.
         {
             let guard = self.tokens.read().await;
-            if let Some(ref t) = *guard {
-                if t.expires_at > Utc::now() + Duration::seconds(REFRESH_MARGIN_SECS) {
-                    return Ok(t.access_token.clone());
-                }
+            if let Some(ref t) = *guard
+                && t.expires_at > Utc::now() + Duration::seconds(REFRESH_MARGIN_SECS)
+            {
+                return Ok(t.access_token.clone());
             }
         }
 

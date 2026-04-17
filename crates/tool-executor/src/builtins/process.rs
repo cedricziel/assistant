@@ -9,16 +9,16 @@
 //! - `list`   — enumerate all tracked sessions
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use assistant_core::{runtime_workspace_dir, ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{ExecutionContext, ToolHandler, ToolOutput, runtime_workspace_dir};
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::ChildStdin;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -149,7 +149,7 @@ impl ProcessHandler {
             None => {
                 return Ok(ToolOutput::error(
                     "Missing required parameter 'command' for action=start",
-                ))
+                ));
             }
         };
         let workdir = params
@@ -269,7 +269,7 @@ impl ProcessHandler {
             None => {
                 return Ok(ToolOutput::error(
                     "Missing required parameter 'session_id' for action=poll",
-                ))
+                ));
             }
         };
 
@@ -280,7 +280,7 @@ impl ProcessHandler {
                 None => {
                     return Ok(ToolOutput::error(format!(
                         "Session '{session_id}' not found"
-                    )))
+                    )));
                 }
             }
         };
@@ -308,7 +308,7 @@ impl ProcessHandler {
             None => {
                 return Ok(ToolOutput::error(
                     "Missing required parameter 'session_id' for action=log",
-                ))
+                ));
             }
         };
         let lines = params.get("lines").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
@@ -320,7 +320,7 @@ impl ProcessHandler {
                 None => {
                     return Ok(ToolOutput::error(format!(
                         "Session '{session_id}' not found"
-                    )))
+                    )));
                 }
             }
         };
@@ -363,7 +363,7 @@ impl ProcessHandler {
             None => {
                 return Ok(ToolOutput::error(
                     "Missing required parameter 'session_id' for action=write",
-                ))
+                ));
             }
         };
         let data = match params.get("data").and_then(|v| v.as_str()) {
@@ -371,7 +371,7 @@ impl ProcessHandler {
             None => {
                 return Ok(ToolOutput::error(
                     "Missing required parameter 'data' for action=write",
-                ))
+                ));
             }
         };
 
@@ -382,7 +382,7 @@ impl ProcessHandler {
                 None => {
                     return Ok(ToolOutput::error(format!(
                         "Session '{session_id}' not found"
-                    )))
+                    )));
                 }
             }
         };
@@ -405,7 +405,7 @@ impl ProcessHandler {
             None => {
                 return Ok(ToolOutput::error(
                     "Missing required parameter 'session_id' for action=kill",
-                ))
+                ));
             }
         };
 
@@ -416,7 +416,7 @@ impl ProcessHandler {
                 None => {
                     return Ok(ToolOutput::error(format!(
                         "Session '{session_id}' not found"
-                    )))
+                    )));
                 }
             }
         };

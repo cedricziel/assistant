@@ -119,10 +119,10 @@ impl SkillDef {
                 if !path.is_file() {
                     continue;
                 }
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with('.') {
-                        continue;
-                    }
+                if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    && name.starts_with('.')
+                {
+                    continue;
                 }
                 let relative = PathBuf::from(category.dir_name()).join(entry.file_name());
                 result.push((category.clone(), relative));

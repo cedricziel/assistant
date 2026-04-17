@@ -294,15 +294,14 @@ pub async fn update_webhook(
     let new_active = body.active.unwrap_or(existing.active);
 
     // Validate the URL if it changed.
-    if body.url.is_some() {
-        if let Err(e) = validate_webhook_url(new_url) {
+    if body.url.is_some()
+        && let Err(e) = validate_webhook_url(new_url) {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": e})),
             )
                 .into_response();
         }
-    }
 
     match store
         .update(&id, new_name, new_url, &new_event_types, new_active)
@@ -568,17 +567,15 @@ fn validate_webhook_url(url: &str) -> Result<(), String> {
     if lower == "localhost" || lower == "127.0.0.1" || lower == "::1" || lower == "[::1]" {
         return Err("Loopback addresses are not allowed".to_string());
     }
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if is_private_ip(ip) {
+    if let Ok(ip) = host.parse::<IpAddr>()
+        && is_private_ip(ip) {
             return Err(format!("Private/reserved IP address {ip} is not allowed"));
         }
-    }
     let trimmed = host.trim_start_matches('[').trim_end_matches(']');
-    if let Ok(ip) = trimmed.parse::<IpAddr>() {
-        if is_private_ip(ip) {
+    if let Ok(ip) = trimmed.parse::<IpAddr>()
+        && is_private_ip(ip) {
             return Err(format!("Private/reserved IP address {ip} is not allowed"));
         }
-    }
     Ok(())
 }
 

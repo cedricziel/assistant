@@ -27,8 +27,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::Consumer;
+use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::stream::RetentionPolicy;
 use async_nats::jetstream::{self, AckKind};
 use async_trait::async_trait;
@@ -488,15 +488,15 @@ fn matches_filter(headers: Option<&async_nats::HeaderMap>, filter: &ClaimFilter)
         return false;
     };
 
-    if let Some(ref want) = filter.agent_id {
-        if header_str(h, H_AGENT_ID) != Some(want.as_str()) {
-            return false;
-        }
+    if let Some(ref want) = filter.agent_id
+        && header_str(h, H_AGENT_ID) != Some(want.as_str())
+    {
+        return false;
     }
-    if let Some(ref want) = filter.user_id {
-        if header_str(h, H_USER_ID) != Some(want.as_str()) {
-            return false;
-        }
+    if let Some(ref want) = filter.user_id
+        && header_str(h, H_USER_ID) != Some(want.as_str())
+    {
+        return false;
     }
     if let Some(ref want) = filter.conversation_id {
         let want_s = want.to_string();
@@ -510,10 +510,10 @@ fn matches_filter(headers: Option<&async_nats::HeaderMap>, filter: &ClaimFilter)
             return false;
         }
     }
-    if let Some(ref want) = filter.interface {
-        if header_str(h, H_INTERFACE) != Some(want.as_str()) {
-            return false;
-        }
+    if let Some(ref want) = filter.interface
+        && header_str(h, H_INTERFACE) != Some(want.as_str())
+    {
+        return false;
     }
 
     true

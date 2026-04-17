@@ -416,11 +416,10 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
     let mut tool_results: std::collections::HashMap<(i64, String), String> =
         std::collections::HashMap::new();
     for m in &history {
-        if matches!(m.role, MessageRole::Tool) {
-            if let Some(ref name) = m.skill_name {
+        if matches!(m.role, MessageRole::Tool)
+            && let Some(ref name) = m.skill_name {
                 tool_results.insert((m.turn, name.clone()), m.content.clone());
             }
-        }
     }
 
     let messages = history
@@ -1641,13 +1640,11 @@ pub async fn serve_attachment(
     };
 
     // Conditional request: check If-None-Match.
-    if let Some(inm) = headers.get(header::IF_NONE_MATCH) {
-        if let Ok(inm_str) = inm.to_str() {
-            if inm_str == etag {
+    if let Some(inm) = headers.get(header::IF_NONE_MATCH)
+        && let Ok(inm_str) = inm.to_str()
+            && inm_str == etag {
                 return StatusCode::NOT_MODIFIED.into_response();
             }
-        }
-    }
 
     // Load original bytes.
     let original = match state.attachment_store.load_bytes(att_id).await {

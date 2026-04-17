@@ -17,14 +17,14 @@ use assistant_core::{
     NextcloudConfig, ToolHandler,
 };
 use async_trait::async_trait;
+use axum::Router;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
-use axum::Router;
 use chrono::Utc;
 use futures::stream::Stream;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -402,10 +402,10 @@ pub(crate) async fn http_post_message(
     reply_to: Option<i64>,
 ) -> Result<()> {
     let mut body = serde_json::json!({ "message": message });
-    if let Some(r) = reply_to {
-        if r > 0 {
-            body["replyTo"] = serde_json::json!(r);
-        }
+    if let Some(r) = reply_to
+        && r > 0
+    {
+        body["replyTo"] = serde_json::json!(r);
     }
     let body_str = body.to_string();
     let (random, signature) = sign_request(secret, &body_str)?;

@@ -13,7 +13,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use assistant_core::{sanitize_llm_output, ExecutionContext, ToolHandler, ToolOutput};
+use assistant_core::{ExecutionContext, ToolHandler, ToolOutput, sanitize_llm_output};
 
 use crate::signing::sign_request;
 

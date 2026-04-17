@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::{expand_tilde, AssistantConfig, MemoryConfig};
+use assistant_core::{AssistantConfig, MemoryConfig, expand_tilde};
 use assistant_llm::LlmProvider;
 use assistant_skills::SkillSource;
 use assistant_storage::StorageLayer;
@@ -110,10 +110,10 @@ pub fn skill_dirs(
         );
     }
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            push_dir(exe_dir.join("skills"), SkillSource::Builtin);
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        push_dir(exe_dir.join("skills"), SkillSource::Builtin);
     }
 
     dirs

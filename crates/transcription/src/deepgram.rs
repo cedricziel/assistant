@@ -3,7 +3,7 @@
 //! Uses Deepgram's `POST /v1/listen` pre-recorded audio endpoint.
 //! See <https://developers.deepgram.com/reference/listen-file> for API docs.
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use async_trait::async_trait;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, warn};

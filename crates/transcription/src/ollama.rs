@@ -6,14 +6,14 @@
 //! The wire format is identical to OpenAI's Whisper API, so this
 //! implementation shares the same multipart upload logic.
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use async_trait::async_trait;
 use reqwest::multipart;
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, warn};
 
 use crate::provider::{
-    extension_for_mime, TranscriptionProvider, TranscriptionRequest, TranscriptionResult,
+    TranscriptionProvider, TranscriptionRequest, TranscriptionResult, extension_for_mime,
 };
 
 /// Default timeout for transcription requests (120 s — audio can be long).

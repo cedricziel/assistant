@@ -8,13 +8,13 @@ use std::sync::Arc;
 use assistant_core::{Attachment, ExecutionContext, Message, MessageRole, ToolHandler};
 use assistant_llm::{Capabilities, ChatHistoryMessage, HostedTool, ToolCallItem, ToolSpec};
 use assistant_storage::conversations::ConversationStore;
-use opentelemetry::trace::Span as _;
 use opentelemetry::KeyValue;
+use opentelemetry::trace::Span as _;
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn, Instrument};
+use tracing::{Instrument, debug, info, warn};
 use uuid::Uuid;
 
-use super::{value_to_params_map, DispatchOutcome, Orchestrator, OrchestratorEvent};
+use super::{DispatchOutcome, Orchestrator, OrchestratorEvent, value_to_params_map};
 use crate::webhook_dispatch;
 
 impl Orchestrator {
@@ -282,41 +282,37 @@ impl Orchestrator {
             .map(|h| h.requires_confirmation())
             .unwrap_or(false);
 
-        if requires_confirm && ctx.interactive {
-            if let Some(cb) = &self.confirmation_callback {
-                if !cb.confirm(name, params) {
-                    let observation = format!("User denied execution of '{name}'.");
-                    info!(%observation);
-                    otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
-                    otel_span.set_attribute(KeyValue::new("tool_error", observation.clone()));
-                    crate::history::append_tool_result(history, name, &observation);
-                    let tr_msg = Self::make_tool_result_message(
-                        conversation_id,
-                        turn_index,
-                        name,
-                        &observation,
-                    );
-                    if let Err(e) = conv_store
-                        .save_message(&tr_msg)
-                        .instrument(instrument_span.clone())
-                        .await
-                    {
-                        warn!("Failed to persist tool-result message: {e}");
-                    }
-                    otel_span.end();
-                    if let Some(sink) = event_sink {
-                        let _ = sink
-                            .send(OrchestratorEvent::ToolResult {
-                                tool_name: name.to_string(),
-                                status: "denied".to_string(),
-                                arguments: Some(params.clone()),
-                                result: Some(observation.clone()),
-                            })
-                            .await;
-                    }
-                    return DispatchOutcome::Denied;
-                }
+        if requires_confirm
+            && ctx.interactive
+            && let Some(cb) = &self.confirmation_callback
+            && !cb.confirm(name, params)
+        {
+            let observation = format!("User denied execution of '{name}'.");
+            info!(%observation);
+            otel_span.set_attribute(KeyValue::new("tool_status", "denied"));
+            otel_span.set_attribute(KeyValue::new("tool_error", observation.clone()));
+            crate::history::append_tool_result(history, name, &observation);
+            let tr_msg =
+                Self::make_tool_result_message(conversation_id, turn_index, name, &observation);
+            if let Err(e) = conv_store
+                .save_message(&tr_msg)
+                .instrument(instrument_span.clone())
+                .await
+            {
+                warn!("Failed to persist tool-result message: {e}");
             }
+            otel_span.end();
+            if let Some(sink) = event_sink {
+                let _ = sink
+                    .send(OrchestratorEvent::ToolResult {
+                        tool_name: name.to_string(),
+                        status: "denied".to_string(),
+                        arguments: Some(params.clone()),
+                        result: Some(observation.clone()),
+                    })
+                    .await;
+            }
+            return DispatchOutcome::Denied;
         }
 
         if let Some(sink) = event_sink {

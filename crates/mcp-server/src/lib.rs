@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_runtime::Orchestrator;
-use assistant_storage::{registry::SkillRegistry, StorageLayer};
+use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{info, warn};

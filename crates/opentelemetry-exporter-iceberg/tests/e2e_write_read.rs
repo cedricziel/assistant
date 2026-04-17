@@ -7,10 +7,10 @@ use std::time::SystemTime;
 
 use arrow_array::Array;
 use assistant_core::{IcebergConfig, PartitionGranularity};
+use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::{
     SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState,
 };
-use opentelemetry::InstrumentationScope;
 use opentelemetry_exporter_iceberg::IcebergSpanExporter;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::{SpanData, SpanEvents, SpanExporter, SpanLinks};

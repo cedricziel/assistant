@@ -6,9 +6,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use assistant_core::IcebergConfig;
 use iceberg::io::FileIO;
-use iceberg::memory::{MemoryCatalogBuilder, MEMORY_CATALOG_WAREHOUSE};
+use iceberg::memory::{MEMORY_CATALOG_WAREHOUSE, MemoryCatalogBuilder};
 use iceberg::{Catalog, CatalogBuilder, NamespaceIdent};
-use iceberg_catalog_rest::{RestCatalogBuilder, REST_CATALOG_PROP_URI};
+use iceberg_catalog_rest::{REST_CATALOG_PROP_URI, RestCatalogBuilder};
 
 /// A thread-safe reference to an Iceberg catalog.
 pub type CatalogRef = Arc<dyn Catalog>;

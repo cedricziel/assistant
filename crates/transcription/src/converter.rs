@@ -7,7 +7,7 @@
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 

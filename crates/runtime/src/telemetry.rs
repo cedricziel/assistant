@@ -2,22 +2,22 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{ObservabilityConfig, OtelExporter};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_exporter_iceberg::build_exporters;
 use opentelemetry_exporter_sqlite::{SqliteLogExporter, SqliteMetricExporter, SqliteSpanExporter};
 use opentelemetry_sdk::{
+    Resource,
     logs::{BatchLogProcessor, SdkLoggerProvider},
     metrics::{PeriodicReader, SdkMeterProvider},
     propagation::TraceContextPropagator,
     trace::{BatchSpanProcessor, SdkTracerProvider},
-    Resource,
 };
 use opentelemetry_semantic_conventions::attribute::{SERVICE_NAME, SERVICE_VERSION};
 use sqlx::SqlitePool;
 use tracing::info;
 use tracing_subscriber::{
-    filter::Targets, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
+    EnvFilter, Layer, filter::Targets, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
 /// Guard that shuts down all OTel providers when dropped.
@@ -113,7 +113,9 @@ pub async fn init_tracing(
     let need_otel = enable_sqlite || enable_iceberg || enable_otlp;
 
     if enable_otlp {
-        info!("OTLP export enabled — the opentelemetry-otlp crate will read endpoint, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars");
+        info!(
+            "OTLP export enabled — the opentelemetry-otlp crate will read endpoint, headers, timeout, and compression from OTEL_EXPORTER_OTLP_* env vars"
+        );
     }
 
     if need_otel {
