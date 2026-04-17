@@ -337,6 +337,13 @@ jobs:
           tar czf "${STANDALONE}.tar.gz" "${STANDALONE}"
           echo "STANDALONE_ARCHIVE=${STANDALONE}.tar.gz" >> $GITHUB_ENV
 
+      - name: Upload standalone binary artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-macos-arm64
+          path: ${{ env.STANDALONE_ARCHIVE }}
+          retention-days: 1
+
       - name: Upload standalone macOS tarball to GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
