@@ -195,7 +195,7 @@ opt-level = 1
 
 [profile.release]
 opt-level = 3
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 4
 # Strip debug symbols to reduce binary size and link time
 strip = "symbols"
