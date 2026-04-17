@@ -263,10 +263,15 @@ class PendingMessage {
     required this.text,
     required this.conversationId,
     this.attachmentIds = const [],
+    this.attachments = const [],
   });
   final String text;
   final String conversationId;
   final List<String> attachmentIds;
+
+  /// Pre-built attachment metadata from upload responses, used to show
+  /// thumbnails immediately in the user bubble without waiting for a reload.
+  final List<ChatAttachment> attachments;
 }
 
 /// A completed tool result recorded during streaming — used by
@@ -560,6 +565,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> sendMessage(
     String message, {
     List<String> attachmentIds = const [],
+    List<ChatAttachment> attachments = const [],
   }) async {
     if (message.trim().isEmpty && attachmentIds.isEmpty) return;
 
@@ -601,6 +607,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             text: message,
             conversationId: conversationId,
             attachmentIds: attachmentIds,
+            attachments: attachments,
           ),
         ],
       ),
@@ -819,6 +826,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           pending.text,
           pending.conversationId,
           attachmentIds: pending.attachmentIds,
+          attachments: pending.attachments,
         );
       }
     } finally {
@@ -991,6 +999,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     String message,
     String conversationId, {
     List<String> attachmentIds = const [],
+    List<ChatAttachment> attachments = const [],
   }) async {
     final api = _api;
     if (api == null) return;
@@ -1010,6 +1019,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       role: 'user',
       content: message,
       status: MessageStatus.sending,
+      attachments: attachments.isNotEmpty ? attachments : null,
     );
     final assistantPlaceholder = ChatMessage(
       id: 'assistant-streaming',

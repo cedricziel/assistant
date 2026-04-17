@@ -153,6 +153,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     // Upload pending attachments first, then send with IDs.
     final attachmentIds = <String>[];
+    final attachments = <ChatAttachment>[];
     if (pending.isNotEmpty) {
       ref.read(pendingAttachmentsProvider.notifier).clear();
       final api = ref.read(apiClientProvider);
@@ -179,6 +180,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               mimeType: p.mimeType,
             );
             attachmentIds.add(meta.id);
+            attachments.add(
+              ChatAttachment(
+                id: meta.id,
+                filename: meta.filename,
+                mimeType: meta.mimeType,
+                url: meta.url,
+              ),
+            );
           } catch (e) {
             // Skip failed uploads — don't block sending the message.
           }
@@ -186,10 +195,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
     }
 
-    final msg = text.isNotEmpty ? text : '[Image attached]';
+    // Server rejects empty messages, so use a Unicode zero-width space when
+    // only images are attached. The bubble hides this when attachments exist.
+    final msg = text.isNotEmpty ? text : '\u200B';
     await ref
         .read(chatProvider.notifier)
-        .sendMessage(msg, attachmentIds: attachmentIds);
+        .sendMessage(
+          msg,
+          attachmentIds: attachmentIds,
+          attachments: attachments,
+        );
     _scrollToBottom();
   }
 
@@ -567,26 +582,29 @@ class _MessageBubble extends StatelessWidget {
                     children: [
                       if (message.attachments.isNotEmpty)
                         _attachmentThumbnails(context),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (isFailed)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: Icon(
-                                Icons.error_outline,
-                                size: 16,
-                                color: Colors.red.shade300,
+                      // Hide text row when content is only whitespace /
+                      // zero-width space and attachments provide the visual.
+                      if (message.content.trim().isNotEmpty)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (isFailed)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Icon(
+                                  Icons.error_outline,
+                                  size: 16,
+                                  color: Colors.red.shade300,
+                                ),
+                              ),
+                            Flexible(
+                              child: SelectableText(
+                                message.content,
+                                style: TextStyle(color: colorScheme.onPrimary),
                               ),
                             ),
-                          Flexible(
-                            child: SelectableText(
-                              message.content,
-                              style: TextStyle(color: colorScheme.onPrimary),
-                            ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
                     ],
                   )
                 : Column(
