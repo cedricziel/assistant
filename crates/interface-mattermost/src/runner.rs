@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_runtime::{ChannelRunner, InterfaceRunner, Orchestrator};
+use assistant_transcription::TranscriptionProvider;
 
 use crate::adapter::MattermostAdapter;
 use crate::client::MattermostClient;
@@ -17,6 +18,8 @@ pub use assistant_core::MattermostConfig;
 pub struct MattermostInterface {
     config: MattermostConfig,
     orchestrator: Arc<Orchestrator>,
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    transcription_language: Option<String>,
 }
 
 impl MattermostInterface {
@@ -24,7 +27,20 @@ impl MattermostInterface {
         Self {
             config,
             orchestrator,
+            transcription: None,
+            transcription_language: None,
         }
+    }
+
+    /// Attach a transcription provider for inbound voice messages.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
+        self
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -42,13 +58,17 @@ impl MattermostInterface {
         })?;
 
         let client = Arc::new(MattermostClient::new(&server_url, &token)?);
-        let adapter = Arc::new(MattermostAdapter::new(
+        let mut adapter = MattermostAdapter::new(
             client,
             self.config.allowed_channels.clone(),
             self.config.allowed_users.clone(),
-        ));
+        );
+        if let Some(ref provider) = self.transcription {
+            adapter =
+                adapter.with_transcription(provider.clone(), self.transcription_language.clone());
+        }
 
-        ChannelRunner::new(adapter, self.orchestrator.clone())
+        ChannelRunner::new(Arc::new(adapter), self.orchestrator.clone())
             .run()
             .await
     }

@@ -13,6 +13,7 @@ use anyhow::Result;
 use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, ToolHandler,
 };
+use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::SinkExt;
@@ -28,6 +29,9 @@ use crate::client::MattermostClient;
 const BACKOFF_MIN: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 
+/// Maximum audio download size (25 MB).
+const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+
 /// Mattermost `ChannelAdapter`. Connects via WebSocket and posts via REST.
 pub struct MattermostAdapter {
     client: Arc<MattermostClient>,
@@ -41,6 +45,10 @@ pub struct MattermostAdapter {
     pending_post_ids: Arc<Mutex<HashMap<String, String>>>,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
+    /// Optional audio transcription provider for voice messages.
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    /// BCP-47 language hint passed to the transcription provider.
+    transcription_language: Option<String>,
 }
 
 impl MattermostAdapter {
@@ -58,7 +66,20 @@ impl MattermostAdapter {
             pending_post_ids: Arc::new(Mutex::new(HashMap::new())),
             stop_tx,
             stop_rx,
+            transcription: None,
+            transcription_language: None,
         }
+    }
+
+    /// Attach a transcription provider for inbound voice messages.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
+        self
     }
 
     pub fn api_client(&self) -> Arc<MattermostClient> {
@@ -82,6 +103,8 @@ impl ChannelAdapter for MattermostAdapter {
         let allowed_users = self.allowed_users.clone();
         let mut stop_rx = self.stop_rx.clone();
         let bot_user_id_store = self.bot_user_id.clone();
+        let transcription = self.transcription.clone();
+        let transcription_language = self.transcription_language.clone();
 
         // Fetch bot's own user ID so we can filter self-messages.
         // Treat failure as non-fatal: self-message filtering is best-effort.
@@ -166,15 +189,38 @@ impl ChannelAdapter for MattermostAdapter {
                                         continue;
                                     }
 
-                                    if let Some(msg) = parse_posted_event(
+                                    if let Some(mut msg) = parse_posted_event(
                                         &payload,
                                         &bot_user_id,
                                         &allowed_channels,
                                         &allowed_users,
-                                    )
-                                        && tx.send(msg).await.is_err() {
+                                    ) {
+                                        // Check for audio file attachments requiring transcription.
+                                        if let Some(transcript) = transcribe_mattermost_files(
+                                            &payload,
+                                            &client,
+                                            &transcription,
+                                            &transcription_language,
+                                        )
+                                        .await
+                                        {
+                                            // Prepend transcript to message text.
+                                            let existing = match &msg.content {
+                                                ChannelContent::Text(t) if !t.is_empty() => {
+                                                    Some(t.clone())
+                                                }
+                                                _ => None,
+                                            };
+                                            let text = match existing {
+                                                Some(t) => format!("{transcript}\n{t}"),
+                                                None => transcript,
+                                            };
+                                            msg.content = ChannelContent::Text(text);
+                                        }
+                                        if tx.send(msg).await.is_err() {
                                             break; // receiver dropped
                                         }
+                                    }
                                 }
                                 Some(Ok(WsMessage::Ping(data))) => {
                                     let _ = ws_write.send(WsMessage::Pong(data)).await;
@@ -198,10 +244,28 @@ impl ChannelAdapter for MattermostAdapter {
 
     async fn send(&self, user: &ChannelUser, content: ChannelContent) -> Result<()> {
         let (channel_id, root_id) = parse_platform_id(&user.platform_id);
-        if let ChannelContent::Text(text) = content {
-            self.client
-                .create_post(&channel_id, &text, root_id.as_deref())
-                .await?;
+        match content {
+            ChannelContent::Text(text) => {
+                self.client
+                    .create_post(&channel_id, &text, root_id.as_deref())
+                    .await?;
+            }
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type: _,
+            } => {
+                let file_ids = self
+                    .client
+                    .upload_file(&channel_id, &filename, data)
+                    .await?;
+                if !file_ids.is_empty() {
+                    self.client
+                        .create_post_with_files(&channel_id, "", root_id.as_deref(), file_ids)
+                        .await?;
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -213,10 +277,28 @@ impl ChannelAdapter for MattermostAdapter {
         thread_id: &str,
     ) -> Result<()> {
         let (channel_id, _) = parse_platform_id(&user.platform_id);
-        if let ChannelContent::Text(text) = content {
-            self.client
-                .create_post(&channel_id, &text, Some(thread_id))
-                .await?;
+        match content {
+            ChannelContent::Text(text) => {
+                self.client
+                    .create_post(&channel_id, &text, Some(thread_id))
+                    .await?;
+            }
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type: _,
+            } => {
+                let file_ids = self
+                    .client
+                    .upload_file(&channel_id, &filename, data)
+                    .await?;
+                if !file_ids.is_empty() {
+                    self.client
+                        .create_post_with_files(&channel_id, "", Some(thread_id), file_ids)
+                        .await?;
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -363,7 +445,13 @@ fn parse_posted_event(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
-    if text.is_empty() {
+    // Check for file attachments (voice messages may have no text).
+    let has_file_ids = post
+        .get("file_ids")
+        .and_then(|v| v.as_array())
+        .is_some_and(|a| !a.is_empty());
+
+    if text.is_empty() && !has_file_ids {
         return None;
     }
     // Filter self-messages.
@@ -437,4 +525,266 @@ fn rand_jitter() -> f64 {
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
     (v >> 33) as f64 / (u32::MAX as f64)
+}
+
+/// Extract `file_ids` from the nested post JSON inside a `posted` WebSocket event.
+fn extract_file_ids(payload: &serde_json::Value) -> Vec<String> {
+    let post_str = match payload.pointer("/data/post").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return vec![],
+    };
+    let post: serde_json::Value = match serde_json::from_str(post_str) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+    post.get("file_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Check for audio file attachments in a posted event and transcribe them.
+///
+/// Returns a formatted `[Voice message]: ...` string if any audio was
+/// successfully transcribed, or `None` otherwise.
+async fn transcribe_mattermost_files(
+    payload: &serde_json::Value,
+    client: &MattermostClient,
+    transcription: &Option<Arc<dyn TranscriptionProvider>>,
+    language: &Option<String>,
+) -> Option<String> {
+    let file_ids = extract_file_ids(payload);
+    if file_ids.is_empty() {
+        return None;
+    }
+
+    let provider = match transcription {
+        Some(p) => p,
+        None => {
+            debug!("mattermost: post has file_ids but no transcription provider configured");
+            return None;
+        }
+    };
+
+    let mut transcripts = Vec::new();
+    for file_id in &file_ids {
+        // Fetch file metadata to check MIME type.
+        let info = match client.get_file_info(file_id).await {
+            Ok(i) => i,
+            Err(e) => {
+                warn!(error = %e, file_id, "mattermost: failed to fetch file info");
+                continue;
+            }
+        };
+
+        if !is_audio_mime(&info.mime_type) {
+            debug!(
+                file_id,
+                mime_type = %info.mime_type,
+                "mattermost: skipping non-audio attachment"
+            );
+            continue;
+        }
+
+        // Download the file bytes.
+        let data = match client.download_file(file_id).await {
+            Ok(d) => d,
+            Err(e) => {
+                warn!(error = %e, file_id, "mattermost: failed to download audio file");
+                continue;
+            }
+        };
+
+        if data.len() > MAX_AUDIO_BYTES {
+            warn!(
+                size = data.len(),
+                limit = MAX_AUDIO_BYTES,
+                file_id,
+                "mattermost: audio file too large; skipping"
+            );
+            continue;
+        }
+
+        let request = TranscriptionRequest {
+            audio_data: data,
+            mime_type: info.mime_type.clone(),
+            filename: Some(info.name.clone()),
+            language: language.clone(),
+        };
+        match provider.transcribe(request).await {
+            Ok(result) => transcripts.push(result.text),
+            Err(e) => {
+                warn!(error = %e, file_id, "mattermost: audio transcription failed");
+            }
+        }
+    }
+
+    if transcripts.is_empty() {
+        return None;
+    }
+
+    Some(format!("[Voice message]: {}", transcripts.join(" ")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_transcription_sets_provider() {
+        use assistant_transcription::{
+            TranscriptionProvider, TranscriptionRequest, TranscriptionResult,
+        };
+
+        #[derive(Debug)]
+        struct DummyProvider;
+
+        #[async_trait]
+        impl TranscriptionProvider for DummyProvider {
+            fn name(&self) -> &str {
+                "dummy"
+            }
+
+            async fn transcribe(&self, _req: TranscriptionRequest) -> Result<TranscriptionResult> {
+                Ok(TranscriptionResult {
+                    text: "hello".to_string(),
+                    language: None,
+                    duration_secs: None,
+                })
+            }
+        }
+
+        let client =
+            Arc::new(crate::client::MattermostClient::new("http://localhost", "tok").unwrap());
+        let adapter = MattermostAdapter::new(client, vec![], vec![]);
+        assert!(adapter.transcription.is_none());
+
+        let adapter = adapter.with_transcription(Arc::new(DummyProvider), Some("en".to_string()));
+        assert!(adapter.transcription.is_some());
+        assert_eq!(adapter.transcription_language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn parse_posted_event_text_still_works() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "user_id": "u1",
+                    "message": "hello world",
+                    "root_id": ""
+                }).to_string()
+            }
+        });
+        let msg = parse_posted_event(&payload, "bot", &[], &[]);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        match &msg.content {
+            ChannelContent::Text(t) => assert_eq!(t, "hello world"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_posted_event_empty_text_no_files_returns_none() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "user_id": "u1",
+                    "message": "",
+                    "root_id": ""
+                }).to_string()
+            }
+        });
+        assert!(parse_posted_event(&payload, "bot", &[], &[]).is_none());
+    }
+
+    #[test]
+    fn parse_posted_event_empty_text_with_file_ids_returns_some() {
+        let payload = serde_json::json!({
+            "event": "posted",
+            "broadcast": { "channel_id": "ch1" },
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "user_id": "u1",
+                    "message": "",
+                    "root_id": "",
+                    "file_ids": ["f1"]
+                }).to_string()
+            }
+        });
+        let msg = parse_posted_event(&payload, "bot", &[], &[]);
+        assert!(
+            msg.is_some(),
+            "should accept posts with file_ids even if text is empty"
+        );
+    }
+
+    #[test]
+    fn extract_file_ids_parses_correctly() {
+        let payload = serde_json::json!({
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "file_ids": ["f1", "f2"]
+                }).to_string()
+            }
+        });
+        let ids = extract_file_ids(&payload);
+        assert_eq!(ids, vec!["f1".to_string(), "f2".to_string()]);
+    }
+
+    #[test]
+    fn extract_file_ids_empty_when_none() {
+        let payload = serde_json::json!({
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "message": "hi"
+                }).to_string()
+            }
+        });
+        let ids = extract_file_ids(&payload);
+        assert!(ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn transcribe_mattermost_files_no_provider_returns_none() {
+        let payload = serde_json::json!({
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "file_ids": ["f1"]
+                }).to_string()
+            }
+        });
+        let client = crate::client::MattermostClient::new("http://localhost", "tok").unwrap();
+        let result = transcribe_mattermost_files(&payload, &client, &None, &None).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn transcribe_mattermost_files_no_file_ids_returns_none() {
+        let payload = serde_json::json!({
+            "data": {
+                "post": serde_json::json!({
+                    "id": "p1",
+                    "message": "text only"
+                }).to_string()
+            }
+        });
+        let client = crate::client::MattermostClient::new("http://localhost", "tok").unwrap();
+        let result = transcribe_mattermost_files(&payload, &client, &None, &None).await;
+        assert!(result.is_none());
+    }
 }
