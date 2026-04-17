@@ -226,6 +226,58 @@ impl MatrixClient {
         Ok(())
     }
 
+    /// Send an `m.audio` message to a room using an already-uploaded `mxc://` URI.
+    ///
+    /// Optionally includes duration in milliseconds if provided.
+    pub async fn send_audio(
+        &self,
+        room_id: &str,
+        mxc_uri: &str,
+        filename: &str,
+        mime_type: &str,
+        size_bytes: usize,
+        duration_ms: Option<u64>,
+    ) -> Result<()> {
+        let txn_id = Uuid::new_v4().to_string();
+        let path = format!(
+            "rooms/{}/send/m.room.message/{}",
+            urlencoding::encode(room_id),
+            txn_id
+        );
+        let url = self.cs_url(&path);
+
+        let mut info = serde_json::json!({
+            "mimetype": mime_type,
+            "size": size_bytes
+        });
+        if let Some(duration) = duration_ms {
+            if let serde_json::Value::Object(ref mut map) = info {
+                map.insert("duration".to_string(), serde_json::json!(duration));
+            }
+        }
+
+        let body = serde_json::json!({
+            "msgtype": "m.audio",
+            "body": filename,
+            "url": mxc_uri,
+            "info": info
+        });
+        debug!(url = %url, room_id, filename, "Matrix send_audio");
+        let resp = self
+            .client
+            .put(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("Matrix send_audio")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Matrix send_audio failed ({status}): {err}");
+        }
+        Ok(())
+    }
+
     // ── Media download ────────────────────────────────────────────────────────
 
     /// Download a Matrix Content Repository resource identified by an `mxc://` URI.
