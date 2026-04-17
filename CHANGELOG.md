@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.113](https://github.com/cedricziel/assistant/compare/v0.1.112...v0.1.113) (2026-04-17)
+
+
+### Features
+
+* **matrix:** add voice message support ([#488](https://github.com/cedricziel/assistant/issues/488)) ([0b58f2e](https://github.com/cedricziel/assistant/commit/0b58f2e64492d20d60b6c92eefe07a628bdcd516))
+
+
+### Bug Fixes
+
+* **analytics:** replace hardcoded colors with theme-aware equivalents ([#503](https://github.com/cedricziel/assistant/issues/503)) ([558e944](https://github.com/cedricziel/assistant/commit/558e944e86996e593895ff3924cf1f390332c1f0))
+* **cli:** wire AudioStore into orchestrator for outbound audio delivery ([#505](https://github.com/cedricziel/assistant/issues/505)) ([47884a9](https://github.com/cedricziel/assistant/commit/47884a9999c359bc289fb53a020ff5a8852c0de4))
+* **connection:** add isIOSPlatform helper and document iOS platform guards ([#504](https://github.com/cedricziel/assistant/issues/504)) ([652affe](https://github.com/cedricziel/assistant/commit/652affe58c9294938aa6f5d4c4532321e8d26686))
+* **matrix:** collapse nested if-let to satisfy clippy ([#506](https://github.com/cedricziel/assistant/issues/506)) ([a1ad2dd](https://github.com/cedricziel/assistant/commit/a1ad2dd8b8fcd1db763f222860bf22836b575476))
+* **notifications:** add iOS notification permission request and badge support ([#500](https://github.com/cedricziel/assistant/issues/500)) ([20393f7](https://github.com/cedricziel/assistant/commit/20393f75242ecf7b4b3259dca1815379ad76452b)), closes [#421](https://github.com/cedricziel/assistant/issues/421)
+
 ## [0.1.112](https://github.com/cedricziel/assistant/compare/v0.1.111...v0.1.112) (2026-04-17)
 
 
