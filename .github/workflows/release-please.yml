@@ -80,10 +80,6 @@ jobs:
             runner: ubuntu-latest
             use_cross: true
             archive_suffix: linux-aarch64-musl
-          - target: aarch64-apple-darwin
-            runner: macos-latest
-            use_cross: false
-            archive_suffix: macos-arm64
 
     steps:
       - uses: actions/checkout@v6
@@ -326,6 +322,25 @@ jobs:
         run: |
           gh release upload ${{ needs.release-please.outputs.tag_name }} \
             "${{ env.ARCHIVE }}" checksums.sha256
+
+      # Reuse the Rust binary already built above to produce the standalone
+      # macOS ARM64 tarball, avoiding a duplicate 18-min compile on a second
+      # macOS runner.
+      - name: Create standalone macOS tarball
+        shell: bash
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          STANDALONE="assistant-${TAG}-macos-arm64"
+          mkdir -p "${STANDALONE}"
+          cp target/aarch64-apple-darwin/release/assistant "${STANDALONE}/"
+          cp config.toml "${STANDALONE}/config.toml.example"
+          tar czf "${STANDALONE}.tar.gz" "${STANDALONE}"
+          echo "STANDALONE_ARCHIVE=${STANDALONE}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload standalone macOS tarball to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ needs.release-please.outputs.tag_name }} ${{ env.STANDALONE_ARCHIVE }}
 
   build-docker:
     name: Build and push Docker image (Alpine)
