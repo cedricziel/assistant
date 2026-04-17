@@ -89,21 +89,27 @@ class _AnalyticsBody extends ConsumerWidget {
         const SizedBox(height: 16),
 
         if (summary == null)
-          const Center(
+          Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.bar_chart_outlined,
-                    size: 64, color: Colors.black26),
-                SizedBox(height: 12),
+                    size: 64,
+                    color: Theme.of(context).colorScheme.outlineVariant),
+                const SizedBox(height: 12),
                 Text(
                   'No analytics data',
-                  style: TextStyle(fontSize: 16, color: Colors.black45),
+                  style: TextStyle(
+                      fontSize: 16,
+                      color:
+                          Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 4),
                 Text(
                   'Use the assistant to generate analytics.',
-                  style: TextStyle(color: Colors.black38),
+                  style: TextStyle(
+                      color:
+                          Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -213,7 +219,7 @@ class _StatCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: Colors.black38),
+            Icon(icon, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -230,9 +236,9 @@ class _StatCard extends StatelessWidget {
                   ),
                   Text(
                     label,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: Colors.black54,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -253,9 +259,9 @@ class _ModelTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (summary.models.isEmpty) {
-      return const Text(
+      return Text(
         'No model data',
-        style: TextStyle(color: Colors.black38),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       );
     }
 
@@ -300,9 +306,9 @@ class _ToolTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (summary.tools.isEmpty) {
-      return const Text(
+      return Text(
         'No tool usage data',
-        style: TextStyle(color: Colors.black38),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       );
     }
 
