@@ -40,21 +40,21 @@ Future<void> main() async {
   // Register for PWA update notifications after the first frame so the
   // ScaffoldMessenger key is bound and can show the SnackBar.
   //
-  // Flutter's flutter_service_worker.js calls skipWaiting() on install, so
-  // the new SW never enters the 'waiting' state.  We listen for the
-  // 'controllerchange' event via JS instead (see index.html).  The stub
-  // implementation is a no-op on non-web platforms.
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    registerPwaUpdateCallback(() {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: const Text('A new version is available.'),
-          action: SnackBarAction(label: 'Reload', onPressed: reloadPwa),
-          duration: const Duration(days: 1),
-        ),
-      );
+  // Only register on web — reloadPwa is a web-only operation and calling it
+  // on iOS/macOS/desktop is dead code at best, a crash risk at worst.
+  if (kIsWeb) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      registerPwaUpdateCallback(() {
+        _scaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: const Text('A new version is available.'),
+            action: SnackBarAction(label: 'Reload', onPressed: reloadPwa),
+            duration: const Duration(days: 1),
+          ),
+        );
+      });
     });
-  });
+  }
 }
 
 /// Root application widget.
