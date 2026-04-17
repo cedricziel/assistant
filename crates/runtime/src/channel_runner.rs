@@ -136,7 +136,7 @@ impl ChannelRunner {
         }
 
         let result = orchestrator
-            .run_turn_with_tools(&text, conv_id, interface, tools, None, attachments)
+            .run_turn_with_tools(&text, conv_id, interface, tools, None, attachments, vec![])
             .await;
 
         match result {

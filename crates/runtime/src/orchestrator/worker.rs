@@ -223,6 +223,7 @@ impl Orchestrator {
                                         Some(&bus_consume_cx),
                                         reg.attachments,
                                         sink,
+                                        turn_req.attachment_ids.clone(),
                                     )
                                     .await
                                 } else {
@@ -234,6 +235,7 @@ impl Orchestrator {
                                         reg.tools,
                                         Some(&bus_consume_cx),
                                         reg.attachments,
+                                        turn_req.attachment_ids.clone(),
                                     )
                                     .await
                                 }
@@ -245,12 +247,19 @@ impl Orchestrator {
                                     interface,
                                     sink,
                                     Some(&bus_consume_cx),
+                                    turn_req.attachment_ids.clone(),
                                 )
                                 .await
                             } else {
                                 // Standard non-streaming turn.
-                                self.run_turn(&prompt, conv_id, interface, Some(&bus_consume_cx))
-                                    .await
+                                self.run_turn(
+                                    &prompt,
+                                    conv_id,
+                                    interface,
+                                    Some(&bus_consume_cx),
+                                    turn_req.attachment_ids.clone(),
+                                )
+                                .await
                             }
                         } => r,
                         _ = turn_cancel.cancelled() => {

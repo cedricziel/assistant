@@ -336,6 +336,7 @@ impl Orchestrator {
     ///
     /// Extension tools are injected by the calling interface (e.g. Slack,
     /// Mattermost) and are checked before the global tool executor.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_turn_with_tools(
         &self,
         user_message: &str,
@@ -344,6 +345,7 @@ impl Orchestrator {
         extensions: Vec<Arc<dyn ToolHandler>>,
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         let turn_span = info_span!(
             "conversation_turn",
@@ -359,6 +361,7 @@ impl Orchestrator {
             trace_cx,
             attachments,
             None,
+            attachment_ids,
         )
         .instrument(turn_span)
         .await
@@ -379,6 +382,7 @@ impl Orchestrator {
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
         token_sink: mpsc::Sender<OrchestratorEvent>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         let turn_span = info_span!(
             "conversation_turn",
@@ -395,6 +399,7 @@ impl Orchestrator {
             trace_cx,
             attachments,
             Some(token_sink),
+            attachment_ids,
         )
         .instrument(turn_span)
         .await
@@ -407,9 +412,17 @@ impl Orchestrator {
         conversation_id: Uuid,
         interface: Interface,
         trace_cx: Option<&OtelContext>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
-        self.run_turn_core(user_message, conversation_id, interface, None, trace_cx)
-            .await
+        self.run_turn_core(
+            user_message,
+            conversation_id,
+            interface,
+            None,
+            trace_cx,
+            attachment_ids,
+        )
+        .await
     }
 
     /// Like [`run_turn`] but streams final-answer tokens through `token_sink`.
@@ -420,6 +433,7 @@ impl Orchestrator {
         interface: Interface,
         token_sink: mpsc::Sender<OrchestratorEvent>,
         trace_cx: Option<&OtelContext>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         self.run_turn_core(
             user_message,
@@ -427,6 +441,7 @@ impl Orchestrator {
             interface,
             Some(token_sink),
             trace_cx,
+            attachment_ids,
         )
         .await
     }
@@ -443,6 +458,7 @@ impl Orchestrator {
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
         token_sink: Option<mpsc::Sender<OrchestratorEvent>>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         self.metrics
             .record_turn(&self.agent_id, None, &format!("{interface:?}"));
@@ -479,7 +495,7 @@ impl Orchestrator {
                 user_message,
                 conversation_id,
                 attachments,
-                &[],
+                &attachment_ids,
                 &self.agent_id,
             )
             .await?;
@@ -815,6 +831,7 @@ impl Orchestrator {
         interface: Interface,
         token_sink: Option<mpsc::Sender<OrchestratorEvent>>,
         trace_cx: Option<&OtelContext>,
+        attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
         let streaming = token_sink.is_some();
         self.metrics
@@ -834,7 +851,7 @@ impl Orchestrator {
                 user_message,
                 conversation_id,
                 Vec::new(),
-                &[],
+                &attachment_ids,
                 &self.agent_id,
             )
             .await?;
