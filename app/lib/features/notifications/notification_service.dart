@@ -96,6 +96,12 @@ class NotificationService {
                 MacOSFlutterLocalNotificationsPlugin>()
             ?.requestPermissions(alert: true, badge: true, sound: true);
         _permissionGranted = granted ?? false;
+      } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final granted = await _plugin
+            .resolvePlatformSpecificImplementation<
+                IOSFlutterLocalNotificationsPlugin>()
+            ?.requestPermissions(alert: true, badge: true, sound: true);
+        _permissionGranted = granted ?? false;
       } else if (kIsWeb) {
         // Web permission is requested by the browser when subscribing to push.
         _permissionGranted = await web_impl.requestWebPermission();
@@ -149,8 +155,10 @@ class NotificationService {
       return;
     }
 
-    // Increment badge counter on macOS.
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+    // Increment badge counter on macOS and iOS.
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
       _ref.read(notificationBadgeProvider.notifier).increment();
     }
   }
@@ -184,6 +192,7 @@ class NotificationService {
   bool get _isSupportedPlatform {
     if (kIsWeb) return true;
     if (defaultTargetPlatform == TargetPlatform.macOS) return true;
+    if (defaultTargetPlatform == TargetPlatform.iOS) return true;
     return false;
   }
 
