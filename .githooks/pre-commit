@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure we're at the working tree root (handles worktrees where CWD may differ)
+cd "$(git rev-parse --show-toplevel)"
+
+# Git sets GIT_DIR when running hooks, which breaks Flutter SDK version
+# detection in worktrees (reports 0.0.0-unknown). Unsetting it lets Flutter
+# discover its SDK normally while cargo/git commands still work fine.
+unset GIT_DIR
+
 BOLD='\033[1m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
