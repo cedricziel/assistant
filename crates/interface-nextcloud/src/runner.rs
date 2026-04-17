@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assistant_runtime::{ChannelRunner, InterfaceRunner, Orchestrator};
+use assistant_transcription::TranscriptionProvider;
 use tracing::info;
 
 use crate::adapter::NextcloudAdapter;
@@ -28,6 +29,10 @@ pub struct NextcloudInterface {
     orchestrator: Arc<Orchestrator>,
     /// Optional external shutdown signal for background / daemon mode.
     shutdown: Option<tokio_util::sync::CancellationToken>,
+    /// Optional audio transcription provider for voice messages.
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    /// BCP-47 language hint passed to the transcription provider.
+    transcription_language: Option<String>,
 }
 
 impl NextcloudInterface {
@@ -36,6 +41,8 @@ impl NextcloudInterface {
             config,
             orchestrator,
             shutdown: None,
+            transcription: None,
+            transcription_language: None,
         }
     }
 
@@ -45,6 +52,17 @@ impl NextcloudInterface {
     /// CLI REPL's Ctrl-C handling.
     pub fn with_shutdown(mut self, token: tokio_util::sync::CancellationToken) -> Self {
         self.shutdown = Some(token);
+        self
+    }
+
+    /// Attach a transcription provider for inbound voice messages.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
         self
     }
 
@@ -60,10 +78,13 @@ impl NextcloudInterface {
             "Starting Nextcloud Talk bot"
         );
 
-        let adapter = Arc::new(
-            NextcloudAdapter::new(self.config.clone())
-                .context("Failed to create NextcloudAdapter")?,
-        );
+        let mut adapter = NextcloudAdapter::new(self.config.clone())
+            .context("Failed to create NextcloudAdapter")?;
+        if let Some(ref provider) = self.transcription {
+            adapter =
+                adapter.with_transcription(provider.clone(), self.transcription_language.clone());
+        }
+        let adapter = Arc::new(adapter);
 
         let mut runner = ChannelRunner::new(adapter, self.orchestrator.clone());
         if let Some(token) = &self.shutdown {

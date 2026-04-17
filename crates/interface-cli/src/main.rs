@@ -1494,7 +1494,10 @@ async fn main() -> Result<()> {
         let mm_cfg = bs.config.mattermost.clone().context(
             "Mattermost is not configured. Add a [mattermost] section to ~/.assistant/config.toml",
         )?;
-        let iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
+        let mut iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         // Spawn a Mattermost-filtered turn worker to prevent duplicate
         // consumption with other workers.
@@ -1525,7 +1528,10 @@ async fn main() -> Result<()> {
         let nc_cfg = bs.config.nextcloud.clone().context(
             "Nextcloud is not configured. Add a [nextcloud] section to ~/.assistant/config.toml",
         )?;
-        let iface = NextcloudInterface::new(nc_cfg, bs.orchestrator.clone());
+        let mut iface = NextcloudInterface::new(nc_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         // Spawn a Nextcloud-filtered turn worker to prevent duplicate
         // consumption with other workers.
@@ -1586,7 +1592,10 @@ async fn main() -> Result<()> {
         let sig_cfg = bs.config.signal.clone().context(
             "Signal is not configured. Add a [signal] section to ~/.assistant/config.toml",
         )?;
-        let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        let mut iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         let worker_orch = bs.orchestrator.clone();
         let _worker = tokio::spawn(async move {
@@ -1650,7 +1659,10 @@ async fn main() -> Result<()> {
     {
         use assistant_interface_mattermost::MattermostInterface;
         let mm_cfg = bs.config.mattermost.clone().unwrap_or_default();
-        let iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
+        let mut iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         let worker_orch = bs.orchestrator.clone();
         tokio::spawn(async move {
@@ -1699,8 +1711,11 @@ async fn main() -> Result<()> {
         use assistant_interface_nextcloud::NextcloudInterface;
         let nc_cfg = bs.config.nextcloud.clone().unwrap_or_default();
         let shutdown_token = tokio_util::sync::CancellationToken::new();
-        let iface =
+        let mut iface =
             NextcloudInterface::new(nc_cfg, bs.orchestrator.clone()).with_shutdown(shutdown_token);
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         let worker_orch = bs.orchestrator.clone();
         tokio::spawn(async move {
@@ -1721,7 +1736,10 @@ async fn main() -> Result<()> {
     if bs.config.signal.is_some() && interface_selected(&orchestrator_interfaces, "signal") {
         use assistant_interface_signal::SignalInterface;
         let sig_cfg = bs.config.signal.clone().unwrap_or_default();
-        let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        let mut iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         if orchestrator_no_repl {
             info!("Running Signal interface in foreground (--no-repl)");

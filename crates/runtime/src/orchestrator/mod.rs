@@ -15,6 +15,7 @@ use assistant_llm::{
 };
 use assistant_storage::{SkillRegistry, StorageLayer, conversations::ConversationStore};
 use assistant_tool_executor::ToolExecutor;
+use assistant_transcription::AudioStore;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,
     trace::{Span as _, Status as OtelStatus, TraceContextExt, Tracer as _},
@@ -211,6 +212,10 @@ pub struct Orchestrator {
     /// timing out. Defaults to 10 800 s (3 h). Configurable per persona via
     /// `with_submit_timeout`.
     pub(crate) submit_timeout_secs: u64,
+    /// Optional audio store for retrieving TTS blobs produced by the
+    /// `voice-response` tool.  When present, synthesised audio is appended
+    /// to `TurnResult::attachments` so channel adapters can deliver it.
+    pub(crate) audio_store: Option<Arc<AudioStore>>,
 }
 
 impl Orchestrator {
@@ -244,6 +249,7 @@ impl Orchestrator {
             compaction_config: config.compaction.clone(),
             submit_timeout_secs: 10_800,
             adapter_registry: crate::AdapterRegistry::new(),
+            audio_store: None,
         }
     }
 
@@ -259,6 +265,13 @@ impl Orchestrator {
     /// Return a reference to the message bus.
     pub fn bus(&self) -> &Arc<dyn MessageBus> {
         &self.bus
+    }
+
+    /// Attach an [`AudioStore`] so that audio produced by the `voice-response`
+    /// tool is included in `TurnResult::attachments`.
+    pub fn with_audio_store(mut self, store: Arc<AudioStore>) -> Self {
+        self.audio_store = Some(store);
+        self
     }
 
     /// Attach a confirmation callback (used by the CLI interface).

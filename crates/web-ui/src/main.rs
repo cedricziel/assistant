@@ -448,6 +448,10 @@ async fn run_with_args(args: Args) -> Result<()> {
         .ok()
         .flatten()
         .and_then(|p| p.turn_timeout_secs);
+
+    // Create the audio store early so the orchestrator can reference it.
+    let audio_store = Arc::new(audio_store::AudioStore::new());
+
     let orchestrator = Arc::new({
         let mut o = Orchestrator::new(
             llm,
@@ -459,7 +463,8 @@ async fn run_with_args(args: Args) -> Result<()> {
         )
         .with_confirmation_callback(Arc::new(AutoDenyConfirmation {
             interface_name: "Web",
-        }));
+        }))
+        .with_audio_store(audio_store.clone());
         if let Some(secs) = persona_timeout {
             o = o.with_submit_timeout(secs);
         }
@@ -569,9 +574,6 @@ async fn run_with_args(args: Args) -> Result<()> {
             Ok::<_, anyhow::Error>(provider)
         })
         .transpose()?;
-
-    // -- In-memory audio store (tool-synthesized audio) ----------------------
-    let audio_store = Arc::new(audio_store::AudioStore::new());
 
     // -- Spawn TTL sweep task ------------------------------------------------
     {

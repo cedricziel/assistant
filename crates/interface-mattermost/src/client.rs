@@ -220,6 +220,30 @@ impl MattermostClient {
             .map(|_| ())
     }
 
+    /// Fetch metadata for a file by its ID.
+    pub async fn get_file_info(&self, file_id: &str) -> Result<FileInfoResponse> {
+        self.get(&format!("files/{file_id}/info")).await
+    }
+
+    /// Download a file's raw bytes by its ID.
+    pub async fn download_file(&self, file_id: &str) -> Result<Vec<u8>> {
+        let url = self.api_url(&format!("files/{file_id}"));
+        debug!(url = %url, "MM GET file");
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GET {url} → {status}: {text}");
+        }
+        let bytes = resp.bytes().await.context("read file bytes")?;
+        Ok(bytes.to_vec())
+    }
+
     /// Return the WebSocket URL for this server.
     pub fn ws_url(&self) -> String {
         let base = self
@@ -235,6 +259,18 @@ impl MattermostClient {
 pub struct MeUser {
     pub id: String,
     pub username: String,
+}
+
+/// File metadata returned by `/files/{id}/info`.
+#[derive(Debug, Deserialize)]
+pub struct FileInfoResponse {
+    pub id: String,
+    #[serde(default)]
+    pub mime_type: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub size: u64,
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

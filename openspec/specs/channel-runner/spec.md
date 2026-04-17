@@ -2,7 +2,7 @@
 
 ### Requirement: ChannelRunner drives any ChannelAdapter
 
-The system SHALL provide a `ChannelRunner` struct in `crates/runtime` that accepts an `Arc<dyn ChannelAdapter>` and an `Arc<Orchestrator>` and runs the full message dispatch loop generically, without any platform-specific logic.
+The system SHALL provide a `ChannelRunner` struct in `crates/runtime` that accepts an `Arc<dyn ChannelAdapter>`, an `Arc<Orchestrator>`, and an optional `Arc<AudioStore>`, and runs the full message dispatch loop generically, without any platform-specific logic.
 
 #### Scenario: Starts the adapter stream
 
@@ -18,6 +18,11 @@ The system SHALL provide a `ChannelRunner` struct in `crates/runtime` that accep
 
 - **WHEN** SIGINT or SIGTERM is received
 - **THEN** `ChannelRunner` exits its dispatch loop and calls `adapter.stop()`
+
+#### Scenario: Audio attachments from TurnResult are sent
+
+- **WHEN** a turn completes and `turn_result.attachments` contains entries with audio MIME types
+- **THEN** each audio attachment is sent via `adapter.send()` as `ChannelContent::FileData` (same as image attachments — existing behavior)
 
 ### Requirement: Per-conversation turn serialization
 

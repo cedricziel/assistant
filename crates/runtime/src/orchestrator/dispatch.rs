@@ -243,8 +243,41 @@ impl Orchestrator {
             // For the voice-response tool, emit a dedicated AudioReady event
             // so voice-enabled clients can auto-play the synthesised audio
             // without waiting for the full turn to finish.
-            if let Some(audio_id) = voice_audio_id {
-                let _ = sink.send(OrchestratorEvent::AudioReady { audio_id }).await;
+            if let Some(ref audio_id) = voice_audio_id {
+                let _ = sink
+                    .send(OrchestratorEvent::AudioReady {
+                        audio_id: audio_id.clone(),
+                    })
+                    .await;
+            }
+        }
+
+        // When an AudioStore is available, retrieve the synthesised audio
+        // blob and append it to the turn attachments so that channel
+        // adapters (Matrix, Slack, Signal, …) can deliver it as a file.
+        if let Some(ref audio_id_str) = voice_audio_id
+            && let Some(ref store) = self.audio_store
+            && let Ok(id) = Uuid::parse_str(audio_id_str)
+        {
+            if let Some((data, mime_type)) = store.get(id).await {
+                let ext = match mime_type.as_str() {
+                    "audio/mpeg" | "audio/mp3" => "mp3",
+                    "audio/ogg" => "ogg",
+                    "audio/wav" | "audio/x-wav" => "wav",
+                    "audio/webm" => "webm",
+                    "audio/flac" => "flac",
+                    "audio/aac" => "aac",
+                    "audio/mp4" | "audio/m4a" => "m4a",
+                    "audio/opus" => "opus",
+                    _ => "audio",
+                };
+                turn_attachments.push(Attachment {
+                    filename: format!("voice-response.{ext}"),
+                    mime_type,
+                    data,
+                });
+            } else {
+                warn!(audio_id = %audio_id_str, "AudioStore entry expired or missing; skipping audio attachment");
             }
         }
 

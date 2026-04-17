@@ -9,6 +9,7 @@ autobins = false
 [dependencies]
 assistant-core = { path = "../core" }
 assistant-runtime = { path = "../runtime" }
+assistant-transcription = { path = "../transcription" }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
