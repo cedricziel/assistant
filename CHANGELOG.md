@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.111](https://github.com/cedricziel/assistant/compare/v0.1.110...v0.1.111) (2026-04-17)
+
+
+### Bug Fixes
+
+* **app:** remove unresolved keychain-access-groups blocking macOS launch ([#491](https://github.com/cedricziel/assistant/issues/491)) ([c6845dc](https://github.com/cedricziel/assistant/commit/c6845dc77f514f6b475b6505577abef31f20b476))
+* **hooks:** make pre-commit hook work in git worktrees ([#493](https://github.com/cedricziel/assistant/issues/493)) ([f17cf2f](https://github.com/cedricziel/assistant/commit/f17cf2f3f508fd0145ec34a18f08324d3731c1e3))
+
+
+### Performance Improvements
+
+* **ci:** speed up release pipeline with thin LTO and dedup macOS build ([#490](https://github.com/cedricziel/assistant/issues/490)) ([25202ae](https://github.com/cedricziel/assistant/commit/25202ae952b8f2a00bd1343606befae983441bda))
+
 ## [0.1.110](https://github.com/cedricziel/assistant/compare/v0.1.109...v0.1.110) (2026-04-16)
 
 
