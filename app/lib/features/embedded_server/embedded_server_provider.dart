@@ -20,6 +20,11 @@ export 'embedded_server_service.dart'
 /// is already saved, this notifier automatically starts the embedded server
 /// and calls [ServerProfileNotifier.connect] when it becomes ready — causing
 /// the router to redirect to `/chat` without any manual setup.
+///
+/// **Note:** iOS is intentionally not supported for embedded server. iOS
+/// apps cannot bundle and execute arbitrary binaries due to platform
+/// restrictions, so this notifier always returns [EmbeddedServerStopped]
+/// on iOS devices.
 class EmbeddedServerNotifier extends AsyncNotifier<EmbeddedServerState>
     with WidgetsBindingObserver {
   final _service = EmbeddedServerService();

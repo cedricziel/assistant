@@ -65,3 +65,7 @@ bool get isWebPlatform => kIsWeb;
 /// Returns `true` when running on macOS desktop.
 bool get isMacOSPlatform =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+
+/// Returns `true` when running on iOS.
+bool get isIOSPlatform =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
