@@ -1,6 +1,6 @@
 [package]
 name = "assistant-bus-nats"
-version = "0.1.111"
+version = "0.1.112"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

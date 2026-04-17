@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.112](https://github.com/cedricziel/assistant/compare/v0.1.111...v0.1.112) (2026-04-17)
+
+
+### Features
+
+* **audio:** end-to-end audio pipeline across all messaging platforms ([#498](https://github.com/cedricziel/assistant/issues/498)) ([7a122a3](https://github.com/cedricziel/assistant/commit/7a122a3373bd06607b7d16e2ef60b601d963d53b))
+* migrate workspace to Rust edition 2024 ([#495](https://github.com/cedricziel/assistant/issues/495)) ([7b6c674](https://github.com/cedricziel/assistant/commit/7b6c674a0def1700e95ebdd5954c7d3e4b51f1d4))
+
+
+### Bug Fixes
+
+* **runtime:** thread attachment_ids through run_turn* methods ([#497](https://github.com/cedricziel/assistant/issues/497)) ([56710b5](https://github.com/cedricziel/assistant/commit/56710b5ded4069c0ca0e95657df6cee7028c266a))
+
 ## [0.1.111](https://github.com/cedricziel/assistant/compare/v0.1.110...v0.1.111) (2026-04-17)
 
 
