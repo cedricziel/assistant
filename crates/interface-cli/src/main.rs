@@ -1116,6 +1116,7 @@ async fn bootstrap(
         .ok()
         .flatten()
         .and_then(|p| p.turn_timeout_secs);
+    let audio_store = Arc::new(assistant_transcription::AudioStore::new());
     let orchestrator = Arc::new({
         let mut o = Orchestrator::new(
             llm,
@@ -1125,7 +1126,8 @@ async fn bootstrap(
             bus,
             &config,
         )
-        .with_confirmation_callback(confirmation_cb);
+        .with_confirmation_callback(confirmation_cb)
+        .with_audio_store(audio_store.clone());
         if let Some(secs) = persona_timeout {
             o = o.with_submit_timeout(secs);
         }
