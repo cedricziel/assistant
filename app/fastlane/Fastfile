@@ -20,6 +20,9 @@ before_all do
     UI.user_error!("Missing required environment variables:\n  #{missing.join("\n  ")}\n\nSee app/fastlane/README.md for setup instructions.")
   end
 
+  # Create a temporary keychain in CI so match doesn't prompt.
+  setup_ci if ENV["CI"]
+
   app_store_connect_api_key(
     key_id:      ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
     issuer_id:   ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
@@ -29,7 +32,7 @@ before_all do
 end
 
 platform :ios do
-  lane :beta do
+  private_lane :build_ios do
     # Sync certificates and provisioning profiles (readonly in CI).
     match(type: "appstore")
 
@@ -41,10 +44,16 @@ platform :ios do
     )
 
     # Build Flutter first so Dart compilation and assets are bundled.
-    sh("flutter build ios --release --no-codesign", chdir: "..")
+    Dir.chdir("..") do
+      sh("flutter", "build", "ios", "--release", "--no-codesign")
+    end
 
     # Archive and export the IPA.
     gym
+  end
+
+  lane :beta do
+    build_ios
 
     # Upload to TestFlight.
     pilot(
@@ -53,21 +62,7 @@ platform :ios do
   end
 
   lane :release do
-    # Sync certificates and provisioning profiles (readonly in CI).
-    match(type: "appstore")
-
-    # Set build number from CI environment (or local fallback).
-    build_number = ENV["BUILD_NUMBER"] || number_of_commits.to_s
-    increment_build_number(
-      build_number: build_number,
-      xcodeproj:    "ios/Runner.xcodeproj"
-    )
-
-    # Build Flutter first.
-    sh("flutter build ios --release --no-codesign", chdir: "..")
-
-    # Archive and export the IPA.
-    gym
+    build_ios
 
     # Submit to App Store review.
     deliver(

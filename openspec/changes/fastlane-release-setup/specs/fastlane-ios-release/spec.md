@@ -11,7 +11,7 @@ The system SHALL provide a `fastlane ios beta` lane that builds the iOS app in r
 
 #### Scenario: Missing API key halts lane
 
-- **WHEN** `APP_STORE_CONNECT_API_KEY_CONTENT` is not set
+- **WHEN** `APP_STORE_CONNECT_API_KEY_KEY` is not set
 - **THEN** the lane fails with a descriptive error before attempting to build or upload
 
 ### Requirement: Fastlane iOS release lane submits to App Store
@@ -48,7 +48,7 @@ The system SHALL read `BUILD_NUMBER` from the environment and pass it to `increm
 
 ### Requirement: Gymfile defines iOS build settings
 
-The system SHALL provide `app/fastlane/Gymfile` (or inline `gym` parameters) specifying: scheme `Runner`, export method `app-store`, output directory `build/ios/`, and `include_bitcode false`.
+The system SHALL provide `app/fastlane/Gymfile` (or inline `gym` parameters) specifying: scheme `Runner`, export method `app-store`, and output directory `build/ios/`.
 
 #### Scenario: gym uses correct scheme
 

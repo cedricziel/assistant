@@ -20,7 +20,7 @@ The system SHALL document in `app/fastlane/README.md` the complete list of GitHu
 
 #### Scenario: Missing secret causes early failure
 
-- **WHEN** `APP_STORE_CONNECT_API_KEY_CONTENT` is not set as a GitHub secret
+- **WHEN** `APP_STORE_CONNECT_API_KEY_KEY` is not set as a GitHub secret
 - **THEN** the workflow step that validates secrets exits with a non-zero code and a human-readable error message before Flutter or Fastlane runs
 
 ### Requirement: Flutter version pinned in release workflow

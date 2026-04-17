@@ -14,6 +14,7 @@ Set these in **Settings → Secrets and variables → Actions** in the GitHub re
 | `APP_STORE_CONNECT_API_KEY_IS_BASE64` | `true` if the key content above is base64-encoded, `false` otherwise |
 | `MATCH_GIT_URL`                       | SSH or HTTPS URL of the private git repo that stores certificates    |
 | `MATCH_PASSWORD`                      | Passphrase used to encrypt/decrypt certificates in the match repo    |
+| `MATCH_DEPLOY_KEY`                    | SSH private key with read access to the match certificate repo       |
 
 ### Creating an App Store Connect API Key
 
