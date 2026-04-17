@@ -233,6 +233,31 @@ jobs:
       - name: Build universal Rust binary for macOS bundle
         run: make build-macos-binary
 
+      # Package and upload the standalone CLI tarball early, so that a later
+      # Flutter/notarization failure does not block this artifact.
+      - name: Create standalone macOS tarball
+        shell: bash
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          STANDALONE="assistant-${TAG}-macos-arm64"
+          mkdir -p "${STANDALONE}"
+          cp target/aarch64-apple-darwin/release/assistant "${STANDALONE}/"
+          cp config.toml "${STANDALONE}/config.toml.example"
+          tar czf "${STANDALONE}.tar.gz" "${STANDALONE}"
+          echo "STANDALONE_ARCHIVE=${STANDALONE}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload standalone binary artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-macos-arm64
+          path: ${{ env.STANDALONE_ARCHIVE }}
+          retention-days: 1
+
+      - name: Upload standalone macOS tarball to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ needs.release-please.outputs.tag_name }} ${{ env.STANDALONE_ARCHIVE }}
+
       - name: Build Flutter macOS app
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
@@ -322,32 +347,6 @@ jobs:
         run: |
           gh release upload ${{ needs.release-please.outputs.tag_name }} \
             "${{ env.ARCHIVE }}" checksums.sha256
-
-      # Reuse the Rust binary already built above to produce the standalone
-      # macOS ARM64 tarball, avoiding a duplicate 18-min compile on a second
-      # macOS runner.
-      - name: Create standalone macOS tarball
-        shell: bash
-        run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          STANDALONE="assistant-${TAG}-macos-arm64"
-          mkdir -p "${STANDALONE}"
-          cp target/aarch64-apple-darwin/release/assistant "${STANDALONE}/"
-          cp config.toml "${STANDALONE}/config.toml.example"
-          tar czf "${STANDALONE}.tar.gz" "${STANDALONE}"
-          echo "STANDALONE_ARCHIVE=${STANDALONE}.tar.gz" >> $GITHUB_ENV
-
-      - name: Upload standalone binary artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: binary-macos-arm64
-          path: ${{ env.STANDALONE_ARCHIVE }}
-          retention-days: 1
-
-      - name: Upload standalone macOS tarball to GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ needs.release-please.outputs.tag_name }} ${{ env.STANDALONE_ARCHIVE }}
 
   build-docker:
     name: Build and push Docker image (Alpine)
