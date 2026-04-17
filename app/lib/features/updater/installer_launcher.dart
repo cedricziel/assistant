@@ -9,6 +9,9 @@ abstract final class InstallerLauncher {
   /// Throws if the installer launch fails so the caller can surface an error
   /// rather than silently exiting.
   static Future<void> launch(String path, String filename) async {
+    // Self-update is not supported on iOS
+    if (Platform.isIOS) return;
+
     if (Platform.isMacOS) {
       await _launchMacOS(path, filename);
     } else if (Platform.isLinux) {

@@ -148,6 +148,8 @@ class UpdateService {
   /// Always returns [null] in debug/profile builds or on web.
   Future<UpdateInfo?> checkForUpdate() async {
     if (kIsWeb || !kReleaseMode) return null;
+    // Self-update is not supported on mobile platforms (iOS, Android)
+    if (Platform.isIOS || Platform.isAndroid) return null;
     if (!Platform.isMacOS && !Platform.isLinux && !Platform.isWindows) {
       return null;
     }
