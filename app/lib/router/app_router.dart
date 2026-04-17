@@ -69,21 +69,36 @@ class AppRoutes {
 final routerProvider = Provider<GoRouter>((ref) {
   final notifier = _RouterRefreshNotifier(ref);
   ref.onDispose(notifier.dispose);
+
+  // Stores the intended deep-link destination while activeContextProvider is
+  // still loading.  Closure-scoped to avoid triggering provider state changes
+  // inside the synchronous redirect callback.
+  String? pendingRedirect;
+
   return GoRouter(
     initialLocation: AppRoutes.chat,
     refreshListenable: notifier,
     redirect: (context, state) {
       final activeContextAsync = ref.read(activeContextProvider);
+      final matchedPath = state.fullPath;
+      final requestedUri = state.uri.toString();
+      final onLoading = matchedPath == AppRoutes.loading;
 
       // While the context is still loading from storage, show the loading
       // scaffold — the router will re-evaluate once the AsyncNotifier settles.
-      if (activeContextAsync.isLoading) return AppRoutes.loading;
+      if (activeContextAsync.isLoading) {
+        if (onLoading) return null; // already on /loading, avoid loop
+        // Preserve the intended destination so we can restore it later.
+        if (requestedUri != AppRoutes.loading) {
+          pendingRedirect = requestedUri;
+        }
+        return AppRoutes.loading;
+      }
 
       final hasContext = activeContextAsync.value != null;
-      final onContextSwitcher = state.fullPath == AppRoutes.contexts;
-      final onSetup = state.fullPath == AppRoutes.setup;
-      final onLogin = state.fullPath == AppRoutes.login;
-      final onLoading = state.fullPath == AppRoutes.loading;
+      final onContextSwitcher = matchedPath == AppRoutes.contexts;
+      final onSetup = matchedPath == AppRoutes.setup;
+      final onLogin = matchedPath == AppRoutes.login;
 
       // On web, /contexts is replaced by the login flow — redirect away.
       if (kIsWeb && onContextSwitcher) {
@@ -91,12 +106,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       // Once loading is done, navigate away from the loading scaffold to
-      // the correct destination.
+      // the correct destination (restoring any pending deep-link).
       if (onLoading) {
-        if (kIsWeb) {
-          return hasContext ? AppRoutes.chat : AppRoutes.login;
-        }
-        return hasContext ? AppRoutes.chat : AppRoutes.contexts;
+        final pending = pendingRedirect;
+        pendingRedirect = null;
+        final fallback = hasContext
+            ? AppRoutes.chat
+            : (kIsWeb ? AppRoutes.login : AppRoutes.contexts);
+        return hasContext && pending != null ? pending : fallback;
       }
 
       // If no active context and not already on an auth screen, redirect.
