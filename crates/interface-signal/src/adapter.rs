@@ -10,10 +10,12 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser};
+use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
 use async_trait::async_trait;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64_STANDARD;
@@ -32,12 +34,19 @@ const BACKOFF_MIN: Duration = Duration::from_secs(1);
 /// Maximum reconnect delay.
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 
+/// Maximum audio download size (25 MB).
+const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+
 /// Signal `ChannelAdapter`.  Connects to the signal-cli-rest-api WebSocket
 /// and provides `send()` via `POST /v1/send`.
 pub struct SignalAdapter {
     config: SignalConfig,
     stop_tx: tokio::sync::watch::Sender<bool>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
+    /// Optional audio transcription provider for voice messages.
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    /// BCP-47 language hint passed to the transcription provider.
+    transcription_language: Option<String>,
 }
 
 impl SignalAdapter {
@@ -51,7 +60,20 @@ impl SignalAdapter {
             config,
             stop_tx,
             stop_rx,
+            transcription: None,
+            transcription_language: None,
         })
+    }
+
+    /// Attach a transcription provider for inbound voice messages.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
+        self
     }
 
     /// Build the HTTP Basic Auth header value if credentials are configured.
@@ -82,6 +104,8 @@ impl ChannelAdapter for SignalAdapter {
         let api_url = self.config.resolved_api_url();
         let allowed_senders = self.config.allowed_senders.clone();
         let auth_header = self.basic_auth_header();
+        let transcription = self.transcription.clone();
+        let transcription_language = self.transcription_language.clone();
         let mut stop_rx = self.stop_rx.clone();
 
         let (tx, rx) = mpsc::channel::<ChannelMessage>(64);
@@ -165,10 +189,20 @@ impl ChannelAdapter for SignalAdapter {
                                                 continue;
                                             }
 
-                                            if let Some(msg) = envelope_to_channel_message(env)
-                                                && tx.send(msg).await.is_err() {
-                                                    return; // receiver dropped
-                                                }
+                                            // Check for audio attachments that need transcription.
+                                            let audio_transcript = transcribe_audio_attachments(
+                                                &env.attachments,
+                                                &transcription,
+                                                &transcription_language,
+                                            )
+                                            .await;
+
+                                            if let Some(msg) =
+                                                envelope_to_channel_message(env, audio_transcript)
+                                                && tx.send(msg).await.is_err()
+                                            {
+                                                return; // receiver dropped
+                                            }
                                         }
                                     }
                                 }
@@ -202,9 +236,22 @@ impl ChannelAdapter for SignalAdapter {
             .ok_or_else(|| anyhow::anyhow!("signal: phone_number is required for send"))?;
         let api_url = self.config.resolved_api_url();
 
-        let text = match content {
-            ChannelContent::Text(t) => t,
-            _ => return Ok(()), // silently skip non-text content
+        let (text, base64_attachments) = match content {
+            ChannelContent::Text(t) => (t, None),
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type,
+            } => {
+                let encoded = B64_STANDARD.encode(&data);
+                let attachment = serde_json::json!({
+                    "data": encoded,
+                    "contentType": mime_type,
+                    "filename": filename,
+                });
+                (String::new(), Some(vec![attachment]))
+            }
+            _ => return Ok(()),
         };
 
         // Check metadata for group_id.
@@ -213,7 +260,7 @@ impl ChannelAdapter for SignalAdapter {
             .strip_prefix("group:")
             .map(|s| s.to_string());
 
-        let body = if let Some(gid) = group_id {
+        let mut body = if let Some(gid) = group_id {
             serde_json::json!({
                 "number": phone_number,
                 "message": text,
@@ -226,6 +273,10 @@ impl ChannelAdapter for SignalAdapter {
                 "message": text,
             })
         };
+
+        if let Some(attachments) = base64_attachments {
+            body["base64_attachments"] = serde_json::json!(attachments);
+        }
 
         let client = build_reqwest_client(&self.config)?;
         let resp = client
@@ -254,13 +305,26 @@ impl ChannelAdapter for SignalAdapter {
         })?;
         let api_url = self.config.resolved_api_url();
 
-        let text = match content {
-            ChannelContent::Text(t) => t,
-            _ => return Ok(()), // silently skip non-text content
+        let (text, base64_attachments) = match content {
+            ChannelContent::Text(t) => (t, None),
+            ChannelContent::FileData {
+                data,
+                filename,
+                mime_type,
+            } => {
+                let encoded = B64_STANDARD.encode(&data);
+                let attachment = serde_json::json!({
+                    "data": encoded,
+                    "contentType": mime_type,
+                    "filename": filename,
+                });
+                (String::new(), Some(vec![attachment]))
+            }
+            _ => return Ok(()),
         };
 
         // If thread_id looks like a group id, send to group; else send to user.
-        let body = if !thread_id.is_empty() && thread_id.len() > 10 {
+        let mut body = if !thread_id.is_empty() && thread_id.len() > 10 {
             // Treat non-trivial thread_id as group_id.
             serde_json::json!({
                 "number": phone_number,
@@ -274,6 +338,10 @@ impl ChannelAdapter for SignalAdapter {
                 "message": text,
             })
         };
+
+        if let Some(attachments) = base64_attachments {
+            body["base64_attachments"] = serde_json::json!(attachments);
+        }
 
         let client = build_reqwest_client(&self.config)?;
         let resp = client
@@ -314,6 +382,17 @@ impl ChannelAdapter for SignalAdapter {
 
 // -- Helpers ------------------------------------------------------------------
 
+/// A single attachment from the signal-cli-rest-api envelope.
+#[derive(Debug, Clone)]
+pub(crate) struct SignalAttachment {
+    /// Base64-encoded file data.
+    pub data: String,
+    /// MIME type (e.g. `"audio/ogg"`).
+    pub content_type: String,
+    /// Optional filename.
+    pub filename: Option<String>,
+}
+
 /// Parsed fields from a signal-cli-rest-api WebSocket envelope.
 #[derive(Debug)]
 pub(crate) struct ParsedEnvelope {
@@ -322,11 +401,14 @@ pub(crate) struct ParsedEnvelope {
     timestamp: i64,
     message: String,
     group_id: Option<String>,
+    /// Attachments embedded in the dataMessage.
+    attachments: Vec<SignalAttachment>,
 }
 
 /// Parse a JSON envelope from the signal-cli-rest-api WebSocket stream.
 ///
 /// Returns `None` for non-dataMessage envelopes (receipts, typing indicators, etc.).
+/// Envelopes with either a text message or attachments are accepted.
 pub(crate) fn parse_envelope(raw: &str) -> Option<ParsedEnvelope> {
     let v: serde_json::Value = serde_json::from_str(raw).ok()?;
     let envelope = v.get("envelope")?;
@@ -345,10 +427,39 @@ pub(crate) fn parse_envelope(raw: &str) -> Option<ParsedEnvelope> {
     let data_msg = envelope.get("dataMessage")?;
     let message = data_msg
         .get("message")
-        .and_then(|v| v.as_str())?
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
         .to_string();
 
-    if message.is_empty() {
+    // Parse attachments (if any).
+    let attachments = data_msg
+        .get("attachments")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|att| {
+                    let data = att.get("data").and_then(|v| v.as_str())?.to_string();
+                    let content_type = att
+                        .get("contentType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("application/octet-stream")
+                        .to_string();
+                    let filename = att
+                        .get("filename")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    Some(SignalAttachment {
+                        data,
+                        content_type,
+                        filename,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    // Require either a non-empty text message or at least one attachment.
+    if message.is_empty() && attachments.is_empty() {
         return None;
     }
 
@@ -369,11 +480,17 @@ pub(crate) fn parse_envelope(raw: &str) -> Option<ParsedEnvelope> {
         timestamp,
         message,
         group_id,
+        attachments,
     })
 }
 
 /// Convert a [`ParsedEnvelope`] into a [`ChannelMessage`].
-fn envelope_to_channel_message(env: ParsedEnvelope) -> Option<ChannelMessage> {
+///
+/// If `audio_transcript` is provided, it is prepended to the text content.
+fn envelope_to_channel_message(
+    env: ParsedEnvelope,
+    audio_transcript: Option<String>,
+) -> Option<ChannelMessage> {
     let mut metadata: HashMap<String, serde_json::Value> = HashMap::new();
     metadata.insert(
         "source".to_string(),
@@ -395,6 +512,14 @@ fn envelope_to_channel_message(env: ParsedEnvelope) -> Option<ChannelMessage> {
         env.source.clone()
     };
 
+    // Combine audio transcript and text message.
+    let text = match (audio_transcript, env.message.is_empty()) {
+        (Some(transcript), true) => transcript,
+        (Some(transcript), false) => format!("{transcript}\n{}", env.message),
+        (None, true) => return None, // no text and no transcript
+        (None, false) => env.message,
+    };
+
     Some(ChannelMessage {
         channel_type: ChannelType::Signal,
         platform_message_id: Some(env.timestamp.to_string()),
@@ -402,11 +527,79 @@ fn envelope_to_channel_message(env: ParsedEnvelope) -> Option<ChannelMessage> {
             platform_id,
             display_name: env.source_name,
         },
-        content: ChannelContent::Text(env.message),
+        content: ChannelContent::Text(text),
         thread_id: env.group_id,
         timestamp: Utc::now(),
         metadata,
     })
+}
+
+/// Attempt to transcribe audio attachments from a signal envelope.
+///
+/// Returns a formatted transcript string if any audio was successfully
+/// transcribed, or `None` if there were no audio attachments or no provider.
+async fn transcribe_audio_attachments(
+    attachments: &[SignalAttachment],
+    transcription: &Option<Arc<dyn TranscriptionProvider>>,
+    language: &Option<String>,
+) -> Option<String> {
+    let audio_attachments: Vec<_> = attachments
+        .iter()
+        .filter(|a| is_audio_mime(&a.content_type))
+        .collect();
+
+    if audio_attachments.is_empty() {
+        return None;
+    }
+
+    let provider = match transcription {
+        Some(p) => p,
+        None => {
+            warn!(
+                "signal: received audio attachment but no transcription provider configured; dropping"
+            );
+            return None;
+        }
+    };
+
+    let mut transcripts = Vec::new();
+    for att in audio_attachments {
+        let decoded = match B64_STANDARD.decode(&att.data) {
+            Ok(d) => d,
+            Err(e) => {
+                warn!(error = %e, "signal: failed to decode base64 audio attachment");
+                continue;
+            }
+        };
+
+        if decoded.len() > MAX_AUDIO_BYTES {
+            warn!(
+                size = decoded.len(),
+                limit = MAX_AUDIO_BYTES,
+                "signal: audio attachment too large; skipping"
+            );
+            continue;
+        }
+
+        let request = TranscriptionRequest {
+            audio_data: decoded,
+            mime_type: att.content_type.clone(),
+            filename: att.filename.clone(),
+            language: language.clone(),
+        };
+        match provider.transcribe(request).await {
+            Ok(result) => transcripts.push(result.text),
+            Err(e) => {
+                warn!(error = %e, "signal: audio transcription failed");
+            }
+        }
+    }
+
+    if transcripts.is_empty() {
+        return None;
+    }
+
+    Some(format!("[Voice message]: {}", transcripts.join(" ")))
 }
 
 /// Convert an HTTP base URL to a WebSocket URL.
@@ -586,6 +779,108 @@ mod tests {
             metadata,
         };
         assert_eq!(adapter.conversation_key(&msg), "groupABC");
+    }
+
+    // -- Audio / transcription tests -------------------------------------------
+
+    #[test]
+    fn parse_envelope_with_audio_attachment() {
+        let raw = r#"{
+            "envelope": {
+                "source": "+14155550123",
+                "sourceName": "Alice",
+                "timestamp": 1111,
+                "dataMessage": {
+                    "timestamp": 1111,
+                    "message": "",
+                    "attachments": [
+                        {
+                            "contentType": "audio/ogg",
+                            "data": "T2dnUw==",
+                            "filename": "voice.ogg"
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let env = parse_envelope(raw).expect("should parse audio-only envelope");
+        assert!(env.message.is_empty());
+        assert_eq!(env.attachments.len(), 1);
+        assert_eq!(env.attachments[0].content_type, "audio/ogg");
+        assert_eq!(env.attachments[0].filename.as_deref(), Some("voice.ogg"));
+    }
+
+    #[test]
+    fn parse_envelope_text_only_has_no_attachments() {
+        let raw = r#"{
+            "envelope": {
+                "source": "+14155550123",
+                "timestamp": 2222,
+                "dataMessage": {
+                    "timestamp": 2222,
+                    "message": "Just text"
+                }
+            }
+        }"#;
+        let env = parse_envelope(raw).expect("should parse");
+        assert_eq!(env.message, "Just text");
+        assert!(env.attachments.is_empty());
+    }
+
+    #[test]
+    fn envelope_to_channel_message_with_transcript() {
+        let env = ParsedEnvelope {
+            source: "+1111".into(),
+            source_name: None,
+            timestamp: 42,
+            message: String::new(),
+            group_id: None,
+            attachments: vec![],
+        };
+        let msg = envelope_to_channel_message(env, Some("[Voice message]: hello".into()));
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        match &msg.content {
+            ChannelContent::Text(t) => assert_eq!(t, "[Voice message]: hello"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn envelope_to_channel_message_no_text_no_transcript_returns_none() {
+        let env = ParsedEnvelope {
+            source: "+1111".into(),
+            source_name: None,
+            timestamp: 42,
+            message: String::new(),
+            group_id: None,
+            attachments: vec![],
+        };
+        assert!(envelope_to_channel_message(env, None).is_none());
+    }
+
+    #[tokio::test]
+    async fn transcribe_audio_no_provider_returns_none() {
+        let attachments = vec![SignalAttachment {
+            data: B64_STANDARD.encode(b"fake-audio"),
+            content_type: "audio/ogg".into(),
+            filename: None,
+        }];
+        let result = transcribe_audio_attachments(&attachments, &None, &None).await;
+        assert!(result.is_none(), "should return None without provider");
+    }
+
+    #[tokio::test]
+    async fn transcribe_audio_non_audio_mime_returns_none() {
+        // Even with a provider, non-audio MIME types should be skipped.
+        let attachments = vec![SignalAttachment {
+            data: B64_STANDARD.encode(b"image-data"),
+            content_type: "image/png".into(),
+            filename: None,
+        }];
+        // No provider needed since we shouldn't even try to transcribe.
+        let result = transcribe_audio_attachments(&attachments, &None, &None).await;
+        assert!(result.is_none());
     }
 
     #[test]

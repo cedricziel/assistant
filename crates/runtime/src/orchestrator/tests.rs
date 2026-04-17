@@ -2731,3 +2731,59 @@ fn max_image_bytes_default_is_conservative() {
         5 * 1024 * 1024
     );
 }
+
+// ── AudioStore integration ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn with_audio_store_makes_store_available() {
+    let store = Arc::new(assistant_transcription::AudioStore::new());
+    let mut config = AssistantConfig::default();
+    config.memory.enabled = false;
+
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+    let llm: Arc<dyn LlmProvider> = Arc::new(
+        LlmClient::new(LlmClientConfig {
+            model: "test".to_string(),
+            base_url: "http://localhost:1".to_string(),
+            timeout_secs: 10,
+            retry_config: assistant_llm::RetryConfig::disabled(),
+        })
+        .unwrap(),
+    );
+    let executor = Arc::new(ToolExecutor::new(
+        storage.clone(),
+        llm.clone(),
+        registry.clone(),
+        Arc::new(config.clone()),
+    ));
+    let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
+    let orch = Orchestrator::new(llm, storage, executor, registry, bus, &config)
+        .with_audio_store(store.clone());
+
+    assert!(
+        orch.audio_store.is_some(),
+        "audio_store should be set after with_audio_store"
+    );
+
+    // Verify the store is the same instance.
+    let id = store
+        .insert(b"fake-mp3".to_vec(), "audio/mpeg".to_string())
+        .await;
+    let retrieved = orch.audio_store.as_ref().unwrap().get(id).await;
+    assert!(
+        retrieved.is_some(),
+        "orchestrator's audio store should share state with the provided store"
+    );
+}
+
+#[tokio::test]
+async fn audio_store_none_by_default() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "ok").await;
+    let (orch, _) = build(&server.uri()).await;
+    assert!(
+        orch.audio_store.is_none(),
+        "audio_store should be None by default"
+    );
+}

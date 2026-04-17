@@ -1586,7 +1586,10 @@ async fn main() -> Result<()> {
         let sig_cfg = bs.config.signal.clone().context(
             "Signal is not configured. Add a [signal] section to ~/.assistant/config.toml",
         )?;
-        let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        let mut iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         let worker_orch = bs.orchestrator.clone();
         let _worker = tokio::spawn(async move {
@@ -1721,7 +1724,10 @@ async fn main() -> Result<()> {
     if bs.config.signal.is_some() && interface_selected(&orchestrator_interfaces, "signal") {
         use assistant_interface_signal::SignalInterface;
         let sig_cfg = bs.config.signal.clone().unwrap_or_default();
-        let iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        let mut iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
+        if let Some(ref tp) = transcription_provider {
+            iface = iface.with_transcription(tp.clone(), transcription_language.clone());
+        }
 
         if orchestrator_no_repl {
             info!("Running Signal interface in foreground (--no-repl)");

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::SignalConfig;
 use assistant_runtime::{ChannelRunner, InterfaceRunner, Orchestrator};
+use assistant_transcription::TranscriptionProvider;
 use async_trait::async_trait;
 
 use crate::adapter::SignalAdapter;
@@ -16,6 +17,8 @@ use crate::adapter::SignalAdapter;
 pub struct SignalInterface {
     config: SignalConfig,
     orchestrator: Arc<Orchestrator>,
+    transcription: Option<Arc<dyn TranscriptionProvider>>,
+    transcription_language: Option<String>,
 }
 
 impl SignalInterface {
@@ -24,13 +27,30 @@ impl SignalInterface {
         Self {
             config,
             orchestrator,
+            transcription: None,
+            transcription_language: None,
         }
+    }
+
+    /// Attach a transcription provider for inbound voice messages.
+    pub fn with_transcription(
+        mut self,
+        provider: Arc<dyn TranscriptionProvider>,
+        language: Option<String>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self.transcription_language = language;
+        self
     }
 
     /// Start the Signal listener loop via [`ChannelRunner`].
     pub async fn run(&self) -> Result<()> {
-        let adapter = Arc::new(SignalAdapter::new(self.config.clone())?);
-        ChannelRunner::new(adapter, self.orchestrator.clone())
+        let mut adapter = SignalAdapter::new(self.config.clone())?;
+        if let Some(ref provider) = self.transcription {
+            adapter =
+                adapter.with_transcription(provider.clone(), self.transcription_language.clone());
+        }
+        ChannelRunner::new(Arc::new(adapter), self.orchestrator.clone())
             .run()
             .await
     }
