@@ -91,9 +91,9 @@ jobs:
           path: app/build/web/
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
 
       - name: Install mold linker
         if: ${{ !matrix.use_cross && runner.os == 'Linux' }}
@@ -195,9 +195,9 @@ jobs:
         working-directory: app
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
+        run: |
+          rustup show
+          rustup target add aarch64-apple-darwin
 
       - name: Install protoc (macOS)
         run: brew install protobuf
