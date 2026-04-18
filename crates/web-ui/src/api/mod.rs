@@ -82,20 +82,20 @@ use assistant_storage::{
     AttachmentStore, ConversationEventStore, ConversationStore, RunBroadcaster,
 };
 use axum::{
+    Json, Router,
     body::Body,
     extract::{DefaultBodyLimit, Multipart, Path, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{
-        sse::{Event, Sse},
         IntoResponse, Response,
+        sse::{Event, Sse},
     },
     routing::{delete, get, patch, post},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 use uuid::Uuid;
@@ -417,9 +417,10 @@ pub async fn get_conversation(State(state): State<ApiState>, Path(id): Path<Stri
         std::collections::HashMap::new();
     for m in &history {
         if matches!(m.role, MessageRole::Tool)
-            && let Some(ref name) = m.skill_name {
-                tool_results.insert((m.turn, name.clone()), m.content.clone());
-            }
+            && let Some(ref name) = m.skill_name
+        {
+            tool_results.insert((m.turn, name.clone()), m.content.clone());
+        }
     }
 
     let messages = history
@@ -848,10 +849,12 @@ pub async fn send_message(
             done_data["message_id"] = serde_json::Value::String(mid.to_string());
         }
         if !reply_attachment_ids.is_empty() {
-            done_data["attachment_ids"] = serde_json::json!(reply_attachment_ids
-                .iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>());
+            done_data["attachment_ids"] = serde_json::json!(
+                reply_attachment_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+            );
         }
 
         // Persist done event.
@@ -1303,10 +1306,12 @@ pub async fn send_voice_message(
             done_data["message_id"] = serde_json::Value::String(mid.to_string());
         }
         if !reply_attachment_ids.is_empty() {
-            done_data["attachment_ids"] = serde_json::json!(reply_attachment_ids
-                .iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>());
+            done_data["attachment_ids"] = serde_json::json!(
+                reply_attachment_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+            );
         }
         let done = Event::default().event("done").data(done_data.to_string());
         let _ = sse_tx.send(Ok(done)).await;
@@ -1642,9 +1647,10 @@ pub async fn serve_attachment(
     // Conditional request: check If-None-Match.
     if let Some(inm) = headers.get(header::IF_NONE_MATCH)
         && let Ok(inm_str) = inm.to_str()
-            && inm_str == etag {
-                return StatusCode::NOT_MODIFIED.into_response();
-            }
+        && inm_str == etag
+    {
+        return StatusCode::NOT_MODIFIED.into_response();
+    }
 
     // Load original bytes.
     let original = match state.attachment_store.load_bytes(att_id).await {
@@ -1746,7 +1752,7 @@ mod tests {
     };
     use async_trait::async_trait;
 
-    use super::{api_router, ApiState};
+    use super::{ApiState, api_router};
 
     // -- Stubs -----------------------------------------------------------------
 
@@ -2998,10 +3004,12 @@ mod tests {
         assert_eq!(meta["mime_type"], "image/png");
         assert_eq!(meta["filename"], "test.png");
         assert!(meta["id"].as_str().is_some());
-        assert!(meta["url"]
-            .as_str()
-            .unwrap()
-            .starts_with("/api/attachments/"));
+        assert!(
+            meta["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("/api/attachments/")
+        );
     }
 
     #[tokio::test]
@@ -3058,13 +3066,14 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.headers().get("content-type").unwrap(), "image/png");
-        assert!(resp
-            .headers()
-            .get("cache-control")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("immutable"));
+        assert!(
+            resp.headers()
+                .get("cache-control")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("immutable")
+        );
         assert!(resp.headers().get("etag").is_some());
 
         let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();

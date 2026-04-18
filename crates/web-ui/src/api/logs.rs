@@ -7,11 +7,11 @@
 //! | GET    | `/api/logs`| List recent log entries   |
 
 use axum::{
+    Json, Router,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -135,13 +135,15 @@ pub async fn list_logs(
                 .filter(|l| {
                     // Apply post-fetch time and conversation filters.
                     if let Some(since) = params.since
-                        && l.timestamp < since {
-                            return false;
-                        }
+                        && l.timestamp < since
+                    {
+                        return false;
+                    }
                     if let Some(until) = params.until
-                        && l.timestamp > until {
-                            return false;
-                        }
+                        && l.timestamp > until
+                    {
+                        return false;
+                    }
                     true
                 })
                 .map(|l| {
@@ -202,7 +204,7 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
-    use super::{logs_router, LogsApiState};
+    use super::{LogsApiState, logs_router};
 
     async fn test_state() -> (LogsApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());

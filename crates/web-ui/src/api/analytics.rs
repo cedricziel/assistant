@@ -9,11 +9,11 @@
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -228,7 +228,7 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
-    use super::{analytics_api_router, AnalyticsApiState};
+    use super::{AnalyticsApiState, analytics_api_router};
 
     async fn test_state() -> (AnalyticsApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());

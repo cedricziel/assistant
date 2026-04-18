@@ -27,13 +27,16 @@ use assistant_a2a_json_schema::{
     },
 };
 use utoipa::{
-    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
     Modify, OpenApi,
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
 };
 
 use crate::a2a::handlers;
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::{
+    AttachmentMetaResponse, ConversationDetail, ConversationSummary, CreateConversationRequest,
+    MessageSummary, SendMessageRequest as ApiSendMessageRequest, ServerCapabilities,
+    StreamRunEventsQuery, ToolCallSummary, UpdateConversationRequest,
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
     analytics::{
         AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
@@ -54,9 +57,6 @@ use crate::api::{
         WorkflowDetail, WorkflowRunDetail, WorkflowRunPreview, WorkflowRunStep, WorkflowRunSummary,
         WorkflowSummary, WorkflowUpsertRequest, WorkflowWebhookSecrets,
     },
-    AttachmentMetaResponse, ConversationDetail, ConversationSummary, CreateConversationRequest,
-    MessageSummary, SendMessageRequest as ApiSendMessageRequest, ServerCapabilities,
-    StreamRunEventsQuery, ToolCallSummary, UpdateConversationRequest,
 };
 
 /// Adds the Bearer token security scheme to the OpenAPI components.

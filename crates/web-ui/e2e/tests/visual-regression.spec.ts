@@ -42,13 +42,17 @@ async function loginFlutter(page: Page) {
   // Navigate directly to the setup screen with the auto-connect token.
   await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "networkidle" });
 
+  // Wait for Flutter engine to be ready before checking URL predicates.
+  await page.waitForSelector("flutter-view", {
+    state: "attached",
+    timeout: 30_000,
+  });
+
   // Wait for GET /health to succeed and Flutter to navigate away from /setup.
-  // This replaces a fixed 3 s timeout — the URL predicate resolves as soon as
-  // auth completes (fast on dev, up to 15 s on slow CI).
   await page.waitForURL(
     (url) =>
       !url.pathname.includes("/setup") && !url.pathname.includes("/loading"),
-    { timeout: 15_000 },
+    { timeout: 30_000 },
   );
 
   // Let any post-login API calls finish.
@@ -61,13 +65,20 @@ async function loginFlutter(page: Page) {
  *
  * Instead of a fixed timeout, we wait for observable events:
  * 1. Initial page load (network idle).
- * 2. Flutter's auth router redirects through /loading — wait for that to
+ * 2. Flutter engine ready (flt-glass-pane element exists in DOM).
+ * 3. Flutter's auth router redirects through /loading — wait for that to
  *    resolve so the target route is active.
- * 3. A second network-idle pass catches API calls triggered after routing.
- * 4. A short CSS-transition settle before the screenshot.
+ * 4. A second network-idle pass catches API calls triggered after routing.
+ * 5. A short CSS-transition settle before the screenshot.
  */
 async function navigateAndSettle(page: Page, path: string) {
   await page.goto(path, { waitUntil: "networkidle" });
+
+  // Wait for Flutter's engine to initialise (WASM compile + first frame).
+  await page.waitForSelector("flutter-view", {
+    state: "attached",
+    timeout: 30_000,
+  });
 
   // Flutter may redirect through /loading while resolving auth state.
   // Wait up to 15 s for the redirect to finish (immediate if no redirect).
@@ -320,6 +331,8 @@ test.describe("Login page", () => {
   // The Flutter web app serves a token-only login screen at /login.
   // Unauthenticated visitors are redirected here automatically.
   test("login page renders correctly", async ({ page }) => {
+    // Cold WASM compilation on first page load can exceed the default 30 s test timeout.
+    test.setTimeout(60_000);
     await navigateAndSettle(page, "/login");
     await expect(page).toHaveScreenshot("login.png", {
       fullPage: true,

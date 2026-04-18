@@ -19,11 +19,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -345,7 +345,7 @@ pub async fn set_active_persona(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {id}: {e}");
@@ -396,7 +396,7 @@ pub async fn get_persona(State(state): State<PersonaApiState>, Path(id): Path<St
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {id}: {e}");
@@ -461,7 +461,7 @@ pub async fn get_persona_file(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {id}: {e}");
@@ -533,7 +533,7 @@ pub async fn put_persona_file(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {id}: {e}");
@@ -605,7 +605,7 @@ pub async fn get_skill_access(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {id}: {e}");
@@ -669,7 +669,7 @@ pub async fn patch_skill_access_mode(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {id}: {e}");
@@ -726,7 +726,7 @@ pub async fn add_skill_access(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {id}: {e}");
@@ -788,7 +788,7 @@ pub async fn delete_skill_access(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {id}: {e}");
@@ -822,7 +822,7 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
-    use super::{personas_router, PersonaApiState};
+    use super::{PersonaApiState, personas_router};
 
     async fn test_state() -> (PersonaApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());

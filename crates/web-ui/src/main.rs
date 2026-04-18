@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use assistant_core::{
-    apply_agent_context, default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
-    validate_agent_id, BusKind, Interface, LlmProviderKind, MessageBus, OtelExporter,
+    BusKind, Interface, LlmProviderKind, MessageBus, OtelExporter, apply_agent_context,
+    default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_llm::LlmProvider;
 use assistant_provider_anthropic::AnthropicProvider;
@@ -25,21 +25,21 @@ use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::OllamaProvider;
 use assistant_provider_openai::OpenAIProvider;
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
-use assistant_runtime::{init_tracing, Orchestrator};
+use assistant_runtime::{Orchestrator, init_tracing};
 use assistant_skills::SkillSource;
 use assistant_storage::registry::SkillRegistry;
-use assistant_storage::{default_db_path, StorageLayer};
+use assistant_storage::{StorageLayer, default_db_path};
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use assistant_workflow::{
-    spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
     AssistantTurnActionExecutor, AssistantTurnClient, WorkflowActionExecutor,
+    spawn_event_trigger_adapter, spawn_schedule_trigger_adapter, spawn_workflow_runner,
 };
 use assistant_workflow_http::HttpRequestActionExecutor;
 use axum::{
+    Extension, Router,
     http::StatusCode,
     routing::{get, post},
-    Extension, Router,
 };
 use backends::{
     IcebergLogBackend, IcebergTraceBackend, LogBackend, SqliteLogBackend, SqliteTraceBackend,
@@ -60,9 +60,9 @@ use uuid::Uuid;
 use auth::AuthConfig;
 
 use a2a::agent_store::AgentStore;
-use a2a::handlers::{build_default_agent_card, A2AState};
+use a2a::handlers::{A2AState, build_default_agent_card};
 use a2a::task_store::TaskStore;
-use api::push::{push_api_router, PushApiState};
+use api::push::{PushApiState, push_api_router};
 use push::PushDispatcher;
 
 #[derive(Parser, Debug)]
@@ -652,7 +652,6 @@ async fn run_with_args(args: Args) -> Result<()> {
     let public_routes = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
-        .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
         // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
         .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))

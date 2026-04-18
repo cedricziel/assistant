@@ -74,7 +74,7 @@ export default defineConfig({
     command: process.env.ASSISTANT_BIN
       ? `rm -f ${dbPath} && ${process.env.ASSISTANT_BIN} webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`
       : `rm -f ${dbPath} && cargo run -p assistant-cli -- webui serve --auth-token test-token --listen 127.0.0.1:8787 --db-path ${dbPath}`,
-    url: "http://127.0.0.1:8787/login",
+    url: "http://127.0.0.1:8787/health",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     stdout: "pipe",

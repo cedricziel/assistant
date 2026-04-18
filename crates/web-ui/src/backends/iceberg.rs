@@ -35,9 +35,10 @@ fn warehouse_path(config: &IcebergConfig) -> PathBuf {
         .clone()
         .unwrap_or_else(|| "~/.assistant/iceberg".to_string());
     if let Some(rest) = raw.strip_prefix("~/")
-        && let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    }
     PathBuf::from(raw)
 }
 
@@ -192,13 +193,15 @@ impl TraceBackend for IcebergTraceBackend {
 
                 // Apply time filters.
                 if let Some(since) = filter.since
-                    && start < since {
-                        continue;
-                    }
+                    && start < since
+                {
+                    continue;
+                }
                 if let Some(until) = filter.until
-                    && start > until {
-                        continue;
-                    }
+                    && start > until
+                {
+                    continue;
+                }
 
                 let tool_name = str_col(batch, "tool_name", i).map(str::to_string);
                 let tool_status = str_col(batch, "tool_status", i).map(str::to_string);
@@ -209,9 +212,10 @@ impl TraceBackend for IcebergTraceBackend {
 
                 // Apply skill filter.
                 if let Some(ref sk) = filter.skill
-                    && tool_name.as_deref() != Some(sk.as_str()) {
-                        continue;
-                    }
+                    && tool_name.as_deref() != Some(sk.as_str())
+                {
+                    continue;
+                }
 
                 let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
                 let attrs: Value = serde_json::from_str(attrs_str).unwrap_or(Value::Null);
@@ -222,9 +226,10 @@ impl TraceBackend for IcebergTraceBackend {
 
                 // Apply interface filter.
                 if let Some(ref iface) = filter.interface
-                    && interface.as_deref() != Some(iface.as_str()) {
-                        continue;
-                    }
+                    && interface.as_deref() != Some(iface.as_str())
+                {
+                    continue;
+                }
 
                 let is_error = tool_status.as_deref() == Some("error");
                 let is_reply = matches!(tool_name.as_deref(), Some("reply" | "slack-post"));
@@ -420,37 +425,43 @@ impl LogBackend for IcebergLogBackend {
 
                 // Time range filter.
                 if let Some(s) = since
-                    && ts < s {
-                        continue;
-                    }
+                    && ts < s
+                {
+                    continue;
+                }
                 if let Some(u) = until
-                    && ts > u {
-                        continue;
-                    }
+                    && ts > u
+                {
+                    continue;
+                }
 
                 let sev = i32_col(batch, "severity_number", i);
                 if let Some(min) = min_severity
-                    && sev.unwrap_or(0) < min {
-                        continue;
-                    }
+                    && sev.unwrap_or(0) < min
+                {
+                    continue;
+                }
 
                 let target = str_col(batch, "target", i);
                 if let Some(tf) = target_filter
-                    && target != Some(tf) {
-                        continue;
-                    }
+                    && target != Some(tf)
+                {
+                    continue;
+                }
 
                 let body = str_col(batch, "body", i);
                 if let Some(q) = search
-                    && !body.unwrap_or("").contains(q) {
-                        continue;
-                    }
+                    && !body.unwrap_or("").contains(q)
+                {
+                    continue;
+                }
 
                 let tid = str_col(batch, "trace_id", i);
                 if let Some(f) = trace_id_filter
-                    && tid != Some(f) {
-                        continue;
-                    }
+                    && tid != Some(f)
+                {
+                    continue;
+                }
 
                 let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
                 let attributes: Value =
