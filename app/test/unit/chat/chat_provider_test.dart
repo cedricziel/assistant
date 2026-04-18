@@ -824,4 +824,238 @@ void main() {
       );
     });
   });
+
+  // -- Phase 3: Streaming timeline entry insertion ----------------------------
+
+  group('ChatNotifier streaming — timeline entries', () {
+    testWidgets('ThinkingEvent inserts a thinking timeline entry', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('think about it'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl.add(const ThinkingEvent('Let me reason...'));
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump();
+
+      final msgs = notifier.state.value!.messages;
+      final thinkingEntries = msgs.where(
+        (m) => m.timelineType == TimelineEntryType.thinking,
+      );
+      expect(
+        thinkingEntries,
+        isNotEmpty,
+        reason: 'should have a thinking entry',
+      );
+      expect(thinkingEntries.first.thinkingContent, 'Let me reason...');
+
+      // Clean up stream.
+      ctrl
+        ..add(const DoneEvent(role: 'assistant', content: 'done'))
+        ..close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('SubagentStartedEvent inserts a subagent timeline entry', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('use subagent'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl.add(
+          SubagentStartedEvent.fromJson({
+            'agent_id': 'research-1',
+            'task': 'Find data',
+          }),
+        );
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump();
+
+      final msgs = notifier.state.value!.messages;
+      final subagentEntries = msgs.where(
+        (m) => m.timelineType == TimelineEntryType.subagent,
+      );
+      expect(
+        subagentEntries,
+        isNotEmpty,
+        reason: 'should have a subagent entry',
+      );
+      expect(subagentEntries.first.subagentId, 'research-1');
+      expect(subagentEntries.first.subagentTask, 'Find data');
+
+      ctrl
+        ..add(const DoneEvent(role: 'assistant', content: 'done'))
+        ..close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+      'SubagentCompletedEvent updates matching subagent entry summary',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('subagent flow'));
+        await tester.pump();
+
+        await tester.runAsync(() async {
+          ctrl.add(
+            SubagentStartedEvent.fromJson({
+              'agent_id': 'r1',
+              'task': 'Research',
+            }),
+          );
+          await Future<void>.delayed(Duration.zero);
+          ctrl.add(
+            SubagentCompletedEvent.fromJson({
+              'agent_id': 'r1',
+              'status': 'ok',
+              'summary': 'Found 3 results',
+            }),
+          );
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pump();
+
+        final msgs = notifier.state.value!.messages;
+        final subagentEntry = msgs.firstWhere(
+          (m) =>
+              m.timelineType == TimelineEntryType.subagent &&
+              m.subagentId == 'r1',
+        );
+        expect(
+          subagentEntry.subagentSummary,
+          'Found 3 results',
+          reason: 'completed event should update the summary',
+        );
+
+        ctrl
+          ..add(const DoneEvent(role: 'assistant', content: 'done'))
+          ..close();
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets('multiple ThinkingEvents accumulate content in single entry', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('deep think'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl.add(const ThinkingEvent('First thought. '));
+        await Future<void>.delayed(Duration.zero);
+        ctrl.add(const ThinkingEvent('Second thought.'));
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump();
+
+      final msgs = notifier.state.value!.messages;
+      final thinkingEntries = msgs.where(
+        (m) => m.timelineType == TimelineEntryType.thinking,
+      );
+      // Multiple thinking events should accumulate into a single entry.
+      expect(thinkingEntries.length, 1);
+      expect(
+        thinkingEntries.first.thinkingContent,
+        'First thought. Second thought.',
+      );
+
+      ctrl
+        ..add(const DoneEvent(role: 'assistant', content: 'done'))
+        ..close();
+      await tester.pumpAndSettle();
+    });
+  });
+
+  // -- Phase 3: Timeline entry data model ------------------------------------
+
+  group('ChatMessage timeline entries', () {
+    test('default timelineType is message', () {
+      final msg = ChatMessage(id: '1', role: 'assistant', content: 'hi');
+      expect(msg.timelineType, TimelineEntryType.message);
+    });
+
+    test('thinking entry stores content', () {
+      final msg = ChatMessage(
+        id: '1',
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.thinking,
+        thinkingContent: 'Let me consider...',
+      );
+      expect(msg.timelineType, TimelineEntryType.thinking);
+      expect(msg.thinkingContent, 'Let me consider...');
+    });
+
+    test('toolCall entry stores tool data', () {
+      final msg = ChatMessage(
+        id: '1',
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.toolCall,
+        toolCalls: [
+          ToolCallRecord(toolName: 'web-search', status: ToolCallStatus.ok),
+        ],
+      );
+      expect(msg.timelineType, TimelineEntryType.toolCall);
+      expect(msg.toolCalls.first.toolName, 'web-search');
+    });
+
+    test('subagent entry stores agent fields', () {
+      final msg = ChatMessage(
+        id: '1',
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.subagent,
+        subagentId: 'research-1',
+        subagentTask: 'Find weather data',
+        subagentSummary: 'Found results',
+      );
+      expect(msg.timelineType, TimelineEntryType.subagent);
+      expect(msg.subagentId, 'research-1');
+      expect(msg.subagentTask, 'Find weather data');
+      expect(msg.subagentSummary, 'Found results');
+    });
+
+    test('copyWith preserves timeline fields', () {
+      final msg = ChatMessage(
+        id: '1',
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.thinking,
+        thinkingContent: 'reasoning',
+        subagentId: 'a1',
+        subagentTask: 'task',
+        subagentSummary: 'summary',
+      );
+      final copy = msg.copyWith(content: 'updated');
+      expect(copy.timelineType, TimelineEntryType.thinking);
+      expect(copy.thinkingContent, 'reasoning');
+      expect(copy.subagentId, 'a1');
+      expect(copy.subagentTask, 'task');
+      expect(copy.subagentSummary, 'summary');
+    });
+  });
 }

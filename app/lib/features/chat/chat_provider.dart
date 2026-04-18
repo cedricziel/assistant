@@ -167,6 +167,9 @@ class ToolCallRecord {
   String? result;
 }
 
+/// The kind of entry shown in the chat timeline.
+enum TimelineEntryType { message, thinking, toolCall, subagent }
+
 /// A message shown in the chat UI (may be a streaming partial).
 /// Metadata for an image attachment on a message.
 class ChatAttachment {
@@ -195,6 +198,11 @@ class ChatMessage {
     this.tokenStream,
     this.audioBytes,
     this.audioMimeType,
+    this.timelineType = TimelineEntryType.message,
+    this.thinkingContent,
+    this.subagentId,
+    this.subagentTask,
+    this.subagentSummary,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -232,6 +240,21 @@ class ChatMessage {
   /// MIME type of [audioBytes] (e.g. `audio/webm`, `audio/mp4`).
   final String? audioMimeType;
 
+  /// The kind of timeline entry this message represents.
+  final TimelineEntryType timelineType;
+
+  /// Reasoning text for [TimelineEntryType.thinking] entries.
+  final String? thinkingContent;
+
+  /// Subagent identifier for [TimelineEntryType.subagent] entries.
+  final String? subagentId;
+
+  /// Subagent task description for [TimelineEntryType.subagent] entries.
+  final String? subagentTask;
+
+  /// Subagent completion summary for [TimelineEntryType.subagent] entries.
+  String? subagentSummary;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -247,6 +270,11 @@ class ChatMessage {
     List<ChatAttachment>? attachments,
     Uint8List? audioBytes,
     String? audioMimeType,
+    TimelineEntryType? timelineType,
+    String? thinkingContent,
+    String? subagentId,
+    String? subagentTask,
+    String? subagentSummary,
   }) {
     return ChatMessage(
       id: id,
@@ -261,6 +289,11 @@ class ChatMessage {
       attachments: attachments ?? this.attachments,
       audioBytes: audioBytes ?? this.audioBytes,
       audioMimeType: audioMimeType ?? this.audioMimeType,
+      timelineType: timelineType ?? this.timelineType,
+      thinkingContent: thinkingContent ?? this.thinkingContent,
+      subagentId: subagentId ?? this.subagentId,
+      subagentTask: subagentTask ?? this.subagentTask,
+      subagentSummary: subagentSummary ?? this.subagentSummary,
     );
   }
 }
@@ -450,6 +483,79 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         ),
       ),
     );
+  }
+
+  /// Insert or update a thinking timeline entry in the message list.
+  /// Multiple [ThinkingEvent]s accumulate into a single entry.
+  void _onThinkingEvent(ChatState chatState, ThinkingEvent event) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final existing = msgs.indexWhere(
+      (m) => m.timelineType == TimelineEntryType.thinking && m.isStreaming,
+    );
+    if (existing != -1) {
+      // Accumulate into existing thinking entry.
+      final prev = msgs[existing];
+      msgs[existing] = prev.copyWith(
+        thinkingContent: (prev.thinkingContent ?? '') + event.content,
+      );
+    } else {
+      // Insert a new thinking entry before the assistant-streaming placeholder.
+      final insertIdx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+      final entry = ChatMessage(
+        id: 'thinking-${DateTime.now().millisecondsSinceEpoch}',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        timelineType: TimelineEntryType.thinking,
+        thinkingContent: event.content,
+      );
+      if (insertIdx != -1) {
+        msgs.insert(insertIdx, entry);
+      } else {
+        msgs.add(entry);
+      }
+    }
+    state = AsyncData(chatState.copyWith(messages: msgs));
+  }
+
+  /// Insert a subagent timeline entry when a subagent starts.
+  void _onSubagentStartedEvent(
+    ChatState chatState,
+    SubagentStartedEvent event,
+  ) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final insertIdx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+    final entry = ChatMessage(
+      id: 'subagent-${event.agentId}',
+      role: 'assistant',
+      content: '',
+      timelineType: TimelineEntryType.subagent,
+      subagentId: event.agentId,
+      subagentTask: event.task,
+    );
+    if (insertIdx != -1) {
+      msgs.insert(insertIdx, entry);
+    } else {
+      msgs.add(entry);
+    }
+    state = AsyncData(chatState.copyWith(messages: msgs));
+  }
+
+  /// Update the matching subagent entry with completion summary.
+  void _onSubagentCompletedEvent(
+    ChatState chatState,
+    SubagentCompletedEvent event,
+  ) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final idx = msgs.indexWhere(
+      (m) =>
+          m.timelineType == TimelineEntryType.subagent &&
+          m.subagentId == event.agentId,
+    );
+    if (idx != -1) {
+      msgs[idx].subagentSummary = event.summary;
+    }
+    state = AsyncData(chatState.copyWith(messages: msgs));
   }
 
   /// Run ID of the most recent (or current) orchestrator run.
@@ -923,6 +1029,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _onStatusEvent(chatState, event.message);
         } else if (event is ToolResultEvent) {
           _onToolResultEvent(chatState, event);
+        } else if (event is ThinkingEvent) {
+          _onThinkingEvent(chatState, event);
+        } else if (event is SubagentStartedEvent) {
+          _onSubagentStartedEvent(chatState, event);
+        } else if (event is SubagentCompletedEvent) {
+          _onSubagentCompletedEvent(chatState, event);
         } else if (event is AudioReadyEvent) {
           // Store audioId on the streaming assistant message for auto-play.
           final msgs = List<ChatMessage>.from(chatState.messages);
@@ -1088,6 +1200,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         } else if (event is ToolResultEvent) {
           _lastSeq++;
           _onToolResultEvent(chatState, event);
+        } else if (event is ThinkingEvent) {
+          _lastSeq++;
+          _onThinkingEvent(chatState, event);
+        } else if (event is SubagentStartedEvent) {
+          _lastSeq++;
+          _onSubagentStartedEvent(chatState, event);
+        } else if (event is SubagentCompletedEvent) {
+          _lastSeq++;
+          _onSubagentCompletedEvent(chatState, event);
         } else if (event is DoneEvent) {
           _lastSeq++;
           unawaited(tokenController.close());

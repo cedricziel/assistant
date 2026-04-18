@@ -96,6 +96,19 @@ impl SubagentRunner for Orchestrator {
             .agent_spawn_count
             .add(1, &[KeyValue::new("agent.id", parent_agent_id.clone())]);
 
+        // Emit SubagentStarted to the parent conversation's event sink.
+        if let Some(parent_conv_id) = spawn.parent_conversation_id {
+            let sinks = self.token_sinks.read().await;
+            if let Some(sink) = sinks.get(&parent_conv_id) {
+                let _ = sink
+                    .send(super::stream_event::OrchestratorEvent::SubagentStarted {
+                        agent_id: spawn.agent_id.clone(),
+                        task: spawn.task.clone(),
+                    })
+                    .await;
+            }
+        }
+
         // Register a cancellation token for this agent.
         let cancel_token = CancellationToken::new();
         self.agent_cancellations
@@ -443,6 +456,26 @@ impl SubagentRunner for Orchestrator {
                 data: None,
             }
         };
+
+        // Emit SubagentCompleted to the parent conversation's event sink.
+        if let Some(parent_conv_id) = spawn.parent_conversation_id {
+            let sinks = self.token_sinks.read().await;
+            if let Some(sink) = sinks.get(&parent_conv_id) {
+                let status_str = match report.status {
+                    AgentReportStatus::Completed => "ok",
+                    AgentReportStatus::Failed => "error",
+                    AgentReportStatus::Cancelled => "cancelled",
+                };
+                let summary = report.content.chars().take(120).collect::<String>();
+                let _ = sink
+                    .send(super::stream_event::OrchestratorEvent::SubagentCompleted {
+                        agent_id: spawn.agent_id.clone(),
+                        status: status_str.to_string(),
+                        summary,
+                    })
+                    .await;
+            }
+        }
 
         // Clean up the cancellation token registry.
         self.agent_cancellations

@@ -802,6 +802,9 @@ impl Orchestrator {
 
                 LlmResponse::Thinking(text, _meta) => {
                     debug!(iteration, "LLM emitted thinking step");
+                    if let Some(sink) = token_sink.as_ref() {
+                        let _ = sink.send(OrchestratorEvent::Thinking(text.clone())).await;
+                    }
                     let thinking_msg = {
                         let mut m = assistant_core::Message::assistant(
                             conversation_id,
@@ -1080,6 +1083,9 @@ impl Orchestrator {
 
                 LlmResponse::Thinking(text, _meta) => {
                     debug!(iteration, "LLM emitted thinking step");
+                    if let Some(sink) = token_sink.as_ref() {
+                        let _ = sink.send(OrchestratorEvent::Thinking(text.clone())).await;
+                    }
                     let thinking_msg = {
                         let mut m =
                             Message::assistant(conversation_id, format!("<think>{text}</think>"));
