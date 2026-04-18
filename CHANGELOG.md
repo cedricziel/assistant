@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.114](https://github.com/cedricziel/assistant/compare/v0.1.113...v0.1.114) (2026-04-18)
+
+
+### Bug Fixes
+
+* **app:** animate streaming dots indicator ([#508](https://github.com/cedricziel/assistant/issues/508)) ([7e80f49](https://github.com/cedricziel/assistant/commit/7e80f49492a1ce3676d33a2a3be9a3ccbf4fa9af))
+* **app:** show image thumbnails immediately when sending ([#509](https://github.com/cedricziel/assistant/issues/509)) ([d253f46](https://github.com/cedricziel/assistant/commit/d253f468332dbfeb856aea251c1b5779ec55cbbe))
+* **router:** preserve deep-link destination during async auth loading ([#511](https://github.com/cedricziel/assistant/issues/511)) ([65e3258](https://github.com/cedricziel/assistant/commit/65e325848ebc2358834068a36306fef616bf3bb4))
+
 ## [0.1.113](https://github.com/cedricziel/assistant/compare/v0.1.112...v0.1.113) (2026-04-17)
 
 
