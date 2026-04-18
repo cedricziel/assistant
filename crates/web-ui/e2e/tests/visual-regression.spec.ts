@@ -42,11 +42,15 @@ async function loginFlutter(page: Page) {
   // Navigate directly to the setup screen with the auto-connect token.
   await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "networkidle" });
 
-  // Wait for Flutter engine to be ready before checking URL predicates.
-  await page.waitForSelector("flutter-view", {
-    state: "attached",
-    timeout: 30_000,
-  });
+  // Wait for Flutter to render its first frame: flt-scene inside
+  // flt-glass-pane's shadow DOM only appears after the widget tree is painted.
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector("flutter-view > flt-glass-pane")
+        ?.shadowRoot?.querySelector("flt-scene") !== null,
+    { timeout: 30_000 },
+  );
 
   // Wait for GET /health to succeed and Flutter to navigate away from /setup.
   await page.waitForURL(
@@ -74,11 +78,15 @@ async function loginFlutter(page: Page) {
 async function navigateAndSettle(page: Page, path: string) {
   await page.goto(path, { waitUntil: "networkidle" });
 
-  // Wait for Flutter's engine to initialise (WASM compile + first frame).
-  await page.waitForSelector("flutter-view", {
-    state: "attached",
-    timeout: 30_000,
-  });
+  // Wait for Flutter to render its first frame: flt-scene inside
+  // flt-glass-pane's shadow DOM only appears after the widget tree is painted.
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector("flutter-view > flt-glass-pane")
+        ?.shadowRoot?.querySelector("flt-scene") !== null,
+    { timeout: 30_000 },
+  );
 
   // Flutter may redirect through /loading while resolving auth state.
   // Wait up to 15 s for the redirect to finish (immediate if no redirect).
