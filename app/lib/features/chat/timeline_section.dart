@@ -7,16 +7,16 @@ import 'chat_provider.dart';
 /// An expandable timeline entry widget for tool calls, thinking, and subagent
 /// events. Shows a collapsed header with icon + label + status, and expands
 /// to reveal full details.
-class TimelineSection extends StatefulWidget {
-  const TimelineSection({super.key, required this.message});
+class ChatTimelineSection extends StatefulWidget {
+  const ChatTimelineSection({super.key, required this.message});
 
   final ChatMessage message;
 
   @override
-  State<TimelineSection> createState() => _TimelineSectionState();
+  State<ChatTimelineSection> createState() => _ChatTimelineSectionState();
 }
 
-class _TimelineSectionState extends State<TimelineSection> {
+class _ChatTimelineSectionState extends State<ChatTimelineSection> {
   bool _expanded = false;
 
   @override

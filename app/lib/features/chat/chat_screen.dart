@@ -22,6 +22,7 @@ import 'attachment_provider.dart';
 import 'audio_player_widget.dart';
 import 'chat_provider.dart';
 import 'conversation_list.dart';
+import 'timeline_section.dart';
 import 'tool_call_chip.dart';
 import 'voice_recorder_button.dart';
 
@@ -427,6 +428,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   itemCount: chatState.messages.length,
                                   itemBuilder: (context, index) {
                                     final msg = chatState.messages[index];
+
+                                    // Render non-message timeline entries
+                                    // (thinking, tool call, subagent) as
+                                    // compact expandable sections.
+                                    if (msg.timelineType !=
+                                        TimelineEntryType.message) {
+                                      return ChatTimelineSection(message: msg);
+                                    }
+
                                     final prevMsg = index > 0
                                         ? chatState.messages[index - 1]
                                         : null;

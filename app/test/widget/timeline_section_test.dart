@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  group('TimelineSection', () {
+  group('ChatTimelineSection', () {
     testWidgets('renders tool call with wrench icon and tool name', (
       tester,
     ) async {
@@ -19,7 +19,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TimelineSection(message: msg)),
+          home: Scaffold(body: ChatTimelineSection(message: msg)),
         ),
       );
 
@@ -40,7 +40,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TimelineSection(message: msg)),
+          home: Scaffold(body: ChatTimelineSection(message: msg)),
         ),
       );
 
@@ -58,7 +58,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TimelineSection(message: msg)),
+          home: Scaffold(body: ChatTimelineSection(message: msg)),
         ),
       );
 
@@ -77,7 +77,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TimelineSection(message: msg)),
+          home: Scaffold(body: ChatTimelineSection(message: msg)),
         ),
       );
 
@@ -95,7 +95,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TimelineSection(message: msg)),
+          home: Scaffold(body: ChatTimelineSection(message: msg)),
         ),
       );
 
@@ -128,7 +128,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TimelineSection(message: msg)),
+          home: Scaffold(body: ChatTimelineSection(message: msg)),
         ),
       );
 
@@ -154,7 +154,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TimelineSection(message: msg)),
+          home: Scaffold(body: ChatTimelineSection(message: msg)),
         ),
       );
 
@@ -174,7 +174,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: TimelineSection(message: msg)),
+          home: Scaffold(body: ChatTimelineSection(message: msg)),
         ),
       );
 
