@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.119](https://github.com/cedricziel/assistant/compare/v0.1.118...v0.1.119) (2026-04-18)
+
+
+### Features
+
+* chat timeline sections for thinking, tool calls, and subagents ([#523](https://github.com/cedricziel/assistant/issues/523)) ([c0eb280](https://github.com/cedricziel/assistant/commit/c0eb280d4c0d5e06a2e1d1950ee9275140554f10))
+
+
+### Bug Fixes
+
+* **ci:** use macos-26 runner for iOS builds ([#526](https://github.com/cedricziel/assistant/issues/526)) ([d36ec04](https://github.com/cedricziel/assistant/commit/d36ec04abc41e54f56f2da5d118b7b233cff42ed))
+* **updater:** disable self-update feature on iOS to prevent crash ([#501](https://github.com/cedricziel/assistant/issues/501)) ([a557757](https://github.com/cedricziel/assistant/commit/a557757fdbe820eb55e2e8b0e3851a63160f2e10)), closes [#420](https://github.com/cedricziel/assistant/issues/420)
+
 ## [0.1.118](https://github.com/cedricziel/assistant/compare/v0.1.117...v0.1.118) (2026-04-18)
 
 
