@@ -75,6 +75,8 @@ export 'package:assistant_api/src/model/persona_file_slot.dart';
 export 'package:assistant_api/src/model/persona_skill_access.dart';
 export 'package:assistant_api/src/model/persona_summary.dart';
 export 'package:assistant_api/src/model/push_notification_config.dart';
+export 'package:assistant_api/src/model/quick_message_request.dart';
+export 'package:assistant_api/src/model/quick_message_response.dart';
 export 'package:assistant_api/src/model/register_agent_request.dart';
 export 'package:assistant_api/src/model/role.dart';
 export 'package:assistant_api/src/model/rotate_secret_response.dart';

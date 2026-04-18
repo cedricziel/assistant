@@ -62,6 +62,8 @@ import 'package:assistant_api/src/model/persona_file_slot.dart';
 import 'package:assistant_api/src/model/persona_skill_access.dart';
 import 'package:assistant_api/src/model/persona_summary.dart';
 import 'package:assistant_api/src/model/push_notification_config.dart';
+import 'package:assistant_api/src/model/quick_message_request.dart';
+import 'package:assistant_api/src/model/quick_message_response.dart';
 import 'package:assistant_api/src/model/register_agent_request.dart';
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
@@ -160,6 +162,8 @@ part 'serializers.g.dart';
   PersonaSkillAccess,
   PersonaSummary,
   PushNotificationConfig,
+  QuickMessageRequest,
+  QuickMessageResponse,
   RegisterAgentRequest,
   Role,
   RotateSecretResponse,

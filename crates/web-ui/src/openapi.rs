@@ -27,13 +27,17 @@ use assistant_a2a_json_schema::{
     },
 };
 use utoipa::{
-    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
     Modify, OpenApi,
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
 };
 
 use crate::a2a::handlers;
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::{
+    AttachmentMetaResponse, ConversationDetail, ConversationSummary, CreateConversationRequest,
+    MessageSummary, QuickMessageRequest, QuickMessageResponse,
+    SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, StreamRunEventsQuery,
+    ToolCallSummary, UpdateConversationRequest,
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
     analytics::{
         AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
@@ -54,9 +58,6 @@ use crate::api::{
         WorkflowDetail, WorkflowRunDetail, WorkflowRunPreview, WorkflowRunStep, WorkflowRunSummary,
         WorkflowSummary, WorkflowUpsertRequest, WorkflowWebhookSecrets,
     },
-    AttachmentMetaResponse, ConversationDetail, ConversationSummary, CreateConversationRequest,
-    MessageSummary, SendMessageRequest as ApiSendMessageRequest, ServerCapabilities,
-    StreamRunEventsQuery, ToolCallSummary, UpdateConversationRequest,
 };
 
 /// Adds the Bearer token security scheme to the OpenAPI components.
@@ -118,6 +119,7 @@ pub struct ApiErrorResponse {
         crate::api::delete_conversation,
         crate::api::update_conversation,
         crate::api::send_message,
+        crate::api::quick_message,
         crate::api::send_voice_message,
         crate::api::stream_run_events,
         crate::api::get_message_audio,
@@ -245,6 +247,8 @@ pub struct ApiErrorResponse {
             CreateConversationRequest,
             UpdateConversationRequest,
             ApiSendMessageRequest,
+            QuickMessageRequest,
+            QuickMessageResponse,
             // Flutter-facing API types
             PersonaSummary,
             SetActivePersonaRequest,

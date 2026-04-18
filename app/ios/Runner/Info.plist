@@ -63,6 +63,8 @@
 	<string>Photo library access is used to attach images to messages.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is used to take photos and attach them to messages.</string>
+	<key>NSSiriUsageDescription</key>
+	<string>Siri is used to send voice questions to your assistant and hear responses.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

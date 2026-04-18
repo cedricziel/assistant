@@ -8,11 +8,11 @@
 //! | GET    | `/api/traces/{id}`    | Get a single trace with spans    |
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -137,17 +137,20 @@ pub async fn list_traces(
                         }
                     }
                     if let Some(conv_id) = filter.conversation
-                        && t.conversation_id != Some(conv_id) {
-                            return false;
-                        }
+                        && t.conversation_id != Some(conv_id)
+                    {
+                        return false;
+                    }
                     if let Some(since) = filter.since
-                        && t.start_time < since {
-                            return false;
-                        }
+                        && t.start_time < since
+                    {
+                        return false;
+                    }
                     if let Some(until) = filter.until
-                        && t.start_time > until {
-                            return false;
-                        }
+                        && t.start_time > until
+                    {
+                        return false;
+                    }
                     true
                 })
                 .map(|t| {
@@ -261,7 +264,7 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
-    use super::{traces_router, TracesApiState};
+    use super::{TracesApiState, traces_router};
 
     async fn test_state() -> (TracesApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
