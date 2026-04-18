@@ -824,4 +824,74 @@ void main() {
       );
     });
   });
+
+  // -- Phase 3: Timeline entry data model ------------------------------------
+
+  group('ChatMessage timeline entries', () {
+    test('default timelineType is message', () {
+      final msg = ChatMessage(id: '1', role: 'assistant', content: 'hi');
+      expect(msg.timelineType, TimelineEntryType.message);
+    });
+
+    test('thinking entry stores content', () {
+      final msg = ChatMessage(
+        id: '1',
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.thinking,
+        thinkingContent: 'Let me consider...',
+      );
+      expect(msg.timelineType, TimelineEntryType.thinking);
+      expect(msg.thinkingContent, 'Let me consider...');
+    });
+
+    test('toolCall entry stores tool data', () {
+      final msg = ChatMessage(
+        id: '1',
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.toolCall,
+        toolCalls: [
+          ToolCallRecord(toolName: 'web-search', status: ToolCallStatus.ok),
+        ],
+      );
+      expect(msg.timelineType, TimelineEntryType.toolCall);
+      expect(msg.toolCalls.first.toolName, 'web-search');
+    });
+
+    test('subagent entry stores agent fields', () {
+      final msg = ChatMessage(
+        id: '1',
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.subagent,
+        subagentId: 'research-1',
+        subagentTask: 'Find weather data',
+        subagentSummary: 'Found results',
+      );
+      expect(msg.timelineType, TimelineEntryType.subagent);
+      expect(msg.subagentId, 'research-1');
+      expect(msg.subagentTask, 'Find weather data');
+      expect(msg.subagentSummary, 'Found results');
+    });
+
+    test('copyWith preserves timeline fields', () {
+      final msg = ChatMessage(
+        id: '1',
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.thinking,
+        thinkingContent: 'reasoning',
+        subagentId: 'a1',
+        subagentTask: 'task',
+        subagentSummary: 'summary',
+      );
+      final copy = msg.copyWith(content: 'updated');
+      expect(copy.timelineType, TimelineEntryType.thinking);
+      expect(copy.thinkingContent, 'reasoning');
+      expect(copy.subagentId, 'a1');
+      expect(copy.subagentTask, 'task');
+      expect(copy.subagentSummary, 'summary');
+    });
+  });
 }

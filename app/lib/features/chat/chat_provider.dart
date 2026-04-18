@@ -167,6 +167,9 @@ class ToolCallRecord {
   String? result;
 }
 
+/// The kind of entry shown in the chat timeline.
+enum TimelineEntryType { message, thinking, toolCall, subagent }
+
 /// A message shown in the chat UI (may be a streaming partial).
 /// Metadata for an image attachment on a message.
 class ChatAttachment {
@@ -195,6 +198,11 @@ class ChatMessage {
     this.tokenStream,
     this.audioBytes,
     this.audioMimeType,
+    this.timelineType = TimelineEntryType.message,
+    this.thinkingContent,
+    this.subagentId,
+    this.subagentTask,
+    this.subagentSummary,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -232,6 +240,21 @@ class ChatMessage {
   /// MIME type of [audioBytes] (e.g. `audio/webm`, `audio/mp4`).
   final String? audioMimeType;
 
+  /// The kind of timeline entry this message represents.
+  final TimelineEntryType timelineType;
+
+  /// Reasoning text for [TimelineEntryType.thinking] entries.
+  final String? thinkingContent;
+
+  /// Subagent identifier for [TimelineEntryType.subagent] entries.
+  final String? subagentId;
+
+  /// Subagent task description for [TimelineEntryType.subagent] entries.
+  final String? subagentTask;
+
+  /// Subagent completion summary for [TimelineEntryType.subagent] entries.
+  String? subagentSummary;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -247,6 +270,11 @@ class ChatMessage {
     List<ChatAttachment>? attachments,
     Uint8List? audioBytes,
     String? audioMimeType,
+    TimelineEntryType? timelineType,
+    String? thinkingContent,
+    String? subagentId,
+    String? subagentTask,
+    String? subagentSummary,
   }) {
     return ChatMessage(
       id: id,
@@ -261,6 +289,11 @@ class ChatMessage {
       attachments: attachments ?? this.attachments,
       audioBytes: audioBytes ?? this.audioBytes,
       audioMimeType: audioMimeType ?? this.audioMimeType,
+      timelineType: timelineType ?? this.timelineType,
+      thinkingContent: thinkingContent ?? this.thinkingContent,
+      subagentId: subagentId ?? this.subagentId,
+      subagentTask: subagentTask ?? this.subagentTask,
+      subagentSummary: subagentSummary ?? this.subagentSummary,
     );
   }
 }
