@@ -2,6 +2,7 @@ import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/capabilities_provider.dart';
 import 'package:assistant_app/api/models/server_capabilities.dart';
+import 'package:assistant_app/api/models/server_profile.dart';
 import 'package:assistant_app/features/chat/audio_player_widget.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
@@ -60,6 +61,10 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
         personasProvider.overrideWith(() => _FakePersonasNotifier()),
         conversationListProvider.overrideWith(
           () => _FakeConversationListNotifier(),
+        ),
+        // Provide a profile so image auth headers and base URL are available.
+        activeProfileProvider.overrideWithValue(
+          const ServerProfile(baseUrl: 'http://localhost', token: 'test-token'),
         ),
         if (capabilities != null) ...[
           apiClientProvider.overrideWithValue(

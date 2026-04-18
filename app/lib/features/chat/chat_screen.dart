@@ -274,6 +274,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ? (ref.watch(capabilitiesProvider).value ?? ServerCapabilities.disabled)
         : ServerCapabilities.disabled;
 
+    // Watch the active profile reactively so image auth headers update when
+    // the profile loads (e.g. after a deep-link hard reload).
+    final activeProfile = ref.watch(activeProfileProvider);
+    final imageBaseUrl = activeProfile?.baseUrl;
+    final imageAuthToken = activeProfile?.token;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(activePersonaName),
@@ -452,12 +458,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                         return api?.fetchMessageAudio(msg.id) ??
                                             Future.value(null);
                                       },
-                                      imageBaseUrl: ref
-                                          .read(activeProfileProvider)
-                                          ?.baseUrl,
-                                      imageAuthToken: ref
-                                          .read(activeProfileProvider)
-                                          ?.token,
+                                      imageBaseUrl: imageBaseUrl,
+                                      imageAuthToken: imageAuthToken,
                                     );
                                   },
                                 ),
@@ -712,9 +714,30 @@ class _MessageBubble extends StatelessWidget {
         spacing: 6,
         runSpacing: 6,
         children: message.attachments.map((att) {
-          final thumbUrl = imageBaseUrl != null
-              ? '$imageBaseUrl${att.url}?w=300'
-              : '${att.url}?w=300';
+          // Without a base URL the relative path cannot be resolved.
+          if (imageBaseUrl == null) {
+            return Container(
+              width: 150,
+              height: 150,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.image, color: colorScheme.outline),
+                  const SizedBox(height: 4),
+                  Text(
+                    att.filename,
+                    style: TextStyle(fontSize: 10, color: colorScheme.outline),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            );
+          }
+          final thumbUrl = '$imageBaseUrl${att.url}?w=300';
           return GestureDetector(
             onTap: () => _showFullImage(context, att),
             child: ClipRRect(
@@ -739,24 +762,30 @@ class _MessageBubble extends StatelessWidget {
                     ),
                   ),
                 ),
-                errorWidget: (_, _, _) => Container(
-                  width: 150,
-                  height: 150,
-                  color: colorScheme.surfaceContainerLowest,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.broken_image, color: colorScheme.outline),
-                      const SizedBox(height: 4),
-                      Text(
-                        att.filename,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: colorScheme.outline,
+                errorWidget: (_, url, _) => GestureDetector(
+                  onTap: () {
+                    CachedNetworkImage.evictFromCache(url);
+                    // Trigger a rebuild to retry loading.
+                    (context as Element).markNeedsBuild();
+                  },
+                  child: Container(
+                    width: 150,
+                    height: 150,
+                    color: colorScheme.surfaceContainerLowest,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.refresh, color: colorScheme.outline),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Tap to retry',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: colorScheme.outline,
+                          ),
                         ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -768,9 +797,8 @@ class _MessageBubble extends StatelessWidget {
   }
 
   void _showFullImage(BuildContext context, ChatAttachment attachment) {
-    final fullUrl = imageBaseUrl != null
-        ? '$imageBaseUrl${attachment.url}?w=1920'
-        : '${attachment.url}?w=1920';
+    if (imageBaseUrl == null) return;
+    final fullUrl = '$imageBaseUrl${attachment.url}?w=1920';
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
