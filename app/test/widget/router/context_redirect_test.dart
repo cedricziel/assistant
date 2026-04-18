@@ -11,6 +11,7 @@ import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/contexts/data/context_repository.dart';
 import 'package:assistant_app/features/contexts/models/context_model.dart';
 import 'package:assistant_app/features/contexts/providers/context_providers.dart';
+import 'package:assistant_app/features/chat/chat_screen.dart';
 import 'package:assistant_app/features/contexts/screens/context_switcher_screen.dart';
 import 'package:assistant_app/router/app_router.dart';
 import 'package:assistant_app/shared/loading_screen.dart';
@@ -189,6 +190,96 @@ void main() {
       },
     );
   });
+
+  group('Deep-link preservation', () {
+    testWidgets(
+      'loading phase redirects to /loading, then restores destination on auth resolve',
+      (tester) async {
+        final completer = Completer<AssistantContext?>();
+        final ctx = AssistantContext(
+          id: 'ctx-deep',
+          name: 'Deep',
+          serverUrl: 'https://deep.example.com',
+          createdAt: DateTime.utc(2024, 1, 1),
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              activeContextProvider.overrideWith(
+                () => _ControllableContextNotifier(completer.future),
+              ),
+              capabilitiesProvider.overrideWith(
+                (ref) async => ServerCapabilities.disabled,
+              ),
+              apiClientProvider.overrideWithValue(null),
+            ],
+            child: Consumer(
+              builder: (context, ref, child) {
+                final router = ref.watch(routerProvider);
+                return MaterialApp.router(routerConfig: router);
+              },
+            ),
+          ),
+        );
+
+        // During loading, router redirects to /loading.
+        await tester.pump();
+        expect(find.byType(LoadingScreen), findsOneWidget);
+
+        // Resolve auth with a valid context.
+        completer.complete(ctx);
+        // Let the provider settle and redirect fire.
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump(const Duration(milliseconds: 500));
+
+        // Should not be on the loading screen anymore.
+        expect(find.byType(LoadingScreen), findsNothing);
+        // Should have navigated to chat (the initial location that was preserved).
+        expect(find.byType(ChatScreen), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'auth resolves with no context → redirects to context switcher',
+      (tester) async {
+        final completer = Completer<AssistantContext?>();
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              activeContextProvider.overrideWith(
+                () => _ControllableContextNotifier(completer.future),
+              ),
+              capabilitiesProvider.overrideWith(
+                (ref) async => ServerCapabilities.disabled,
+              ),
+              apiClientProvider.overrideWithValue(null),
+            ],
+            child: Consumer(
+              builder: (context, ref, child) {
+                final router = ref.watch(routerProvider);
+                return MaterialApp.router(routerConfig: router);
+              },
+            ),
+          ),
+        );
+
+        await tester.pump();
+        expect(find.byType(LoadingScreen), findsOneWidget);
+
+        // Resolve auth with no context → should go to /contexts (native).
+        completer.complete(null);
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump(const Duration(milliseconds: 500));
+
+        expect(find.byType(LoadingScreen), findsNothing);
+        expect(find.byType(ContextSwitcherScreen), findsOneWidget);
+      },
+    );
+  });
 }
 
 /// An [ActiveContextNotifier] that never resolves — stays in [AsyncLoading].
@@ -199,4 +290,13 @@ class _AlwaysLoadingContextNotifier extends ActiveContextNotifier {
     await Completer<AssistantContext?>().future;
     return null;
   }
+}
+
+/// An [ActiveContextNotifier] controlled by an external [Future].
+class _ControllableContextNotifier extends ActiveContextNotifier {
+  _ControllableContextNotifier(this._future);
+  final Future<AssistantContext?> _future;
+
+  @override
+  Future<AssistantContext?> build() => _future;
 }
