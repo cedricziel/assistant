@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/capabilities_provider.dart';
@@ -649,6 +651,94 @@ void main() {
         findsOneWidget,
         reason: 'Tapping thumbnail should open full-size image dialog',
       );
+    });
+  });
+
+  group('Chat screen — voice message player', () {
+    testWidgets(
+      'voice message with audioBytes renders player instead of text',
+      (tester) async {
+        final res = await pumpChatScreen(tester);
+
+        final msg = ChatMessage(
+          id: 'voice-1',
+          role: 'user',
+          content: 'Hello world',
+          audioBytes: Uint8List.fromList([0, 1, 2, 3]),
+          audioMimeType: 'audio/webm',
+        );
+
+        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+        await tester.pump();
+
+        // Should find a play button icon.
+        expect(
+          find.byIcon(Icons.play_circle_filled),
+          findsOneWidget,
+          reason: 'Voice message should render a play button',
+        );
+        // Should find the transcript toggle (expand_more chevron).
+        expect(
+          find.byIcon(Icons.expand_more),
+          findsOneWidget,
+          reason: 'Voice message should show collapsed transcript chevron',
+        );
+        // Should NOT render the plain text as a SelectableText.
+        expect(
+          find.widgetWithText(SelectableText, 'Hello world'),
+          findsNothing,
+          reason: 'Voice message should not render content as SelectableText',
+        );
+      },
+    );
+
+    testWidgets('voice message without audioBytes renders as plain text', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'voice-2',
+        role: 'user',
+        content: 'Hello world',
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      // No play button — regular text message.
+      expect(find.byIcon(Icons.play_circle_filled), findsNothing);
+      expect(
+        find.widgetWithText(SelectableText, 'Hello world'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('tapping transcript chevron toggles expansion', (tester) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'voice-3',
+        role: 'user',
+        content: 'This is a transcript of a voice message that was recorded',
+        audioBytes: Uint8List.fromList([0, 1, 2]),
+        audioMimeType: 'audio/webm',
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      // Initially collapsed — chevron points down.
+      expect(find.byIcon(Icons.expand_more), findsOneWidget);
+      expect(find.byIcon(Icons.expand_less), findsNothing);
+
+      // Tap the transcript area to expand.
+      await tester.tap(find.byIcon(Icons.expand_more));
+      await tester.pump();
+
+      // Now expanded — chevron points up.
+      expect(find.byIcon(Icons.expand_less), findsOneWidget);
+      expect(find.byIcon(Icons.expand_more), findsNothing);
     });
   });
 }

@@ -193,6 +193,8 @@ class ChatMessage {
     this.audioId,
     this.ttsAvailable = false,
     this.tokenStream,
+    this.audioBytes,
+    this.audioMimeType,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -224,6 +226,12 @@ class ChatMessage {
   /// Image attachments linked to this message.
   List<ChatAttachment> attachments;
 
+  /// Raw audio bytes for user voice messages (in-memory only, not persisted).
+  final Uint8List? audioBytes;
+
+  /// MIME type of [audioBytes] (e.g. `audio/webm`, `audio/mp4`).
+  final String? audioMimeType;
+
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';
 
@@ -237,6 +245,8 @@ class ChatMessage {
     Stream<String>? tokenStream,
     bool clearTokenStream = false,
     List<ChatAttachment>? attachments,
+    Uint8List? audioBytes,
+    String? audioMimeType,
   }) {
     return ChatMessage(
       id: id,
@@ -249,6 +259,8 @@ class ChatMessage {
       toolCalls: toolCalls ?? this.toolCalls,
       tokenStream: clearTokenStream ? null : (tokenStream ?? this.tokenStream),
       attachments: attachments ?? this.attachments,
+      audioBytes: audioBytes ?? this.audioBytes,
+      audioMimeType: audioMimeType ?? this.audioMimeType,
     );
   }
 }
@@ -856,6 +868,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       role: 'user',
       content: '🎤 Voice message',
       status: MessageStatus.sending,
+      audioBytes: audioBytes,
+      audioMimeType: mimeType,
     );
     final assistantPlaceholder = ChatMessage(
       id: 'assistant-streaming',
