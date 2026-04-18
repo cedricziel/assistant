@@ -410,10 +410,6 @@ jobs:
           bundler-cache: true
           working-directory: app
 
-      - name: Reinstall CocoaPods
-        run: gem install cocoapods
-        working-directory: app
-
       - name: Run Fastlane beta lane
         run: bundle exec fastlane ios beta
 
