@@ -21,12 +21,6 @@ const MAX_DIFF_RATIO_FLUTTER = 0.15;
 // Settle time for CSS transitions before screenshotting.
 const CSS_SETTLE_MS = 300;
 
-// Extra settle time for Flutter to render after network idle.
-// Flutter web needs time to: initialize WASM, load async providers from
-// SharedPreferences, re-evaluate the router, and render the final state.
-// 3 seconds is the observed upper bound on a developer MacBook; CI may need more.
-const FLUTTER_SETTLE_MS = 3000;
-
 // -- Helpers ----------------------------------------------------------------
 
 /**
@@ -47,20 +41,45 @@ const FLUTTER_SETTLE_MS = 3000;
 async function loginFlutter(page: Page) {
   // Navigate directly to the setup screen with the auto-connect token.
   await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(FLUTTER_SETTLE_MS);
 
   // Wait for GET /health to succeed and Flutter to navigate away from /setup.
-  await page.waitForURL((url) => !url.pathname.includes("/setup"), {
-    timeout: 15_000,
-  });
-  await page.waitForTimeout(FLUTTER_SETTLE_MS);
+  // This replaces a fixed 3 s timeout — the URL predicate resolves as soon as
+  // auth completes (fast on dev, up to 15 s on slow CI).
+  await page.waitForURL(
+    (url) =>
+      !url.pathname.includes("/setup") && !url.pathname.includes("/loading"),
+    { timeout: 15_000 },
+  );
+
+  // Let any post-login API calls finish.
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(CSS_SETTLE_MS);
 }
 
-/** Navigate and wait for network idle before screenshotting. */
+/**
+ * Navigate and wait for Flutter to fully render before screenshotting.
+ *
+ * Instead of a fixed timeout, we wait for observable events:
+ * 1. Initial page load (network idle).
+ * 2. Flutter's auth router redirects through /loading — wait for that to
+ *    resolve so the target route is active.
+ * 3. A second network-idle pass catches API calls triggered after routing.
+ * 4. A short CSS-transition settle before the screenshot.
+ */
 async function navigateAndSettle(page: Page, path: string) {
   await page.goto(path, { waitUntil: "networkidle" });
-  // Extra settle time for any CSS transitions and Flutter rendering.
-  await page.waitForTimeout(FLUTTER_SETTLE_MS);
+
+  // Flutter may redirect through /loading while resolving auth state.
+  // Wait up to 15 s for the redirect to finish (immediate if no redirect).
+  await page.waitForURL((url) => !url.pathname.includes("/loading"), {
+    timeout: 15_000,
+  });
+
+  // Data-fetching API calls fire after routing settles — wait for them.
+  await page.waitForLoadState("networkidle");
+
+  // Short settle for CSS transitions / final Flutter paint.
+  await page.waitForTimeout(CSS_SETTLE_MS);
 }
 
 // -- API helpers ------------------------------------------------------------
@@ -558,7 +577,7 @@ test.describe("Authenticated pages", () => {
   });
 
   test("core routes avoid viewport horizontal overflow", async ({ page }) => {
-    // 10 routes × ~5 s each (3 s settle + navigation) — extend the default 30 s limit.
+    // 8 routes with per-route auth redirect + network idle — extend the default 30 s limit.
     test.setTimeout(90_000);
     const routes = [
       "/chat",
