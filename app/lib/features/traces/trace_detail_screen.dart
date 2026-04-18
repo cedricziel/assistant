@@ -92,10 +92,10 @@ class _TraceDetailBody extends StatelessWidget {
                 const SizedBox(height: 6),
                 SelectableText(
                   traceId,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 12,
-                    color: Colors.black54,
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -116,12 +116,12 @@ class _TraceDetailBody extends StatelessWidget {
         const SizedBox(height: 8),
 
         if (spans.isEmpty)
-          const Center(
+          Center(
             child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
+              padding: const EdgeInsets.symmetric(vertical: 24),
               child: Text(
                 'No spans recorded',
-                style: TextStyle(color: Colors.black45),
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
               ),
             ),
           )
@@ -213,7 +213,7 @@ class _SpanCardState extends State<_SpanCard> {
                           ? Icons.keyboard_arrow_up
                           : Icons.keyboard_arrow_down,
                       size: 16,
-                      color: Colors.black45,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ],
                 ],
@@ -229,7 +229,7 @@ class _SpanCardState extends State<_SpanCard> {
                       height: 4,
                       width: double.infinity,
                       decoration: BoxDecoration(
-                        color: Colors.black12,
+                        color: theme.colorScheme.outlineVariant,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -262,7 +262,7 @@ class _SpanCardState extends State<_SpanCard> {
                             '${e.key}',
                             style: TextStyle(
                               fontSize: 11,
-                              color: Colors.black54,
+                              color: theme.colorScheme.onSurfaceVariant,
                               fontFamily: 'monospace',
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -306,7 +306,10 @@ class _InfoRow extends StatelessWidget {
             width: 72,
             child: Text(
               label,
-              style: const TextStyle(fontSize: 12, color: Colors.black45),
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
           Expanded(
@@ -333,7 +336,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),

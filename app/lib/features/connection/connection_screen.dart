@@ -121,10 +121,12 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Choose how to connect to the backend.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.black54),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 24),
 
@@ -220,15 +222,21 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                                 vertical: 8,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                border: Border.all(color: Colors.red.shade300),
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.errorContainer,
+                                border: Border.all(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
                                 children: [
                                   Icon(
                                     Icons.error_outline,
-                                    color: Colors.red.shade700,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onErrorContainer,
                                     size: 18,
                                   ),
                                   const SizedBox(width: 8),
@@ -237,7 +245,9 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                                       _error!,
                                       key: const Key('error_message'),
                                       style: TextStyle(
-                                        color: Colors.red.shade700,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onErrorContainer,
                                       ),
                                     ),
                                   ),
@@ -288,7 +298,10 @@ class _EmbeddedServerStatus extends StatelessWidget {
       ),
       error: (e, _) => _StatusCard(
         key: const Key('embedded_error'),
-        icon: const Icon(Icons.error_outline, color: Colors.red),
+        icon: Icon(
+          Icons.error_outline,
+          color: Theme.of(context).colorScheme.error,
+        ),
         message: e.toString(),
         isError: true,
       ),
@@ -305,7 +318,10 @@ class _EmbeddedServerStatus extends StatelessWidget {
         ),
         EmbeddedServerError(message: final msg) => _StatusCard(
           key: const Key('embedded_error_state'),
-          icon: const Icon(Icons.error_outline, color: Colors.red),
+          icon: Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+          ),
           message: msg,
           isError: true,
         ),
@@ -333,13 +349,16 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       decoration: BoxDecoration(
-        color: isError ? Colors.red.shade50 : Colors.grey.shade100,
+        color: isError
+            ? colorScheme.errorContainer
+            : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isError ? Colors.red.shade200 : Colors.grey.shade300,
+          color: isError ? colorScheme.error : colorScheme.outline,
         ),
       ),
       child: Row(
@@ -349,7 +368,9 @@ class _StatusCard extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: TextStyle(color: isError ? Colors.red.shade700 : null),
+              style: TextStyle(
+                color: isError ? colorScheme.onErrorContainer : null,
+              ),
             ),
           ),
         ],

@@ -31,7 +31,9 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
@@ -48,7 +50,7 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Delete failed: $error'),
-          backgroundColor: Colors.red.shade600,
+          backgroundColor: Theme.of(context).colorScheme.error,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -68,7 +70,7 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed: $error'),
-          backgroundColor: Colors.red.shade600,
+          backgroundColor: Theme.of(context).colorScheme.error,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -95,7 +97,10 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
             onPressed: () => context.go('/workflows/${widget.workflowId}/edit'),
           ),
           IconButton(
-            icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
+            icon: Icon(
+              Icons.delete_outline,
+              color: Theme.of(context).colorScheme.error,
+            ),
             tooltip: 'Delete workflow',
             onPressed: _confirmDelete,
           ),
@@ -211,7 +216,9 @@ class _WorkflowDetailBody extends StatelessWidget {
                   const SizedBox(height: 8),
                   Text(
                     detail.description,
-                    style: const TextStyle(color: Colors.black54),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ],
@@ -226,12 +233,14 @@ class _WorkflowDetailBody extends StatelessWidget {
         const SizedBox(height: 8),
 
         if (runs.isEmpty)
-          const Center(
+          Center(
             child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
+              padding: const EdgeInsets.symmetric(vertical: 24),
               child: Text(
                 'No runs yet',
-                style: TextStyle(color: Colors.black38),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           )
@@ -245,7 +254,10 @@ class _WorkflowDetailBody extends StatelessWidget {
               child: Text(
                 'Showing 20 of ${runs.length} runs',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.black38),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
         ],
@@ -262,6 +274,7 @@ class _RunTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final status = run.status;
     final isSuccess = status == 'completed' || status == 'success';
     final isError = status == 'failed' || status == 'error';
@@ -279,7 +292,7 @@ class _RunTile extends StatelessWidget {
           color: isSuccess
               ? Colors.green.shade600
               : isError
-              ? Colors.red.shade600
+              ? colorScheme.error
               : Colors.orange.shade600,
         ),
         title: Text(
@@ -288,7 +301,7 @@ class _RunTile extends StatelessWidget {
         ),
         subtitle: Text(
           run.startedAt.toIso8601String(),
-          style: const TextStyle(fontSize: 11, color: Colors.black54),
+          style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
         ),
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -296,14 +309,14 @@ class _RunTile extends StatelessWidget {
             color: isSuccess
                 ? Colors.green.shade50
                 : isError
-                ? Colors.red.shade50
+                ? colorScheme.errorContainer
                 : Colors.orange.shade50,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isSuccess
                   ? Colors.green.shade300
                   : isError
-                  ? Colors.red.shade300
+                  ? colorScheme.error
                   : Colors.orange.shade300,
             ),
           ),
@@ -315,7 +328,7 @@ class _RunTile extends StatelessWidget {
               color: isSuccess
                   ? Colors.green.shade700
                   : isError
-                  ? Colors.red.shade700
+                  ? colorScheme.error
                   : Colors.orange.shade700,
             ),
           ),
@@ -337,7 +350,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),

@@ -179,7 +179,9 @@ class _SummaryCards extends StatelessWidget {
           label: 'Errors',
           value: summary.errorCount.toString(),
           icon: Icons.error_outline,
-          valueColor: summary.errorCount > 0 ? Colors.red.shade700 : null,
+          valueColor: summary.errorCount > 0
+              ? Theme.of(context).colorScheme.error
+              : null,
         ),
         _StatCard(
           label: 'Avg Duration',
@@ -363,7 +365,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),

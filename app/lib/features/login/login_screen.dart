@@ -122,12 +122,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   FilledButton(
                     onPressed: _saving ? null : _submit,
                     child: _saving
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: Theme.of(
+                                buildContext,
+                              ).colorScheme.onPrimary,
                             ),
                           )
                         : const Text('Connect'),

@@ -341,8 +341,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               SizedBox(
                 width: 240,
                 child: Container(
-                  decoration: const BoxDecoration(
-                    border: Border(right: BorderSide(color: Colors.black12)),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      right: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ),
                   ),
                   child: const ConversationList(),
                 ),
@@ -376,7 +380,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     // Error banner.
                     if (chatState.error != null)
                       Material(
-                        color: Colors.red.shade50,
+                        color: Theme.of(context).colorScheme.errorContainer,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -386,14 +390,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             children: [
                               Icon(
                                 Icons.warning_amber_outlined,
-                                color: Colors.red.shade700,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onErrorContainer,
                                 size: 18,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   chatState.error!,
-                                  style: TextStyle(color: Colors.red.shade700),
+                                  style: TextStyle(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onErrorContainer,
+                                  ),
                                 ),
                               ),
                               IconButton(
@@ -582,7 +592,7 @@ class _MessageBubble extends StatelessWidget {
                     : const Radius.circular(16),
               ),
               border: isFailed
-                  ? Border.all(color: Colors.red.shade400, width: 1.5)
+                  ? Border.all(color: colorScheme.error, width: 1.5)
                   : null,
             ),
             child: message.isStreaming && message.content.isEmpty
@@ -613,7 +623,7 @@ class _MessageBubble extends StatelessWidget {
                                 child: Icon(
                                   Icons.error_outline,
                                   size: 16,
-                                  color: Colors.red.shade300,
+                                  color: colorScheme.error,
                                 ),
                               ),
                             Flexible(
@@ -833,17 +843,22 @@ class _MessageBubble extends StatelessWidget {
                     : const {},
                 placeholder: (_, _) =>
                     const Center(child: CircularProgressIndicator()),
-                errorWidget: (_, _, _) => const Center(
+                errorWidget: (_, _, _) => Center(
                   child: Icon(
                     Icons.broken_image,
                     size: 64,
-                    color: Colors.white70,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.7),
                   ),
                 ),
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
+              icon: Icon(
+                Icons.close,
+                color: Theme.of(context).colorScheme.onPrimary,
+              ),
               onPressed: () => Navigator.of(ctx).pop(),
             ),
           ],
@@ -954,7 +969,7 @@ class _MetaActionRow extends StatelessWidget {
           key: const Key('retry_button'),
           icon: Icons.refresh,
           label: 'Retry',
-          color: Colors.red.shade700,
+          color: colorScheme.error,
           onTap: onRetry!,
         ),
       );
@@ -1237,24 +1252,29 @@ class _EmptyChat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.chat_bubble_outline, size: 64, color: Colors.black26),
-          SizedBox(height: 16),
+          Icon(
+            Icons.chat_bubble_outline,
+            size: 64,
+            color: colorScheme.outlineVariant,
+          ),
+          const SizedBox(height: 16),
           Text(
             'Start a conversation',
             style: TextStyle(
               fontSize: 18,
-              color: Colors.black45,
+              color: colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w500,
             ),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(
             'Type a message below to begin.',
-            style: TextStyle(color: Colors.black38),
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -1296,6 +1316,7 @@ class _InputRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1354,7 +1375,7 @@ class _InputRow extends StatelessWidget {
                           onPressed: () => onRemoveAttachment(index),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
-                          color: Colors.red.shade400,
+                          color: colorScheme.error,
                         ),
                       ),
                     ],
@@ -1365,8 +1386,8 @@ class _InputRow extends StatelessWidget {
           ),
         Container(
           padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: Colors.black12)),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
           ),
           child: Row(
             children: [

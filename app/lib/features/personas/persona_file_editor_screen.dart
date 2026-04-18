@@ -174,7 +174,7 @@ class _PersonaFileEditorScreenState
                 children: [
                   Icon(
                     Icons.error_outline,
-                    color: Colors.red.shade600,
+                    color: Theme.of(context).colorScheme.error,
                     size: 48,
                   ),
                   const SizedBox(height: 12),
@@ -197,7 +197,7 @@ class _PersonaFileEditorScreenState
                 children: [
                   if (_saveError != null)
                     Material(
-                      color: Colors.red.shade50,
+                      color: Theme.of(context).colorScheme.errorContainer,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -207,14 +207,16 @@ class _PersonaFileEditorScreenState
                           children: [
                             Icon(
                               Icons.warning_amber_outlined,
-                              color: Colors.red.shade700,
+                              color: Theme.of(context).colorScheme.error,
                               size: 18,
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 _saveError!,
-                                style: TextStyle(color: Colors.red.shade700),
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
                               ),
                             ),
                             IconButton(

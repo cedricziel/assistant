@@ -178,19 +178,25 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
           Container(
             width: 8,
             height: 8,
-            decoration: const BoxDecoration(
-              color: Colors.red,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.error,
               shape: BoxShape.circle,
             ),
           ),
           const SizedBox(width: 6),
           Text(
             '$minutes:${secs.toString().padLeft(2, '0')}',
-            style: const TextStyle(fontSize: 13, color: Colors.red),
+            style: TextStyle(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.error,
+            ),
           ),
           const SizedBox(width: 4),
           IconButton(
-            icon: const Icon(Icons.stop_circle_outlined, color: Colors.red),
+            icon: Icon(
+              Icons.stop_circle_outlined,
+              color: Theme.of(context).colorScheme.error,
+            ),
             onPressed: _stop,
             tooltip: 'Stop recording',
           ),

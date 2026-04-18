@@ -33,7 +33,9 @@ class _SkillDetailScreenState extends ConsumerState<SkillDetailScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
@@ -50,7 +52,7 @@ class _SkillDetailScreenState extends ConsumerState<SkillDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Delete failed: $error'),
-          backgroundColor: Colors.red.shade600,
+          backgroundColor: Theme.of(context).colorScheme.error,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -85,7 +87,10 @@ class _SkillDetailScreenState extends ConsumerState<SkillDetailScreen> {
               onPressed: () => context.go('/skills/${widget.skillName}/edit'),
             ),
             IconButton(
-              icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
+              icon: Icon(
+                Icons.delete_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
               tooltip: 'Delete skill',
               onPressed: _confirmDelete,
             ),
@@ -268,7 +273,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),

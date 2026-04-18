@@ -43,13 +43,14 @@ class _ChatTimelineSectionState extends State<ChatTimelineSection> {
       context,
       icon: Icons.build_outlined,
       label: record.toolName,
-      statusWidget: _toolStatusIcon(record.status),
+      statusWidget: _toolStatusIcon(context, record.status),
       expandable: hasDetails,
       expandedContent: hasDetails ? _toolDetails(context, record) : null,
     );
   }
 
-  Widget _toolStatusIcon(ToolCallStatus status) {
+  Widget _toolStatusIcon(BuildContext context, ToolCallStatus status) {
+    final colorScheme = Theme.of(context).colorScheme;
     return switch (status) {
       ToolCallStatus.pending => const SizedBox(
         width: 12,
@@ -61,10 +62,10 @@ class _ChatTimelineSectionState extends State<ChatTimelineSection> {
         size: 14,
         color: Colors.green,
       ),
-      ToolCallStatus.error => const Icon(
+      ToolCallStatus.error => Icon(
         Icons.error_outline,
         size: 14,
-        color: Colors.red,
+        color: colorScheme.error,
       ),
       ToolCallStatus.denied => const Icon(
         Icons.block,
