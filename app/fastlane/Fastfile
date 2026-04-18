@@ -36,6 +36,19 @@ platform :ios do
     # Sync certificates and provisioning profiles (readonly in CI).
     match(type: "appstore")
 
+    # Switch Runner target to manual signing with the App Store profile
+    # installed by match. Without this, xcodebuild uses the project's default
+    # signing identity ("iPhone Developer") and fails to find a matching
+    # provisioning profile in CI.
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "ios/Runner.xcodeproj",
+      team_id: "WPW3QSLZ2F",
+      code_sign_identity: "iPhone Distribution",
+      profile_name: ENV["sigh_com.cedricziel.assistant.ios_appstore_profile-name"] || "match AppStore com.cedricziel.assistant.ios",
+      targets: ["Runner"]
+    )
+
     # Set build number from CI environment (or local fallback).
     build_number = ENV["BUILD_NUMBER"] || number_of_commits.to_s
     increment_build_number(
