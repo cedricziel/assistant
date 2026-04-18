@@ -15,7 +15,8 @@ part 'get_task_request.g.dart';
 /// * [id] - The resource ID of the task to retrieve.
 /// * [tenant] - Optional tenant ID.
 @BuiltValue()
-abstract class GetTaskRequest implements Built<GetTaskRequest, GetTaskRequestBuilder> {
+abstract class GetTaskRequest
+    implements Built<GetTaskRequest, GetTaskRequestBuilder> {
   /// Max number of recent messages to include in history.
   @BuiltValueField(wireName: r'historyLength')
   int? get historyLength;
@@ -30,16 +31,19 @@ abstract class GetTaskRequest implements Built<GetTaskRequest, GetTaskRequestBui
 
   GetTaskRequest._();
 
-  factory GetTaskRequest([void updates(GetTaskRequestBuilder b)]) = _$GetTaskRequest;
+  factory GetTaskRequest([void updates(GetTaskRequestBuilder b)]) =
+      _$GetTaskRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(GetTaskRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<GetTaskRequest> get serializer => _$GetTaskRequestSerializer();
+  static Serializer<GetTaskRequest> get serializer =>
+      _$GetTaskRequestSerializer();
 }
 
-class _$GetTaskRequestSerializer implements PrimitiveSerializer<GetTaskRequest> {
+class _$GetTaskRequestSerializer
+    implements PrimitiveSerializer<GetTaskRequest> {
   @override
   final Iterable<Type> types = const [GetTaskRequest, _$GetTaskRequest];
 
@@ -78,7 +82,9 @@ class _$GetTaskRequestSerializer implements PrimitiveSerializer<GetTaskRequest> 
     GetTaskRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -144,4 +150,3 @@ class _$GetTaskRequestSerializer implements PrimitiveSerializer<GetTaskRequest> 
     return result.build();
   }
 }
-

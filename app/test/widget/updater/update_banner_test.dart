@@ -8,22 +8,23 @@ import 'package:assistant_app/features/updater/update_service.dart';
 
 /// A minimal [ReleaseInfo] for testing.
 ReleaseInfo _fakeRelease() => ReleaseInfo(
-      tagName: 'v2.0.0',
-      body: 'Performance improvements and bug fixes.',
-      htmlUrl: 'https://github.com/cedricziel/assistant/releases/tag/v2.0.0',
-      assets: const [],
-    );
+  tagName: 'v2.0.0',
+  body: 'Performance improvements and bug fixes.',
+  htmlUrl: 'https://github.com/cedricziel/assistant/releases/tag/v2.0.0',
+  assets: const [],
+);
 
 /// A [UpdateInfo] for testing.
 UpdateInfo _fakeUpdateInfo() => UpdateInfo(
-      currentVersion: '1.0.0',
-      latestVersion: 'v2.0.0',
-      release: _fakeRelease(),
-    );
+  currentVersion: '1.0.0',
+  latestVersion: 'v2.0.0',
+  release: _fakeRelease(),
+);
 
 void main() {
-  testWidgets('UpdateBannerWrapper shows banner when update is available',
-      (tester) async {
+  testWidgets('UpdateBannerWrapper shows banner when update is available', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -31,9 +32,7 @@ void main() {
         ],
         child: const MaterialApp(
           home: Scaffold(
-            body: UpdateBannerWrapper(
-              child: SizedBox(key: Key('body')),
-            ),
+            body: UpdateBannerWrapper(child: SizedBox(key: Key('body'))),
           ),
         ),
       ),
@@ -53,9 +52,7 @@ void main() {
         ],
         child: const MaterialApp(
           home: Scaffold(
-            body: UpdateBannerWrapper(
-              child: SizedBox(key: Key('body')),
-            ),
+            body: UpdateBannerWrapper(child: SizedBox(key: Key('body'))),
           ),
         ),
       ),
@@ -70,8 +67,9 @@ void main() {
     expect(find.text('Update available — v2.0.0'), findsNothing);
   });
 
-  testWidgets('UpdateBannerWrapper shows no banner when up-to-date',
-      (tester) async {
+  testWidgets('UpdateBannerWrapper shows no banner when up-to-date', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -79,9 +77,7 @@ void main() {
         ],
         child: const MaterialApp(
           home: Scaffold(
-            body: UpdateBannerWrapper(
-              child: SizedBox(key: Key('body')),
-            ),
+            body: UpdateBannerWrapper(child: SizedBox(key: Key('body'))),
           ),
         ),
       ),

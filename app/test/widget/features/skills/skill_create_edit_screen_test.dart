@@ -14,10 +14,7 @@ void main() {
       final fake = notifier ?? _FakeSkillsNotifier();
       final router = GoRouter(
         routes: [
-          GoRoute(
-            path: '/',
-            builder: (_, _) => const SkillCreateEditScreen(),
-          ),
+          GoRoute(path: '/', builder: (_, _) => const SkillCreateEditScreen()),
           GoRoute(
             path: '/skills',
             builder: (_, _) => const Scaffold(body: Text('skills list')),
@@ -63,8 +60,9 @@ void main() {
       expect(find.text('Name is required'), findsOneWidget);
     });
 
-    testWidgets('invalid name (uppercase) shows validation error',
-        (tester) async {
+    testWidgets('invalid name (uppercase) shows validation error', (
+      tester,
+    ) async {
       await tester.pumpWidget(buildCreateScreen());
       await tester.pump();
 
@@ -102,8 +100,9 @@ void main() {
       expect(find.text('Body is required'), findsOneWidget);
     });
 
-    testWidgets('valid form calls createSkill and navigates to skills list',
-        (tester) async {
+    testWidgets('valid form calls createSkill and navigates to skills list', (
+      tester,
+    ) async {
       final notifier = _FakeSkillsNotifier(createResult: null);
       await tester.pumpWidget(buildCreateScreen(notifier: notifier));
       await tester.pump();
@@ -165,9 +164,9 @@ void main() {
     }
 
     testWidgets('shows Edit Skill title and Save button', (tester) async {
-      await tester.pumpWidget(buildEditScreen(
-        detailState: SkillDetailState(skill: _existingSkill()),
-      ));
+      await tester.pumpWidget(
+        buildEditScreen(detailState: SkillDetailState(skill: _existingSkill())),
+      );
       await tester.pump();
 
       expect(find.text('Edit Skill'), findsOneWidget);
@@ -175,15 +174,16 @@ void main() {
     });
 
     testWidgets('name field is disabled in edit mode', (tester) async {
-      await tester.pumpWidget(buildEditScreen(
-        detailState: SkillDetailState(skill: _existingSkill()),
-      ));
+      await tester.pumpWidget(
+        buildEditScreen(detailState: SkillDetailState(skill: _existingSkill())),
+      );
       await tester.pump();
 
       // The name TextFormField is disabled — its underlying TextField has
       // enabled=false, making the widget ignore pointer events.
-      final nameFields =
-          tester.widgetList<TextField>(find.byType(TextField)).toList();
+      final nameFields = tester
+          .widgetList<TextField>(find.byType(TextField))
+          .toList();
 
       // First field is name (in layout order: name, description, body).
       expect(nameFields.first.enabled, isFalse);
@@ -194,12 +194,14 @@ void main() {
 // ---------------------------------------------------------------------------
 // Fixtures
 
-SkillDetail _existingSkill() => SkillDetail((b) => b
-  ..name = 'my-skill'
-  ..description = 'Existing description'
-  ..body = '# SKILL.md\nExisting body'
-  ..source_ = 'user'
-  ..isBuiltin = false);
+SkillDetail _existingSkill() => SkillDetail(
+  (b) => b
+    ..name = 'my-skill'
+    ..description = 'Existing description'
+    ..body = '# SKILL.md\nExisting body'
+    ..source_ = 'user'
+    ..isBuiltin = false,
+);
 
 // ---------------------------------------------------------------------------
 // Fake notifiers

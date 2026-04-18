@@ -33,9 +33,7 @@ class _SkillDetailScreenState extends ConsumerState<SkillDetailScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red.shade600,
-            ),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
@@ -94,8 +92,9 @@ class _SkillDetailScreenState extends ConsumerState<SkillDetailScreen> {
           ],
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () =>
-                ref.read(skillDetailProvider(widget.skillName).notifier).refresh(),
+            onPressed: () => ref
+                .read(skillDetailProvider(widget.skillName).notifier)
+                .refresh(),
           ),
         ],
       ),
@@ -103,15 +102,17 @@ class _SkillDetailScreenState extends ConsumerState<SkillDetailScreen> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
-          onRetry: () =>
-              ref.read(skillDetailProvider(widget.skillName).notifier).refresh(),
+          onRetry: () => ref
+              .read(skillDetailProvider(widget.skillName).notifier)
+              .refresh(),
         ),
         data: (state) {
           if (state.error != null) {
             return _ErrorView(
               error: state.error!,
-              onRetry: () =>
-                  ref.read(skillDetailProvider(widget.skillName).notifier).refresh(),
+              onRetry: () => ref
+                  .read(skillDetailProvider(widget.skillName).notifier)
+                  .refresh(),
             );
           }
           final skill = state.skill;
@@ -184,8 +185,9 @@ class _SkillDetailBodyState extends State<_SkillDetailBody> {
           if (skill.description.isNotEmpty) ...[
             Text(
               'Description',
-              style: theme.textTheme.labelLarge
-                  ?.copyWith(color: theme.colorScheme.primary),
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
             ),
             const SizedBox(height: 4),
             Text(skill.description, style: theme.textTheme.bodyMedium),
@@ -198,8 +200,9 @@ class _SkillDetailBodyState extends State<_SkillDetailBody> {
             children: [
               Text(
                 'Skill Body',
-                style: theme.textTheme.labelLarge
-                    ?.copyWith(color: theme.colorScheme.primary),
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
               ),
               IconButton(
                 icon: Icon(
@@ -222,10 +225,7 @@ class _SkillDetailBodyState extends State<_SkillDetailBody> {
             ),
             child: SelectableText(
               skill.body,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-              ),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             ),
           ),
         ],

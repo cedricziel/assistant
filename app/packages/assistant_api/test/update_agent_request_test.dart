@@ -11,6 +11,5 @@ void main() {
     test('to test the property `card`', () async {
       // TODO
     });
-
   });
 }

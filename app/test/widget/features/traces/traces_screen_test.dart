@@ -12,10 +12,7 @@ void main() {
     Widget buildUnderTest({required TracesState state}) {
       final router = GoRouter(
         routes: [
-          GoRoute(
-            path: '/',
-            builder: (_, _) => const TracesScreen(),
-          ),
+          GoRoute(path: '/', builder: (_, _) => const TracesScreen()),
           GoRoute(
             path: '/chat',
             builder: (_, _) => const Scaffold(body: Text('chat')),
@@ -42,7 +39,9 @@ void main() {
     });
 
     testWidgets('renders trace rows for each trace in state', (tester) async {
-      final state = TracesState(traces: [_trace('t1', 'persona-a'), _trace('t2', 'persona-b')]);
+      final state = TracesState(
+        traces: [_trace('t1', 'persona-a'), _trace('t2', 'persona-b')],
+      );
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
 
@@ -67,8 +66,9 @@ void main() {
     });
 
     testWidgets('shows skill name when present', (tester) async {
-      final state =
-          TracesState(traces: [_trace('t1', 'p', skillName: 'my-skill')]);
+      final state = TracesState(
+        traces: [_trace('t1', 'p', skillName: 'my-skill')],
+      );
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
 
@@ -84,7 +84,9 @@ void main() {
       expect(find.text('Retry'), findsOneWidget);
     });
 
-    testWidgets('tapping a trace row navigates to trace detail', (tester) async {
+    testWidgets('tapping a trace row navigates to trace detail', (
+      tester,
+    ) async {
       final state = TracesState(traces: [_trace('trace-abc', 'p')]);
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
@@ -106,14 +108,15 @@ TraceSummaryResponse _trace(
   int durationMs = 100,
   String status = 'ok',
   String? skillName,
-}) =>
-    TraceSummaryResponse((b) => b
-      ..traceId = traceId
-      ..personaId = personaId
-      ..durationMs = durationMs
-      ..status = status
-      ..skillName = skillName
-      ..startTime = DateTime(2024, 1, 1, 12, 0, 0));
+}) => TraceSummaryResponse(
+  (b) => b
+    ..traceId = traceId
+    ..personaId = personaId
+    ..durationMs = durationMs
+    ..status = status
+    ..skillName = skillName
+    ..startTime = DateTime(2024, 1, 1, 12, 0, 0),
+);
 
 // ---------------------------------------------------------------------------
 // Fake notifier

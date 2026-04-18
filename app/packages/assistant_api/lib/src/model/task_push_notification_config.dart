@@ -16,7 +16,9 @@ part 'task_push_notification_config.g.dart';
 /// * [taskId] - The ID of the task this configuration is associated with.
 /// * [tenant] - Tenant ID.
 @BuiltValue()
-abstract class TaskPushNotificationConfig implements Built<TaskPushNotificationConfig, TaskPushNotificationConfigBuilder> {
+abstract class TaskPushNotificationConfig
+    implements
+        Built<TaskPushNotificationConfig, TaskPushNotificationConfigBuilder> {
   /// The push notification configuration details.
   @BuiltValueField(wireName: r'pushNotificationConfig')
   PushNotificationConfig get pushNotificationConfig;
@@ -31,18 +33,25 @@ abstract class TaskPushNotificationConfig implements Built<TaskPushNotificationC
 
   TaskPushNotificationConfig._();
 
-  factory TaskPushNotificationConfig([void updates(TaskPushNotificationConfigBuilder b)]) = _$TaskPushNotificationConfig;
+  factory TaskPushNotificationConfig(
+          [void updates(TaskPushNotificationConfigBuilder b)]) =
+      _$TaskPushNotificationConfig;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(TaskPushNotificationConfigBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<TaskPushNotificationConfig> get serializer => _$TaskPushNotificationConfigSerializer();
+  static Serializer<TaskPushNotificationConfig> get serializer =>
+      _$TaskPushNotificationConfigSerializer();
 }
 
-class _$TaskPushNotificationConfigSerializer implements PrimitiveSerializer<TaskPushNotificationConfig> {
+class _$TaskPushNotificationConfigSerializer
+    implements PrimitiveSerializer<TaskPushNotificationConfig> {
   @override
-  final Iterable<Type> types = const [TaskPushNotificationConfig, _$TaskPushNotificationConfig];
+  final Iterable<Type> types = const [
+    TaskPushNotificationConfig,
+    _$TaskPushNotificationConfig
+  ];
 
   @override
   final String wireName = r'TaskPushNotificationConfig';
@@ -77,7 +86,9 @@ class _$TaskPushNotificationConfigSerializer implements PrimitiveSerializer<Task
     TaskPushNotificationConfig object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -142,4 +153,3 @@ class _$TaskPushNotificationConfigSerializer implements PrimitiveSerializer<Task
     return result.build();
   }
 }
-

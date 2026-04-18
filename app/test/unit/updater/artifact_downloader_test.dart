@@ -81,7 +81,9 @@ void main() {
 
     test('returns null when checksums.sha256 is absent', () {
       final assets = [macDmg, linux];
-      final found = assets.firstWhereOrNull((a) => a.name == 'checksums.sha256');
+      final found = assets.firstWhereOrNull(
+        (a) => a.name == 'checksums.sha256',
+      );
       expect(found, isNull);
     });
   });

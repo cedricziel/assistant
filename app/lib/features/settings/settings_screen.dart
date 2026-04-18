@@ -54,9 +54,7 @@ class SettingsScreen extends ConsumerWidget {
                 SwitchListTile(
                   secondary: const Icon(Icons.warning_amber_outlined),
                   title: const Text('Agent errors'),
-                  subtitle: const Text(
-                    'Notify on critical assistant errors',
-                  ),
+                  subtitle: const Text('Notify on critical assistant errors'),
                   value: prefs.notifyAgentErrors,
                   onChanged: (value) async {
                     await prefs.setNotifyAgentErrors(value);
@@ -99,8 +97,8 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-            ),
+          color: Theme.of(context).colorScheme.primary,
+        ),
       ),
     );
   }

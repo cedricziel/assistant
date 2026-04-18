@@ -93,13 +93,15 @@ class NotificationService {
       if (defaultTargetPlatform == TargetPlatform.macOS) {
         final granted = await _plugin
             .resolvePlatformSpecificImplementation<
-                MacOSFlutterLocalNotificationsPlugin>()
+              MacOSFlutterLocalNotificationsPlugin
+            >()
             ?.requestPermissions(alert: true, badge: true, sound: true);
         _permissionGranted = granted ?? false;
       } else if (defaultTargetPlatform == TargetPlatform.iOS) {
         final granted = await _plugin
             .resolvePlatformSpecificImplementation<
-                IOSFlutterLocalNotificationsPlugin>()
+              IOSFlutterLocalNotificationsPlugin
+            >()
             ?.requestPermissions(alert: true, badge: true, sound: true);
         _permissionGranted = granted ?? false;
       } else if (kIsWeb) {
@@ -120,11 +122,7 @@ class NotificationService {
   /// On web (background): handled by the service worker — no-op here.
   ///
   /// Respects `notifyChatMessages` / related preferences before calling.
-  Future<void> show(
-    String title,
-    String body, {
-    String? conversationId,
-  }) async {
+  Future<void> show(String title, String body, {String? conversationId}) async {
     if (!_isSupportedPlatform) return;
     if (!_initialized) await initialize();
 
@@ -132,15 +130,17 @@ class NotificationService {
     if (!granted) return;
 
     // Truncate body to 80 characters.
-    final truncated =
-        body.length > 80 ? '${body.substring(0, 77)}…' : body;
+    final truncated = body.length > 80 ? '${body.substring(0, 77)}…' : body;
 
     const darwinDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
     );
-    const details = NotificationDetails(macOS: darwinDetails, iOS: darwinDetails);
+    const details = NotificationDetails(
+      macOS: darwinDetails,
+      iOS: darwinDetails,
+    );
 
     try {
       await _plugin.show(
@@ -207,11 +207,14 @@ class NotificationService {
         headers: {'Authorization': 'Bearer ${profile.token}'},
       );
       if (resp.statusCode != 200) {
-        debugPrint('[NotificationService] VAPID key fetch failed: ${resp.statusCode}');
+        debugPrint(
+          '[NotificationService] VAPID key fetch failed: ${resp.statusCode}',
+        );
         return;
       }
       final vapidKey =
-          (jsonDecode(resp.body) as Map<String, dynamic>)['public_key'] as String;
+          (jsonDecode(resp.body) as Map<String, dynamic>)['public_key']
+              as String;
 
       // 2. Register sw.js and subscribe to push.
       final subscription = await web_impl.subscribeToWebPush(vapidKey);

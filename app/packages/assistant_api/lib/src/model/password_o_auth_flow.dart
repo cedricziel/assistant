@@ -16,7 +16,8 @@ part 'password_o_auth_flow.g.dart';
 /// * [scopes] - Available scopes.
 /// * [tokenUrl] - The token URL.
 @BuiltValue()
-abstract class PasswordOAuthFlow implements Built<PasswordOAuthFlow, PasswordOAuthFlowBuilder> {
+abstract class PasswordOAuthFlow
+    implements Built<PasswordOAuthFlow, PasswordOAuthFlowBuilder> {
   /// The URL for obtaining refresh tokens.
   @BuiltValueField(wireName: r'refreshUrl')
   String? get refreshUrl;
@@ -31,16 +32,19 @@ abstract class PasswordOAuthFlow implements Built<PasswordOAuthFlow, PasswordOAu
 
   PasswordOAuthFlow._();
 
-  factory PasswordOAuthFlow([void updates(PasswordOAuthFlowBuilder b)]) = _$PasswordOAuthFlow;
+  factory PasswordOAuthFlow([void updates(PasswordOAuthFlowBuilder b)]) =
+      _$PasswordOAuthFlow;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(PasswordOAuthFlowBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<PasswordOAuthFlow> get serializer => _$PasswordOAuthFlowSerializer();
+  static Serializer<PasswordOAuthFlow> get serializer =>
+      _$PasswordOAuthFlowSerializer();
 }
 
-class _$PasswordOAuthFlowSerializer implements PrimitiveSerializer<PasswordOAuthFlow> {
+class _$PasswordOAuthFlowSerializer
+    implements PrimitiveSerializer<PasswordOAuthFlow> {
   @override
   final Iterable<Type> types = const [PasswordOAuthFlow, _$PasswordOAuthFlow];
 
@@ -63,7 +67,8 @@ class _$PasswordOAuthFlowSerializer implements PrimitiveSerializer<PasswordOAuth
       yield r'scopes';
       yield serializers.serialize(
         object.scopes,
-        specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
+        specifiedType:
+            const FullType(BuiltMap, [FullType(String), FullType(String)]),
       );
     }
     if (object.tokenUrl != null) {
@@ -81,7 +86,9 @@ class _$PasswordOAuthFlowSerializer implements PrimitiveSerializer<PasswordOAuth
     PasswordOAuthFlow object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -107,7 +114,8 @@ class _$PasswordOAuthFlowSerializer implements PrimitiveSerializer<PasswordOAuth
         case r'scopes':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
+            specifiedType:
+                const FullType(BuiltMap, [FullType(String), FullType(String)]),
           ) as BuiltMap<String, String>;
           result.scopes.replace(valueDes);
           break;
@@ -147,4 +155,3 @@ class _$PasswordOAuthFlowSerializer implements PrimitiveSerializer<PasswordOAuth
     return result.build();
   }
 }
-

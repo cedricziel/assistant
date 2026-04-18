@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for AgentsApi
 void main() {
   final instance = AssistantApi().getAgentsApi();
@@ -48,6 +47,5 @@ void main() {
     test('test updateAgent', () async {
       // TODO
     });
-
   });
 }

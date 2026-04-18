@@ -21,7 +21,8 @@ part 'list_tasks_request.g.dart';
 /// * [statusTimestampAfter] - Filter tasks with status updated after this timestamp.
 /// * [tenant] - Tenant ID.
 @BuiltValue()
-abstract class ListTasksRequest implements Built<ListTasksRequest, ListTasksRequestBuilder> {
+abstract class ListTasksRequest
+    implements Built<ListTasksRequest, ListTasksRequestBuilder> {
   /// Filter tasks by context ID.
   @BuiltValueField(wireName: r'contextId')
   String? get contextId;
@@ -57,16 +58,19 @@ abstract class ListTasksRequest implements Built<ListTasksRequest, ListTasksRequ
 
   ListTasksRequest._();
 
-  factory ListTasksRequest([void updates(ListTasksRequestBuilder b)]) = _$ListTasksRequest;
+  factory ListTasksRequest([void updates(ListTasksRequestBuilder b)]) =
+      _$ListTasksRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ListTasksRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ListTasksRequest> get serializer => _$ListTasksRequestSerializer();
+  static Serializer<ListTasksRequest> get serializer =>
+      _$ListTasksRequestSerializer();
 }
 
-class _$ListTasksRequestSerializer implements PrimitiveSerializer<ListTasksRequest> {
+class _$ListTasksRequestSerializer
+    implements PrimitiveSerializer<ListTasksRequest> {
   @override
   final Iterable<Type> types = const [ListTasksRequest, _$ListTasksRequest];
 
@@ -142,7 +146,9 @@ class _$ListTasksRequestSerializer implements PrimitiveSerializer<ListTasksReque
     ListTasksRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -249,4 +255,3 @@ class _$ListTasksRequestSerializer implements PrimitiveSerializer<ListTasksReque
     return result.build();
   }
 }
-

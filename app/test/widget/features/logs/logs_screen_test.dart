@@ -12,10 +12,7 @@ void main() {
     Widget buildUnderTest({required LogsState state}) {
       final router = GoRouter(
         routes: [
-          GoRoute(
-            path: '/',
-            builder: (_, _) => const LogsScreen(),
-          ),
+          GoRoute(path: '/', builder: (_, _) => const LogsScreen()),
           GoRoute(
             path: '/chat',
             builder: (_, _) => const Scaffold(body: Text('chat')),
@@ -23,9 +20,7 @@ void main() {
         ],
       );
       return ProviderScope(
-        overrides: [
-          logsProvider.overrideWith(() => _FakeLogsNotifier(state)),
-        ],
+        overrides: [logsProvider.overrideWith(() => _FakeLogsNotifier(state))],
         child: MaterialApp.router(routerConfig: router),
       );
     }
@@ -38,10 +33,12 @@ void main() {
     });
 
     testWidgets('renders log rows with message and severity', (tester) async {
-      final state = LogsState(logs: [
-        _logEntry(id: '1', message: 'Server started', severity: 'INFO'),
-        _logEntry(id: '2', message: 'Connection failed', severity: 'ERROR'),
-      ]);
+      final state = LogsState(
+        logs: [
+          _logEntry(id: '1', message: 'Server started', severity: 'INFO'),
+          _logEntry(id: '2', message: 'Connection failed', severity: 'ERROR'),
+        ],
+      );
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
 
@@ -53,8 +50,9 @@ void main() {
     });
 
     testWidgets('renders WARN severity chip', (tester) async {
-      final state =
-          LogsState(logs: [_logEntry(id: '1', message: 'slow', severity: 'WARN')]);
+      final state = LogsState(
+        logs: [_logEntry(id: '1', message: 'slow', severity: 'WARN')],
+      );
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
 
@@ -62,8 +60,9 @@ void main() {
     });
 
     testWidgets('renders DEBUG severity chip', (tester) async {
-      final state =
-          LogsState(logs: [_logEntry(id: '1', message: 'trace', severity: 'DEBUG')]);
+      final state = LogsState(
+        logs: [_logEntry(id: '1', message: 'trace', severity: 'DEBUG')],
+      );
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
 
@@ -79,8 +78,9 @@ void main() {
       expect(find.text('Retry'), findsOneWidget);
     });
 
-    testWidgets('shows no-match message when search has no results',
-        (tester) async {
+    testWidgets('shows no-match message when search has no results', (
+      tester,
+    ) async {
       final state = LogsState(logs: const [], searchQuery: 'foobar');
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
@@ -96,11 +96,19 @@ void main() {
       expect(find.byKey(const Key('log_search_field')), findsOneWidget);
     });
 
-    testWidgets('shows target module below message when non-empty',
-        (tester) async {
-      final state = LogsState(logs: [
-        _logEntry(id: '1', message: 'booting', severity: 'INFO', target: 'assistant::runtime'),
-      ]);
+    testWidgets('shows target module below message when non-empty', (
+      tester,
+    ) async {
+      final state = LogsState(
+        logs: [
+          _logEntry(
+            id: '1',
+            message: 'booting',
+            severity: 'INFO',
+            target: 'assistant::runtime',
+          ),
+        ],
+      );
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
 
@@ -117,13 +125,14 @@ LogEntryResponse _logEntry({
   required String message,
   required String severity,
   String target = '',
-}) =>
-    LogEntryResponse((b) => b
-      ..id = id
-      ..message = message
-      ..severity = severity
-      ..target = target
-      ..timestamp = DateTime(2024, 1, 1, 12, 0, 0));
+}) => LogEntryResponse(
+  (b) => b
+    ..id = id
+    ..message = message
+    ..severity = severity
+    ..target = target
+    ..timestamp = DateTime(2024, 1, 1, 12, 0, 0),
+);
 
 // ---------------------------------------------------------------------------
 // Fake notifier

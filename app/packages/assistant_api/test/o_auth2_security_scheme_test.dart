@@ -24,6 +24,5 @@ void main() {
     test('to test the property `oauth2MetadataUrl`', () async {
       // TODO
     });
-
   });
 }

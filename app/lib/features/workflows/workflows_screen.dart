@@ -39,8 +39,7 @@ class WorkflowsScreen extends ConsumerWidget {
           return ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 8),
             itemCount: workflows.length,
-            separatorBuilder: (_, _) =>
-                const Divider(height: 1, indent: 72),
+            separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
             itemBuilder: (context, index) =>
                 _WorkflowRow(workflow: workflows[index]),
           );
@@ -63,9 +62,7 @@ class _WorkflowRow extends StatelessWidget {
         color: workflow.active ? Colors.green.shade50 : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: workflow.active
-              ? Colors.green.shade300
-              : Colors.grey.shade400,
+          color: workflow.active ? Colors.green.shade300 : Colors.grey.shade400,
         ),
       ),
       child: Text(
@@ -73,9 +70,7 @@ class _WorkflowRow extends StatelessWidget {
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: workflow.active
-              ? Colors.green.shade700
-              : Colors.grey.shade600,
+          color: workflow.active ? Colors.green.shade700 : Colors.grey.shade600,
         ),
       ),
     );
@@ -88,9 +83,7 @@ class _WorkflowRow extends StatelessWidget {
         child: Icon(
           Icons.account_tree_outlined,
           size: 20,
-          color: workflow.active
-              ? Colors.green.shade700
-              : Colors.grey.shade500,
+          color: workflow.active ? Colors.green.shade700 : Colors.grey.shade500,
         ),
       ),
       title: Row(

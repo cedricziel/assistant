@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for ConversationsApi
 void main() {
   final instance = AssistantApi().getConversationsApi();
@@ -50,6 +49,5 @@ void main() {
     test('test updateConversation', () async {
       // TODO
     });
-
   });
 }

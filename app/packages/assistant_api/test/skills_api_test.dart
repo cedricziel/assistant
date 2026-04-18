@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for SkillsApi
 void main() {
   final instance = AssistantApi().getSkillsApi();
@@ -13,6 +12,5 @@ void main() {
     test('test listPersonaSkills', () async {
       // TODO
     });
-
   });
 }

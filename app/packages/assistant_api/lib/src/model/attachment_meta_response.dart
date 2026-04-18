@@ -11,14 +11,15 @@ part 'attachment_meta_response.g.dart';
 /// Metadata returned after a successful upload.
 ///
 /// Properties:
-/// * [createdAt] 
-/// * [filename] 
-/// * [id] 
-/// * [mimeType] 
-/// * [sizeBytes] 
+/// * [createdAt]
+/// * [filename]
+/// * [id]
+/// * [mimeType]
+/// * [sizeBytes]
 /// * [url] - URL to fetch the attachment content.
 @BuiltValue()
-abstract class AttachmentMetaResponse implements Built<AttachmentMetaResponse, AttachmentMetaResponseBuilder> {
+abstract class AttachmentMetaResponse
+    implements Built<AttachmentMetaResponse, AttachmentMetaResponseBuilder> {
   @BuiltValueField(wireName: r'created_at')
   DateTime get createdAt;
 
@@ -40,18 +41,25 @@ abstract class AttachmentMetaResponse implements Built<AttachmentMetaResponse, A
 
   AttachmentMetaResponse._();
 
-  factory AttachmentMetaResponse([void updates(AttachmentMetaResponseBuilder b)]) = _$AttachmentMetaResponse;
+  factory AttachmentMetaResponse(
+          [void updates(AttachmentMetaResponseBuilder b)]) =
+      _$AttachmentMetaResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AttachmentMetaResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AttachmentMetaResponse> get serializer => _$AttachmentMetaResponseSerializer();
+  static Serializer<AttachmentMetaResponse> get serializer =>
+      _$AttachmentMetaResponseSerializer();
 }
 
-class _$AttachmentMetaResponseSerializer implements PrimitiveSerializer<AttachmentMetaResponse> {
+class _$AttachmentMetaResponseSerializer
+    implements PrimitiveSerializer<AttachmentMetaResponse> {
   @override
-  final Iterable<Type> types = const [AttachmentMetaResponse, _$AttachmentMetaResponse];
+  final Iterable<Type> types = const [
+    AttachmentMetaResponse,
+    _$AttachmentMetaResponse
+  ];
 
   @override
   final String wireName = r'AttachmentMetaResponse';
@@ -99,7 +107,9 @@ class _$AttachmentMetaResponseSerializer implements PrimitiveSerializer<Attachme
     AttachmentMetaResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -184,4 +194,3 @@ class _$AttachmentMetaResponseSerializer implements PrimitiveSerializer<Attachme
     return result.build();
   }
 }
-

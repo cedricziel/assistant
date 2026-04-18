@@ -16,7 +16,9 @@ part 'client_credentials_o_auth_flow.g.dart';
 /// * [scopes] - Available scopes for the OAuth2 security scheme.
 /// * [tokenUrl] - The token URL.
 @BuiltValue()
-abstract class ClientCredentialsOAuthFlow implements Built<ClientCredentialsOAuthFlow, ClientCredentialsOAuthFlowBuilder> {
+abstract class ClientCredentialsOAuthFlow
+    implements
+        Built<ClientCredentialsOAuthFlow, ClientCredentialsOAuthFlowBuilder> {
   /// The URL for obtaining refresh tokens.
   @BuiltValueField(wireName: r'refreshUrl')
   String? get refreshUrl;
@@ -31,18 +33,25 @@ abstract class ClientCredentialsOAuthFlow implements Built<ClientCredentialsOAut
 
   ClientCredentialsOAuthFlow._();
 
-  factory ClientCredentialsOAuthFlow([void updates(ClientCredentialsOAuthFlowBuilder b)]) = _$ClientCredentialsOAuthFlow;
+  factory ClientCredentialsOAuthFlow(
+          [void updates(ClientCredentialsOAuthFlowBuilder b)]) =
+      _$ClientCredentialsOAuthFlow;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ClientCredentialsOAuthFlowBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ClientCredentialsOAuthFlow> get serializer => _$ClientCredentialsOAuthFlowSerializer();
+  static Serializer<ClientCredentialsOAuthFlow> get serializer =>
+      _$ClientCredentialsOAuthFlowSerializer();
 }
 
-class _$ClientCredentialsOAuthFlowSerializer implements PrimitiveSerializer<ClientCredentialsOAuthFlow> {
+class _$ClientCredentialsOAuthFlowSerializer
+    implements PrimitiveSerializer<ClientCredentialsOAuthFlow> {
   @override
-  final Iterable<Type> types = const [ClientCredentialsOAuthFlow, _$ClientCredentialsOAuthFlow];
+  final Iterable<Type> types = const [
+    ClientCredentialsOAuthFlow,
+    _$ClientCredentialsOAuthFlow
+  ];
 
   @override
   final String wireName = r'ClientCredentialsOAuthFlow';
@@ -62,7 +71,8 @@ class _$ClientCredentialsOAuthFlowSerializer implements PrimitiveSerializer<Clie
     yield r'scopes';
     yield serializers.serialize(
       object.scopes,
-      specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
+      specifiedType:
+          const FullType(BuiltMap, [FullType(String), FullType(String)]),
     );
     yield r'tokenUrl';
     yield serializers.serialize(
@@ -77,7 +87,9 @@ class _$ClientCredentialsOAuthFlowSerializer implements PrimitiveSerializer<Clie
     ClientCredentialsOAuthFlow object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -103,7 +115,8 @@ class _$ClientCredentialsOAuthFlowSerializer implements PrimitiveSerializer<Clie
         case r'scopes':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
+            specifiedType:
+                const FullType(BuiltMap, [FullType(String), FullType(String)]),
           ) as BuiltMap<String, String>;
           result.scopes.replace(valueDes);
           break;
@@ -142,4 +155,3 @@ class _$ClientCredentialsOAuthFlowSerializer implements PrimitiveSerializer<Clie
     return result.build();
   }
 }
-

@@ -11,20 +11,17 @@ class NotificationPreferences {
 
   final SharedPreferences _prefs;
 
-  bool get notifyChatMessages =>
-      _prefs.getBool(_kNotifyChatMessages) ?? true;
+  bool get notifyChatMessages => _prefs.getBool(_kNotifyChatMessages) ?? true;
 
   Future<void> setNotifyChatMessages(bool value) =>
       _prefs.setBool(_kNotifyChatMessages, value);
 
-  bool get notifySkillComplete =>
-      _prefs.getBool(_kNotifySkillComplete) ?? true;
+  bool get notifySkillComplete => _prefs.getBool(_kNotifySkillComplete) ?? true;
 
   Future<void> setNotifySkillComplete(bool value) =>
       _prefs.setBool(_kNotifySkillComplete, value);
 
-  bool get notifyAgentErrors =>
-      _prefs.getBool(_kNotifyAgentErrors) ?? true;
+  bool get notifyAgentErrors => _prefs.getBool(_kNotifyAgentErrors) ?? true;
 
   Future<void> setNotifyAgentErrors(bool value) =>
       _prefs.setBool(_kNotifyAgentErrors, value);
@@ -42,7 +39,7 @@ class NotificationPreferencesNotifier
 }
 
 final notificationPreferencesProvider =
-    AsyncNotifierProvider<NotificationPreferencesNotifier,
-        NotificationPreferences>(
-  NotificationPreferencesNotifier.new,
-);
+    AsyncNotifierProvider<
+      NotificationPreferencesNotifier,
+      NotificationPreferences
+    >(NotificationPreferencesNotifier.new);

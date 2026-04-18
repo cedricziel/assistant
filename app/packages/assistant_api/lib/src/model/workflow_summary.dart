@@ -11,20 +11,21 @@ part 'workflow_summary.g.dart';
 /// Workflow list item.
 ///
 /// Properties:
-/// * [actionCount] 
-/// * [active] 
-/// * [createdAt] 
-/// * [description] 
-/// * [edgeCount] 
+/// * [actionCount]
+/// * [active]
+/// * [createdAt]
+/// * [description]
+/// * [edgeCount]
 /// * [id] - Workflow UUID.
-/// * [maxSteps] 
-/// * [maxVisitsPerNode] 
-/// * [name] 
-/// * [nodeCount] 
-/// * [triggerCount] 
-/// * [updatedAt] 
+/// * [maxSteps]
+/// * [maxVisitsPerNode]
+/// * [name]
+/// * [nodeCount]
+/// * [triggerCount]
+/// * [updatedAt]
 @BuiltValue()
-abstract class WorkflowSummary implements Built<WorkflowSummary, WorkflowSummaryBuilder> {
+abstract class WorkflowSummary
+    implements Built<WorkflowSummary, WorkflowSummaryBuilder> {
   @BuiltValueField(wireName: r'action_count')
   int get actionCount;
 
@@ -64,16 +65,19 @@ abstract class WorkflowSummary implements Built<WorkflowSummary, WorkflowSummary
 
   WorkflowSummary._();
 
-  factory WorkflowSummary([void updates(WorkflowSummaryBuilder b)]) = _$WorkflowSummary;
+  factory WorkflowSummary([void updates(WorkflowSummaryBuilder b)]) =
+      _$WorkflowSummary;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WorkflowSummaryBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WorkflowSummary> get serializer => _$WorkflowSummarySerializer();
+  static Serializer<WorkflowSummary> get serializer =>
+      _$WorkflowSummarySerializer();
 }
 
-class _$WorkflowSummarySerializer implements PrimitiveSerializer<WorkflowSummary> {
+class _$WorkflowSummarySerializer
+    implements PrimitiveSerializer<WorkflowSummary> {
   @override
   final Iterable<Type> types = const [WorkflowSummary, _$WorkflowSummary];
 
@@ -153,7 +157,9 @@ class _$WorkflowSummarySerializer implements PrimitiveSerializer<WorkflowSummary
     WorkflowSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -280,4 +286,3 @@ class _$WorkflowSummarySerializer implements PrimitiveSerializer<WorkflowSummary
     return result.build();
   }
 }
-

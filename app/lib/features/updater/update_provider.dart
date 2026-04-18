@@ -13,5 +13,5 @@ class UpdateCheckNotifier extends AsyncNotifier<UpdateInfo?> {
 
 final updateCheckProvider =
     AsyncNotifierProvider<UpdateCheckNotifier, UpdateInfo?>(
-  UpdateCheckNotifier.new,
-);
+      UpdateCheckNotifier.new,
+    );

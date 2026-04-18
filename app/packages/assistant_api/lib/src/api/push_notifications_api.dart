@@ -15,7 +15,6 @@ import 'package:assistant_api/src/model/list_task_push_notification_configs_resp
 import 'package:assistant_api/src/model/task_push_notification_config.dart';
 
 class PushNotificationsApi {
-
   final Dio _dio;
 
   final Serializers _serializers;
@@ -23,11 +22,11 @@ class PushNotificationsApi {
   const PushNotificationsApi(this._dio, this._serializers);
 
   /// &#x60;POST /tasks/:task_id/pushNotificationConfigs&#x60;
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [taskId] - Parent task ID
-  /// * [createTaskPushNotificationConfigRequest] 
+  /// * [createTaskPushNotificationConfigRequest]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -37,9 +36,10 @@ class PushNotificationsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [TaskPushNotificationConfig] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<TaskPushNotificationConfig>> createPushNotificationConfig({ 
+  Future<Response<TaskPushNotificationConfig>> createPushNotificationConfig({
     required String taskId,
-    required CreateTaskPushNotificationConfigRequest createTaskPushNotificationConfigRequest,
+    required CreateTaskPushNotificationConfigRequest
+        createTaskPushNotificationConfigRequest,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -47,7 +47,10 @@ class PushNotificationsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/tasks/{task_id}/pushNotificationConfigs'.replaceAll('{' r'task_id' '}', encodeQueryParameter(_serializers, taskId, const FullType(String)).toString());
+    final _path = r'/tasks/{task_id}/pushNotificationConfigs'.replaceAll(
+        '{' r'task_id' '}',
+        encodeQueryParameter(_serializers, taskId, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
@@ -71,11 +74,12 @@ class PushNotificationsApi {
 
     try {
       const _type = FullType(CreateTaskPushNotificationConfigRequest);
-      _bodyData = _serializers.serialize(createTaskPushNotificationConfigRequest, specifiedType: _type);
-
-    } catch(error, stackTrace) {
+      _bodyData = _serializers.serialize(
+          createTaskPushNotificationConfigRequest,
+          specifiedType: _type);
+    } catch (error, stackTrace) {
       throw DioException(
-         requestOptions: _options.compose(
+        requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -98,11 +102,12 @@ class PushNotificationsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(TaskPushNotificationConfig),
-      ) as TaskPushNotificationConfig;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(TaskPushNotificationConfig),
+            ) as TaskPushNotificationConfig;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -126,7 +131,7 @@ class PushNotificationsApi {
   }
 
   /// &#x60;DELETE /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [taskId] - Parent task ID
@@ -140,7 +145,7 @@ class PushNotificationsApi {
   ///
   /// Returns a [Future]
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<void>> deletePushNotificationConfig({ 
+  Future<Response<void>> deletePushNotificationConfig({
     required String taskId,
     required String configId,
     CancelToken? cancelToken,
@@ -150,7 +155,15 @@ class PushNotificationsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/tasks/{task_id}/pushNotificationConfigs/{config_id}'.replaceAll('{' r'task_id' '}', encodeQueryParameter(_serializers, taskId, const FullType(String)).toString()).replaceAll('{' r'config_id' '}', encodeQueryParameter(_serializers, configId, const FullType(String)).toString());
+    final _path = r'/tasks/{task_id}/pushNotificationConfigs/{config_id}'
+        .replaceAll(
+            '{' r'task_id' '}',
+            encodeQueryParameter(_serializers, taskId, const FullType(String))
+                .toString())
+        .replaceAll(
+            '{' r'config_id' '}',
+            encodeQueryParameter(_serializers, configId, const FullType(String))
+                .toString());
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
@@ -181,7 +194,7 @@ class PushNotificationsApi {
   }
 
   /// &#x60;GET /tasks/:task_id/pushNotificationConfigs/:config_id&#x60;
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [taskId] - Parent task ID
@@ -195,7 +208,7 @@ class PushNotificationsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [TaskPushNotificationConfig] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<TaskPushNotificationConfig>> getPushNotificationConfig({ 
+  Future<Response<TaskPushNotificationConfig>> getPushNotificationConfig({
     required String taskId,
     required String configId,
     CancelToken? cancelToken,
@@ -205,7 +218,15 @@ class PushNotificationsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/tasks/{task_id}/pushNotificationConfigs/{config_id}'.replaceAll('{' r'task_id' '}', encodeQueryParameter(_serializers, taskId, const FullType(String)).toString()).replaceAll('{' r'config_id' '}', encodeQueryParameter(_serializers, configId, const FullType(String)).toString());
+    final _path = r'/tasks/{task_id}/pushNotificationConfigs/{config_id}'
+        .replaceAll(
+            '{' r'task_id' '}',
+            encodeQueryParameter(_serializers, taskId, const FullType(String))
+                .toString())
+        .replaceAll(
+            '{' r'config_id' '}',
+            encodeQueryParameter(_serializers, configId, const FullType(String))
+                .toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -236,11 +257,12 @@ class PushNotificationsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(TaskPushNotificationConfig),
-      ) as TaskPushNotificationConfig;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(TaskPushNotificationConfig),
+            ) as TaskPushNotificationConfig;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -264,12 +286,12 @@ class PushNotificationsApi {
   }
 
   /// &#x60;GET /tasks/:task_id/pushNotificationConfigs&#x60;
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [taskId] - Parent task ID
-  /// * [pageSize] 
-  /// * [pageToken] 
+  /// * [pageSize]
+  /// * [pageToken]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -279,7 +301,8 @@ class PushNotificationsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [ListTaskPushNotificationConfigsResponse] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<ListTaskPushNotificationConfigsResponse>> listPushNotificationConfigs({ 
+  Future<Response<ListTaskPushNotificationConfigsResponse>>
+      listPushNotificationConfigs({
     required String taskId,
     int? pageSize,
     String? pageToken,
@@ -290,7 +313,10 @@ class PushNotificationsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/tasks/{task_id}/pushNotificationConfigs'.replaceAll('{' r'task_id' '}', encodeQueryParameter(_serializers, taskId, const FullType(String)).toString());
+    final _path = r'/tasks/{task_id}/pushNotificationConfigs'.replaceAll(
+        '{' r'task_id' '}',
+        encodeQueryParameter(_serializers, taskId, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -310,8 +336,10 @@ class PushNotificationsApi {
     );
 
     final _queryParameters = <String, dynamic>{
-      r'pageSize': encodeQueryParameter(_serializers, pageSize, const FullType(int)),
-      r'pageToken': encodeQueryParameter(_serializers, pageToken, const FullType(String)),
+      r'pageSize':
+          encodeQueryParameter(_serializers, pageSize, const FullType(int)),
+      r'pageToken':
+          encodeQueryParameter(_serializers, pageToken, const FullType(String)),
     };
 
     final _response = await _dio.request<Object>(
@@ -327,11 +355,13 @@ class PushNotificationsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(ListTaskPushNotificationConfigsResponse),
-      ) as ListTaskPushNotificationConfigsResponse;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType:
+                  const FullType(ListTaskPushNotificationConfigsResponse),
+            ) as ListTaskPushNotificationConfigsResponse;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -353,5 +383,4 @@ class PushNotificationsApi {
       extra: _response.extra,
     );
   }
-
 }

@@ -16,7 +16,10 @@ part 'list_task_push_notification_configs_request.g.dart';
 /// * [taskId] - The parent task resource ID.
 /// * [tenant] - Optional tenant ID.
 @BuiltValue()
-abstract class ListTaskPushNotificationConfigsRequest implements Built<ListTaskPushNotificationConfigsRequest, ListTaskPushNotificationConfigsRequestBuilder> {
+abstract class ListTaskPushNotificationConfigsRequest
+    implements
+        Built<ListTaskPushNotificationConfigsRequest,
+            ListTaskPushNotificationConfigsRequestBuilder> {
   /// Max number of configurations to return.
   @BuiltValueField(wireName: r'pageSize')
   int? get pageSize;
@@ -35,18 +38,25 @@ abstract class ListTaskPushNotificationConfigsRequest implements Built<ListTaskP
 
   ListTaskPushNotificationConfigsRequest._();
 
-  factory ListTaskPushNotificationConfigsRequest([void updates(ListTaskPushNotificationConfigsRequestBuilder b)]) = _$ListTaskPushNotificationConfigsRequest;
+  factory ListTaskPushNotificationConfigsRequest(
+          [void updates(ListTaskPushNotificationConfigsRequestBuilder b)]) =
+      _$ListTaskPushNotificationConfigsRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ListTaskPushNotificationConfigsRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ListTaskPushNotificationConfigsRequest> get serializer => _$ListTaskPushNotificationConfigsRequestSerializer();
+  static Serializer<ListTaskPushNotificationConfigsRequest> get serializer =>
+      _$ListTaskPushNotificationConfigsRequestSerializer();
 }
 
-class _$ListTaskPushNotificationConfigsRequestSerializer implements PrimitiveSerializer<ListTaskPushNotificationConfigsRequest> {
+class _$ListTaskPushNotificationConfigsRequestSerializer
+    implements PrimitiveSerializer<ListTaskPushNotificationConfigsRequest> {
   @override
-  final Iterable<Type> types = const [ListTaskPushNotificationConfigsRequest, _$ListTaskPushNotificationConfigsRequest];
+  final Iterable<Type> types = const [
+    ListTaskPushNotificationConfigsRequest,
+    _$ListTaskPushNotificationConfigsRequest
+  ];
 
   @override
   final String wireName = r'ListTaskPushNotificationConfigsRequest';
@@ -90,7 +100,9 @@ class _$ListTaskPushNotificationConfigsRequestSerializer implements PrimitiveSer
     ListTaskPushNotificationConfigsRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -164,4 +176,3 @@ class _$ListTaskPushNotificationConfigsRequestSerializer implements PrimitiveSer
     return result.build();
   }
 }
-

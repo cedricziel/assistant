@@ -17,7 +17,8 @@ part 'agent_card_signature.g.dart';
 /// * [protected] - The protected JWS header, base64url-encoded JSON object.
 /// * [signature] - The computed signature, base64url-encoded.
 @BuiltValue()
-abstract class AgentCardSignature implements Built<AgentCardSignature, AgentCardSignatureBuilder> {
+abstract class AgentCardSignature
+    implements Built<AgentCardSignature, AgentCardSignatureBuilder> {
   /// The unprotected JWS header values.
   @BuiltValueField(wireName: r'header')
   BuiltMap<String, JsonObject?>? get header;
@@ -32,16 +33,19 @@ abstract class AgentCardSignature implements Built<AgentCardSignature, AgentCard
 
   AgentCardSignature._();
 
-  factory AgentCardSignature([void updates(AgentCardSignatureBuilder b)]) = _$AgentCardSignature;
+  factory AgentCardSignature([void updates(AgentCardSignatureBuilder b)]) =
+      _$AgentCardSignature;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AgentCardSignatureBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AgentCardSignature> get serializer => _$AgentCardSignatureSerializer();
+  static Serializer<AgentCardSignature> get serializer =>
+      _$AgentCardSignatureSerializer();
 }
 
-class _$AgentCardSignatureSerializer implements PrimitiveSerializer<AgentCardSignature> {
+class _$AgentCardSignatureSerializer
+    implements PrimitiveSerializer<AgentCardSignature> {
   @override
   final Iterable<Type> types = const [AgentCardSignature, _$AgentCardSignature];
 
@@ -57,7 +61,8 @@ class _$AgentCardSignatureSerializer implements PrimitiveSerializer<AgentCardSig
       yield r'header';
       yield serializers.serialize(
         object.header,
-        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(
+            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     yield r'protected';
@@ -78,7 +83,9 @@ class _$AgentCardSignatureSerializer implements PrimitiveSerializer<AgentCardSig
     AgentCardSignature object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -96,7 +103,8 @@ class _$AgentCardSignatureSerializer implements PrimitiveSerializer<AgentCardSig
         case r'header':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(
+                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.header.replace(valueDes);
@@ -143,4 +151,3 @@ class _$AgentCardSignatureSerializer implements PrimitiveSerializer<AgentCardSig
     return result.build();
   }
 }
-

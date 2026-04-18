@@ -61,73 +61,73 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
         child: Column(
-        children: [
-          // Keyword filter
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: TextField(
-              key: const Key('log_search_field'),
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Filter by keyword...',
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _searching
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    : null,
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                isDense: true,
+          children: [
+            // Keyword filter
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: TextField(
+                key: const Key('log_search_field'),
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Filter by keyword...',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  suffixIcon: _searching
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
+                  border: const OutlineInputBorder(),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  isDense: true,
+                ),
+                onChanged: _onSearchChanged,
               ),
-              onChanged: _onSearchChanged,
             ),
-          ),
 
-          // Log list
-          Expanded(
-            child: logsAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => _ErrorView(
-                error: err.toString(),
-                onRetry: () => ref.read(logsProvider.notifier).refresh(),
+            // Log list
+            Expanded(
+              child: logsAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (err, _) => _ErrorView(
+                  error: err.toString(),
+                  onRetry: () => ref.read(logsProvider.notifier).refresh(),
+                ),
+                data: (state) {
+                  if (state.error != null) {
+                    return _ErrorView(
+                      error: state.error!,
+                      onRetry: () => ref.read(logsProvider.notifier).refresh(),
+                    );
+                  }
+                  if (state.logs.isEmpty) {
+                    return Center(
+                      child: state.searchQuery.isNotEmpty
+                          ? Text(
+                              'No logs matching "${state.searchQuery}"',
+                              style: const TextStyle(color: Colors.black45),
+                            )
+                          : const _EmptyView(),
+                    );
+                  }
+                  return ListView.separated(
+                    itemCount: state.logs.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1, indent: 12, endIndent: 12),
+                    itemBuilder: (context, index) {
+                      return _LogRow(entry: state.logs[index]);
+                    },
+                  );
+                },
               ),
-              data: (state) {
-                if (state.error != null) {
-                  return _ErrorView(
-                    error: state.error!,
-                    onRetry: () => ref.read(logsProvider.notifier).refresh(),
-                  );
-                }
-                if (state.logs.isEmpty) {
-                  return Center(
-                    child: state.searchQuery.isNotEmpty
-                        ? Text(
-                            'No logs matching "${state.searchQuery}"',
-                            style: const TextStyle(color: Colors.black45),
-                          )
-                        : const _EmptyView(),
-                  );
-                }
-                return ListView.separated(
-                  itemCount: state.logs.length,
-                  separatorBuilder: (context, index) =>
-                      const Divider(height: 1, indent: 12, endIndent: 12),
-                  itemBuilder: (context, index) {
-                    return _LogRow(entry: state.logs[index]);
-                  },
-                );
-              },
             ),
-          ),
-        ],
-      ),
-      ),  // GestureDetector
+          ],
+        ),
+      ), // GestureDetector
     );
   }
 }

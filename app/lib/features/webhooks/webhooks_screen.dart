@@ -71,9 +71,7 @@ class _WebhookRow extends StatelessWidget {
         child: Icon(
           Icons.webhook,
           size: 20,
-          color: webhook.active
-              ? Colors.green.shade700
-              : Colors.grey.shade500,
+          color: webhook.active ? Colors.green.shade700 : Colors.grey.shade500,
         ),
       ),
       title: Text(

@@ -98,8 +98,7 @@ class PersonaPicker extends ConsumerWidget {
                     itemCount: state.personas.length,
                     itemBuilder: (context, index) {
                       final persona = state.personas[index];
-                      final isActive =
-                          persona.id == state.activePersona?.id;
+                      final isActive = persona.id == state.activePersona?.id;
 
                       return _PersonaTile(
                         persona: persona,
@@ -145,8 +144,9 @@ class _PersonaTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor:
-            isActive ? Theme.of(context).colorScheme.primary : Colors.grey.shade200,
+        backgroundColor: isActive
+            ? Theme.of(context).colorScheme.primary
+            : Colors.grey.shade200,
         child: Text(
           persona.name.isNotEmpty ? persona.name[0].toUpperCase() : '?',
           style: TextStyle(
@@ -171,12 +171,12 @@ class _PersonaTile extends StatelessWidget {
       trailing: isActive
           ? const Icon(Icons.check_circle, color: Colors.green)
           : (isSwitching
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : null),
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : null),
       onTap: isSwitching ? null : onTap,
     );
   }

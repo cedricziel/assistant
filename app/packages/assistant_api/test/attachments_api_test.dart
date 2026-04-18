@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for AttachmentsApi
 void main() {
   final instance = AssistantApi().getAttachmentsApi();
@@ -24,6 +23,5 @@ void main() {
     test('test uploadAttachment', () async {
       // TODO
     });
-
   });
 }

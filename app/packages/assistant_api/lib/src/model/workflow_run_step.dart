@@ -12,15 +12,16 @@ part 'workflow_run_step.g.dart';
 /// Single step within a workflow run.
 ///
 /// Properties:
-/// * [id] 
-/// * [nodeId] 
-/// * [nodeKind] 
-/// * [note] 
-/// * [occurredAt] 
-/// * [output] 
-/// * [stepIndex] 
+/// * [id]
+/// * [nodeId]
+/// * [nodeKind]
+/// * [note]
+/// * [occurredAt]
+/// * [output]
+/// * [stepIndex]
 @BuiltValue()
-abstract class WorkflowRunStep implements Built<WorkflowRunStep, WorkflowRunStepBuilder> {
+abstract class WorkflowRunStep
+    implements Built<WorkflowRunStep, WorkflowRunStepBuilder> {
   @BuiltValueField(wireName: r'id')
   String get id;
 
@@ -44,16 +45,19 @@ abstract class WorkflowRunStep implements Built<WorkflowRunStep, WorkflowRunStep
 
   WorkflowRunStep._();
 
-  factory WorkflowRunStep([void updates(WorkflowRunStepBuilder b)]) = _$WorkflowRunStep;
+  factory WorkflowRunStep([void updates(WorkflowRunStepBuilder b)]) =
+      _$WorkflowRunStep;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WorkflowRunStepBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WorkflowRunStep> get serializer => _$WorkflowRunStepSerializer();
+  static Serializer<WorkflowRunStep> get serializer =>
+      _$WorkflowRunStepSerializer();
 }
 
-class _$WorkflowRunStepSerializer implements PrimitiveSerializer<WorkflowRunStep> {
+class _$WorkflowRunStepSerializer
+    implements PrimitiveSerializer<WorkflowRunStep> {
   @override
   final Iterable<Type> types = const [WorkflowRunStep, _$WorkflowRunStep];
 
@@ -112,7 +116,9 @@ class _$WorkflowRunStepSerializer implements PrimitiveSerializer<WorkflowRunStep
     WorkflowRunStep object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -206,4 +212,3 @@ class _$WorkflowRunStepSerializer implements PrimitiveSerializer<WorkflowRunStep
     return result.build();
   }
 }
-

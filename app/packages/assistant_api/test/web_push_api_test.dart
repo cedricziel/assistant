@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for WebPushApi
 void main() {
   final instance = AssistantApi().getWebPushApi();
@@ -33,6 +32,5 @@ void main() {
     test('test vapidPublicKey', () async {
       // TODO
     });
-
   });
 }

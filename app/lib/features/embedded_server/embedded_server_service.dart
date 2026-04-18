@@ -63,8 +63,7 @@ class EmbeddedServerService {
   /// Finds a free loopback port by binding to port 0, capturing the assigned
   /// port, and immediately closing the socket (TOCTOU is acceptable on loopback).
   Future<int> _findFreePort() async {
-    final socket =
-        await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final port = socket.port;
     await socket.close();
     return port;
@@ -87,17 +86,14 @@ class EmbeddedServerService {
     await Process.run('chmod', ['+x', binaryPath]);
 
     // Spawn the server process.
-    _process = await Process.start(
-      binaryPath,
-      [
-        'webui',
-        'serve',
-        '--listen',
-        '127.0.0.1:$port',
-        '--auth-token',
-        token,
-      ],
-    );
+    _process = await Process.start(binaryPath, [
+      'webui',
+      'serve',
+      '--listen',
+      '127.0.0.1:$port',
+      '--auth-token',
+      token,
+    ]);
 
     // Drain stdout/stderr to prevent the pipe buffer from blocking the child.
     _process!.stdout.drain<void>();
@@ -115,8 +111,7 @@ class EmbeddedServerService {
         if (delay > maxDelay) delay = maxDelay;
 
         try {
-          final request =
-              await client.getUrl(Uri.parse('$baseUrl/health'));
+          final request = await client.getUrl(Uri.parse('$baseUrl/health'));
           final response = await request.close();
           await response.drain<void>();
           if (response.statusCode == 200) {
@@ -135,7 +130,8 @@ class EmbeddedServerService {
     _process?.kill(ProcessSignal.sigkill);
     _process = null;
     yield EmbeddedServerError(
-      message: 'Embedded server failed to become ready after 10 health-check attempts.',
+      message:
+          'Embedded server failed to become ready after 10 health-check attempts.',
     );
   }
 

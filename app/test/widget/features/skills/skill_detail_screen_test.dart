@@ -20,8 +20,7 @@ void main() {
         routes: [
           GoRoute(
             path: '/',
-            builder: (_, _) =>
-                const SkillDetailScreen(skillName: 'my-skill'),
+            builder: (_, _) => const SkillDetailScreen(skillName: 'my-skill'),
           ),
           GoRoute(
             path: '/skills',
@@ -29,8 +28,7 @@ void main() {
           ),
           GoRoute(
             path: '/skills/:name/edit',
-            builder: (_, _) =>
-                const Scaffold(body: Text('edit screen')),
+            builder: (_, _) => const Scaffold(body: Text('edit screen')),
           ),
         ],
       );
@@ -46,8 +44,9 @@ void main() {
       );
     }
 
-    testWidgets('edit and delete icons shown for user-created skill',
-        (tester) async {
+    testWidgets('edit and delete icons shown for user-created skill', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         buildUnderTest(detailState: SkillDetailState(skill: _userSkill())),
       );
@@ -57,8 +56,9 @@ void main() {
       expect(find.byIcon(Icons.delete_outline), findsOneWidget);
     });
 
-    testWidgets('edit and delete icons hidden for builtin skill',
-        (tester) async {
+    testWidgets('edit and delete icons hidden for builtin skill', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         buildUnderTest(detailState: SkillDetailState(skill: _builtinSkill())),
       );
@@ -81,8 +81,9 @@ void main() {
       expect(find.text('Delete skill?'), findsOneWidget);
     });
 
-    testWidgets('canceling delete dialog does not call deleteSkill',
-        (tester) async {
+    testWidgets('canceling delete dialog does not call deleteSkill', (
+      tester,
+    ) async {
       final notifier = _FakeSkillsNotifier();
       await tester.pumpWidget(
         buildUnderTest(
@@ -102,8 +103,9 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
     });
 
-    testWidgets('confirming delete calls deleteSkill with skill name',
-        (tester) async {
+    testWidgets('confirming delete calls deleteSkill with skill name', (
+      tester,
+    ) async {
       // Fake returns an error so navigation doesn't happen — lets us assert
       // the provider was called without needing a full navigation stack.
       final notifier = _FakeSkillsNotifier(deleteResult: 'simulated error');
@@ -125,8 +127,9 @@ void main() {
     });
 
     testWidgets('delete error shows snackbar', (tester) async {
-      final notifier =
-          _FakeSkillsNotifier(deleteResult: 'Something went wrong');
+      final notifier = _FakeSkillsNotifier(
+        deleteResult: 'Something went wrong',
+      );
       await tester.pumpWidget(
         buildUnderTest(
           detailState: SkillDetailState(skill: _userSkill()),
@@ -166,19 +169,23 @@ void main() {
 // ---------------------------------------------------------------------------
 // Fixtures
 
-SkillDetail _userSkill() => SkillDetail((b) => b
-  ..name = 'my-skill'
-  ..description = 'A user skill'
-  ..body = '# SKILL.md\nDoes things'
-  ..source_ = 'user'
-  ..isBuiltin = false);
+SkillDetail _userSkill() => SkillDetail(
+  (b) => b
+    ..name = 'my-skill'
+    ..description = 'A user skill'
+    ..body = '# SKILL.md\nDoes things'
+    ..source_ = 'user'
+    ..isBuiltin = false,
+);
 
-SkillDetail _builtinSkill() => SkillDetail((b) => b
-  ..name = 'builtin-skill'
-  ..description = 'A built-in skill'
-  ..body = '# SKILL.md\nBuilt in'
-  ..source_ = 'builtin'
-  ..isBuiltin = true);
+SkillDetail _builtinSkill() => SkillDetail(
+  (b) => b
+    ..name = 'builtin-skill'
+    ..description = 'A built-in skill'
+    ..body = '# SKILL.md\nBuilt in'
+    ..source_ = 'builtin'
+    ..isBuiltin = true,
+);
 
 // ---------------------------------------------------------------------------
 // Fake notifiers

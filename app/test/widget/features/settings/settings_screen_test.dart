@@ -43,8 +43,9 @@ void main() {
       }
     });
 
-    testWidgets('tapping "New chat messages" toggle turns it off',
-        (tester) async {
+    testWidgets('tapping "New chat messages" toggle turns it off', (
+      tester,
+    ) async {
       await tester.pumpWidget(buildUnderTest());
       await tester.pump();
 

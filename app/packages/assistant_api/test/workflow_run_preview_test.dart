@@ -41,6 +41,5 @@ void main() {
     test('to test the property `workflowId`', () async {
       // TODO
     });
-
   });
 }

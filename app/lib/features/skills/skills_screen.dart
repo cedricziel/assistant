@@ -96,12 +96,11 @@ class _SkillRowState extends State<_SkillRow> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CircleAvatar(
-              backgroundColor:
-                  skill.enabled ? Colors.green.shade100 : Colors.grey.shade200,
+              backgroundColor: skill.enabled
+                  ? Colors.green.shade100
+                  : Colors.grey.shade200,
               child: Icon(
-                skill.enabled
-                    ? Icons.extension
-                    : Icons.extension_off_outlined,
+                skill.enabled ? Icons.extension : Icons.extension_off_outlined,
                 size: 20,
                 color: skill.enabled
                     ? Colors.green.shade700
@@ -126,7 +125,9 @@ class _SkillRowState extends State<_SkillRow> {
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: skill.enabled
                               ? Colors.green.shade50
@@ -154,8 +155,7 @@ class _SkillRowState extends State<_SkillRow> {
                         icon: const Icon(Icons.arrow_forward_ios, size: 14),
                         tooltip: 'View detail',
                         visualDensity: VisualDensity.compact,
-                        onPressed: () =>
-                            context.go('/skills/${skill.name}'),
+                        onPressed: () => context.go('/skills/${skill.name}'),
                       ),
                     ],
                   ),
@@ -164,8 +164,7 @@ class _SkillRowState extends State<_SkillRow> {
                     Text(
                       skill.description,
                       maxLines: _expanded ? null : 2,
-                      overflow:
-                          _expanded ? null : TextOverflow.ellipsis,
+                      overflow: _expanded ? null : TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 12),
                     ),
                     if (!_expanded)

@@ -12,16 +12,17 @@ part 'log_entry_response.g.dart';
 /// A log entry row returned by the API.
 ///
 /// Properties:
-/// * [conversationId] 
-/// * [fields] 
-/// * [id] 
-/// * [message] 
-/// * [severity] 
-/// * [target] 
-/// * [timestamp] 
-/// * [traceId] 
+/// * [conversationId]
+/// * [fields]
+/// * [id]
+/// * [message]
+/// * [severity]
+/// * [target]
+/// * [timestamp]
+/// * [traceId]
 @BuiltValue()
-abstract class LogEntryResponse implements Built<LogEntryResponse, LogEntryResponseBuilder> {
+abstract class LogEntryResponse
+    implements Built<LogEntryResponse, LogEntryResponseBuilder> {
   @BuiltValueField(wireName: r'conversation_id')
   String? get conversationId;
 
@@ -48,16 +49,19 @@ abstract class LogEntryResponse implements Built<LogEntryResponse, LogEntryRespo
 
   LogEntryResponse._();
 
-  factory LogEntryResponse([void updates(LogEntryResponseBuilder b)]) = _$LogEntryResponse;
+  factory LogEntryResponse([void updates(LogEntryResponseBuilder b)]) =
+      _$LogEntryResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(LogEntryResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<LogEntryResponse> get serializer => _$LogEntryResponseSerializer();
+  static Serializer<LogEntryResponse> get serializer =>
+      _$LogEntryResponseSerializer();
 }
 
-class _$LogEntryResponseSerializer implements PrimitiveSerializer<LogEntryResponse> {
+class _$LogEntryResponseSerializer
+    implements PrimitiveSerializer<LogEntryResponse> {
   @override
   final Iterable<Type> types = const [LogEntryResponse, _$LogEntryResponse];
 
@@ -77,10 +81,12 @@ class _$LogEntryResponseSerializer implements PrimitiveSerializer<LogEntryRespon
       );
     }
     yield r'fields';
-    yield object.fields == null ? null : serializers.serialize(
-      object.fields,
-      specifiedType: const FullType.nullable(JsonObject),
-    );
+    yield object.fields == null
+        ? null
+        : serializers.serialize(
+            object.fields,
+            specifiedType: const FullType.nullable(JsonObject),
+          );
     yield r'id';
     yield serializers.serialize(
       object.id,
@@ -121,7 +127,9 @@ class _$LogEntryResponseSerializer implements PrimitiveSerializer<LogEntryRespon
     LogEntryResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -223,4 +231,3 @@ class _$LogEntryResponseSerializer implements PrimitiveSerializer<LogEntryRespon
     return result.build();
   }
 }
-

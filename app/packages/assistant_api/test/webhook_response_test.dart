@@ -51,6 +51,5 @@ void main() {
     test('to test the property `verifiedAt`', () async {
       // TODO
     });
-
   });
 }

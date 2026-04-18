@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for MessagesApi
 void main() {
   final instance = AssistantApi().getMessagesApi();
@@ -22,6 +21,5 @@ void main() {
     test('test sendMessageStreaming', () async {
       // TODO
     });
-
   });
 }

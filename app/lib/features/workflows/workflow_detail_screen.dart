@@ -31,8 +31,7 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: Colors.red.shade600),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
@@ -93,21 +92,18 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Edit workflow',
-            onPressed: () =>
-                context.go('/workflows/${widget.workflowId}/edit'),
+            onPressed: () => context.go('/workflows/${widget.workflowId}/edit'),
           ),
           IconButton(
-            icon: Icon(
-              Icons.delete_outline,
-              color: Colors.red.shade400,
-            ),
+            icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
             tooltip: 'Delete workflow',
             onPressed: _confirmDelete,
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () =>
-                ref.read(workflowDetailProvider(widget.workflowId).notifier).refresh(),
+            onPressed: () => ref
+                .read(workflowDetailProvider(widget.workflowId).notifier)
+                .refresh(),
           ),
         ],
       ),
@@ -115,8 +111,9 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
-          onRetry: () =>
-              ref.read(workflowDetailProvider(widget.workflowId).notifier).refresh(),
+          onRetry: () => ref
+              .read(workflowDetailProvider(widget.workflowId).notifier)
+              .refresh(),
         ),
         data: (state) => _WorkflowDetailBody(
           workflowId: widget.workflowId,
@@ -225,10 +222,7 @@ class _WorkflowDetailBody extends StatelessWidget {
         const SizedBox(height: 16),
 
         // Recent runs.
-        Text(
-          'Recent Runs',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
+        Text('Recent Runs', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
 
         if (runs.isEmpty)
@@ -242,7 +236,9 @@ class _WorkflowDetailBody extends StatelessWidget {
             ),
           )
         else ...[
-          ...runs.take(20).map((run) => _RunTile(workflowId: workflowId, run: run)),
+          ...runs
+              .take(20)
+              .map((run) => _RunTile(workflowId: workflowId, run: run)),
           if (runs.length > 20)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -273,20 +269,18 @@ class _RunTile extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 4),
       child: ListTile(
-        onTap: () => context.go(
-          '/workflows/$workflowId/runs/${run.id}',
-        ),
+        onTap: () => context.go('/workflows/$workflowId/runs/${run.id}'),
         leading: Icon(
           isSuccess
               ? Icons.check_circle_outline
               : isError
-                  ? Icons.error_outline
-                  : Icons.hourglass_empty,
+              ? Icons.error_outline
+              : Icons.hourglass_empty,
           color: isSuccess
               ? Colors.green.shade600
               : isError
-                  ? Colors.red.shade600
-                  : Colors.orange.shade600,
+              ? Colors.red.shade600
+              : Colors.orange.shade600,
         ),
         title: Text(
           'Run ${run.id.length > 8 ? run.id.substring(0, 8) : run.id}…',
@@ -302,15 +296,15 @@ class _RunTile extends StatelessWidget {
             color: isSuccess
                 ? Colors.green.shade50
                 : isError
-                    ? Colors.red.shade50
-                    : Colors.orange.shade50,
+                ? Colors.red.shade50
+                : Colors.orange.shade50,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isSuccess
                   ? Colors.green.shade300
                   : isError
-                      ? Colors.red.shade300
-                      : Colors.orange.shade300,
+                  ? Colors.red.shade300
+                  : Colors.orange.shade300,
             ),
           ),
           child: Text(
@@ -321,8 +315,8 @@ class _RunTile extends StatelessWidget {
               color: isSuccess
                   ? Colors.green.shade700
                   : isError
-                      ? Colors.red.shade700
-                      : Colors.orange.shade700,
+                  ? Colors.red.shade700
+                  : Colors.orange.shade700,
             ),
           ),
         ),

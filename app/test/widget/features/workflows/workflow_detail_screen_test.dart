@@ -18,13 +18,11 @@ void main() {
         routes: [
           GoRoute(
             path: '/',
-            builder: (_, _) =>
-                const WorkflowDetailScreen(workflowId: 'wf-1'),
+            builder: (_, _) => const WorkflowDetailScreen(workflowId: 'wf-1'),
           ),
           GoRoute(
             path: '/workflows',
-            builder: (_, _) =>
-                const Scaffold(body: Text('workflows list')),
+            builder: (_, _) => const Scaffold(body: Text('workflows list')),
           ),
           GoRoute(
             path: '/workflows/wf-1/edit',
@@ -48,9 +46,7 @@ void main() {
     // Delete flow
 
     testWidgets('tapping delete shows confirmation dialog', (tester) async {
-      await tester.pumpWidget(
-        buildUnderTest(detailState: _activeState()),
-      );
+      await tester.pumpWidget(buildUnderTest(detailState: _activeState()));
       await tester.pump();
 
       await tester.tap(find.byIcon(Icons.delete_outline));
@@ -60,8 +56,9 @@ void main() {
       expect(find.text('Delete workflow?'), findsOneWidget);
     });
 
-    testWidgets('canceling delete does not call deleteWorkflow',
-        (tester) async {
+    testWidgets('canceling delete does not call deleteWorkflow', (
+      tester,
+    ) async {
       final notifier = _FakeWorkflowsNotifier();
       await tester.pumpWidget(
         buildUnderTest(
@@ -81,10 +78,10 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
     });
 
-    testWidgets('confirming delete calls deleteWorkflow with workflow id',
-        (tester) async {
-      final notifier =
-          _FakeWorkflowsNotifier(deleteResult: 'simulated error');
+    testWidgets('confirming delete calls deleteWorkflow with workflow id', (
+      tester,
+    ) async {
+      final notifier = _FakeWorkflowsNotifier(deleteResult: 'simulated error');
       await tester.pumpWidget(
         buildUnderTest(
           detailState: _activeState(),
@@ -103,8 +100,9 @@ void main() {
     });
 
     testWidgets('delete error shows snackbar', (tester) async {
-      final notifier =
-          _FakeWorkflowsNotifier(deleteResult: 'Something went wrong');
+      final notifier = _FakeWorkflowsNotifier(
+        deleteResult: 'Something went wrong',
+      );
       await tester.pumpWidget(
         buildUnderTest(
           detailState: _activeState(),
@@ -121,8 +119,9 @@ void main() {
       expect(find.textContaining('Something went wrong'), findsOneWidget);
     });
 
-    testWidgets('successful delete navigates to workflows list',
-        (tester) async {
+    testWidgets('successful delete navigates to workflows list', (
+      tester,
+    ) async {
       final notifier = _FakeWorkflowsNotifier(deleteResult: null);
       await tester.pumpWidget(
         buildUnderTest(
@@ -143,10 +142,12 @@ void main() {
     // -------------------------------------------------------------------------
     // Active / inactive toggle
 
-    testWidgets('tapping chip on active workflow calls deactivateWorkflow',
-        (tester) async {
-      final notifier =
-          _FakeWorkflowsNotifier(deactivateResult: 'simulated error');
+    testWidgets('tapping chip on active workflow calls deactivateWorkflow', (
+      tester,
+    ) async {
+      final notifier = _FakeWorkflowsNotifier(
+        deactivateResult: 'simulated error',
+      );
       await tester.pumpWidget(
         buildUnderTest(
           detailState: _activeState(),
@@ -163,10 +164,12 @@ void main() {
       expect(notifier.activateCalledWith, isNull);
     });
 
-    testWidgets('tapping chip on inactive workflow calls activateWorkflow',
-        (tester) async {
-      final notifier =
-          _FakeWorkflowsNotifier(activateResult: 'simulated error');
+    testWidgets('tapping chip on inactive workflow calls activateWorkflow', (
+      tester,
+    ) async {
+      final notifier = _FakeWorkflowsNotifier(
+        activateResult: 'simulated error',
+      );
       await tester.pumpWidget(
         buildUnderTest(
           detailState: _inactiveState(),
@@ -183,8 +186,7 @@ void main() {
     });
 
     testWidgets('toggle error shows snackbar', (tester) async {
-      final notifier =
-          _FakeWorkflowsNotifier(activateResult: 'Toggle failed');
+      final notifier = _FakeWorkflowsNotifier(activateResult: 'Toggle failed');
       await tester.pumpWidget(
         buildUnderTest(
           detailState: _inactiveState(),
@@ -205,26 +207,30 @@ void main() {
 // Fixtures
 
 WorkflowDetailState _activeState() => WorkflowDetailState(
-      detail: WorkflowDetail((b) => b
-        ..id = 'wf-1'
-        ..name = 'My Workflow'
-        ..description = 'A workflow'
-        ..active = true
-        ..createdAt = DateTime(2024, 1, 1)
-        ..updatedAt = DateTime(2024, 1, 1)),
-      runs: const [],
-    );
+  detail: WorkflowDetail(
+    (b) => b
+      ..id = 'wf-1'
+      ..name = 'My Workflow'
+      ..description = 'A workflow'
+      ..active = true
+      ..createdAt = DateTime(2024, 1, 1)
+      ..updatedAt = DateTime(2024, 1, 1),
+  ),
+  runs: const [],
+);
 
 WorkflowDetailState _inactiveState() => WorkflowDetailState(
-      detail: WorkflowDetail((b) => b
-        ..id = 'wf-1'
-        ..name = 'My Workflow'
-        ..description = 'A workflow'
-        ..active = false
-        ..createdAt = DateTime(2024, 1, 1)
-        ..updatedAt = DateTime(2024, 1, 1)),
-      runs: const [],
-    );
+  detail: WorkflowDetail(
+    (b) => b
+      ..id = 'wf-1'
+      ..name = 'My Workflow'
+      ..description = 'A workflow'
+      ..active = false
+      ..createdAt = DateTime(2024, 1, 1)
+      ..updatedAt = DateTime(2024, 1, 1),
+  ),
+  runs: const [],
+);
 
 // ---------------------------------------------------------------------------
 // Fake notifiers
