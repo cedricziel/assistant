@@ -2,17 +2,17 @@
 
 ### Requirement: iOS release workflow triggers on version tags
 
-The system SHALL provide `.github/workflows/release-ios.yml` that triggers on tags matching `v*`, runs on `macos-latest`, installs Flutter and Ruby dependencies, and invokes `fastlane ios beta`.
+The system SHALL provide a `release-ios-testflight` job in `.github/workflows/release-please.yml` that runs on `macos-latest` when a release is created, installs Flutter and Ruby dependencies, and invokes `fastlane ios beta`.
 
 #### Scenario: Tagged commit triggers iOS workflow
 
-- **WHEN** a git tag starting with `v` is pushed (e.g. `v0.2.0`)
-- **THEN** the `release-ios` GitHub Actions workflow starts and runs `fastlane ios beta`
+- **WHEN** release-please creates a new release on `main`
+- **THEN** the `release-ios-testflight` job starts and runs `fastlane ios beta`
 
-#### Scenario: Workflow does not trigger on branch pushes
+#### Scenario: Job does not run without a release
 
-- **WHEN** a commit is pushed to a branch (not a tag)
-- **THEN** the `release-ios` workflow does NOT start
+- **WHEN** a commit is pushed to `main` without triggering a release
+- **THEN** the `release-ios-testflight` job does NOT start
 
 ### Requirement: Required secrets documented and validated
 

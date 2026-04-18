@@ -2,7 +2,7 @@
 
 The assistant Flutter app targets iOS and macOS. Publishing to TestFlight and the App Store today is entirely manual: build in Xcode, manage signing certificates locally, upload via Transporter. This is fragile and not repeatable in CI.
 
-Fastlane is the industry standard for automating Apple platform releases. It handles code signing (via `match`), building (via `gym`), and uploading (via `pilot`/`deliver`). We will add a shared `Gemfile`-driven Fastlane setup under `app/fastlane/` for iOS, backed by a single GitHub Actions workflow (`release-ios.yml`) that triggers on version tags.
+Fastlane is the industry standard for automating Apple platform releases. It handles code signing (via `match`), building (via `gym`), and uploading (via `pilot`/`deliver`). We will add a shared `Gemfile`-driven Fastlane setup under `app/fastlane/` for iOS, integrated as a job (`release-ios-testflight`) in the existing `release-please.yml` workflow that runs when a release is created.
 
 **Current State:**
 
