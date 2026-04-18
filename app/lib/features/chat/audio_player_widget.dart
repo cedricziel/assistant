@@ -21,6 +21,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
   final _player = AudioPlayer();
   bool _isPlaying = false;
   bool _isLoading = false;
+  bool _hasError = false;
   Uint8List? _cachedBytes;
 
   @override
@@ -44,12 +45,20 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
     try {
       _cachedBytes ??= await widget.fetchAudio();
       final bytes = _cachedBytes;
       if (bytes == null || !mounted) {
-        setState(() => _isLoading = false);
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _hasError = true;
+          });
+        }
         return;
       }
 
@@ -61,7 +70,13 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      _cachedBytes = null; // clear so retry re-fetches
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+        });
+      }
     }
   }
 
@@ -72,6 +87,20 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
         width: 20,
         height: 20,
         child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    if (_hasError) {
+      return IconButton(
+        key: const Key('audio_error_retry'),
+        icon: Icon(
+          Icons.error_outline,
+          color: Theme.of(context).colorScheme.error,
+        ),
+        onPressed: _toggle,
+        iconSize: 20,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        tooltip: 'Failed to load audio — tap to retry',
       );
     }
     return IconButton(

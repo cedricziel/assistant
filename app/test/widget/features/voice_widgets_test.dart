@@ -250,7 +250,7 @@ void main() {
       await tester.pump();
     });
 
-    testWidgets('shows play icon again when fetchAudio returns null', (
+    testWidgets('shows error icon when fetchAudio returns null', (
       tester,
     ) async {
       await tester.pumpWidget(
@@ -260,16 +260,78 @@ void main() {
       );
 
       await tester.tap(find.byType(IconButton));
-      // runAsync lets real async futures resolve; pump applies setState changes.
       await tester.runAsync(() => Future<void>.delayed(Duration.zero));
       await tester.pump();
 
       expect(
-        find.byIcon(Icons.play_circle_outlined),
+        find.byIcon(Icons.error_outline),
         findsOneWidget,
-        reason: 'null audio — widget returns to idle play state',
+        reason: 'null audio — widget shows error icon for retry',
       );
       expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byIcon(Icons.play_circle_outlined), findsNothing);
+    });
+
+    testWidgets('shows error icon when fetchAudio throws', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AudioPlayerWidget(
+              fetchAudio: () async => throw Exception('network error'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byType(IconButton));
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+
+      expect(
+        find.byIcon(Icons.error_outline),
+        findsOneWidget,
+        reason: 'exception during fetch — widget shows error icon',
+      );
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('tapping error icon retries the fetch', (tester) async {
+      int callCount = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AudioPlayerWidget(
+              fetchAudio: () async {
+                callCount++;
+                if (callCount == 1) return null; // first call fails
+                return Uint8List.fromList([1, 2, 3]); // retry succeeds
+              },
+            ),
+          ),
+        ),
+      );
+
+      // First tap → null → error state.
+      await tester.tap(find.byType(IconButton));
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
+
+      // Tap the error icon to retry.
+      await tester.tap(find.byKey(const Key('audio_error_retry')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+
+      // After successful retry, should be playing (stop icon visible).
+      expect(
+        find.byIcon(Icons.stop_circle_outlined),
+        findsOneWidget,
+        reason: 'retry succeeded — widget should be playing',
+      );
+      expect(callCount, equals(2));
     });
 
     testWidgets('caches bytes — fetchAudio called only once across two taps', (

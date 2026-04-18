@@ -23,10 +23,10 @@ class ReleaseAsset {
   final int size;
 
   factory ReleaseAsset.fromJson(Map<String, dynamic> json) => ReleaseAsset(
-        name: json['name'] as String,
-        browserDownloadUrl: json['browser_download_url'] as String,
-        size: json['size'] as int,
-      );
+    name: json['name'] as String,
+    browserDownloadUrl: json['browser_download_url'] as String,
+    size: json['size'] as int,
+  );
 }
 
 /// Metadata returned from the GitHub Releases API.
@@ -44,13 +44,13 @@ class ReleaseInfo {
   final List<ReleaseAsset> assets;
 
   factory ReleaseInfo.fromJson(Map<String, dynamic> json) => ReleaseInfo(
-        tagName: json['tag_name'] as String,
-        body: (json['body'] as String?) ?? '',
-        htmlUrl: json['html_url'] as String,
-        assets: (json['assets'] as List<dynamic>)
-            .map((a) => ReleaseAsset.fromJson(a as Map<String, dynamic>))
-            .toList(),
-      );
+    tagName: json['tag_name'] as String,
+    body: (json['body'] as String?) ?? '',
+    htmlUrl: json['html_url'] as String,
+    assets: (json['assets'] as List<dynamic>)
+        .map((a) => ReleaseAsset.fromJson(a as Map<String, dynamic>))
+        .toList(),
+  );
 }
 
 /// Holds the information surfaced to the UI when an update is available.
@@ -115,8 +115,12 @@ class UpdateService {
   /// Both strings are expected to be SemVer (optionally prefixed with 'v').
   bool isNewerVersion(String latest, String current) {
     try {
-      final l = Version.parse(latest.startsWith('v') ? latest.substring(1) : latest);
-      final c = Version.parse(current.startsWith('v') ? current.substring(1) : current);
+      final l = Version.parse(
+        latest.startsWith('v') ? latest.substring(1) : latest,
+      );
+      final c = Version.parse(
+        current.startsWith('v') ? current.substring(1) : current,
+      );
       return l > c;
     } catch (_) {
       return false;
@@ -144,7 +148,9 @@ class UpdateService {
   /// Always returns [null] in debug/profile builds or on web.
   Future<UpdateInfo?> checkForUpdate() async {
     if (kIsWeb || !kReleaseMode) return null;
-    if (!Platform.isMacOS && !Platform.isLinux && !Platform.isWindows) return null;
+    if (!Platform.isMacOS && !Platform.isLinux && !Platform.isWindows) {
+      return null;
+    }
     if (await _alreadyCheckedToday()) return null;
 
     final release = await fetchLatestRelease();

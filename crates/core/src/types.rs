@@ -421,6 +421,15 @@ pub struct TtsConfig {
     /// API key (also checked via provider-specific env vars: `OPENAI_API_KEY` for OpenAI,
     /// `DEEPGRAM_API_KEY` for Deepgram).
     pub api_key: Option<String>,
+    /// Per-language voice overrides (Deepgram only).
+    ///
+    /// ```toml
+    /// [tts.voices]
+    /// en = "aura-2-zeus-en"
+    /// de = "aura-2-aurelia-de"
+    /// ```
+    #[serde(default)]
+    pub voices: std::collections::HashMap<String, String>,
 }
 
 fn default_llm_model() -> String {
