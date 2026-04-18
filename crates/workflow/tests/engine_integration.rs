@@ -93,6 +93,7 @@ async fn runner_executes_action_and_persists_step_output() {
     let handle = spawn_workflow_runner(storage.clone(), Duration::from_millis(20), executors);
     tokio::time::sleep(Duration::from_millis(150)).await;
     handle.abort();
+    let _ = handle.await; // ensure the task's DB connection is returned to the pool
 
     let run = store
         .get_run(workflow_id, run_id)
@@ -134,6 +135,7 @@ async fn schedule_adapter_creates_schedule_run() {
     let handle = spawn_schedule_trigger_adapter(storage.clone(), Duration::from_millis(20));
     tokio::time::sleep(Duration::from_millis(120)).await;
     handle.abort();
+    let _ = handle.await; // ensure the task's DB connection is returned to the pool
 
     let runs = store
         .list_runs(workflow_id, 10)
@@ -186,6 +188,7 @@ async fn event_adapter_creates_run_from_done_bus_message() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
     handle.abort();
+    let _ = handle.await; // ensure the task's DB connection is returned to the pool
 
     let runs = store
         .list_runs(workflow_id, 10)
