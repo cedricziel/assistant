@@ -1,0 +1,22 @@
+# Matchfile — centralized code signing via fastlane match.
+#
+# Required environment variables:
+#   MATCH_GIT_URL     — URL of the private git repo storing certificates
+#   MATCH_PASSWORD    — passphrase used to encrypt/decrypt certificates
+#
+# One-time setup (run locally):
+#   bundle exec fastlane match init
+#   bundle exec fastlane match appstore --platform ios
+
+git_url(ENV["MATCH_GIT_URL"])
+
+storage_mode("git")
+
+type("appstore")
+
+app_identifier(["com.cedricziel.assistant.ios"])
+
+platform("ios")
+
+# In CI, never create or revoke certificates — only fetch existing ones.
+readonly(ENV["MATCH_READONLY"] == "true" || ENV["CI"] == "true")

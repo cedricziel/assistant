@@ -1,0 +1,7 @@
+# Gymfile — default build settings for iOS.
+
+scheme("Runner")
+workspace("ios/Runner.xcworkspace")
+export_method("app-store")
+output_directory("build/ios/")
+output_name("assistant.ipa")
