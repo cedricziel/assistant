@@ -186,6 +186,46 @@ void main() {
     });
   });
 
+  group('ChatMessage.copyWith — audioBytes / audioMimeType', () {
+    test('preserves audioBytes and audioMimeType through copyWith', () {
+      final bytes = Uint8List.fromList([10, 20, 30]);
+      final msg = ChatMessage(
+        id: 'v1',
+        role: 'user',
+        content: 'Hello',
+        audioBytes: bytes,
+        audioMimeType: 'audio/webm',
+      );
+      final copy = msg.copyWith(content: 'Updated transcript');
+      expect(copy.audioBytes, same(bytes), reason: 'audioBytes preserved');
+      expect(
+        copy.audioMimeType,
+        'audio/webm',
+        reason: 'audioMimeType preserved',
+      );
+      expect(copy.content, 'Updated transcript');
+    });
+
+    test('defaults to null when not provided', () {
+      final msg = ChatMessage(id: 'v2', role: 'user', content: 'hi');
+      expect(msg.audioBytes, isNull);
+      expect(msg.audioMimeType, isNull);
+    });
+
+    test('copyWith can override audioBytes', () {
+      final msg = ChatMessage(
+        id: 'v3',
+        role: 'user',
+        content: 'test',
+        audioBytes: Uint8List.fromList([1]),
+        audioMimeType: 'audio/mp4',
+      );
+      final newBytes = Uint8List.fromList([2, 3]);
+      final copy = msg.copyWith(audioBytes: newBytes);
+      expect(copy.audioBytes, same(newBytes));
+    });
+  });
+
   group('ChatState.copyWith with pendingQueue', () {
     test('copies pendingQueue when provided', () {
       const state = ChatState();
@@ -664,6 +704,80 @@ void main() {
         expect(assistant.audioId, equals('voice-audio-id'));
       },
     );
+
+    testWidgets('voice message preserves audioBytes on user ChatMessage', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueVoiceStream();
+      final audioBytes = Uint8List.fromList([10, 20, 30, 40]);
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendVoiceMessage(audioBytes, 'audio/mp4'));
+      await tester.pump();
+
+      final userMsg = notifier.state.value!.messages.firstWhere(
+        (m) => m.isUser,
+      );
+      expect(
+        userMsg.audioBytes,
+        equals(audioBytes),
+        reason: 'user message should carry the recorded audio bytes',
+      );
+      expect(
+        userMsg.audioMimeType,
+        equals('audio/mp4'),
+        reason: 'user message should carry the audio MIME type',
+      );
+
+      ctrl
+        ..add(const DoneEvent(role: 'assistant', content: 'done'))
+        ..close();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('TranscriptEvent updates content but preserves audioBytes', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueVoiceStream();
+      final audioBytes = Uint8List.fromList([5, 6, 7]);
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendVoiceMessage(audioBytes, 'audio/webm'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl.add(const TranscriptEvent('Hello from voice'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl
+          ..add(const DoneEvent(role: 'assistant', content: 'response'))
+          ..close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final userMsg = notifier.state.value!.messages.firstWhere(
+        (m) => m.isUser,
+      );
+      expect(
+        userMsg.content,
+        equals('Hello from voice'),
+        reason: 'TranscriptEvent should update user message content',
+      );
+      expect(
+        userMsg.audioBytes,
+        equals(audioBytes),
+        reason: 'audioBytes must survive the TranscriptEvent copyWith',
+      );
+      expect(
+        userMsg.audioMimeType,
+        equals('audio/webm'),
+        reason: 'audioMimeType must survive the TranscriptEvent copyWith',
+      );
+    });
   });
 
   // -- tokenStream tests ------------------------------------------------------

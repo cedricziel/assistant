@@ -740,5 +740,79 @@ void main() {
       expect(find.byIcon(Icons.expand_less), findsOneWidget);
       expect(find.byIcon(Icons.expand_more), findsNothing);
     });
+
+    testWidgets(
+      'voice message with placeholder content hides transcript section',
+      (tester) async {
+        final res = await pumpChatScreen(tester);
+
+        final msg = ChatMessage(
+          id: 'voice-4',
+          role: 'user',
+          content: '🎤 Voice message',
+          audioBytes: Uint8List.fromList([0, 1, 2]),
+          audioMimeType: 'audio/webm',
+        );
+
+        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+        await tester.pump();
+
+        // Player should be present.
+        expect(find.byIcon(Icons.play_circle_filled), findsOneWidget);
+        // Transcript chevron should NOT be present — placeholder is not a
+        // real transcript.
+        expect(
+          find.byIcon(Icons.expand_more),
+          findsNothing,
+          reason: 'Placeholder content should not show transcript toggle',
+        );
+      },
+    );
+
+    testWidgets('voice message renders a Slider for progress', (tester) async {
+      final res = await pumpChatScreen(tester);
+
+      final msg = ChatMessage(
+        id: 'voice-5',
+        role: 'user',
+        content: 'Some transcript',
+        audioBytes: Uint8List.fromList([0, 1, 2]),
+        audioMimeType: 'audio/webm',
+      );
+
+      res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+      await tester.pump();
+
+      expect(
+        find.byType(Slider),
+        findsOneWidget,
+        reason: 'Voice player should have a progress slider',
+      );
+    });
+
+    testWidgets(
+      'assistant message with audioBytes does not show voice player',
+      (tester) async {
+        final res = await pumpChatScreen(tester);
+
+        // Only user messages should render the voice player.
+        final msg = ChatMessage(
+          id: 'assistant-voice',
+          role: 'assistant',
+          content: 'Response text',
+          audioBytes: Uint8List.fromList([0, 1]),
+          audioMimeType: 'audio/webm',
+        );
+
+        res.notifier.push(ChatState(conversationId: 'c1', messages: [msg]));
+        await tester.pump();
+
+        expect(
+          find.byIcon(Icons.play_circle_filled),
+          findsNothing,
+          reason: 'Assistant messages should not render inline voice player',
+        );
+      },
+    );
   });
 }
