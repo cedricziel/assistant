@@ -54,6 +54,30 @@ pub enum OrchestratorEvent {
         message: String,
     },
 
+    /// Internal reasoning / chain-of-thought produced by the LLM.
+    ///
+    /// Streamed to the client so UIs can render an expandable "Thinking…"
+    /// section in the message timeline.
+    Thinking(String),
+
+    /// A subagent process was started.
+    SubagentStarted {
+        /// Identifier of the spawned subagent.
+        agent_id: String,
+        /// The task description given to the subagent.
+        task: String,
+    },
+
+    /// A subagent process completed.
+    SubagentCompleted {
+        /// Identifier of the completed subagent.
+        agent_id: String,
+        /// `"ok"` on success, `"error"` on failure.
+        status: String,
+        /// Short summary of the subagent's result.
+        summary: String,
+    },
+
     /// A `voice-response` tool call produced synthesised audio that clients
     /// should auto-play.
     ///
@@ -65,4 +89,77 @@ pub enum OrchestratorEvent {
         /// Retrieve via `GET /api/audio/{audio_id}`.
         audio_id: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thinking_event_stores_content() {
+        let event = OrchestratorEvent::Thinking("Let me consider...".to_string());
+        match event {
+            OrchestratorEvent::Thinking(content) => {
+                assert_eq!(content, "Let me consider...");
+            }
+            _ => panic!("expected Thinking variant"),
+        }
+    }
+
+    #[test]
+    fn subagent_started_event_stores_fields() {
+        let event = OrchestratorEvent::SubagentStarted {
+            agent_id: "research-1".to_string(),
+            task: "Find weather data".to_string(),
+        };
+        match event {
+            OrchestratorEvent::SubagentStarted { agent_id, task } => {
+                assert_eq!(agent_id, "research-1");
+                assert_eq!(task, "Find weather data");
+            }
+            _ => panic!("expected SubagentStarted variant"),
+        }
+    }
+
+    #[test]
+    fn subagent_completed_event_stores_fields() {
+        let event = OrchestratorEvent::SubagentCompleted {
+            agent_id: "research-1".to_string(),
+            status: "ok".to_string(),
+            summary: "Found current conditions".to_string(),
+        };
+        match event {
+            OrchestratorEvent::SubagentCompleted {
+                agent_id,
+                status,
+                summary,
+            } => {
+                assert_eq!(agent_id, "research-1");
+                assert_eq!(status, "ok");
+                assert_eq!(summary, "Found current conditions");
+            }
+            _ => panic!("expected SubagentCompleted variant"),
+        }
+    }
+
+    #[test]
+    fn new_events_are_cloneable_and_debuggable() {
+        let events = vec![
+            OrchestratorEvent::Thinking("test".to_string()),
+            OrchestratorEvent::SubagentStarted {
+                agent_id: "a".to_string(),
+                task: "t".to_string(),
+            },
+            OrchestratorEvent::SubagentCompleted {
+                agent_id: "a".to_string(),
+                status: "ok".to_string(),
+                summary: "s".to_string(),
+            },
+        ];
+        for event in &events {
+            let cloned = event.clone();
+            let debug = format!("{:?}", cloned);
+            assert!(!debug.is_empty());
+        }
+    }
 }
