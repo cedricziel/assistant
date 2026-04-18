@@ -106,6 +106,9 @@ pub fn build_tts_provider(config: &TtsConfig) -> anyhow::Result<Arc<dyn TtsProvi
             if let Some(ref model) = config.model {
                 provider = provider.with_model(model);
             }
+            if !config.voices.is_empty() {
+                provider = provider.with_voices(config.voices.clone());
+            }
             Ok(Arc::new(provider))
         }
     }
