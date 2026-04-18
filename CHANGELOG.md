@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.116](https://github.com/cedricziel/assistant/compare/v0.1.115...v0.1.116) (2026-04-18)
+
+
+### Bug Fixes
+
+* gate PwaUpdateListener to web-only ([#502](https://github.com/cedricziel/assistant/issues/502)) ([e6287fc](https://github.com/cedricziel/assistant/commit/e6287fc268819e6ef03b62944e104cd2607ecf38)), closes [#419](https://github.com/cedricziel/assistant/issues/419)
+
 ## [0.1.115](https://github.com/cedricziel/assistant/compare/v0.1.114...v0.1.115) (2026-04-18)
 
 
