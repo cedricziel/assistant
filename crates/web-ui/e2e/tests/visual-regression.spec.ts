@@ -48,7 +48,7 @@ async function loginFlutter(page: Page) {
     () =>
       document
         .querySelector("flutter-view > flt-glass-pane")
-        ?.shadowRoot?.querySelector("flt-scene") !== null,
+        ?.shadowRoot?.querySelector("flt-scene") != null,
     { timeout: 30_000 },
   );
 
@@ -84,7 +84,7 @@ async function navigateAndSettle(page: Page, path: string) {
     () =>
       document
         .querySelector("flutter-view > flt-glass-pane")
-        ?.shadowRoot?.querySelector("flt-scene") !== null,
+        ?.shadowRoot?.querySelector("flt-scene") != null,
     { timeout: 30_000 },
   );
 
