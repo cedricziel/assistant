@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.117](https://github.com/cedricziel/assistant/compare/v0.1.116...v0.1.117) (2026-04-18)
+
+
+### Bug Fixes
+
+* **ci:** reinstall CocoaPods with correct Ruby version in iOS TestFlight job ([#518](https://github.com/cedricziel/assistant/issues/518)) ([3f7cfb3](https://github.com/cedricziel/assistant/commit/3f7cfb3914487e4084ce563214d6d20df8ce97cc))
+
 ## [0.1.116](https://github.com/cedricziel/assistant/compare/v0.1.115...v0.1.116) (2026-04-18)
 
 
