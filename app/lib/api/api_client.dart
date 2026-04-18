@@ -280,6 +280,36 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
         } catch (_) {
           // ignore malformed transcript events
         }
+      } else if (eventType == 'thinking' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield ThinkingEvent.fromJson(json);
+        } catch (_) {
+          // ignore malformed thinking events
+        }
+      } else if (eventType == 'subagent_started' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield SubagentStartedEvent.fromJson(json);
+        } catch (_) {
+          // ignore malformed subagent_started events
+        }
+      } else if (eventType == 'subagent_completed' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield SubagentCompletedEvent.fromJson(json);
+        } catch (_) {
+          // ignore malformed subagent_completed events
+        }
+      } else if (eventType == 'skill_complete' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield SkillCompleteEvent.fromJson(json);
+        } catch (_) {
+          // ignore malformed skill_complete events
+        }
+      } else if (eventType == 'agent_error' && dataLine != null) {
+        yield AgentErrorEvent(dataLine);
       } else if (eventType == 'audio_ready' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;

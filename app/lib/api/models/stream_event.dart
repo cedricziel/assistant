@@ -129,6 +129,97 @@ class TranscriptEvent extends StreamEvent {
   }
 }
 
+/// Internal reasoning / chain-of-thought produced by the LLM.
+///
+/// Corresponds to `event:thinking` in the SSE stream.  The JSON body is
+/// `{"content":"<thinking text>"}`.
+class ThinkingEvent extends StreamEvent {
+  const ThinkingEvent(this.content);
+
+  /// The reasoning text produced by the LLM.
+  final String content;
+
+  factory ThinkingEvent.fromJson(Map<String, dynamic> json) {
+    return ThinkingEvent(json['content'] as String? ?? '');
+  }
+}
+
+/// A subagent process was started.
+///
+/// Corresponds to `event:subagent_started` in the SSE stream.  The JSON body
+/// is `{"agent_id":"...","task":"..."}`.
+class SubagentStartedEvent extends StreamEvent {
+  const SubagentStartedEvent({required this.agentId, required this.task});
+
+  final String agentId;
+  final String task;
+
+  factory SubagentStartedEvent.fromJson(Map<String, dynamic> json) {
+    return SubagentStartedEvent(
+      agentId: json['agent_id'] as String? ?? '',
+      task: json['task'] as String? ?? '',
+    );
+  }
+}
+
+/// A subagent process completed.
+///
+/// Corresponds to `event:subagent_completed` in the SSE stream.  The JSON
+/// body is `{"agent_id":"...","status":"ok"|"error","summary":"..."}`.
+class SubagentCompletedEvent extends StreamEvent {
+  const SubagentCompletedEvent({
+    required this.agentId,
+    required this.status,
+    required this.summary,
+  });
+
+  final String agentId;
+  final String status;
+  final String summary;
+
+  factory SubagentCompletedEvent.fromJson(Map<String, dynamic> json) {
+    return SubagentCompletedEvent(
+      agentId: json['agent_id'] as String? ?? '',
+      status: json['status'] as String? ?? 'ok',
+      summary: json['summary'] as String? ?? '',
+    );
+  }
+}
+
+/// A skill run completed (success or failure).
+///
+/// Corresponds to `event:skill_complete` in the SSE stream.  The JSON body
+/// is `{"skill_name":"...","success":true|false,"summary":"..."}`.
+class SkillCompleteEvent extends StreamEvent {
+  const SkillCompleteEvent({
+    required this.skillName,
+    required this.success,
+    required this.summary,
+  });
+
+  final String skillName;
+  final bool success;
+  final String summary;
+
+  factory SkillCompleteEvent.fromJson(Map<String, dynamic> json) {
+    return SkillCompleteEvent(
+      skillName: json['skill_name'] as String? ?? '',
+      success: json['success'] as bool? ?? false,
+      summary: json['summary'] as String? ?? '',
+    );
+  }
+}
+
+/// The orchestrator encountered a critical error.
+///
+/// Corresponds to `event:agent_error` in the SSE stream.  The data is a
+/// plain-text error message.
+class AgentErrorEvent extends StreamEvent {
+  const AgentErrorEvent(this.message);
+
+  final String message;
+}
+
 /// The server has produced audio for the most recent assistant response.
 ///
 /// Corresponds to `event:audio_ready` in the SSE stream.  The JSON body is

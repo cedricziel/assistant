@@ -99,6 +99,83 @@ void main() {
       expect(events, isEmpty);
     });
 
+    test('emits ThinkingEvent from thinking SSE event', () async {
+      final payload = jsonEncode({'content': 'Let me consider...'});
+      final sse = 'event:thinking\ndata:$payload\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<ThinkingEvent>());
+      expect(
+        (events.first as ThinkingEvent).content,
+        equals('Let me consider...'),
+      );
+    });
+
+    test(
+      'emits SubagentStartedEvent from subagent_started SSE event',
+      () async {
+        final payload = jsonEncode({
+          'agent_id': 'research-1',
+          'task': 'Find weather data',
+        });
+        final sse = 'event:subagent_started\ndata:$payload\n\n';
+        final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+        expect(events.length, equals(1));
+        expect(events.first, isA<SubagentStartedEvent>());
+        final e = events.first as SubagentStartedEvent;
+        expect(e.agentId, equals('research-1'));
+        expect(e.task, equals('Find weather data'));
+      },
+    );
+
+    test(
+      'emits SubagentCompletedEvent from subagent_completed SSE event',
+      () async {
+        final payload = jsonEncode({
+          'agent_id': 'research-1',
+          'status': 'ok',
+          'summary': 'Found current conditions',
+        });
+        final sse = 'event:subagent_completed\ndata:$payload\n\n';
+        final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+        expect(events.length, equals(1));
+        expect(events.first, isA<SubagentCompletedEvent>());
+        final e = events.first as SubagentCompletedEvent;
+        expect(e.agentId, equals('research-1'));
+        expect(e.status, equals('ok'));
+        expect(e.summary, equals('Found current conditions'));
+      },
+    );
+
+    test('emits SkillCompleteEvent from skill_complete SSE event', () async {
+      final payload = jsonEncode({
+        'skill_name': 'web-search',
+        'success': true,
+        'summary': 'Found 3 results',
+      });
+      final sse = 'event:skill_complete\ndata:$payload\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<SkillCompleteEvent>());
+      final e = events.first as SkillCompleteEvent;
+      expect(e.skillName, equals('web-search'));
+      expect(e.success, isTrue);
+      expect(e.summary, equals('Found 3 results'));
+    });
+
+    test('emits AgentErrorEvent from agent_error SSE event', () async {
+      const sse = 'event:agent_error\ndata:LLM timeout\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<AgentErrorEvent>());
+      expect((events.first as AgentErrorEvent).message, equals('LLM timeout'));
+    });
+
     test('handles multi-chunk byte stream reassembly', () async {
       // Simulate chunked delivery: SSE event split across two byte chunks.
       final part1 = utf8.encode('event:token\n');
@@ -158,49 +235,95 @@ void main() {
       expect(event.status, equals('ok'));
     });
 
+    test('ThinkingEvent parses JSON correctly', () {
+      final event = ThinkingEvent.fromJson({'content': 'Reasoning...'});
+      expect(event.content, equals('Reasoning...'));
+    });
+
+    test('ThinkingEvent handles missing content', () {
+      final event = ThinkingEvent.fromJson({});
+      expect(event.content, equals(''));
+    });
+
+    test('SubagentStartedEvent parses JSON correctly', () {
+      final event = SubagentStartedEvent.fromJson({
+        'agent_id': 'a1',
+        'task': 'do stuff',
+      });
+      expect(event.agentId, equals('a1'));
+      expect(event.task, equals('do stuff'));
+    });
+
+    test('SubagentCompletedEvent parses JSON correctly', () {
+      final event = SubagentCompletedEvent.fromJson({
+        'agent_id': 'a1',
+        'status': 'ok',
+        'summary': 'done',
+      });
+      expect(event.agentId, equals('a1'));
+      expect(event.status, equals('ok'));
+      expect(event.summary, equals('done'));
+    });
+
+    test('SkillCompleteEvent parses JSON correctly', () {
+      final event = SkillCompleteEvent.fromJson({
+        'skill_name': 'search',
+        'success': false,
+        'summary': 'failed',
+      });
+      expect(event.skillName, equals('search'));
+      expect(event.success, isFalse);
+      expect(event.summary, equals('failed'));
+    });
+
+    test('AgentErrorEvent stores message', () {
+      const event = AgentErrorEvent('timeout');
+      expect(event.message, equals('timeout'));
+    });
+
     test('StreamEvent sealed class hierarchy', () {
-      // Verify pattern matching works correctly.
+      // Verify pattern matching works correctly with all event types.
       final events = <StreamEvent>[
         const TokenEvent('token'),
         const StatusEvent('status'),
         ToolResultEvent.fromJson({'tool_name': 'tool', 'status': 'ok'}),
         const DoneEvent(role: 'assistant', content: 'full'),
         const ErrorEvent('error'),
+        const ThinkingEvent('thinking'),
+        SubagentStartedEvent.fromJson({'agent_id': 'a', 'task': 't'}),
+        SubagentCompletedEvent.fromJson({
+          'agent_id': 'a',
+          'status': 'ok',
+          'summary': 's',
+        }),
+        SkillCompleteEvent.fromJson({
+          'skill_name': 'sk',
+          'success': true,
+          'summary': 'ok',
+        }),
+        const AgentErrorEvent('err'),
       ];
 
-      int tokenCount = 0,
-          statusCount = 0,
-          toolCount = 0,
-          doneCount = 0,
-          errorCount = 0,
-          audioReadyCount = 0;
+      int count = 0;
       for (final e in events) {
         switch (e) {
           case TokenEvent():
-            tokenCount++;
           case StatusEvent():
-            statusCount++;
           case ToolResultEvent():
-            toolCount++;
           case DoneEvent():
-            doneCount++;
           case ErrorEvent():
-            errorCount++;
+          case ThinkingEvent():
+          case SubagentStartedEvent():
+          case SubagentCompletedEvent():
+          case SkillCompleteEvent():
+          case AgentErrorEvent():
           case AudioReadyEvent():
-            audioReadyCount++;
           case TranscriptEvent():
-            break;
           case RunStartedEvent():
-            break; // not counted in this test
+            count++;
         }
       }
-
-      expect(tokenCount, equals(1));
-      expect(statusCount, equals(1));
-      expect(toolCount, equals(1));
-      expect(doneCount, equals(1));
-      expect(errorCount, equals(1));
-      expect(audioReadyCount, equals(0));
+      expect(count, equals(events.length));
     });
   });
 }
