@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.120](https://github.com/cedricziel/assistant/compare/v0.1.119...v0.1.120) (2026-04-18)
+
+
+### Bug Fixes
+
+* **ci:** configure manual code signing for iOS archive in CI ([#528](https://github.com/cedricziel/assistant/issues/528)) ([c1cfe76](https://github.com/cedricziel/assistant/commit/c1cfe766774955c56374a15596462521d8181042))
+* **web-ui:** vendor swagger-ui assets to avoid CI download failures ([#527](https://github.com/cedricziel/assistant/issues/527)) ([205c125](https://github.com/cedricziel/assistant/commit/205c125b0ec04194009e85678ff0d34bc8cb590d))
+
 ## [0.1.119](https://github.com/cedricziel/assistant/compare/v0.1.118...v0.1.119) (2026-04-18)
 
 
