@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.115](https://github.com/cedricziel/assistant/compare/v0.1.114...v0.1.115) (2026-04-18)
+
+
+### Features
+
+* **chat:** render user voice messages as mini audio player ([#514](https://github.com/cedricziel/assistant/issues/514)) ([7f506cd](https://github.com/cedricziel/assistant/commit/7f506cdaaf21c36388c6c3522e4a104f8303356d))
+* **fastlane:** iOS release automation setup ([#418](https://github.com/cedricziel/assistant/issues/418)) ([43085a8](https://github.com/cedricziel/assistant/commit/43085a80db62c2c737e40750feb2c28476e7329b))
+* **tts:** auto-detect language for Deepgram TTS voice selection ([#515](https://github.com/cedricziel/assistant/issues/515)) ([3c54e07](https://github.com/cedricziel/assistant/commit/3c54e07b9dc35291c07e2e34c6390d7917fc1e80))
+
+
+### Bug Fixes
+
+* **chat:** fix inline image 401 by watching auth profile reactively ([#512](https://github.com/cedricziel/assistant/issues/512)) ([4196b80](https://github.com/cedricziel/assistant/commit/4196b80b7a95efdae62f096a180832a85ab9e1dd))
+* **transcription:** use valid Deepgram TTS model name aura-2-thalia-en ([#507](https://github.com/cedricziel/assistant/issues/507)) ([c7f8f78](https://github.com/cedricziel/assistant/commit/c7f8f7840c92d2b3bd962059d021f596154873bf))
+* **workflow:** await task handle after abort to fix flaky test ([#516](https://github.com/cedricziel/assistant/issues/516)) ([46236de](https://github.com/cedricziel/assistant/commit/46236deb1f27688f061be2427bdc11970300aef2))
+
 ## [0.1.114](https://github.com/cedricziel/assistant/compare/v0.1.113...v0.1.114) (2026-04-18)
 
 
