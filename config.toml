@@ -226,6 +226,38 @@ trace_enabled = true
 # heartbeat_path = "~/.assistant/agents/default/HEARTBEAT.md"
 # boot_path = "~/.assistant/agents/default/BOOT.md"
 
+# ── Transcription (speech-to-text) ────────────────────────────────────────────
+# Providers: "whisper" (OpenAI), "ollama" (local), "deepgram"
+# API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY
+#
+# [transcription]
+# provider = "whisper"
+# model    = "whisper-1"                # provider-specific default if omitted
+# # api_key = "sk-..."                 # or set OPENAI_API_KEY env var
+# # base_url = "https://api.openai.com/v1"
+# # language = "en"                    # optional BCP-47 language hint
+
+# ── Text-to-speech (TTS) ─────────────────────────────────────────────────────
+# Providers: "openai", "deepgram"
+# API keys fall back to env vars: OPENAI_API_KEY, DEEPGRAM_API_KEY
+#
+# [tts]
+# provider = "deepgram"
+# model    = "aura-2-thalia-en"         # provider-specific default if omitted
+# # voice  = "nova"                    # voice name (OpenAI); ignored by Deepgram auto-detect
+# # api_key = "sk-..."                 # or set DEEPGRAM_API_KEY / OPENAI_API_KEY env var
+# # base_url = "https://api.deepgram.com/v1"
+#
+# Per-language voice overrides (Deepgram only).
+# When no explicit voice is set, Deepgram auto-detects the language of each
+# TTS request and selects a matching Aura 2 voice.  Override defaults here:
+#
+# [tts.voices]
+# en = "aura-2-thalia-en"              # English  (default)
+# de = "aura-2-julius-de"              # German   (default)
+# es = "aura-2-lucia-es"               # Spanish  (default)
+# fr = "aura-2-chloe-fr"              # French   (default)
+
 [signal]
 # Signal interface settings — requires a running signal-cli-rest-api daemon.
 # See: https://github.com/bbernhard/signal-cli-rest-api

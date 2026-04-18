@@ -22,7 +22,7 @@
 
 - [x] Parse optional `[tts.voices]` table from `config.toml` in server startup code
 - [x] Pass voice map to `DeepgramTtsProvider::new().with_voices(map)` during initialization
-- [ ] Update `config.toml` documentation / example with `[tts.voices]` section
+- [x] Update `config.toml` documentation / example with `[tts.voices]` section
 - [x] Verify backwards compatibility: existing configs without `[tts.voices]` use defaults
 
 ### Phase 4: Client error handling
