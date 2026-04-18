@@ -8,7 +8,7 @@ use tracing::debug;
 use crate::provider::{TtsProvider, TtsRequest, TtsResult};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
-const DEFAULT_MODEL: &str = "aura-2-en-us";
+const DEFAULT_MODEL: &str = "aura-2-thalia-en";
 
 pub struct DeepgramTtsProvider {
     api_key: String,
