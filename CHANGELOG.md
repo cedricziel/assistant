@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.118](https://github.com/cedricziel/assistant/compare/v0.1.117...v0.1.118) (2026-04-18)
+
+
+### Bug Fixes
+
+* **ci:** add cocoapods to Gemfile for iOS TestFlight builds ([#521](https://github.com/cedricziel/assistant/issues/521)) ([3c0132e](https://github.com/cedricziel/assistant/commit/3c0132e9d5425c08303b7dd2c1f1625f9c03775c))
+
 ## [0.1.117](https://github.com/cedricziel/assistant/compare/v0.1.116...v0.1.117) (2026-04-18)
 
 
