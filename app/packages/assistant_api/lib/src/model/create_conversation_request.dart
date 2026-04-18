@@ -13,25 +13,34 @@ part 'create_conversation_request.g.dart';
 /// Properties:
 /// * [title] - Optional title for the new conversation.
 @BuiltValue()
-abstract class CreateConversationRequest implements Built<CreateConversationRequest, CreateConversationRequestBuilder> {
+abstract class CreateConversationRequest
+    implements
+        Built<CreateConversationRequest, CreateConversationRequestBuilder> {
   /// Optional title for the new conversation.
   @BuiltValueField(wireName: r'title')
   String? get title;
 
   CreateConversationRequest._();
 
-  factory CreateConversationRequest([void updates(CreateConversationRequestBuilder b)]) = _$CreateConversationRequest;
+  factory CreateConversationRequest(
+          [void updates(CreateConversationRequestBuilder b)]) =
+      _$CreateConversationRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(CreateConversationRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<CreateConversationRequest> get serializer => _$CreateConversationRequestSerializer();
+  static Serializer<CreateConversationRequest> get serializer =>
+      _$CreateConversationRequestSerializer();
 }
 
-class _$CreateConversationRequestSerializer implements PrimitiveSerializer<CreateConversationRequest> {
+class _$CreateConversationRequestSerializer
+    implements PrimitiveSerializer<CreateConversationRequest> {
   @override
-  final Iterable<Type> types = const [CreateConversationRequest, _$CreateConversationRequest];
+  final Iterable<Type> types = const [
+    CreateConversationRequest,
+    _$CreateConversationRequest
+  ];
 
   @override
   final String wireName = r'CreateConversationRequest';
@@ -56,7 +65,9 @@ class _$CreateConversationRequestSerializer implements PrimitiveSerializer<Creat
     CreateConversationRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -107,4 +118,3 @@ class _$CreateConversationRequestSerializer implements PrimitiveSerializer<Creat
     return result.build();
   }
 }
-

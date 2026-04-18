@@ -13,25 +13,32 @@ part 'analytics_query_params.g.dart';
 /// Properties:
 /// * [window] - Window in hours. Valid values: 1, 6, 24, 72, 168. Defaults to 24.
 @BuiltValue()
-abstract class AnalyticsQueryParams implements Built<AnalyticsQueryParams, AnalyticsQueryParamsBuilder> {
+abstract class AnalyticsQueryParams
+    implements Built<AnalyticsQueryParams, AnalyticsQueryParamsBuilder> {
   /// Window in hours. Valid values: 1, 6, 24, 72, 168. Defaults to 24.
   @BuiltValueField(wireName: r'window')
   int? get window;
 
   AnalyticsQueryParams._();
 
-  factory AnalyticsQueryParams([void updates(AnalyticsQueryParamsBuilder b)]) = _$AnalyticsQueryParams;
+  factory AnalyticsQueryParams([void updates(AnalyticsQueryParamsBuilder b)]) =
+      _$AnalyticsQueryParams;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AnalyticsQueryParamsBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AnalyticsQueryParams> get serializer => _$AnalyticsQueryParamsSerializer();
+  static Serializer<AnalyticsQueryParams> get serializer =>
+      _$AnalyticsQueryParamsSerializer();
 }
 
-class _$AnalyticsQueryParamsSerializer implements PrimitiveSerializer<AnalyticsQueryParams> {
+class _$AnalyticsQueryParamsSerializer
+    implements PrimitiveSerializer<AnalyticsQueryParams> {
   @override
-  final Iterable<Type> types = const [AnalyticsQueryParams, _$AnalyticsQueryParams];
+  final Iterable<Type> types = const [
+    AnalyticsQueryParams,
+    _$AnalyticsQueryParams
+  ];
 
   @override
   final String wireName = r'AnalyticsQueryParams';
@@ -56,7 +63,9 @@ class _$AnalyticsQueryParamsSerializer implements PrimitiveSerializer<AnalyticsQ
     AnalyticsQueryParams object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -107,4 +116,3 @@ class _$AnalyticsQueryParamsSerializer implements PrimitiveSerializer<AnalyticsQ
     return result.build();
   }
 }
-

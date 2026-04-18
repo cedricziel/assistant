@@ -29,8 +29,7 @@ void main() {
       test('returns a non-zero port', () async {
         // _findFreePort is private; test the underlying mechanism directly by
         // verifying a ServerSocket can bind to port 0 and return a usable port.
-        final socket =
-            await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
         final port = socket.port;
         await socket.close();
 

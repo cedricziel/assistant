@@ -13,25 +13,34 @@ part 'get_extended_agent_card_request.g.dart';
 /// Properties:
 /// * [tenant] - Optional tenant ID.
 @BuiltValue()
-abstract class GetExtendedAgentCardRequest implements Built<GetExtendedAgentCardRequest, GetExtendedAgentCardRequestBuilder> {
+abstract class GetExtendedAgentCardRequest
+    implements
+        Built<GetExtendedAgentCardRequest, GetExtendedAgentCardRequestBuilder> {
   /// Optional tenant ID.
   @BuiltValueField(wireName: r'tenant')
   String? get tenant;
 
   GetExtendedAgentCardRequest._();
 
-  factory GetExtendedAgentCardRequest([void updates(GetExtendedAgentCardRequestBuilder b)]) = _$GetExtendedAgentCardRequest;
+  factory GetExtendedAgentCardRequest(
+          [void updates(GetExtendedAgentCardRequestBuilder b)]) =
+      _$GetExtendedAgentCardRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(GetExtendedAgentCardRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<GetExtendedAgentCardRequest> get serializer => _$GetExtendedAgentCardRequestSerializer();
+  static Serializer<GetExtendedAgentCardRequest> get serializer =>
+      _$GetExtendedAgentCardRequestSerializer();
 }
 
-class _$GetExtendedAgentCardRequestSerializer implements PrimitiveSerializer<GetExtendedAgentCardRequest> {
+class _$GetExtendedAgentCardRequestSerializer
+    implements PrimitiveSerializer<GetExtendedAgentCardRequest> {
   @override
-  final Iterable<Type> types = const [GetExtendedAgentCardRequest, _$GetExtendedAgentCardRequest];
+  final Iterable<Type> types = const [
+    GetExtendedAgentCardRequest,
+    _$GetExtendedAgentCardRequest
+  ];
 
   @override
   final String wireName = r'GetExtendedAgentCardRequest';
@@ -56,7 +65,9 @@ class _$GetExtendedAgentCardRequestSerializer implements PrimitiveSerializer<Get
     GetExtendedAgentCardRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -107,4 +118,3 @@ class _$GetExtendedAgentCardRequestSerializer implements PrimitiveSerializer<Get
     return result.build();
   }
 }
-

@@ -11,26 +11,34 @@ part 'set_active_persona_request.g.dart';
 /// Body for `POST /api/personas/active`.
 ///
 /// Properties:
-/// * [id] 
+/// * [id]
 @BuiltValue()
-abstract class SetActivePersonaRequest implements Built<SetActivePersonaRequest, SetActivePersonaRequestBuilder> {
+abstract class SetActivePersonaRequest
+    implements Built<SetActivePersonaRequest, SetActivePersonaRequestBuilder> {
   @BuiltValueField(wireName: r'id')
   String get id;
 
   SetActivePersonaRequest._();
 
-  factory SetActivePersonaRequest([void updates(SetActivePersonaRequestBuilder b)]) = _$SetActivePersonaRequest;
+  factory SetActivePersonaRequest(
+          [void updates(SetActivePersonaRequestBuilder b)]) =
+      _$SetActivePersonaRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SetActivePersonaRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SetActivePersonaRequest> get serializer => _$SetActivePersonaRequestSerializer();
+  static Serializer<SetActivePersonaRequest> get serializer =>
+      _$SetActivePersonaRequestSerializer();
 }
 
-class _$SetActivePersonaRequestSerializer implements PrimitiveSerializer<SetActivePersonaRequest> {
+class _$SetActivePersonaRequestSerializer
+    implements PrimitiveSerializer<SetActivePersonaRequest> {
   @override
-  final Iterable<Type> types = const [SetActivePersonaRequest, _$SetActivePersonaRequest];
+  final Iterable<Type> types = const [
+    SetActivePersonaRequest,
+    _$SetActivePersonaRequest
+  ];
 
   @override
   final String wireName = r'SetActivePersonaRequest';
@@ -53,7 +61,9 @@ class _$SetActivePersonaRequestSerializer implements PrimitiveSerializer<SetActi
     SetActivePersonaRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -103,4 +113,3 @@ class _$SetActivePersonaRequestSerializer implements PrimitiveSerializer<SetActi
     return result.build();
   }
 }
-

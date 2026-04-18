@@ -28,15 +28,13 @@ class TraceDetailScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
-          onRetry: () =>
-              ref.invalidate(traceDetailProvider(traceId)),
+          onRetry: () => ref.invalidate(traceDetailProvider(traceId)),
         ),
         data: (state) {
           if (state.error != null) {
             return _ErrorView(
               error: state.error!,
-              onRetry: () =>
-                  ref.invalidate(traceDetailProvider(traceId)),
+              onRetry: () => ref.invalidate(traceDetailProvider(traceId)),
             );
           }
           final detail = state.detail;
@@ -78,8 +76,9 @@ class _TraceDetailBody extends StatelessWidget {
                   children: [
                     Text(
                       'Trace',
-                      style: theme.textTheme.labelLarge
-                          ?.copyWith(color: theme.colorScheme.primary),
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: theme.colorScheme.primary,
+                      ),
                     ),
                     const Spacer(),
                     Text(
@@ -105,10 +104,7 @@ class _TraceDetailBody extends StatelessWidget {
                   label: 'Started',
                   value: _formatTimestamp(detail.startTime),
                 ),
-                _InfoRow(
-                  label: 'Spans',
-                  value: '${spans.length}',
-                ),
+                _InfoRow(label: 'Spans', value: '${spans.length}'),
               ],
             ),
           ),
@@ -116,10 +112,7 @@ class _TraceDetailBody extends StatelessWidget {
 
         const SizedBox(height: 16),
 
-        Text(
-          'Spans',
-          style: theme.textTheme.titleMedium,
-        ),
+        Text('Spans', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
 
         if (spans.isEmpty)
@@ -133,9 +126,7 @@ class _TraceDetailBody extends StatelessWidget {
             ),
           )
         else
-          ...spans.map(
-            (span) => _SpanCard(span: span, totalMs: totalMs),
-          ),
+          ...spans.map((span) => _SpanCard(span: span, totalMs: totalMs)),
       ],
     );
   }
@@ -260,36 +251,36 @@ class _SpanCardState extends State<_SpanCard> {
                 const Divider(height: 1),
                 const SizedBox(height: 8),
                 ...attrs.entries.map(
-                      (e) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: 160,
-                              child: Text(
-                                '${e.key}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.black54,
-                                  fontFamily: 'monospace',
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                  (e) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 160,
+                          child: Text(
+                            '${e.key}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.black54,
+                              fontFamily: 'monospace',
                             ),
-                            Expanded(
-                              child: Text(
-                                '${e.value}',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontFamily: 'monospace',
-                                ),
-                              ),
-                            ),
-                          ],
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
+                        Expanded(
+                          child: Text(
+                            '${e.value}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+                ),
               ],
             ],
           ),

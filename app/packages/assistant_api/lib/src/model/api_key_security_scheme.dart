@@ -15,7 +15,8 @@ part 'api_key_security_scheme.g.dart';
 /// * [location] - The location of the API key: \"query\", \"header\", or \"cookie\".
 /// * [name] - The name of the header, query, or cookie parameter to be used.
 @BuiltValue()
-abstract class ApiKeySecurityScheme implements Built<ApiKeySecurityScheme, ApiKeySecuritySchemeBuilder> {
+abstract class ApiKeySecurityScheme
+    implements Built<ApiKeySecurityScheme, ApiKeySecuritySchemeBuilder> {
   /// An optional description for the security scheme.
   @BuiltValueField(wireName: r'description')
   String? get description;
@@ -30,18 +31,24 @@ abstract class ApiKeySecurityScheme implements Built<ApiKeySecurityScheme, ApiKe
 
   ApiKeySecurityScheme._();
 
-  factory ApiKeySecurityScheme([void updates(ApiKeySecuritySchemeBuilder b)]) = _$ApiKeySecurityScheme;
+  factory ApiKeySecurityScheme([void updates(ApiKeySecuritySchemeBuilder b)]) =
+      _$ApiKeySecurityScheme;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ApiKeySecuritySchemeBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ApiKeySecurityScheme> get serializer => _$ApiKeySecuritySchemeSerializer();
+  static Serializer<ApiKeySecurityScheme> get serializer =>
+      _$ApiKeySecuritySchemeSerializer();
 }
 
-class _$ApiKeySecuritySchemeSerializer implements PrimitiveSerializer<ApiKeySecurityScheme> {
+class _$ApiKeySecuritySchemeSerializer
+    implements PrimitiveSerializer<ApiKeySecurityScheme> {
   @override
-  final Iterable<Type> types = const [ApiKeySecurityScheme, _$ApiKeySecurityScheme];
+  final Iterable<Type> types = const [
+    ApiKeySecurityScheme,
+    _$ApiKeySecurityScheme
+  ];
 
   @override
   final String wireName = r'ApiKeySecurityScheme';
@@ -76,7 +83,9 @@ class _$ApiKeySecuritySchemeSerializer implements PrimitiveSerializer<ApiKeySecu
     ApiKeySecurityScheme object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -141,4 +150,3 @@ class _$ApiKeySecuritySchemeSerializer implements PrimitiveSerializer<ApiKeySecu
     return result.build();
   }
 }
-

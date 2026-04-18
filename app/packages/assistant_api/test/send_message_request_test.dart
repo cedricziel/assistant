@@ -30,6 +30,5 @@ void main() {
     test('to test the property `tenant`', () async {
       // TODO
     });
-
   });
 }

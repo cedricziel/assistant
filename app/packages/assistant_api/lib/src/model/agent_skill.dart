@@ -118,7 +118,8 @@ class _$AgentSkillSerializer implements PrimitiveSerializer<AgentSkill> {
       yield r'securityRequirements';
       yield serializers.serialize(
         object.securityRequirements,
-        specifiedType: const FullType(BuiltList, [FullType(SecurityRequirement)]),
+        specifiedType:
+            const FullType(BuiltList, [FullType(SecurityRequirement)]),
       );
     }
     yield r'tags';
@@ -134,7 +135,9 @@ class _$AgentSkillSerializer implements PrimitiveSerializer<AgentSkill> {
     AgentSkill object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -194,7 +197,8 @@ class _$AgentSkillSerializer implements PrimitiveSerializer<AgentSkill> {
         case r'securityRequirements':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(SecurityRequirement)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(SecurityRequirement)]),
           ) as BuiltList<SecurityRequirement>;
           result.securityRequirements.replace(valueDes);
           break;
@@ -233,4 +237,3 @@ class _$AgentSkillSerializer implements PrimitiveSerializer<AgentSkill> {
     return result.build();
   }
 }
-

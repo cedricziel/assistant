@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for PersonasApi
 void main() {
   final instance = AssistantApi().getPersonasApi();
@@ -20,6 +19,5 @@ void main() {
     test('test setActivePersona', () async {
       // TODO
     });
-
   });
 }

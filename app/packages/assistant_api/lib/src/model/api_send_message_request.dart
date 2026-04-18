@@ -15,7 +15,8 @@ part 'api_send_message_request.g.dart';
 /// * [attachmentIds] - Optional attachment IDs to include with this message.
 /// * [message] - The message text to send to the assistant.
 @BuiltValue()
-abstract class ApiSendMessageRequest implements Built<ApiSendMessageRequest, ApiSendMessageRequestBuilder> {
+abstract class ApiSendMessageRequest
+    implements Built<ApiSendMessageRequest, ApiSendMessageRequestBuilder> {
   /// Optional attachment IDs to include with this message.
   @BuiltValueField(wireName: r'attachment_ids')
   BuiltList<String>? get attachmentIds;
@@ -26,18 +27,24 @@ abstract class ApiSendMessageRequest implements Built<ApiSendMessageRequest, Api
 
   ApiSendMessageRequest._();
 
-  factory ApiSendMessageRequest([void updates(ApiSendMessageRequestBuilder b)]) = _$ApiSendMessageRequest;
+  factory ApiSendMessageRequest(
+      [void updates(ApiSendMessageRequestBuilder b)]) = _$ApiSendMessageRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ApiSendMessageRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ApiSendMessageRequest> get serializer => _$ApiSendMessageRequestSerializer();
+  static Serializer<ApiSendMessageRequest> get serializer =>
+      _$ApiSendMessageRequestSerializer();
 }
 
-class _$ApiSendMessageRequestSerializer implements PrimitiveSerializer<ApiSendMessageRequest> {
+class _$ApiSendMessageRequestSerializer
+    implements PrimitiveSerializer<ApiSendMessageRequest> {
   @override
-  final Iterable<Type> types = const [ApiSendMessageRequest, _$ApiSendMessageRequest];
+  final Iterable<Type> types = const [
+    ApiSendMessageRequest,
+    _$ApiSendMessageRequest
+  ];
 
   @override
   final String wireName = r'ApiSendMessageRequest';
@@ -67,7 +74,9 @@ class _$ApiSendMessageRequestSerializer implements PrimitiveSerializer<ApiSendMe
     ApiSendMessageRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -124,4 +133,3 @@ class _$ApiSendMessageRequestSerializer implements PrimitiveSerializer<ApiSendMe
     return result.build();
   }
 }
-

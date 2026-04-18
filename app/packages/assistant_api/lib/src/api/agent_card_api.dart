@@ -11,7 +11,6 @@ import 'package:dio/dio.dart';
 import 'package:assistant_api/src/model/agent_card.dart';
 
 class AgentCardApi {
-
   final Dio _dio;
 
   final Serializers _serializers;
@@ -19,7 +18,7 @@ class AgentCardApi {
   const AgentCardApi(this._dio, this._serializers);
 
   /// &#x60;GET /.well-known/agent.json&#x60; -- Returns the public agent card.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -31,7 +30,7 @@ class AgentCardApi {
   ///
   /// Returns a [Future] containing a [Response] with a [AgentCard] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<AgentCard>> getAgentCardWellKnown({ 
+  Future<Response<AgentCard>> getAgentCardWellKnown({
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -64,11 +63,12 @@ class AgentCardApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(AgentCard),
-      ) as AgentCard;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(AgentCard),
+            ) as AgentCard;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -92,7 +92,7 @@ class AgentCardApi {
   }
 
   /// &#x60;GET /agent/authenticatedExtendedCard&#x60; -- Returns the extended agent card (same as public for now).
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -104,7 +104,7 @@ class AgentCardApi {
   ///
   /// Returns a [Future] containing a [Response] with a [AgentCard] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<AgentCard>> getExtendedAgentCard({ 
+  Future<Response<AgentCard>> getExtendedAgentCard({
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -143,11 +143,12 @@ class AgentCardApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(AgentCard),
-      ) as AgentCard;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(AgentCard),
+            ) as AgentCard;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -169,5 +170,4 @@ class AgentCardApi {
       extra: _response.extra,
     );
   }
-
 }

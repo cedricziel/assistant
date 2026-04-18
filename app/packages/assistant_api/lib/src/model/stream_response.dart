@@ -20,7 +20,8 @@ part 'stream_response.g.dart';
 /// * [statusUpdate] - An event indicating a task status update.
 /// * [task] - A Task object containing the current state of the task.
 @BuiltValue()
-abstract class StreamResponse implements Built<StreamResponse, StreamResponseBuilder> {
+abstract class StreamResponse
+    implements Built<StreamResponse, StreamResponseBuilder> {
   /// An event indicating a task artifact update.
   @BuiltValueField(wireName: r'artifactUpdate')
   TaskArtifactUpdateEvent? get artifactUpdate;
@@ -39,16 +40,19 @@ abstract class StreamResponse implements Built<StreamResponse, StreamResponseBui
 
   StreamResponse._();
 
-  factory StreamResponse([void updates(StreamResponseBuilder b)]) = _$StreamResponse;
+  factory StreamResponse([void updates(StreamResponseBuilder b)]) =
+      _$StreamResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(StreamResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<StreamResponse> get serializer => _$StreamResponseSerializer();
+  static Serializer<StreamResponse> get serializer =>
+      _$StreamResponseSerializer();
 }
 
-class _$StreamResponseSerializer implements PrimitiveSerializer<StreamResponse> {
+class _$StreamResponseSerializer
+    implements PrimitiveSerializer<StreamResponse> {
   @override
   final Iterable<Type> types = const [StreamResponse, _$StreamResponse];
 
@@ -96,7 +100,9 @@ class _$StreamResponseSerializer implements PrimitiveSerializer<StreamResponse> 
     StreamResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -171,4 +177,3 @@ class _$StreamResponseSerializer implements PrimitiveSerializer<StreamResponse> 
     return result.build();
   }
 }
-

@@ -27,9 +27,9 @@ class ConversationList extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(
             'Conversations',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
           ),
         ),
 
@@ -39,10 +39,10 @@ class ConversationList extends ConsumerWidget {
           child: OutlinedButton.icon(
             key: const Key('new_chat_button'),
             onPressed: () async {
-              final notifier =
-                  ref.read(conversationListProvider.notifier);
-              final created =
-                  await notifier.createConversation(title: 'New Chat');
+              final notifier = ref.read(conversationListProvider.notifier);
+              final created = await notifier.createConversation(
+                title: 'New Chat',
+              );
               if (created != null) {
                 ref.read(chatProvider.notifier).clearConversation();
                 if (context.mounted) {

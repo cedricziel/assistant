@@ -80,20 +80,20 @@ class _RunDetailBody extends StatelessWidget {
     final statusColor = isSuccess
         ? Colors.green.shade600
         : isError
-            ? Colors.red.shade600
-            : Colors.orange.shade600;
+        ? Colors.red.shade600
+        : Colors.orange.shade600;
 
     final statusBg = isSuccess
         ? Colors.green.shade50
         : isError
-            ? Colors.red.shade50
-            : Colors.orange.shade50;
+        ? Colors.red.shade50
+        : Colors.orange.shade50;
 
     final statusBorder = isSuccess
         ? Colors.green.shade300
         : isError
-            ? Colors.red.shade300
-            : Colors.orange.shade300;
+        ? Colors.red.shade300
+        : Colors.orange.shade300;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -197,10 +197,7 @@ class _RunDetailBody extends StatelessWidget {
 
         const SizedBox(height: 16),
 
-        Text(
-          'Execution Steps',
-          style: theme.textTheme.titleMedium,
-        ),
+        Text('Execution Steps', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
 
         if (steps.isEmpty)
@@ -215,11 +212,11 @@ class _RunDetailBody extends StatelessWidget {
           )
         else
           ...steps.asMap().entries.map(
-                (entry) => _StepTile(
-                  step: entry.value,
-                  isLast: entry.key == steps.length - 1,
-                ),
-              ),
+            (entry) => _StepTile(
+              step: entry.value,
+              isLast: entry.key == steps.length - 1,
+            ),
+          ),
       ],
     );
   }
@@ -297,15 +294,14 @@ class _StepTileState extends State<_StepTile> {
                     shape: BoxShape.circle,
                     border: Border.all(color: kindColor, width: 1.5),
                   ),
-                  child: Icon(_kindIcon(step.nodeKind), size: 14, color: kindColor),
+                  child: Icon(
+                    _kindIcon(step.nodeKind),
+                    size: 14,
+                    color: kindColor,
+                  ),
                 ),
                 if (!widget.isLast)
-                  Expanded(
-                    child: Container(
-                      width: 2,
-                      color: Colors.black12,
-                    ),
-                  ),
+                  Expanded(child: Container(width: 2, color: Colors.black12)),
               ],
             ),
           ),

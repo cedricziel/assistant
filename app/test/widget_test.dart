@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:assistant_app/main.dart';
 
 void main() {
-  testWidgets('App smoke test — renders without crash', (WidgetTester tester) async {
+  testWidgets('App smoke test — renders without crash', (
+    WidgetTester tester,
+  ) async {
     // Wrap in ProviderScope (same as production main.dart).
     await tester.pumpWidget(const ProviderScope(child: AssistantApp()));
     // Allow async providers to settle.

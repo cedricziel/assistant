@@ -14,7 +14,8 @@ part 'subscribe_to_task_request.g.dart';
 /// * [id] - The resource ID of the task to subscribe to.
 /// * [tenant] - Optional tenant ID.
 @BuiltValue()
-abstract class SubscribeToTaskRequest implements Built<SubscribeToTaskRequest, SubscribeToTaskRequestBuilder> {
+abstract class SubscribeToTaskRequest
+    implements Built<SubscribeToTaskRequest, SubscribeToTaskRequestBuilder> {
   /// The resource ID of the task to subscribe to.
   @BuiltValueField(wireName: r'id')
   String get id;
@@ -25,18 +26,25 @@ abstract class SubscribeToTaskRequest implements Built<SubscribeToTaskRequest, S
 
   SubscribeToTaskRequest._();
 
-  factory SubscribeToTaskRequest([void updates(SubscribeToTaskRequestBuilder b)]) = _$SubscribeToTaskRequest;
+  factory SubscribeToTaskRequest(
+          [void updates(SubscribeToTaskRequestBuilder b)]) =
+      _$SubscribeToTaskRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SubscribeToTaskRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SubscribeToTaskRequest> get serializer => _$SubscribeToTaskRequestSerializer();
+  static Serializer<SubscribeToTaskRequest> get serializer =>
+      _$SubscribeToTaskRequestSerializer();
 }
 
-class _$SubscribeToTaskRequestSerializer implements PrimitiveSerializer<SubscribeToTaskRequest> {
+class _$SubscribeToTaskRequestSerializer
+    implements PrimitiveSerializer<SubscribeToTaskRequest> {
   @override
-  final Iterable<Type> types = const [SubscribeToTaskRequest, _$SubscribeToTaskRequest];
+  final Iterable<Type> types = const [
+    SubscribeToTaskRequest,
+    _$SubscribeToTaskRequest
+  ];
 
   @override
   final String wireName = r'SubscribeToTaskRequest';
@@ -66,7 +74,9 @@ class _$SubscribeToTaskRequestSerializer implements PrimitiveSerializer<Subscrib
     SubscribeToTaskRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -124,4 +134,3 @@ class _$SubscribeToTaskRequestSerializer implements PrimitiveSerializer<Subscrib
     return result.build();
   }
 }
-

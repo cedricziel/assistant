@@ -161,7 +161,8 @@ class _SkillCreateEditScreenState extends ConsumerState<SkillCreateEditScreen> {
               decoration: InputDecoration(
                 labelText: 'Skill name',
                 hintText: 'e.g. my-custom-skill',
-                helperText: 'Lowercase letters, digits, hyphens and underscores',
+                helperText:
+                    'Lowercase letters, digits, hyphens and underscores',
                 border: const OutlineInputBorder(),
                 filled: widget.isEdit,
                 fillColor: widget.isEdit ? Colors.grey.shade100 : null,
@@ -189,8 +190,9 @@ class _SkillCreateEditScreenState extends ConsumerState<SkillCreateEditScreen> {
                 border: OutlineInputBorder(),
                 alignLabelWithHint: true,
               ),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Description is required' : null,
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'Description is required'
+                  : null,
             ),
             const SizedBox(height: 16),
 

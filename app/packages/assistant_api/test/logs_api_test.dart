@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for LogsApi
 void main() {
   final instance = AssistantApi().getLogsApi();
@@ -13,6 +12,5 @@ void main() {
     test('test listLogs', () async {
       // TODO
     });
-
   });
 }

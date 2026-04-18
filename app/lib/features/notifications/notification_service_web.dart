@@ -61,16 +61,10 @@ Future<Map<String, dynamic>?> subscribeToWebPush(String vapidPublicKey) async {
     //    conversion needed.
     final json = sub.toJSON();
     final keys = json.keys;
-    final p256dh =
-        (keys.getProperty('p256dh'.toJS) as JSString).toDart;
-    final auth =
-        (keys.getProperty('auth'.toJS) as JSString).toDart;
+    final p256dh = (keys.getProperty('p256dh'.toJS) as JSString).toDart;
+    final auth = (keys.getProperty('auth'.toJS) as JSString).toDart;
 
-    return {
-      'endpoint': sub.endpoint,
-      'p256dh': p256dh,
-      'auth': auth,
-    };
+    return {'endpoint': sub.endpoint, 'p256dh': p256dh, 'auth': auth};
   } catch (e) {
     debugPrint('[web_push] subscribeToWebPush failed: $e');
     return null;

@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for TasksApi
 void main() {
   final instance = AssistantApi().getTasksApi();
@@ -34,6 +33,5 @@ void main() {
     test('test subscribeToTask', () async {
       // TODO
     });
-
   });
 }

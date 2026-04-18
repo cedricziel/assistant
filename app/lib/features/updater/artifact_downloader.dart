@@ -40,7 +40,9 @@ class ArtifactDownloader {
     // Enforce HTTPS on the download URL.
     final downloadUri = Uri.parse(asset.browserDownloadUrl);
     if (downloadUri.scheme != 'https') {
-      throw Exception('Refusing to download over non-HTTPS URL: ${downloadUri.scheme}');
+      throw Exception(
+        'Refusing to download over non-HTTPS URL: ${downloadUri.scheme}',
+      );
     }
 
     // 3. Download the artifact.
@@ -82,9 +84,7 @@ class ArtifactDownloader {
       );
     }
     if (Platform.isLinux) {
-      return assets.firstWhereOrNull(
-        (a) => a.name.endsWith('.AppImage'),
-      );
+      return assets.firstWhereOrNull((a) => a.name.endsWith('.AppImage'));
     }
     if (Platform.isWindows) {
       return assets.firstWhereOrNull(
@@ -97,10 +97,10 @@ class ArtifactDownloader {
   /// Downloads and parses the `checksums.sha256` release asset.
   ///
   /// Returns a map of `filename → sha256hex`, or [null] when absent.
-  Future<Map<String, String>?> _fetchChecksums(List<ReleaseAsset> assets) async {
-    final asset = assets.firstWhereOrNull(
-      (a) => a.name == 'checksums.sha256',
-    );
+  Future<Map<String, String>?> _fetchChecksums(
+    List<ReleaseAsset> assets,
+  ) async {
+    final asset = assets.firstWhereOrNull((a) => a.name == 'checksums.sha256');
     if (asset == null) return null;
     try {
       final checksumUri = Uri.parse(asset.browserDownloadUrl);

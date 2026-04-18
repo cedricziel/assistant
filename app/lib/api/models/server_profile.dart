@@ -31,11 +31,8 @@ class ServerProfile {
 
   // -- Serialisation for flutter_secure_storage -------------------------------
 
-  String toJson() => jsonEncode({
-        'baseUrl': baseUrl,
-        'token': token,
-        'label': label,
-      });
+  String toJson() =>
+      jsonEncode({'baseUrl': baseUrl, 'token': token, 'label': label});
 
   factory ServerProfile.fromJson(String source) {
     final map = jsonDecode(source) as Map<String, dynamic>;

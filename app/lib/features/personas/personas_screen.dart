@@ -62,12 +62,12 @@ class _PersonasScreenState extends ConsumerState<PersonasScreen> {
           final filtered = _query.isEmpty
               ? state.personas
               : state.personas
-                  .where(
-                    (p) =>
-                        p.name.toLowerCase().contains(_query) ||
-                        p.id.toLowerCase().contains(_query),
-                  )
-                  .toList();
+                    .where(
+                      (p) =>
+                          p.name.toLowerCase().contains(_query) ||
+                          p.id.toLowerCase().contains(_query),
+                    )
+                    .toList();
 
           return Column(
             children: [
@@ -138,8 +138,7 @@ class _PersonaRow extends StatelessWidget {
       ),
       trailing: persona.isDefault
           ? Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: BorderRadius.circular(12),

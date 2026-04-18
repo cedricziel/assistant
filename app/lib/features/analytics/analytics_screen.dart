@@ -93,23 +93,25 @@ class _AnalyticsBody extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.bar_chart_outlined,
-                    size: 64,
-                    color: Theme.of(context).colorScheme.outlineVariant),
+                Icon(
+                  Icons.bar_chart_outlined,
+                  size: 64,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
                 const SizedBox(height: 12),
                 Text(
                   'No analytics data',
                   style: TextStyle(
-                      fontSize: 16,
-                      color:
-                          Theme.of(context).colorScheme.onSurfaceVariant),
+                    fontSize: 16,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Use the assistant to generate analytics.',
                   style: TextStyle(
-                      color:
-                          Theme.of(context).colorScheme.onSurfaceVariant),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -129,10 +131,7 @@ class _AnalyticsBody extends ConsumerWidget {
           const SizedBox(height: 16),
 
           // Tool usage.
-          Text(
-            'Tool Usage',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('Tool Usage', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           _ToolTable(summary: summary),
         ],
@@ -180,8 +179,7 @@ class _SummaryCards extends StatelessWidget {
           label: 'Errors',
           value: summary.errorCount.toString(),
           icon: Icons.error_outline,
-          valueColor:
-              summary.errorCount > 0 ? Colors.red.shade700 : null,
+          valueColor: summary.errorCount > 0 ? Colors.red.shade700 : null,
         ),
         _StatCard(
           label: 'Avg Duration',
@@ -219,7 +217,11 @@ class _StatCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            Icon(
+              icon,
+              size: 20,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -269,29 +271,33 @@ class _ModelTable extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-        columnSpacing: 16,
-        columns: const [
-          DataColumn(label: Text('Model')),
-          DataColumn(label: Text('Requests'), numeric: true),
-          DataColumn(label: Text('Tokens In'), numeric: true),
-          DataColumn(label: Text('Tokens Out'), numeric: true),
-        ],
-        rows: summary.models
-            .map(
-              (m) => DataRow(cells: [
-                DataCell(Text(
-                  m.model,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                  ),
-                )),
-                DataCell(Text(m.requestCount.toString())),
-                DataCell(Text(m.inputTokens.toString())),
-                DataCell(Text(m.outputTokens.toString())),
-              ]),
-            )
-            .toList(),
+          columnSpacing: 16,
+          columns: const [
+            DataColumn(label: Text('Model')),
+            DataColumn(label: Text('Requests'), numeric: true),
+            DataColumn(label: Text('Tokens In'), numeric: true),
+            DataColumn(label: Text('Tokens Out'), numeric: true),
+          ],
+          rows: summary.models
+              .map(
+                (m) => DataRow(
+                  cells: [
+                    DataCell(
+                      Text(
+                        m.model,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                    DataCell(Text(m.requestCount.toString())),
+                    DataCell(Text(m.inputTokens.toString())),
+                    DataCell(Text(m.outputTokens.toString())),
+                  ],
+                ),
+              )
+              .toList(),
         ),
       ),
     );
@@ -316,25 +322,29 @@ class _ToolTable extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-        columnSpacing: 16,
-        columns: const [
-          DataColumn(label: Text('Tool')),
-          DataColumn(label: Text('Count'), numeric: true),
-        ],
-        rows: summary.tools
-            .map(
-              (t) => DataRow(cells: [
-                DataCell(Text(
-                  t.toolName,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                  ),
-                )),
-                DataCell(Text(t.invocations.toString())),
-              ]),
-            )
-            .toList(),
+          columnSpacing: 16,
+          columns: const [
+            DataColumn(label: Text('Tool')),
+            DataColumn(label: Text('Count'), numeric: true),
+          ],
+          rows: summary.tools
+              .map(
+                (t) => DataRow(
+                  cells: [
+                    DataCell(
+                      Text(
+                        t.toolName,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                    DataCell(Text(t.invocations.toString())),
+                  ],
+                ),
+              )
+              .toList(),
         ),
       ),
     );

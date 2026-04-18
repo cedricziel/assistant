@@ -13,25 +13,32 @@ part 'stream_run_events_query.g.dart';
 /// Properties:
 /// * [since] - Replay from this sequence number (inclusive). Defaults to 0.
 @BuiltValue()
-abstract class StreamRunEventsQuery implements Built<StreamRunEventsQuery, StreamRunEventsQueryBuilder> {
+abstract class StreamRunEventsQuery
+    implements Built<StreamRunEventsQuery, StreamRunEventsQueryBuilder> {
   /// Replay from this sequence number (inclusive). Defaults to 0.
   @BuiltValueField(wireName: r'since')
   int? get since;
 
   StreamRunEventsQuery._();
 
-  factory StreamRunEventsQuery([void updates(StreamRunEventsQueryBuilder b)]) = _$StreamRunEventsQuery;
+  factory StreamRunEventsQuery([void updates(StreamRunEventsQueryBuilder b)]) =
+      _$StreamRunEventsQuery;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(StreamRunEventsQueryBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<StreamRunEventsQuery> get serializer => _$StreamRunEventsQuerySerializer();
+  static Serializer<StreamRunEventsQuery> get serializer =>
+      _$StreamRunEventsQuerySerializer();
 }
 
-class _$StreamRunEventsQuerySerializer implements PrimitiveSerializer<StreamRunEventsQuery> {
+class _$StreamRunEventsQuerySerializer
+    implements PrimitiveSerializer<StreamRunEventsQuery> {
   @override
-  final Iterable<Type> types = const [StreamRunEventsQuery, _$StreamRunEventsQuery];
+  final Iterable<Type> types = const [
+    StreamRunEventsQuery,
+    _$StreamRunEventsQuery
+  ];
 
   @override
   final String wireName = r'StreamRunEventsQuery';
@@ -56,7 +63,9 @@ class _$StreamRunEventsQuerySerializer implements PrimitiveSerializer<StreamRunE
     StreamRunEventsQuery object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -107,4 +116,3 @@ class _$StreamRunEventsQuerySerializer implements PrimitiveSerializer<StreamRunE
     return result.build();
   }
 }
-

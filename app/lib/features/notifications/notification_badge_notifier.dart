@@ -35,5 +35,5 @@ class NotificationBadgeNotifier extends Notifier<int> {
 
 final notificationBadgeProvider =
     NotifierProvider<NotificationBadgeNotifier, int>(
-  NotificationBadgeNotifier.new,
-);
+      NotificationBadgeNotifier.new,
+    );

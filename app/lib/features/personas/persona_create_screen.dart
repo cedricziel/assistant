@@ -95,106 +95,109 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Material(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.warning_amber_outlined,
-                            color: Colors.red.shade700,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _error!,
-                              style: TextStyle(color: Colors.red.shade700),
+          padding: const EdgeInsets.all(24),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Material(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.warning_amber_outlined,
+                              color: Colors.red.shade700,
+                              size: 18,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _error!,
+                                style: TextStyle(color: Colors.red.shade700),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              TextFormField(
-                controller: _idController,
-                focusNode: _idFocus,
-                decoration: const InputDecoration(
-                  labelText: 'ID',
-                  hintText: 'e.g. my-persona',
-                  helperText: 'Lowercase letters, numbers, hyphens, underscores.',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) {
-                    return 'ID is required';
-                  }
-                  if (!RegExp(r'^[a-z0-9_-]+$').hasMatch(v.trim())) {
-                    return 'Only lowercase letters, numbers, hyphens, underscores';
-                  }
-                  return null;
-                },
-                enabled: !_submitting,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                  hintText: 'Display name',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) {
-                    return 'Name is required';
-                  }
-                  return null;
-                },
-                enabled: !_submitting,
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _submitting ? null : () => context.go('/personas'),
-                      child: const Text('Cancel'),
-                    ),
+                TextFormField(
+                  controller: _idController,
+                  focusNode: _idFocus,
+                  decoration: const InputDecoration(
+                    labelText: 'ID',
+                    hintText: 'e.g. my-persona',
+                    helperText:
+                        'Lowercase letters, numbers, hyphens, underscores.',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _submitting ? null : _submit,
-                      child: _submitting
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Create Persona'),
-                    ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return 'ID is required';
+                    }
+                    if (!RegExp(r'^[a-z0-9_-]+$').hasMatch(v.trim())) {
+                      return 'Only lowercase letters, numbers, hyphens, underscores';
+                    }
+                    return null;
+                  },
+                  enabled: !_submitting,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Name',
+                    hintText: 'Display name',
+                    border: OutlineInputBorder(),
                   ),
-                ],
-              ),
-            ],
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Name is required';
+                    }
+                    return null;
+                  },
+                  enabled: !_submitting,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _submitting
+                            ? null
+                            : () => context.go('/personas'),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _submitting ? null : _submit,
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Create Persona'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-        ),  // SafeArea
+        ), // SafeArea
       ),
     );
   }

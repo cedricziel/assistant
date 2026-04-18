@@ -16,7 +16,6 @@ import 'package:assistant_api/src/model/update_skill_request.dart';
 import 'package:built_collection/built_collection.dart';
 
 class SkillsApi {
-
   final Dio _dio;
 
   final Serializers _serializers;
@@ -24,10 +23,10 @@ class SkillsApi {
   const SkillsApi(this._dio, this._serializers);
 
   /// &#x60;POST /api/skills&#x60; — create a new user skill.
-  /// 
+  ///
   ///
   /// Parameters:
-  /// * [createSkillRequest] 
+  /// * [createSkillRequest]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -37,7 +36,7 @@ class SkillsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [SkillDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<SkillDetail>> createSkill({ 
+  Future<Response<SkillDetail>> createSkill({
     required CreateSkillRequest createSkillRequest,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -70,11 +69,11 @@ class SkillsApi {
 
     try {
       const _type = FullType(CreateSkillRequest);
-      _bodyData = _serializers.serialize(createSkillRequest, specifiedType: _type);
-
-    } catch(error, stackTrace) {
+      _bodyData =
+          _serializers.serialize(createSkillRequest, specifiedType: _type);
+    } catch (error, stackTrace) {
       throw DioException(
-         requestOptions: _options.compose(
+        requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -97,11 +96,12 @@ class SkillsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(SkillDetail),
-      ) as SkillDetail;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(SkillDetail),
+            ) as SkillDetail;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -125,7 +125,7 @@ class SkillsApi {
   }
 
   /// &#x60;DELETE /api/skills/{name}&#x60; — delete a user skill.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [name] - Skill name
@@ -138,7 +138,7 @@ class SkillsApi {
   ///
   /// Returns a [Future]
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<void>> deleteSkill({ 
+  Future<Response<void>> deleteSkill({
     required String name,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -147,7 +147,10 @@ class SkillsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/skills/{name}'.replaceAll('{' r'name' '}', encodeQueryParameter(_serializers, name, const FullType(String)).toString());
+    final _path = r'/api/skills/{name}'.replaceAll(
+        '{' r'name' '}',
+        encodeQueryParameter(_serializers, name, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
@@ -178,7 +181,7 @@ class SkillsApi {
   }
 
   /// &#x60;GET /api/skills/{name}&#x60; — get a skill by name.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [name] - Skill name
@@ -191,7 +194,7 @@ class SkillsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [SkillDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<SkillDetail>> getSkill({ 
+  Future<Response<SkillDetail>> getSkill({
     required String name,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -200,7 +203,10 @@ class SkillsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/skills/{name}'.replaceAll('{' r'name' '}', encodeQueryParameter(_serializers, name, const FullType(String)).toString());
+    final _path = r'/api/skills/{name}'.replaceAll(
+        '{' r'name' '}',
+        encodeQueryParameter(_serializers, name, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -231,11 +237,12 @@ class SkillsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(SkillDetail),
-      ) as SkillDetail;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(SkillDetail),
+            ) as SkillDetail;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -259,7 +266,7 @@ class SkillsApi {
   }
 
   /// &#x60;GET /api/personas/{persona_id}/skills&#x60; — list skills for a persona.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [personaId] - Persona ID
@@ -272,7 +279,7 @@ class SkillsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<SkillEntryResponse>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<SkillEntryResponse>>> listPersonaSkills({ 
+  Future<Response<BuiltList<SkillEntryResponse>>> listPersonaSkills({
     required String personaId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -281,7 +288,10 @@ class SkillsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/personas/{persona_id}/skills'.replaceAll('{' r'persona_id' '}', encodeQueryParameter(_serializers, personaId, const FullType(String)).toString());
+    final _path = r'/api/personas/{persona_id}/skills'.replaceAll(
+        '{' r'persona_id' '}',
+        encodeQueryParameter(_serializers, personaId, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -312,11 +322,13 @@ class SkillsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(BuiltList, [FullType(SkillEntryResponse)]),
-      ) as BuiltList<SkillEntryResponse>;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType:
+                  const FullType(BuiltList, [FullType(SkillEntryResponse)]),
+            ) as BuiltList<SkillEntryResponse>;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -340,7 +352,7 @@ class SkillsApi {
   }
 
   /// &#x60;GET /api/skills&#x60; — list all skills.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -352,7 +364,7 @@ class SkillsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<SkillDetail>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<SkillDetail>>> listSkills({ 
+  Future<Response<BuiltList<SkillDetail>>> listSkills({
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -391,11 +403,12 @@ class SkillsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(BuiltList, [FullType(SkillDetail)]),
-      ) as BuiltList<SkillDetail>;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(BuiltList, [FullType(SkillDetail)]),
+            ) as BuiltList<SkillDetail>;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -419,11 +432,11 @@ class SkillsApi {
   }
 
   /// &#x60;PUT /api/skills/{name}&#x60; — update a user skill.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [name] - Skill name
-  /// * [updateSkillRequest] 
+  /// * [updateSkillRequest]
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -433,7 +446,7 @@ class SkillsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [SkillDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<SkillDetail>> updateSkill({ 
+  Future<Response<SkillDetail>> updateSkill({
     required String name,
     required UpdateSkillRequest updateSkillRequest,
     CancelToken? cancelToken,
@@ -443,7 +456,10 @@ class SkillsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/skills/{name}'.replaceAll('{' r'name' '}', encodeQueryParameter(_serializers, name, const FullType(String)).toString());
+    final _path = r'/api/skills/{name}'.replaceAll(
+        '{' r'name' '}',
+        encodeQueryParameter(_serializers, name, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'PUT',
       headers: <String, dynamic>{
@@ -467,11 +483,11 @@ class SkillsApi {
 
     try {
       const _type = FullType(UpdateSkillRequest);
-      _bodyData = _serializers.serialize(updateSkillRequest, specifiedType: _type);
-
-    } catch(error, stackTrace) {
+      _bodyData =
+          _serializers.serialize(updateSkillRequest, specifiedType: _type);
+    } catch (error, stackTrace) {
       throw DioException(
-         requestOptions: _options.compose(
+        requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -494,11 +510,12 @@ class SkillsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(SkillDetail),
-      ) as SkillDetail;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(SkillDetail),
+            ) as SkillDetail;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -520,5 +537,4 @@ class SkillsApi {
       extra: _response.extra,
     );
   }
-
 }

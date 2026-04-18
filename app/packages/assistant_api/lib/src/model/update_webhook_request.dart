@@ -12,12 +12,13 @@ part 'update_webhook_request.g.dart';
 /// Body for `PATCH /api/webhooks/{id}`.
 ///
 /// Properties:
-/// * [active] 
-/// * [eventTypes] 
-/// * [name] 
-/// * [url] 
+/// * [active]
+/// * [eventTypes]
+/// * [name]
+/// * [url]
 @BuiltValue()
-abstract class UpdateWebhookRequest implements Built<UpdateWebhookRequest, UpdateWebhookRequestBuilder> {
+abstract class UpdateWebhookRequest
+    implements Built<UpdateWebhookRequest, UpdateWebhookRequestBuilder> {
   @BuiltValueField(wireName: r'active')
   bool? get active;
 
@@ -32,18 +33,24 @@ abstract class UpdateWebhookRequest implements Built<UpdateWebhookRequest, Updat
 
   UpdateWebhookRequest._();
 
-  factory UpdateWebhookRequest([void updates(UpdateWebhookRequestBuilder b)]) = _$UpdateWebhookRequest;
+  factory UpdateWebhookRequest([void updates(UpdateWebhookRequestBuilder b)]) =
+      _$UpdateWebhookRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(UpdateWebhookRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<UpdateWebhookRequest> get serializer => _$UpdateWebhookRequestSerializer();
+  static Serializer<UpdateWebhookRequest> get serializer =>
+      _$UpdateWebhookRequestSerializer();
 }
 
-class _$UpdateWebhookRequestSerializer implements PrimitiveSerializer<UpdateWebhookRequest> {
+class _$UpdateWebhookRequestSerializer
+    implements PrimitiveSerializer<UpdateWebhookRequest> {
   @override
-  final Iterable<Type> types = const [UpdateWebhookRequest, _$UpdateWebhookRequest];
+  final Iterable<Type> types = const [
+    UpdateWebhookRequest,
+    _$UpdateWebhookRequest
+  ];
 
   @override
   final String wireName = r'UpdateWebhookRequest';
@@ -89,7 +96,9 @@ class _$UpdateWebhookRequestSerializer implements PrimitiveSerializer<UpdateWebh
     UpdateWebhookRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -115,7 +124,8 @@ class _$UpdateWebhookRequestSerializer implements PrimitiveSerializer<UpdateWebh
         case r'event_types':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltList, [FullType(String)]),
+            specifiedType:
+                const FullType.nullable(BuiltList, [FullType(String)]),
           ) as BuiltList<String>?;
           if (valueDes == null) continue;
           result.eventTypes.replace(valueDes);
@@ -164,4 +174,3 @@ class _$UpdateWebhookRequestSerializer implements PrimitiveSerializer<UpdateWebh
     return result.build();
   }
 }
-

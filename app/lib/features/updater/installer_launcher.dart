@@ -27,13 +27,17 @@ abstract final class InstallerLauncher {
     if (filename.endsWith('.dmg')) {
       final result = await Process.run('open', [path]);
       if (result.exitCode != 0) {
-        throw Exception('Failed to open DMG (exit ${result.exitCode}): ${result.stderr}');
+        throw Exception(
+          'Failed to open DMG (exit ${result.exitCode}): ${result.stderr}',
+        );
       }
     } else if (filename.endsWith('.zip')) {
       final dir = File(path).parent.path;
       final unzipResult = await Process.run('unzip', ['-o', path, '-d', dir]);
       if (unzipResult.exitCode != 0) {
-        throw Exception('Failed to extract ZIP (exit ${unzipResult.exitCode}): ${unzipResult.stderr}');
+        throw Exception(
+          'Failed to extract ZIP (exit ${unzipResult.exitCode}): ${unzipResult.stderr}',
+        );
       }
       // Find the extracted .app bundle.
       Directory? appBundle;
@@ -48,7 +52,9 @@ abstract final class InstallerLauncher {
       }
       final openResult = await Process.run('open', [appBundle.path]);
       if (openResult.exitCode != 0) {
-        throw Exception('Failed to open .app bundle (exit ${openResult.exitCode}): ${openResult.stderr}');
+        throw Exception(
+          'Failed to open .app bundle (exit ${openResult.exitCode}): ${openResult.stderr}',
+        );
       }
     }
   }
@@ -58,7 +64,9 @@ abstract final class InstallerLauncher {
   static Future<void> _launchLinux(String path) async {
     final chmodResult = await Process.run('chmod', ['+x', path]);
     if (chmodResult.exitCode != 0) {
-      throw Exception('chmod +x failed (exit ${chmodResult.exitCode}): ${chmodResult.stderr}');
+      throw Exception(
+        'chmod +x failed (exit ${chmodResult.exitCode}): ${chmodResult.stderr}',
+      );
     }
     await Process.start(path, [], mode: ProcessStartMode.detached);
   }
@@ -68,7 +76,9 @@ abstract final class InstallerLauncher {
   static Future<void> _launchWindows(String path) async {
     final result = await Process.run(path, []);
     if (result.exitCode != 0) {
-      throw Exception('Installer exited with code ${result.exitCode}: ${result.stderr}');
+      throw Exception(
+        'Installer exited with code ${result.exitCode}: ${result.stderr}',
+      );
     }
   }
 }

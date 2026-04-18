@@ -18,9 +18,7 @@ class WebhookDetailScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          detailAsync.value?.webhook?.name ?? 'Webhook',
-        ),
+        title: Text(detailAsync.value?.webhook?.name ?? 'Webhook'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/webhooks'),
@@ -124,8 +122,11 @@ class _WebhookDetailBody extends StatelessWidget {
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
-                    Icon(Icons.check_circle_outline,
-                        color: Colors.green.shade700, size: 18),
+                    Icon(
+                      Icons.check_circle_outline,
+                      color: Colors.green.shade700,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       actionMessage!,
@@ -154,7 +155,9 @@ class _WebhookDetailBody extends StatelessWidget {
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: webhook.active
                             ? Colors.green.shade50
@@ -201,13 +204,11 @@ class _WebhookDetailBody extends StatelessWidget {
         const SizedBox(height: 16),
 
         // Actions.
-        Text(
-          'Actions',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
+        Text('Actions', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         Tooltip(
-          message: 'Sends a test ping to your endpoint to confirm it responds correctly.',
+          message:
+              'Sends a test ping to your endpoint to confirm it responds correctly.',
           child: OutlinedButton.icon(
             onPressed: onVerify,
             icon: const Icon(Icons.verified_outlined),
@@ -250,12 +251,7 @@ class _InfoRow extends StatelessWidget {
             ),
           ),
         ),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(fontSize: 12),
-          ),
-        ),
+        Expanded(child: Text(value, style: const TextStyle(fontSize: 12))),
       ],
     );
   }

@@ -11,12 +11,13 @@ part 'conversation_summary.g.dart';
 /// A conversation summary (no messages).
 ///
 /// Properties:
-/// * [createdAt] 
-/// * [id] 
-/// * [title] 
-/// * [updatedAt] 
+/// * [createdAt]
+/// * [id]
+/// * [title]
+/// * [updatedAt]
 @BuiltValue()
-abstract class ConversationSummary implements Built<ConversationSummary, ConversationSummaryBuilder> {
+abstract class ConversationSummary
+    implements Built<ConversationSummary, ConversationSummaryBuilder> {
   @BuiltValueField(wireName: r'created_at')
   DateTime get createdAt;
 
@@ -31,18 +32,24 @@ abstract class ConversationSummary implements Built<ConversationSummary, Convers
 
   ConversationSummary._();
 
-  factory ConversationSummary([void updates(ConversationSummaryBuilder b)]) = _$ConversationSummary;
+  factory ConversationSummary([void updates(ConversationSummaryBuilder b)]) =
+      _$ConversationSummary;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ConversationSummaryBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ConversationSummary> get serializer => _$ConversationSummarySerializer();
+  static Serializer<ConversationSummary> get serializer =>
+      _$ConversationSummarySerializer();
 }
 
-class _$ConversationSummarySerializer implements PrimitiveSerializer<ConversationSummary> {
+class _$ConversationSummarySerializer
+    implements PrimitiveSerializer<ConversationSummary> {
   @override
-  final Iterable<Type> types = const [ConversationSummary, _$ConversationSummary];
+  final Iterable<Type> types = const [
+    ConversationSummary,
+    _$ConversationSummary
+  ];
 
   @override
   final String wireName = r'ConversationSummary';
@@ -80,7 +87,9 @@ class _$ConversationSummarySerializer implements PrimitiveSerializer<Conversatio
     ConversationSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -151,4 +160,3 @@ class _$ConversationSummarySerializer implements PrimitiveSerializer<Conversatio
     return result.build();
   }
 }
-

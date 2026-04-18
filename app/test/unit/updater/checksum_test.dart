@@ -31,7 +31,8 @@ void main() {
 
     test('mismatched checksum fails verification', () async {
       final bytes = await artifact.readAsBytes();
-      const wrong = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+      const wrong =
+          'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
       final checksumMap = {'artifact.bin': wrong};
 
       final expected = checksumMap['artifact.bin'];

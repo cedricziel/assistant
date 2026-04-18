@@ -46,8 +46,11 @@ class _WithBanner extends ConsumerWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                Icon(Icons.system_update_alt,
-                    size: 20, color: colorScheme.onPrimaryContainer),
+                Icon(
+                  Icons.system_update_alt,
+                  size: 20,
+                  color: colorScheme.onPrimaryContainer,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -64,8 +67,9 @@ class _WithBanner extends ConsumerWidget {
                         info.shortReleaseNotes,
                         style: TextStyle(
                           fontSize: 12,
-                          color: colorScheme.onPrimaryContainer
-                              .withValues(alpha: 0.8),
+                          color: colorScheme.onPrimaryContainer.withValues(
+                            alpha: 0.8,
+                          ),
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -199,15 +203,15 @@ class _ProgressDialogState extends State<_ProgressDialog> {
       if (e.type == DioExceptionType.cancel) return; // User cancelled — silent.
       if (!mounted) return;
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Download failed: ${e.message}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Download failed: ${e.message}')));
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Update failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update failed: $e')));
     }
   }
 

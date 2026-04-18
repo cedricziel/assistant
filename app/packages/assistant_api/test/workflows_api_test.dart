@@ -1,7 +1,6 @@
 import 'package:test/test.dart';
 import 'package:assistant_api/assistant_api.dart';
 
-
 /// tests for WorkflowsApi
 void main() {
   final instance = AssistantApi().getWorkflowsApi();
@@ -83,6 +82,5 @@ void main() {
     test('test updateWorkflow', () async {
       // TODO
     });
-
   });
 }

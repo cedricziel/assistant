@@ -18,9 +18,7 @@ class PersonaDetailScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          detailAsync.value?.detail?.name ?? 'Persona',
-        ),
+        title: Text(detailAsync.value?.detail?.name ?? 'Persona'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/personas'),
@@ -91,9 +89,7 @@ class _PersonaDetailBody extends StatelessWidget {
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .primaryContainer,
+                          color: Theme.of(context).colorScheme.primaryContainer,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -101,9 +97,9 @@ class _PersonaDetailBody extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onPrimaryContainer,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onPrimaryContainer,
                           ),
                         ),
                       ),
@@ -128,16 +124,10 @@ class _PersonaDetailBody extends StatelessWidget {
         const SizedBox(height: 16),
 
         // File slots.
-        Text(
-          'File Slots',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
+        Text('File Slots', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         ...detail.files.map(
-          (slot) => _FileSlotTile(
-            slot: slot,
-            personaId: detail.id,
-          ),
+          (slot) => _FileSlotTile(slot: slot, personaId: detail.id),
         ),
       ],
     );
@@ -195,8 +185,7 @@ class _FileSlotTile extends StatelessWidget {
           color: slot.exists ? Colors.green.shade50 : Colors.amber.shade50,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color:
-                slot.exists ? Colors.green.shade300 : Colors.amber.shade400,
+            color: slot.exists ? Colors.green.shade300 : Colors.amber.shade400,
           ),
         ),
         child: Text(
@@ -204,9 +193,7 @@ class _FileSlotTile extends StatelessWidget {
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.w600,
-            color: slot.exists
-                ? Colors.green.shade700
-                : Colors.amber.shade800,
+            color: slot.exists ? Colors.green.shade700 : Colors.amber.shade800,
           ),
         ),
       ),
@@ -236,16 +223,11 @@ class _FileSlotTile extends StatelessWidget {
                 ),
               ),
             if (slot.description.isNotEmpty)
-              Text(
-                slot.description,
-                style: const TextStyle(fontSize: 12),
-              ),
+              Text(slot.description, style: const TextStyle(fontSize: 12)),
           ],
         ),
         trailing: badge,
-        onTap: () => context.go(
-          '/personas/$personaId/files/${slot.filename}',
-        ),
+        onTap: () => context.go('/personas/$personaId/files/${slot.filename}'),
       ),
     );
   }
