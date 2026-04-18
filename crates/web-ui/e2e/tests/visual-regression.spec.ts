@@ -18,8 +18,11 @@ const MAX_DIFF_RATIO = 0.05;
 // Flutter SPA renders differently across runs — use a more generous ratio.
 const MAX_DIFF_RATIO_FLUTTER = 0.15;
 
-// Settle time for CSS transitions before screenshotting.
-const CSS_SETTLE_MS = 300;
+// Settle time after flt-scene appears and routing resolves.
+// The Flutter widget tree renders asynchronously on the canvas after the
+// engine creates the scene container — 1.5 s covers widget build + API
+// fetch cycles on CI where the CanvasKit WASM cold-start is slower.
+const FLUTTER_SETTLE_MS = 1_500;
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -61,7 +64,7 @@ async function loginFlutter(page: Page) {
 
   // Let any post-login API calls finish.
   await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(CSS_SETTLE_MS);
+  await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
 /**
@@ -98,7 +101,7 @@ async function navigateAndSettle(page: Page, path: string) {
   await page.waitForLoadState("networkidle");
 
   // Short settle for CSS transitions / final Flutter paint.
-  await page.waitForTimeout(CSS_SETTLE_MS);
+  await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
 // -- API helpers ------------------------------------------------------------
