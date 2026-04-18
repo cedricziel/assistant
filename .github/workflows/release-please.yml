@@ -350,7 +350,7 @@ jobs:
 
   release-ios-testflight:
     name: Build & Upload iOS to TestFlight
-    runs-on: macos-latest
+    runs-on: macos-26
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
 
