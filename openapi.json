@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.1.120"
+    "version": "0.1.122"
   },
   "servers": [
     {
@@ -513,6 +513,35 @@
         ]
       }
     },
+    "/api/commands": {
+      "get": {
+        "tags": [
+          "commands"
+        ],
+        "summary": "`GET /api/commands` — list all registered commands.",
+        "operationId": "list_commands",
+        "responses": {
+          "200": {
+            "description": "List of available commands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommandDefResponse"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations": {
       "get": {
         "tags": [
@@ -788,6 +817,101 @@
           },
           "404": {
             "description": "Conversation not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{id}/command": {
+      "post": {
+        "tags": [
+          "commands"
+        ],
+        "summary": "`POST /api/conversations/{id}/command` — execute a slash command.",
+        "operationId": "execute_command",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteCommandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Command executed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandEventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown command"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/conversations/{id}/events": {
+      "get": {
+        "tags": [
+          "commands"
+        ],
+        "summary": "`GET /api/conversations/{id}/events` — list command events for the timeline.",
+        "operationId": "list_conversation_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of command events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommandEventResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID"
           }
         },
         "security": [
@@ -4401,6 +4525,102 @@
           }
         }
       },
+      "CommandArgResponse": {
+        "type": "object",
+        "description": "A command argument definition for the autocomplete UI.",
+        "required": [
+          "name",
+          "required"
+        ],
+        "properties": {
+          "completions_endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional API endpoint that returns completions for this argument."
+          },
+          "name": {
+            "type": "string",
+            "description": "Argument name shown in autocomplete."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether this argument is required."
+          }
+        }
+      },
+      "CommandDefResponse": {
+        "type": "object",
+        "description": "A command definition for the autocomplete UI.",
+        "required": [
+          "name",
+          "description",
+          "category",
+          "args"
+        ],
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommandArgResponse"
+            },
+            "description": "Argument definitions."
+          },
+          "category": {
+            "type": "string",
+            "description": "Grouping category (e.g. `\"session\"`, `\"config\"`, `\"debug\"`)."
+          },
+          "description": {
+            "type": "string",
+            "description": "One-line description."
+          },
+          "name": {
+            "type": "string",
+            "description": "Command name without the leading `/`."
+          }
+        }
+      },
+      "CommandEventResponse": {
+        "type": "object",
+        "description": "Response body for a command event.",
+        "required": [
+          "id",
+          "event_type",
+          "command",
+          "created_at"
+        ],
+        "properties": {
+          "ack_text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Acknowledgement text returned by the command."
+          },
+          "command": {
+            "type": "string",
+            "description": "Command that was executed."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the event was created."
+          },
+          "event_type": {
+            "type": "string",
+            "description": "Event type (always `\"command\"` for now)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique event ID."
+          },
+          "payload": {
+            "description": "Optional payload associated with the command."
+          }
+        }
+      },
       "ConversationDetail": {
         "type": "object",
         "description": "A conversation with its full message history.",
@@ -4599,6 +4819,26 @@
           "tokenUrl": {
             "type": "string",
             "description": "The token URL."
+          }
+        }
+      },
+      "ExecuteCommandRequest": {
+        "type": "object",
+        "description": "Request body for `POST /api/conversations/{id}/command`.",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional command arguments."
+          },
+          "command": {
+            "type": "string",
+            "description": "Command name without the leading `/` (e.g. `\"model\"`)."
           }
         }
       },
@@ -6569,6 +6809,10 @@
     {
       "name": "capabilities",
       "description": "Server capabilities — query which optional features (voice, TTS) are enabled"
+    },
+    {
+      "name": "commands",
+      "description": "Slash commands — list, execute, and view command events for conversations"
     },
     {
       "name": "conversations",

@@ -34,6 +34,9 @@ import 'package:assistant_api/src/model/authentication_info.dart';
 import 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/cancel_task_request.dart';
 import 'package:assistant_api/src/model/client_credentials_o_auth_flow.dart';
+import 'package:assistant_api/src/model/command_arg_response.dart';
+import 'package:assistant_api/src/model/command_def_response.dart';
+import 'package:assistant_api/src/model/command_event_response.dart';
 import 'package:assistant_api/src/model/conversation_detail.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
 import 'package:assistant_api/src/model/create_conversation_request.dart';
@@ -42,6 +45,7 @@ import 'package:assistant_api/src/model/create_skill_request.dart';
 import 'package:assistant_api/src/model/create_task_push_notification_config_request.dart';
 import 'package:assistant_api/src/model/create_webhook_request.dart';
 import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
+import 'package:assistant_api/src/model/execute_command_request.dart';
 import 'package:assistant_api/src/model/http_auth_security_scheme.dart';
 import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
@@ -134,6 +138,9 @@ part 'serializers.g.dart';
   AuthorizationCodeOAuthFlow,
   CancelTaskRequest,
   ClientCredentialsOAuthFlow,
+  CommandArgResponse,
+  CommandDefResponse,
+  CommandEventResponse,
   ConversationDetail,
   ConversationSummary,
   CreateConversationRequest,
@@ -142,6 +149,7 @@ part 'serializers.g.dart';
   CreateTaskPushNotificationConfigRequest,
   CreateWebhookRequest,
   DeviceCodeOAuthFlow,
+  ExecuteCommandRequest,
   HttpAuthSecurityScheme,
   ImplicitOAuthFlow,
   ListTaskPushNotificationConfigsResponse,
@@ -217,8 +225,20 @@ Serializers serializers = (_$serializers.toBuilder()
         () => ListBuilder<ConversationSummary>(),
       )
       ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(CommandEventResponse)]),
+        () => ListBuilder<CommandEventResponse>(),
+      )
+      ..addBuilderFactory(
         const FullType(BuiltList, [FullType(WorkflowSummary)]),
         () => ListBuilder<WorkflowSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(LogEntryResponse)]),
+        () => ListBuilder<LogEntryResponse>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(SkillDetail)]),
+        () => ListBuilder<SkillDetail>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(PersonaSummary)]),
@@ -233,8 +253,8 @@ Serializers serializers = (_$serializers.toBuilder()
         () => ListBuilder<int>(),
       )
       ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(LogEntryResponse)]),
-        () => ListBuilder<LogEntryResponse>(),
+        const FullType(BuiltList, [FullType(CommandDefResponse)]),
+        () => ListBuilder<CommandDefResponse>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(WorkflowRunSummary)]),
@@ -243,10 +263,6 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(AgentSummary)]),
         () => ListBuilder<AgentSummary>(),
-      )
-      ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(SkillDetail)]),
-        () => ListBuilder<SkillDetail>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(WebhookResponse)]),

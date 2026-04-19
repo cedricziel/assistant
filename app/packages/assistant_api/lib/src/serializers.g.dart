@@ -27,6 +27,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(AuthorizationCodeOAuthFlow.serializer)
       ..add(CancelTaskRequest.serializer)
       ..add(ClientCredentialsOAuthFlow.serializer)
+      ..add(CommandArgResponse.serializer)
+      ..add(CommandDefResponse.serializer)
+      ..add(CommandEventResponse.serializer)
       ..add(ConversationDetail.serializer)
       ..add(ConversationSummary.serializer)
       ..add(CreateConversationRequest.serializer)
@@ -35,6 +38,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(CreateTaskPushNotificationConfigRequest.serializer)
       ..add(CreateWebhookRequest.serializer)
       ..add(DeviceCodeOAuthFlow.serializer)
+      ..add(ExecuteCommandRequest.serializer)
       ..add(HttpAuthSecurityScheme.serializer)
       ..add(ImplicitOAuthFlow.serializer)
       ..add(ListTaskPushNotificationConfigsResponse.serializer)
@@ -126,6 +130,9 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(ToolCallSummary)]),
           () => ListBuilder<ToolCallSummary>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(CommandArgResponse)]),
+          () => ListBuilder<CommandArgResponse>())
+      ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(MessageSummary)]),
           () => ListBuilder<MessageSummary>())
       ..addBuilderFactory(
@@ -149,6 +156,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SpanEntryResponse)]),
           () => ListBuilder<SpanEntryResponse>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
