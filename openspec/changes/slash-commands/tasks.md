@@ -46,15 +46,20 @@
 - [x] 6.2 Retain CLI-local commands (`/quit`, `/exit`, `/skills`, `/review`, `/install`) as a local fallback before the registry check.
 - [x] 6.3 Test that CLI REPL dispatches both local and registry commands correctly.
 
-## 7. Flutter web UI: autocomplete and timeline
+## 7. Flutter app: autocomplete and timeline (web, macOS, iOS)
 
 - [ ] 7.1 Run `make generate-flutter-client` to pick up new API endpoints.
-- [ ] 7.2 Build the command autocomplete popup widget: triggered on `/` as first char, fetches and caches `GET /api/commands`, filters by prefix as user types.
-- [ ] 7.3 Add argument completion for `/model`: fetch model list from completions endpoint when user selects the command.
-- [ ] 7.4 Wire popup dismissal on Escape, backspace past `/`, and command selection (no-arg commands submit immediately).
-- [ ] 7.5 Add `CommandEventTile` widget for timeline rendering: distinct system-event style showing command name and ack text.
-- [ ] 7.6 Update conversation timeline to merge messages and events by timestamp, fetching from both `GET /api/conversations/{id}/messages` and `GET /api/conversations/{id}/events`.
-- [ ] 7.7 Write widget tests: popup appears on `/`, filters correctly, dismisses on Escape, event tile renders correctly.
+- [ ] 7.2 Write failing widget test: typing `/` in the input field shows the autocomplete popup.
+- [ ] 7.3 Build the command autocomplete popup widget: triggered on `/` as first char, fetches and caches `GET /api/commands`, filters by prefix as user types.
+- [ ] 7.4 Write failing widget test: popup filters commands by prefix as user types (e.g. `/mo` → `/model`).
+- [ ] 7.5 Write failing widget test: Escape dismisses popup, backspace past `/` dismisses popup, selecting a no-arg command submits immediately.
+- [ ] 7.6 Wire popup dismissal on Escape, backspace past `/`, and command selection (no-arg commands submit immediately).
+- [ ] 7.7 Write failing widget test: selecting `/model` fills input and shows argument completions from the completions endpoint.
+- [ ] 7.8 Add argument completion for `/model`: fetch model list from completions endpoint when user selects the command.
+- [ ] 7.9 Write failing widget test: `CommandEventTile` renders command name and ack text in system-event style.
+- [ ] 7.10 Add `CommandEventTile` widget for timeline rendering: distinct system-event style showing command name and ack text.
+- [ ] 7.11 Write failing test: conversation timeline merges messages and command events by timestamp.
+- [ ] 7.12 Update conversation timeline to merge messages and events by timestamp, fetching from both `GET /api/conversations/{id}/messages` and `GET /api/conversations/{id}/events`.
 
 ## 8. Integration and cleanup
 
