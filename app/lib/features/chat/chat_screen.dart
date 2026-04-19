@@ -24,6 +24,7 @@ import 'attachment_provider.dart';
 import 'audio_player_widget.dart';
 import 'chat_provider.dart';
 import 'conversation_list.dart';
+import 'image_utils.dart';
 import 'timeline_section.dart';
 import 'tool_call_chip.dart';
 import 'voice_recorder_button.dart';
@@ -192,7 +193,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
             );
           } catch (e) {
-            // Skip failed uploads — don't block sending the message.
+            // Log but don't block — the message will still be sent without
+            // the failed attachment.
+            debugPrint('Attachment upload failed for ${p.filename}: $e');
           }
         }
       }
@@ -226,26 +229,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final notifier = ref.read(pendingAttachmentsProvider.notifier);
     for (final file in result.files) {
       if (file.bytes != null) {
-        final mime = _mimeFromExtension(file.extension);
+        final (bytes, filename, mime) = await normalizeImage(
+          file.bytes!,
+          file.name,
+          file.extension,
+        );
         notifier.add(
-          PendingAttachment(
-            bytes: file.bytes!,
-            filename: file.name,
-            mimeType: mime,
-          ),
+          PendingAttachment(bytes: bytes, filename: filename, mimeType: mime),
         );
       }
     }
-  }
-
-  static String _mimeFromExtension(String? ext) {
-    return switch (ext?.toLowerCase()) {
-      'png' => 'image/png',
-      'jpg' || 'jpeg' => 'image/jpeg',
-      'gif' => 'image/gif',
-      'webp' => 'image/webp',
-      _ => 'application/octet-stream',
-    };
   }
 
   @override
@@ -378,7 +371,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   for (final file in details.files) {
                     file.readAsBytes().then((bytes) {
                       final ext = file.name.split('.').last;
-                      final mime = _mimeFromExtension(ext);
+                      final mime = mimeFromExtension(ext);
                       if (mime.startsWith('image/')) {
                         notifier.add(
                           PendingAttachment(
