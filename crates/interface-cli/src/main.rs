@@ -1828,6 +1828,7 @@ async fn main() -> Result<()> {
                     let mut parts = rest.splitn(2, ' ');
                     let cmd = parts.next().unwrap_or("");
                     let arg = parts.next().unwrap_or("").trim();
+                    let mut is_command = true;
 
                     match cmd {
                         // -- CLI-local commands (not in the shared registry) --
@@ -1918,14 +1919,16 @@ async fn main() -> Result<()> {
                                 let result = command_registry.execute(&cmd_name, &args, ctx).await;
                                 println!("{}", result.ack_text);
                             } else {
-                                eprintln!(
-                                    "Unknown command '/{cmd}'. Type /help for available commands."
-                                );
+                                // Not a recognized command — fall through to normal
+                                // assistant submission (e.g. "/new-york pizza").
+                                is_command = false;
                             }
                         }
                     }
 
-                    continue;
+                    if is_command {
+                        continue;
+                    }
                 }
 
                 // Normal user input — submit through the message bus with

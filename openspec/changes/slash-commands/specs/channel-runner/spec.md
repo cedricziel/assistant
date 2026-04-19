@@ -19,7 +19,7 @@ The system SHALL provide a `ChannelRunner` struct in `crates/runtime` that accep
 - **WHEN** a `ChannelMessage` arrives with text starting with `/` followed by a registered command name
 - **THEN** the message is routed to `CommandRegistry::execute()` instead of the orchestrator
 - **THEN** the command result's ack text is sent back via `adapter.send()`
-- **THEN** a `conversation_events` record is persisted
+- **THEN** a `command_events` record is persisted
 
 #### Scenario: Stops cleanly on shutdown signal
 

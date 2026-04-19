@@ -154,6 +154,20 @@ pub async fn execute_command(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid conversation ID").into_response(),
     };
 
+    // Verify the conversation exists.
+    let agent_id = state.agent_id.read().await.clone();
+    let store = assistant_storage::ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    match store.get_conversation(conv_id).await {
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, "Conversation not found").into_response();
+        }
+        Err(e) => {
+            warn!("Failed to check conversation {conv_id}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+        _ => {}
+    }
+
     // Verify the command is known.
     if state.command_registry.get(&body.command).is_none() {
         return (
@@ -178,11 +192,13 @@ pub async fn execute_command(
         .execute(&body.command, &body.args, ctx)
         .await;
 
-    // Persist the event.
-    let payload = if body.args.is_empty() {
-        None
-    } else {
-        Some(serde_json::json!({ "args": body.args }))
+    // Build a semantic payload for the event.
+    let payload = match body.command.as_str() {
+        "model" if !body.args.is_empty() => {
+            Some(serde_json::json!({ "model_name": body.args.join(" ") }))
+        }
+        _ if !body.args.is_empty() => Some(serde_json::json!({ "args": body.args })),
+        _ => None,
     };
 
     match state
@@ -193,16 +209,11 @@ pub async fn execute_command(
         Ok(event) => Json(CommandEventResponse::from(event)).into_response(),
         Err(e) => {
             warn!("Failed to persist command event: {e}");
-            // Still return the result even if persistence fails.
-            Json(CommandEventResponse {
-                id: Uuid::new_v4(),
-                event_type: "command".into(),
-                command: body.command,
-                payload,
-                ack_text: Some(result.ack_text),
-                created_at: Utc::now(),
-            })
-            .into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to persist command event",
+            )
+                .into_response()
         }
     }
 }

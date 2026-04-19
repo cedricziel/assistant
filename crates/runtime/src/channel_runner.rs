@@ -314,14 +314,18 @@ impl ChannelRunner {
                                             let _guard = lock.lock().await;
                                             let result = registry.execute(&cmd_name, &args, ctx).await;
                                             Self::send_command_ack(&adapter, &user, &result.ack_text, thread_id.as_deref()).await;
-                                            let _ = event_store.save_event(conv_id, &cmd_name, None, &result.ack_text).await;
+                                            if let Err(e) = event_store.save_event(conv_id, &cmd_name, None, &result.ack_text).await {
+                                                warn!(conv_id = %conv_id, command = %cmd_name, error = %e, "failed to persist command event");
+                                            }
                                         });
                                     } else {
                                         // All other commands bypass the lock.
                                         tokio::spawn(async move {
                                             let result = registry.execute(&cmd_name, &args, ctx).await;
                                             Self::send_command_ack(&adapter, &user, &result.ack_text, thread_id.as_deref()).await;
-                                            let _ = event_store.save_event(conv_id, &cmd_name, None, &result.ack_text).await;
+                                            if let Err(e) = event_store.save_event(conv_id, &cmd_name, None, &result.ack_text).await {
+                                                warn!(conv_id = %conv_id, command = %cmd_name, error = %e, "failed to persist command event");
+                                            }
                                         });
                                     }
                                 continue;

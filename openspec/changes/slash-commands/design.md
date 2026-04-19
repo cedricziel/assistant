@@ -80,10 +80,10 @@ When the orchestrator builds a turn, it checks for a conversation-level model ov
 
 **Persistence decision:** `ConversationConfig` is stored in-memory only for now (in a `HashMap<Uuid, ConversationConfig>` on the `CommandRegistry` or `ChannelRunner`). If the process restarts, overrides reset to defaults. This is acceptable for an initial implementation — persisting to SQLite is a future enhancement.
 
-### 5. `conversation_events` table for durable command records
+### 5. `command_events` table for durable command records
 
 ```sql
-CREATE TABLE conversation_events (
+CREATE TABLE command_events (
     id              TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL,
     event_type      TEXT NOT NULL,
@@ -93,7 +93,7 @@ CREATE TABLE conversation_events (
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
-CREATE INDEX idx_conversation_events_conv ON conversation_events(conversation_id);
+CREATE INDEX idx_command_events_conv ON command_events(conversation_id);
 ```
 
 Command invocations are stored here, never in the `messages` table. The web UI timeline merges both tables by `created_at` for rendering. The orchestrator's `prepare_history` never queries this table — commands are invisible to the model.
