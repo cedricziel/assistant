@@ -1,6 +1,6 @@
 [package]
 name = "assistant-mcp-client"
-version = "0.1.121"
+version = "0.1.122"
 license.workspace = true
 edition.workspace = true
 description = "MCP client library — connects to external MCP servers and bridges their tools"
