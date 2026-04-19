@@ -1703,6 +1703,11 @@ pub async fn upload_attachment(
 
     // Validate MIME type.
     if !assistant_core::is_supported_mime_type(&mime_type) {
+        warn!(
+            mime_type = %mime_type,
+            filename = %filename,
+            "Attachment upload rejected: unsupported MIME type"
+        );
         return (
             StatusCode::BAD_REQUEST,
             format!(
