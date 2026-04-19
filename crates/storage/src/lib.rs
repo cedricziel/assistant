@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod attachments;
 pub mod command_events;
+pub mod conversation_broadcaster;
 pub mod conversation_events;
 pub mod conversations;
 pub mod logs;
@@ -21,6 +22,9 @@ pub mod workflows;
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
 pub use attachments::AttachmentStore;
 pub use command_events::{CommandEventRow, CommandEventStore};
+pub use conversation_broadcaster::{
+    ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
+};
 pub use conversation_events::{
     ConversationEventRow, ConversationEventStore, LiveEvent, RunBroadcaster,
 };
