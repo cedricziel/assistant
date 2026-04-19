@@ -23,6 +23,9 @@ import '../personas/personas_provider.dart';
 import 'attachment_provider.dart';
 import 'audio_player_widget.dart';
 import 'chat_provider.dart';
+import 'command_autocomplete.dart';
+import 'command_event_tile.dart';
+import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'image_utils.dart';
 import 'timeline_section.dart';
@@ -449,6 +452,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   itemBuilder: (context, index) {
                                     final msg = chatState.messages[index];
 
+                                    // Render command events as compact
+                                    // system-event tiles.
+                                    if (msg.timelineType ==
+                                        TimelineEntryType.command) {
+                                      return CommandEventTile(message: msg);
+                                    }
+
                                     // Render non-message timeline entries
                                     // (thinking, tool call, subagent) as
                                     // compact expandable sections.
@@ -516,6 +526,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       pendingQueueCount: chatState.pendingQueue.length,
                       pendingAttachments: ref.watch(pendingAttachmentsProvider),
                       capabilities: capabilities,
+                      commands: ref.watch(commandsProvider).value ?? [],
                       onSend: _sendMessage,
                       onStop: () =>
                           ref.read(chatProvider.notifier).cancelStream(),
@@ -1299,7 +1310,7 @@ class _EmptyChat extends StatelessWidget {
 
 // -- Input row ---------------------------------------------------------------
 
-class _InputRow extends StatelessWidget {
+class _InputRow extends StatefulWidget {
   const _InputRow({
     required this.controller,
     required this.focusNode,
@@ -1313,6 +1324,7 @@ class _InputRow extends StatelessWidget {
     required this.onPickImage,
     required this.onRemoveAttachment,
     required this.onPasteImage,
+    this.commands = const [],
   });
 
   final TextEditingController controller;
@@ -1327,6 +1339,64 @@ class _InputRow extends StatelessWidget {
   final VoidCallback onPickImage;
   final void Function(int index) onRemoveAttachment;
   final void Function(Uint8List bytes) onPasteImage;
+  final List<CommandEntry> commands;
+
+  @override
+  State<_InputRow> createState() => _InputRowState();
+}
+
+class _InputRowState extends State<_InputRow> {
+  bool _showAutocomplete = false;
+  String _commandFilter = '';
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _InputRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onTextChanged);
+      widget.controller.addListener(_onTextChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    final text = widget.controller.text;
+    final shouldShow = text.startsWith('/') && widget.commands.isNotEmpty;
+    final filter = shouldShow ? text.substring(1).split(' ').first : '';
+
+    if (shouldShow != _showAutocomplete || filter != _commandFilter) {
+      setState(() {
+        _showAutocomplete = shouldShow;
+        _commandFilter = filter;
+      });
+    }
+  }
+
+  void _onCommandSelected(CommandEntry cmd) {
+    if (cmd.hasArgs) {
+      // Fill the input with the command and a trailing space for the arg.
+      widget.controller.text = '/${cmd.name} ';
+      widget.controller.selection = TextSelection.fromPosition(
+        TextPosition(offset: widget.controller.text.length),
+      );
+    } else {
+      // No-arg command: set text and submit through normal send path.
+      widget.controller.text = '/${cmd.name}';
+      setState(() => _showAutocomplete = false);
+      widget.onSend();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1335,8 +1405,19 @@ class _InputRow extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // Command autocomplete popup — shown when text starts with /.
+        if (_showAutocomplete)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: CommandAutocompletePopup(
+              key: const Key('command_autocomplete_popup'),
+              commands: widget.commands,
+              filter: _commandFilter,
+              onSelect: _onCommandSelected,
+            ),
+          ),
         // Queue depth badge — visible when messages are waiting.
-        if (pendingQueueCount > 0)
+        if (widget.pendingQueueCount > 0)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1350,7 +1431,7 @@ class _InputRow extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  '$pendingQueueCount message${pendingQueueCount == 1 ? '' : 's'} queued',
+                  '${widget.pendingQueueCount} message${widget.pendingQueueCount == 1 ? '' : 's'} queued',
                   key: const Key('queue_depth_badge'),
                   style: TextStyle(fontSize: 12, color: Colors.amber.shade800),
                 ),
@@ -1358,7 +1439,7 @@ class _InputRow extends StatelessWidget {
             ),
           ),
         // Pending attachment thumbnails.
-        if (pendingAttachments.isNotEmpty)
+        if (widget.pendingAttachments.isNotEmpty)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -1366,10 +1447,10 @@ class _InputRow extends StatelessWidget {
               height: 72,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
-                itemCount: pendingAttachments.length,
+                itemCount: widget.pendingAttachments.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 8),
                 itemBuilder: (context, index) {
-                  final attachment = pendingAttachments[index];
+                  final attachment = widget.pendingAttachments[index];
                   return Stack(
                     children: [
                       ClipRRect(
@@ -1387,7 +1468,7 @@ class _InputRow extends StatelessWidget {
                         child: IconButton(
                           key: Key('remove_attachment_$index'),
                           icon: const Icon(Icons.cancel, size: 18),
-                          onPressed: () => onRemoveAttachment(index),
+                          onPressed: () => widget.onRemoveAttachment(index),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           color: colorScheme.error,
@@ -1407,24 +1488,24 @@ class _InputRow extends StatelessWidget {
           child: Row(
             children: [
               // Image picker button.
-              if (!isSending)
+              if (!widget.isSending)
                 IconButton(
                   key: const Key('attach_image_button'),
                   icon: const Icon(Icons.image_outlined),
                   tooltip: 'Attach image',
-                  onPressed: onPickImage,
+                  onPressed: widget.onPickImage,
                 ),
               // Voice recorder button — shown when server supports voice send.
-              if (capabilities.voiceSend && !isSending)
+              if (widget.capabilities.voiceSend && !widget.isSending)
                 VoiceRecorderButton(
-                  onRecordingComplete: onVoiceRecorded,
+                  onRecordingComplete: widget.onVoiceRecorded,
                   onError: (err) {
                     ScaffoldMessenger.of(
                       context,
                     ).showSnackBar(SnackBar(content: Text(err)));
                   },
                 ),
-              if (!isSending) const SizedBox(width: 4),
+              if (!widget.isSending) const SizedBox(width: 4),
               Expanded(
                 child: KeyboardListener(
                   focusNode: FocusNode(),
@@ -1445,9 +1526,9 @@ class _InputRow extends StatelessWidget {
                   child: isAppleTouch
                       ? CupertinoTextField(
                           key: const Key('message_input'),
-                          controller: controller,
-                          focusNode: focusNode,
-                          placeholder: pendingAttachments.isNotEmpty
+                          controller: widget.controller,
+                          focusNode: widget.focusNode,
+                          placeholder: widget.pendingAttachments.isNotEmpty
                               ? 'Add a caption...'
                               : 'Type a message...',
                           padding: const EdgeInsets.symmetric(
@@ -1457,14 +1538,14 @@ class _InputRow extends StatelessWidget {
                           minLines: 1,
                           maxLines: 6,
                           textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => onSend(),
+                          onSubmitted: (_) => widget.onSend(),
                         )
                       : TextField(
                           key: const Key('message_input'),
-                          controller: controller,
-                          focusNode: focusNode,
+                          controller: widget.controller,
+                          focusNode: widget.focusNode,
                           decoration: InputDecoration(
-                            hintText: pendingAttachments.isNotEmpty
+                            hintText: widget.pendingAttachments.isNotEmpty
                                 ? 'Add a caption...'
                                 : 'Type a message...',
                             border: const OutlineInputBorder(),
@@ -1477,21 +1558,21 @@ class _InputRow extends StatelessWidget {
                           minLines: 1,
                           maxLines: 6,
                           textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => onSend(),
+                          onSubmitted: (_) => widget.onSend(),
                         ),
                 ),
               ),
               const SizedBox(width: 8),
-              if (isSending)
+              if (widget.isSending)
                 IconButton.filled(
                   key: const Key('stop_button'),
-                  onPressed: onStop,
+                  onPressed: widget.onStop,
                   icon: const Icon(Icons.stop_rounded),
                 )
               else
                 IconButton.filled(
                   key: const Key('send_button'),
-                  onPressed: onSend,
+                  onPressed: widget.onSend,
                   icon: const Icon(Icons.send),
                 ),
             ],

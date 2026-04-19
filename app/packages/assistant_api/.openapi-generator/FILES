@@ -247,8 +247,3 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/command_arg_response_test.dart
-test/command_def_response_test.dart
-test/command_event_response_test.dart
-test/commands_api_test.dart
-test/execute_command_request_test.dart

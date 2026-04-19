@@ -169,7 +169,7 @@ class ToolCallRecord {
 }
 
 /// The kind of entry shown in the chat timeline.
-enum TimelineEntryType { message, thinking, toolCall, subagent }
+enum TimelineEntryType { message, thinking, toolCall, subagent, command }
 
 /// A message shown in the chat UI (may be a streaming partial).
 /// Metadata for an image attachment on a message.
@@ -204,6 +204,8 @@ class ChatMessage {
     this.subagentId,
     this.subagentTask,
     this.subagentSummary,
+    this.commandName,
+    this.commandAckText,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -255,6 +257,12 @@ class ChatMessage {
 
   /// Subagent completion summary for [TimelineEntryType.subagent] entries.
   String? subagentSummary;
+
+  /// Command name for [TimelineEntryType.command] entries (without `/`).
+  final String? commandName;
+
+  /// Acknowledgement text for [TimelineEntryType.command] entries.
+  final String? commandAckText;
 
   bool get isUser => role == 'user';
   bool get isAssistant => role == 'assistant';

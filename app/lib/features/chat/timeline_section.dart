@@ -25,6 +25,7 @@ class _ChatTimelineSectionState extends State<ChatTimelineSection> {
       TimelineEntryType.toolCall => _buildToolCall(context),
       TimelineEntryType.thinking => _buildThinking(context),
       TimelineEntryType.subagent => _buildSubagent(context),
+      TimelineEntryType.command => const SizedBox.shrink(),
       TimelineEntryType.message => const SizedBox.shrink(),
     };
   }
