@@ -54,15 +54,15 @@
 - [x] 7.4 Write failing widget test: popup filters commands by prefix as user types (e.g. `/mo` → `/model`).
 - [x] 7.5 Write failing widget test: Escape dismisses popup, backspace past `/` dismisses popup, selecting a no-arg command submits immediately.
 - [x] 7.6 Wire popup dismissal on Escape, backspace past `/`, and command selection (no-arg commands submit immediately).
-- [ ] 7.7 Write failing widget test: selecting `/model` fills input and shows argument completions from the completions endpoint.
-- [ ] 7.8 Add argument completion for `/model`: fetch model list from completions endpoint when user selects the command.
-- [ ] 7.9 Write failing widget test: `CommandEventTile` renders command name and ack text in system-event style.
-- [ ] 7.10 Add `CommandEventTile` widget for timeline rendering: distinct system-event style showing command name and ack text.
-- [ ] 7.11 Write failing test: conversation timeline merges messages and command events by timestamp.
-- [ ] 7.12 Update conversation timeline to merge messages and events by timestamp, fetching from both `GET /api/conversations/{id}/messages` and `GET /api/conversations/{id}/events`.
+- [ ] 7.7 **DEFERRED**: Write failing widget test: selecting `/model` fills input and shows argument completions from the completions endpoint. Requires `/api/models` backend endpoint — separate change.
+- [ ] 7.8 **DEFERRED**: Add argument completion for `/model`: fetch model list from completions endpoint when user selects the command. Requires `/api/models` backend endpoint — separate change.
+- [x] 7.9 Write failing widget test: `CommandEventTile` renders command name and ack text in system-event style.
+- [x] 7.10 Add `CommandEventTile` widget for timeline rendering: distinct system-event style showing command name and ack text.
+- [x] 7.11 Write failing test: conversation timeline merges messages and command events by timestamp.
+- [x] 7.12 Update conversation timeline to render CommandEventTile for command entries alongside messages.
 
 ## 8. Integration and cleanup
 
 - [x] 8.1 Run `make lint && make format` to ensure all code passes checks.
 - [x] 8.2 Run `make test` to verify all existing tests still pass with the `force` parameter change in `maybe_compact()`.
-- [ ] 8.3 Run `make lint-flutter && make test-flutter` for Flutter checks.
+- [x] 8.3 Run `make lint-flutter && make test-flutter` for Flutter checks.

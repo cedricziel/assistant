@@ -24,6 +24,7 @@ import 'attachment_provider.dart';
 import 'audio_player_widget.dart';
 import 'chat_provider.dart';
 import 'command_autocomplete.dart';
+import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'image_utils.dart';
@@ -450,6 +451,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   itemCount: chatState.messages.length,
                                   itemBuilder: (context, index) {
                                     final msg = chatState.messages[index];
+
+                                    // Render command events as compact
+                                    // system-event tiles.
+                                    if (msg.timelineType ==
+                                        TimelineEntryType.command) {
+                                      return CommandEventTile(message: msg);
+                                    }
 
                                     // Render non-message timeline entries
                                     // (thinking, tool call, subagent) as
