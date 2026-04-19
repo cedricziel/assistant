@@ -43,6 +43,7 @@ class ApiClient {
   AnalyticsApi get analytics => _generatedApi.getAnalyticsApi();
   WorkflowsApi get workflows => _generatedApi.getWorkflowsApi();
   CapabilitiesApi get capabilities => _generatedApi.getCapabilitiesApi();
+  CommandsApi get commands => _generatedApi.getCommandsApi();
 
   /// Stream assistant tokens for a conversation message.
   ///

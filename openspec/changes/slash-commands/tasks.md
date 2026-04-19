@@ -48,12 +48,12 @@
 
 ## 7. Flutter app: autocomplete and timeline (web, macOS, iOS)
 
-- [ ] 7.1 Run `make generate-flutter-client` to pick up new API endpoints.
-- [ ] 7.2 Write failing widget test: typing `/` in the input field shows the autocomplete popup.
-- [ ] 7.3 Build the command autocomplete popup widget: triggered on `/` as first char, fetches and caches `GET /api/commands`, filters by prefix as user types.
-- [ ] 7.4 Write failing widget test: popup filters commands by prefix as user types (e.g. `/mo` → `/model`).
-- [ ] 7.5 Write failing widget test: Escape dismisses popup, backspace past `/` dismisses popup, selecting a no-arg command submits immediately.
-- [ ] 7.6 Wire popup dismissal on Escape, backspace past `/`, and command selection (no-arg commands submit immediately).
+- [x] 7.1 Run `make generate-flutter-client` to pick up new API endpoints.
+- [x] 7.2 Write failing widget test: typing `/` in the input field shows the autocomplete popup.
+- [x] 7.3 Build the command autocomplete popup widget: triggered on `/` as first char, fetches and caches `GET /api/commands`, filters by prefix as user types.
+- [x] 7.4 Write failing widget test: popup filters commands by prefix as user types (e.g. `/mo` → `/model`).
+- [x] 7.5 Write failing widget test: Escape dismisses popup, backspace past `/` dismisses popup, selecting a no-arg command submits immediately.
+- [x] 7.6 Wire popup dismissal on Escape, backspace past `/`, and command selection (no-arg commands submit immediately).
 - [ ] 7.7 Write failing widget test: selecting `/model` fills input and shows argument completions from the completions endpoint.
 - [ ] 7.8 Add argument completion for `/model`: fetch model list from completions endpoint when user selects the command.
 - [ ] 7.9 Write failing widget test: `CommandEventTile` renders command name and ack text in system-event style.
