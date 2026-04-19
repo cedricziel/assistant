@@ -211,7 +211,10 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: AudioPlayerWidget(
-              fetchAudio: () async => Uint8List.fromList([1, 2, 3]),
+              fetchAudio: () async => (
+                bytes: Uint8List.fromList([1, 2, 3]),
+                mimeType: 'audio/mpeg',
+              ),
             ),
           ),
         ),
@@ -224,7 +227,7 @@ void main() {
 
     testWidgets('shows spinner while audio is being fetched', (tester) async {
       // Use a Completer that never completes so the fetch stays in-flight.
-      final completer = Completer<Uint8List?>();
+      final completer = Completer<({Uint8List bytes, String mimeType})?>();
 
       await tester.pumpWidget(
         MaterialApp(
@@ -305,7 +308,10 @@ void main() {
               fetchAudio: () async {
                 callCount++;
                 if (callCount == 1) return null; // first call fails
-                return Uint8List.fromList([1, 2, 3]); // retry succeeds
+                return (
+                  bytes: Uint8List.fromList([1, 2, 3]),
+                  mimeType: 'audio/mpeg',
+                ); // retry succeeds
               },
             ),
           ),
@@ -345,7 +351,10 @@ void main() {
             body: AudioPlayerWidget(
               fetchAudio: () async {
                 callCount++;
-                return Uint8List.fromList([1, 2, 3]);
+                return (
+                  bytes: Uint8List.fromList([1, 2, 3]),
+                  mimeType: 'audio/mpeg',
+                );
               },
             ),
           ),
