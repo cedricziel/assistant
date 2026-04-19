@@ -232,6 +232,14 @@ impl ConversationStore {
             .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
+
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Deleted {
+                conversation_id: id,
+                agent_id: self.agent_id.clone(),
+            });
+        }
+
         Ok(())
     }
 
@@ -570,6 +578,35 @@ mod tests {
                 );
             }
             _ => panic!("expected Upserted event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_conversation_emits_deleted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+
+        let conv = store.create_conversation(Some("To delete")).await.unwrap();
+
+        // Subscribe after create to skip the Upserted event from creation.
+        let mut rx = broadcaster.subscribe();
+
+        store.delete_conversation(conv.id).await.unwrap();
+
+        let event = rx.recv().await.expect("should receive event");
+        match event {
+            ConversationEvent::Deleted {
+                conversation_id,
+                agent_id,
+            } => {
+                assert_eq!(conversation_id, conv.id, "deleted id should match");
+                assert_eq!(agent_id, "default", "agent_id should match");
+            }
+            _ => panic!("expected Deleted event"),
         }
     }
 }
