@@ -181,7 +181,9 @@ class ApiClient {
   }
 
   /// Fetch the audio bytes for a message (GET /api/messages/{id}/audio).
-  Future<Uint8List?> fetchMessageAudio(String messageId) async {
+  Future<({Uint8List bytes, String mimeType})?> fetchMessageAudio(
+    String messageId,
+  ) async {
     try {
       final response = await _dio.get<List<int>>(
         '/api/messages/$messageId/audio',
@@ -191,7 +193,8 @@ class ApiClient {
         ),
       );
       if (response.statusCode == 200 && response.data != null) {
-        return Uint8List.fromList(response.data!);
+        final mime = response.headers.value('content-type') ?? 'audio/mpeg';
+        return (bytes: Uint8List.fromList(response.data!), mimeType: mime);
       }
     } catch (_) {
       // ignore
@@ -200,7 +203,9 @@ class ApiClient {
   }
 
   /// Fetch audio bytes by audio ID (GET /api/audio/{id}).
-  Future<Uint8List?> fetchAudio(String audioId) async {
+  Future<({Uint8List bytes, String mimeType})?> fetchAudio(
+    String audioId,
+  ) async {
     try {
       final response = await _dio.get<List<int>>(
         '/api/audio/$audioId',
@@ -210,7 +215,8 @@ class ApiClient {
         ),
       );
       if (response.statusCode == 200 && response.data != null) {
-        return Uint8List.fromList(response.data!);
+        final mime = response.headers.value('content-type') ?? 'audio/mpeg';
+        return (bytes: Uint8List.fromList(response.data!), mimeType: mime);
       }
     } catch (_) {
       // ignore

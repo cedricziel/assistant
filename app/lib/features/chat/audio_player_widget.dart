@@ -10,8 +10,8 @@ import 'package:flutter/material.dart';
 class AudioPlayerWidget extends StatefulWidget {
   const AudioPlayerWidget({super.key, required this.fetchAudio});
 
-  /// Called once to obtain the audio bytes.  Returns `null` on failure.
-  final Future<Uint8List?> Function() fetchAudio;
+  /// Called once to obtain the audio bytes and MIME type.  Returns `null` on failure.
+  final Future<({Uint8List bytes, String mimeType})?> Function() fetchAudio;
 
   @override
   State<AudioPlayerWidget> createState() => _AudioPlayerWidgetState();
@@ -22,7 +22,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
   bool _isPlaying = false;
   bool _isLoading = false;
   bool _hasError = false;
-  Uint8List? _cachedBytes;
+  ({Uint8List bytes, String mimeType})? _cachedAudio;
 
   @override
   void initState() {
@@ -50,9 +50,9 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
       _hasError = false;
     });
     try {
-      _cachedBytes ??= await widget.fetchAudio();
-      final bytes = _cachedBytes;
-      if (bytes == null || !mounted) {
+      _cachedAudio ??= await widget.fetchAudio();
+      final audio = _cachedAudio;
+      if (audio == null || !mounted) {
         if (mounted) {
           setState(() {
             _isLoading = false;
@@ -62,7 +62,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
         return;
       }
 
-      await _player.play(BytesSource(bytes));
+      await _player.play(BytesSource(audio.bytes, mimeType: audio.mimeType));
       if (mounted) {
         setState(() {
           _isPlaying = true;
@@ -70,7 +70,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
         });
       }
     } catch (_) {
-      _cachedBytes = null; // clear so retry re-fetches
+      _cachedAudio = null; // clear so retry re-fetches
       if (mounted) {
         setState(() {
           _isLoading = false;

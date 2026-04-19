@@ -556,7 +556,8 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onRetry;
   final VoidCallback? onStop;
   final ServerCapabilities capabilities;
-  final Future<Uint8List?> Function() fetchMessageAudio;
+  final Future<({Uint8List bytes, String mimeType})?> Function()
+  fetchMessageAudio;
   final String? imageBaseUrl;
   final String? imageAuthToken;
 
@@ -608,6 +609,7 @@ class _MessageBubble extends StatelessWidget {
                       if (message.audioBytes != null)
                         _VoiceMessagePlayer(
                           audioBytes: message.audioBytes!,
+                          audioMimeType: message.audioMimeType,
                           transcript: message.content,
                           foregroundColor: colorScheme.onPrimary,
                         )
@@ -900,7 +902,8 @@ class _MetaActionRow extends StatelessWidget {
 
   final ChatMessage message;
   final ServerCapabilities capabilities;
-  final Future<Uint8List?> Function() fetchMessageAudio;
+  final Future<({Uint8List bytes, String mimeType})?> Function()
+  fetchMessageAudio;
   final VoidCallback? onRetry;
   final VoidCallback? onStop;
 
@@ -1043,7 +1046,7 @@ class _ReadAloudAction extends StatefulWidget {
     required this.color,
   });
 
-  final Future<Uint8List?> Function() fetchAudio;
+  final Future<({Uint8List bytes, String mimeType})?> Function() fetchAudio;
   final Color color;
 
   @override
@@ -1053,7 +1056,7 @@ class _ReadAloudAction extends StatefulWidget {
 class _ReadAloudActionState extends State<_ReadAloudAction> {
   final _player = AudioPlayer();
   _ReadAloudState _state = _ReadAloudState.idle;
-  Uint8List? _cachedBytes;
+  ({Uint8List bytes, String mimeType})? _cachedAudio;
   Timer? _errorTimer;
 
   @override
@@ -1080,13 +1083,15 @@ class _ReadAloudActionState extends State<_ReadAloudAction> {
       case _ReadAloudState.error:
         setState(() => _state = _ReadAloudState.loading);
         try {
-          _cachedBytes ??= await widget.fetchAudio();
-          final bytes = _cachedBytes;
-          if (bytes == null || !mounted) {
+          _cachedAudio ??= await widget.fetchAudio();
+          final audio = _cachedAudio;
+          if (audio == null || !mounted) {
             _showError();
             return;
           }
-          await _player.play(BytesSource(bytes));
+          await _player.play(
+            BytesSource(audio.bytes, mimeType: audio.mimeType),
+          );
           if (mounted) setState(() => _state = _ReadAloudState.playing);
         } catch (_) {
           _showError();
@@ -1479,11 +1484,13 @@ class _VoiceMessagePlayer extends StatefulWidget {
     required this.audioBytes,
     required this.transcript,
     required this.foregroundColor,
+    this.audioMimeType,
   });
 
   final Uint8List audioBytes;
   final String transcript;
   final Color foregroundColor;
+  final String? audioMimeType;
 
   @override
   State<_VoiceMessagePlayer> createState() => _VoiceMessagePlayerState();
@@ -1527,7 +1534,9 @@ class _VoiceMessagePlayerState extends State<_VoiceMessagePlayer> {
       setState(() => _isPlaying = false);
     } else {
       if (_position == Duration.zero) {
-        await _player.play(BytesSource(widget.audioBytes));
+        await _player.play(
+          BytesSource(widget.audioBytes, mimeType: widget.audioMimeType),
+        );
       } else {
         await _player.resume();
       }
