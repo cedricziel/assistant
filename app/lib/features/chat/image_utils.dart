@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-/// Maps a file extension to a MIME type for image formats.
+/// Maps a file extension to a MIME type.
 ///
 /// Returns `'application/octet-stream'` for unrecognised extensions.
 String mimeFromExtension(String? ext) {
@@ -11,9 +11,33 @@ String mimeFromExtension(String? ext) {
     'gif' => 'image/gif',
     'webp' => 'image/webp',
     'heic' || 'heif' => 'image/heic',
+    'pdf' => 'application/pdf',
+    'txt' => 'text/plain',
+    'md' || 'markdown' => 'text/markdown',
+    'csv' => 'text/csv',
+    'json' => 'application/json',
     _ => 'application/octet-stream',
   };
 }
+
+/// MIME types the server accepts for attachment upload.
+const supportedMimeTypes = {
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json',
+};
+
+/// Returns `true` if the MIME type is accepted by the server.
+bool isSupportedMimeType(String mime) => supportedMimeTypes.contains(mime);
+
+/// Returns `true` if the MIME type is an image type (for thumbnail display).
+bool isImageMimeType(String mime) => mime.startsWith('image/');
 
 /// Returns `true` if [ext] is a format that the server does not accept and
 /// must be converted client-side (e.g. HEIC from iOS cameras).

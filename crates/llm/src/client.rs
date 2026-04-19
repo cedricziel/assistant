@@ -26,6 +26,18 @@ pub enum ContentBlock {
         /// Base64-encoded image data (no data-URI prefix).
         data: String,
     },
+    /// A base64-encoded document (e.g. PDF).
+    ///
+    /// Providers with native document support (Anthropic) serialize this as a
+    /// `"document"` content block.  Others should receive a text-extracted
+    /// fallback via [`ContentBlock::Text`] instead — the orchestrator handles
+    /// the conversion before reaching the provider.
+    Document {
+        /// MIME type, e.g. `"application/pdf"`.
+        media_type: String,
+        /// Base64-encoded document data.
+        data: String,
+    },
 }
 
 /// A single message in the chat history as tracked by the caller.
@@ -608,6 +620,11 @@ fn build_json_messages(
                             images.push(json!(data));
                         }
                         ContentBlock::Image { .. } => { /* vision disabled — skip */ }
+                        ContentBlock::Document { .. } => {
+                            // Ollama/OpenAI do not support native document blocks.
+                            // The orchestrator should have converted these to Text
+                            // before reaching the provider; skip if not.
+                        }
                     }
                 }
                 let combined_text = texts.join("\n");
@@ -852,6 +869,26 @@ mod tests {
         assert!(
             msgs[0].get("images").is_none(),
             "images must be stripped when vision is false"
+        );
+    }
+
+    #[test]
+    fn multimodal_user_document_blocks_are_skipped() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("summarize this".to_string()),
+                ContentBlock::Document {
+                    media_type: "application/pdf".to_string(),
+                    data: "JVBERi0xLjQ=".to_string(),
+                },
+            ],
+        }];
+        let msgs = build_json_messages("", &history, true);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["content"], "summarize this");
+        assert!(
+            msgs[0].get("images").is_none(),
+            "document blocks should not produce images"
         );
     }
 }

@@ -289,6 +289,14 @@ fn build_anthropic_messages(history: &[ChatHistoryMessage]) -> (Vec<Value>, Vec<
                                 "data": data,
                             }
                         }),
+                        ContentBlock::Document { media_type, data } => json!({
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": data,
+                            }
+                        }),
                     })
                     .collect();
                 messages.push(json!({"role": "user", "content": blocks}));
@@ -910,6 +918,27 @@ mod tests {
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "just text");
+    }
+
+    #[test]
+    fn multimodal_user_document_produces_document_block() {
+        let history = vec![ChatHistoryMessage::MultimodalUser {
+            content: vec![
+                ContentBlock::Text("Summarize this PDF".to_string()),
+                ContentBlock::Document {
+                    media_type: "application/pdf".to_string(),
+                    data: "JVBERi0xLjQ=".to_string(),
+                },
+            ],
+        }];
+        let (messages, _) = build_anthropic_messages(&history);
+        let content = messages[0]["content"].as_array().expect("content array");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "document");
+        assert_eq!(content[1]["source"]["type"], "base64");
+        assert_eq!(content[1]["source"]["media_type"], "application/pdf");
+        assert_eq!(content[1]["source"]["data"], "JVBERi0xLjQ=");
     }
 
     #[test]

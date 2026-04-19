@@ -96,7 +96,7 @@ fn message_text(msg: &ChatHistoryMessage) -> String {
             .iter()
             .filter_map(|b| match b {
                 ContentBlock::Text(t) => Some(t.as_str()),
-                ContentBlock::Image { .. } => None,
+                ContentBlock::Image { .. } | ContentBlock::Document { .. } => None,
             })
             .collect::<Vec<_>>()
             .join(" "),
@@ -240,7 +240,7 @@ fn chat_history_to_message(
                 .iter()
                 .filter_map(|b| match b {
                     ContentBlock::Text(t) => Some(t.as_str()),
-                    ContentBlock::Image { .. } => None,
+                    ContentBlock::Image { .. } | ContentBlock::Document { .. } => None,
                 })
                 .collect::<Vec<_>>()
                 .join(" ");

@@ -12,15 +12,26 @@ use uuid::Uuid;
 /// MIME types accepted for attachment upload.
 ///
 /// The storage layer and API are file-type-agnostic — this list gates what the
-/// LLM integration path and resize pipeline currently handle.  Expand as new
-/// content types are supported (e.g. `application/pdf`).
-pub const SUPPORTED_MIME_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"];
+/// upload endpoint allows.  Images go through the resize pipeline; documents
+/// and text files are forwarded to the LLM via `ContentBlock::Document` or
+/// inlined `ContentBlock::Text`.
+pub const SUPPORTED_MIME_TYPES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+];
 
 /// MIME types that support server-side resizing via the `image` crate.
 pub const RESIZABLE_MIME_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"];
 
-/// Maximum attachment size in bytes (10 MB).
-pub const MAX_ATTACHMENT_SIZE: u64 = 10 * 1024 * 1024;
+/// Maximum attachment size in bytes (25 MB).
+pub const MAX_ATTACHMENT_SIZE: u64 = 25 * 1024 * 1024;
 
 // -- AttachmentMeta -----------------------------------------------------------
 
@@ -58,6 +69,14 @@ pub fn is_resizable_mime_type(mime_type: &str) -> bool {
     RESIZABLE_MIME_TYPES.contains(&mime_type)
 }
 
+/// Returns `true` if `mime_type` is a text-based type that can be inlined.
+pub fn is_text_mime_type(mime_type: &str) -> bool {
+    matches!(
+        mime_type,
+        "text/plain" | "text/markdown" | "text/csv" | "application/json"
+    )
+}
+
 /// Map a MIME type to a canonical file extension.
 pub fn extension_for_mime(mime_type: &str) -> &str {
     match mime_type {
@@ -65,6 +84,11 @@ pub fn extension_for_mime(mime_type: &str) -> &str {
         "image/jpeg" => "jpg",
         "image/gif" => "gif",
         "image/webp" => "webp",
+        "application/pdf" => "pdf",
+        "text/plain" => "txt",
+        "text/markdown" => "md",
+        "text/csv" => "csv",
+        "application/json" => "json",
         _ => "bin",
     }
 }
@@ -81,12 +105,17 @@ mod tests {
         assert_eq!(extension_for_mime("image/jpeg"), "jpg");
         assert_eq!(extension_for_mime("image/gif"), "gif");
         assert_eq!(extension_for_mime("image/webp"), "webp");
+        assert_eq!(extension_for_mime("application/pdf"), "pdf");
+        assert_eq!(extension_for_mime("text/plain"), "txt");
+        assert_eq!(extension_for_mime("text/markdown"), "md");
+        assert_eq!(extension_for_mime("text/csv"), "csv");
+        assert_eq!(extension_for_mime("application/json"), "json");
     }
 
     #[test]
     fn extension_fallback() {
-        assert_eq!(extension_for_mime("application/pdf"), "bin");
-        assert_eq!(extension_for_mime("text/plain"), "bin");
+        assert_eq!(extension_for_mime("application/zip"), "bin");
+        assert_eq!(extension_for_mime("video/mp4"), "bin");
     }
 
     #[test]
@@ -105,32 +134,49 @@ mod tests {
     }
 
     #[test]
-    fn is_supported_mime_type_accepts_images() {
+    fn is_supported_mime_type_accepts_all_supported() {
         assert!(is_supported_mime_type("image/png"));
         assert!(is_supported_mime_type("image/jpeg"));
         assert!(is_supported_mime_type("image/gif"));
         assert!(is_supported_mime_type("image/webp"));
+        assert!(is_supported_mime_type("application/pdf"));
+        assert!(is_supported_mime_type("text/plain"));
+        assert!(is_supported_mime_type("text/markdown"));
+        assert!(is_supported_mime_type("text/csv"));
+        assert!(is_supported_mime_type("application/json"));
     }
 
     #[test]
     fn is_supported_mime_type_rejects_others() {
-        assert!(!is_supported_mime_type("application/pdf"));
-        assert!(!is_supported_mime_type("text/plain"));
+        assert!(!is_supported_mime_type("application/zip"));
+        assert!(!is_supported_mime_type("video/mp4"));
         assert!(!is_supported_mime_type("image/svg+xml"));
     }
 
     #[test]
-    fn is_resizable_matches_supported() {
-        for mime in SUPPORTED_MIME_TYPES {
+    fn is_resizable_only_images() {
+        for mime in RESIZABLE_MIME_TYPES {
             assert!(is_resizable_mime_type(mime), "{mime} should be resizable");
         }
+        assert!(!is_resizable_mime_type("application/pdf"));
+        assert!(!is_resizable_mime_type("text/plain"));
+    }
+
+    #[test]
+    fn is_text_mime_type_works() {
+        assert!(is_text_mime_type("text/plain"));
+        assert!(is_text_mime_type("text/markdown"));
+        assert!(is_text_mime_type("text/csv"));
+        assert!(is_text_mime_type("application/json"));
+        assert!(!is_text_mime_type("image/png"));
+        assert!(!is_text_mime_type("application/pdf"));
     }
 
     #[test]
     fn constants_are_consistent() {
-        assert_eq!(SUPPORTED_MIME_TYPES.len(), 4);
+        assert_eq!(SUPPORTED_MIME_TYPES.len(), 9);
         assert_eq!(RESIZABLE_MIME_TYPES.len(), 4);
-        assert_eq!(MAX_ATTACHMENT_SIZE, 10 * 1024 * 1024);
+        assert_eq!(MAX_ATTACHMENT_SIZE, 25 * 1024 * 1024);
     }
 
     #[test]

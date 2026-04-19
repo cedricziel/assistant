@@ -16,7 +16,7 @@ pub mod upload;
 pub use allowlist::AllowlistFilter;
 pub use attachment::{
     AttachmentMeta, MAX_ATTACHMENT_SIZE, RESIZABLE_MIME_TYPES, SUPPORTED_MIME_TYPES,
-    is_resizable_mime_type, is_supported_mime_type,
+    extension_for_mime, is_resizable_mime_type, is_supported_mime_type, is_text_mime_type,
 };
 pub use bus::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
 pub use bus_messages::{

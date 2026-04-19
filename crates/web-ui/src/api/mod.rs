@@ -326,7 +326,7 @@ pub fn api_router() -> Router<ApiState> {
         .route("/quick-message", post(quick_message))
         .route(
             "/conversations/{id}/attachments",
-            post(upload_attachment).layer(DefaultBodyLimit::max(12 * 1024 * 1024)), // 12 MB
+            post(upload_attachment).layer(DefaultBodyLimit::max(27 * 1024 * 1024)), // 27 MB
         )
         .route("/attachments/{id}", get(serve_attachment))
         .route(
