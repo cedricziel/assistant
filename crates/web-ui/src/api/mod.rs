@@ -3823,4 +3823,69 @@ mod tests {
             "upserted event should contain the conversation title"
         );
     }
+
+    #[tokio::test]
+    async fn stream_conversations_filters_by_agent_id() {
+        use assistant_storage::ConversationEvent;
+
+        let (state, _storage) = event_log_state().await;
+        let broadcaster = state.conversation_broadcaster.clone();
+
+        // Stream filtered to agent "work".
+        let app = app(state);
+        let handle = tokio::spawn(async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream?agent_id=work")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            body_bytes(resp.into_body()).await
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Emit an event for agent "default" — should be filtered out.
+        broadcaster.emit(ConversationEvent::Upserted(
+            assistant_storage::ConversationRecord {
+                id: Uuid::new_v4(),
+                agent_id: "default".to_string(),
+                title: Some("DefaultConv".to_string()),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+        ));
+
+        // Emit an event for agent "work" — should pass through.
+        broadcaster.emit(ConversationEvent::Upserted(
+            assistant_storage::ConversationRecord {
+                id: Uuid::new_v4(),
+                agent_id: "work".to_string(),
+                title: Some("WorkConv".to_string()),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+        ));
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(broadcaster);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("timeout")
+            .expect("no panic");
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(
+            !text.contains("DefaultConv"),
+            "should NOT contain event for wrong agent, got: {text}"
+        );
+        assert!(
+            text.contains("WorkConv"),
+            "should contain event for filtered agent, got: {text}"
+        );
+    }
 }
