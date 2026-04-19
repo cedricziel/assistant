@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
+import '../../shared/platform/platform.dart';
 import 'logs_provider.dart';
 
 /// Observability screen that lists recent structured log entries.
@@ -44,6 +46,108 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
   Widget build(BuildContext context) {
     final logsAsync = ref.watch(logsProvider);
 
+    final searchField = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: TextField(
+        key: const Key('log_search_field'),
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: 'Filter by keyword...',
+          prefixIcon: const Icon(Icons.search, size: 20),
+          suffixIcon: _searching
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : null,
+          border: const OutlineInputBorder(),
+          contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          isDense: true,
+        ),
+        onChanged: _onSearchChanged,
+      ),
+    );
+
+    if (isAppleTouch) {
+      return Scaffold(
+        body: GestureDetector(
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: CustomScrollView(
+            slivers: [
+              CupertinoSliverNavigationBar(
+                largeTitle: const Text('Logs'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.refresh),
+                      onPressed: () =>
+                          ref.read(logsProvider.notifier).refresh(),
+                    ),
+                  ],
+                ),
+              ),
+              SliverToBoxAdapter(child: searchField),
+              logsAsync.when(
+                loading: () => const SliverFillRemaining(
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (err, _) => SliverFillRemaining(
+                  child: _ErrorView(
+                    error: err.toString(),
+                    onRetry: () => ref.read(logsProvider.notifier).refresh(),
+                  ),
+                ),
+                data: (state) {
+                  if (state.error != null) {
+                    return SliverFillRemaining(
+                      child: _ErrorView(
+                        error: state.error!,
+                        onRetry: () =>
+                            ref.read(logsProvider.notifier).refresh(),
+                      ),
+                    );
+                  }
+                  if (state.logs.isEmpty) {
+                    return SliverFillRemaining(
+                      child: Center(
+                        child: state.searchQuery.isNotEmpty
+                            ? Text(
+                                'No logs matching "${state.searchQuery}"',
+                                style: TextStyle(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              )
+                            : const _EmptyView(),
+                      ),
+                    );
+                  }
+                  return SliverList(
+                    delegate: SliverChildBuilderDelegate((context, index) {
+                      if (index.isOdd) {
+                        return const Divider(
+                          height: 1,
+                          indent: 12,
+                          endIndent: 12,
+                        );
+                      }
+                      return _LogRow(entry: state.logs[index ~/ 2]);
+                    }, childCount: state.logs.length * 2 - 1),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Logs'),
@@ -62,33 +166,7 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
         onTap: () => FocusScope.of(context).unfocus(),
         child: Column(
           children: [
-            // Keyword filter
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-              child: TextField(
-                key: const Key('log_search_field'),
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Filter by keyword...',
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  suffixIcon: _searching
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : null,
-                  border: const OutlineInputBorder(),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  isDense: true,
-                ),
-                onChanged: _onSearchChanged,
-              ),
-            ),
-
+            searchField,
             // Log list
             Expanded(
               child: logsAsync.when(

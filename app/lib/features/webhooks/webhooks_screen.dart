@@ -1,8 +1,10 @@
 import 'package:assistant_api/assistant_api.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/platform/platform.dart';
 import 'webhooks_provider.dart';
 
 /// Screen that lists all registered webhooks.
@@ -12,6 +14,56 @@ class WebhooksScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final webhooksAsync = ref.watch(webhooksProvider);
+
+    if (isAppleTouch) {
+      return Scaffold(
+        body: CustomScrollView(
+          slivers: [
+            CupertinoSliverNavigationBar(
+              largeTitle: const Text('Webhooks'),
+              trailing: CupertinoButton(
+                padding: EdgeInsets.zero,
+                child: const Icon(CupertinoIcons.refresh),
+                onPressed: () => ref.read(webhooksProvider.notifier).refresh(),
+              ),
+            ),
+            webhooksAsync.when(
+              loading: () => const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (err, _) => SliverFillRemaining(
+                child: _ErrorView(
+                  error: err.toString(),
+                  onRetry: () => ref.read(webhooksProvider.notifier).refresh(),
+                ),
+              ),
+              data: (state) {
+                if (state.error != null) {
+                  return SliverFillRemaining(
+                    child: _ErrorView(
+                      error: state.error!,
+                      onRetry: () =>
+                          ref.read(webhooksProvider.notifier).refresh(),
+                    ),
+                  );
+                }
+                if (state.webhooks.isEmpty) {
+                  return const SliverFillRemaining(child: _EmptyView());
+                }
+                return SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    if (index.isOdd) {
+                      return const Divider(height: 1, indent: 72);
+                    }
+                    return _WebhookRow(webhook: state.webhooks[index ~/ 2]);
+                  }, childCount: state.webhooks.length * 2 - 1),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(

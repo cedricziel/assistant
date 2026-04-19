@@ -1,9 +1,11 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
+import '../../shared/platform/platform.dart';
 import 'personas_provider.dart';
 
 /// Screen that lists all personas.
@@ -32,6 +34,93 @@ class _PersonasScreenState extends ConsumerState<PersonasScreen> {
   Widget build(BuildContext context) {
     final personasAsync = ref.watch(personasProvider);
 
+    final fab = FloatingActionButton(
+      onPressed: () => context.go('/personas/new'),
+      child: const Icon(Icons.add),
+    );
+
+    final searchField = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: TextField(
+        controller: _searchController,
+        decoration: const InputDecoration(
+          hintText: 'Search personas...',
+          prefixIcon: Icon(Icons.search, size: 20),
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(vertical: 8),
+          isDense: true,
+        ),
+        onChanged: (v) => setState(() => _query = v.toLowerCase()),
+      ),
+    );
+
+    if (isAppleTouch) {
+      return Scaffold(
+        floatingActionButton: fab,
+        body: CustomScrollView(
+          slivers: [
+            CupertinoSliverNavigationBar(
+              largeTitle: const Text('Personas'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: () =>
+                        ref.read(personasProvider.notifier).refresh(),
+                  ),
+                ],
+              ),
+            ),
+            SliverToBoxAdapter(child: searchField),
+            personasAsync.when(
+              loading: () => const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (err, _) => SliverFillRemaining(
+                child: _ErrorView(
+                  error: err.toString(),
+                  onRetry: () => ref.read(personasProvider.notifier).refresh(),
+                ),
+              ),
+              data: (state) {
+                if (state.error != null) {
+                  return SliverFillRemaining(
+                    child: _ErrorView(
+                      error: state.error!,
+                      onRetry: () =>
+                          ref.read(personasProvider.notifier).refresh(),
+                    ),
+                  );
+                }
+                final filtered = _query.isEmpty
+                    ? state.personas
+                    : state.personas
+                          .where(
+                            (p) =>
+                                p.name.toLowerCase().contains(_query) ||
+                                p.id.toLowerCase().contains(_query),
+                          )
+                          .toList();
+
+                if (filtered.isEmpty) {
+                  return const SliverFillRemaining(child: _EmptyView());
+                }
+                return SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    if (index.isOdd) {
+                      return const Divider(height: 1, indent: 72);
+                    }
+                    return _PersonaRow(persona: filtered[index ~/ 2]);
+                  }, childCount: filtered.length * 2 - 1),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Personas'),
@@ -42,10 +131,7 @@ class _PersonasScreenState extends ConsumerState<PersonasScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.go('/personas/new'),
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: fab,
       body: personasAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => _ErrorView(
@@ -71,20 +157,7 @@ class _PersonasScreenState extends ConsumerState<PersonasScreen> {
 
           return Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: const InputDecoration(
-                    hintText: 'Search personas...',
-                    prefixIcon: Icon(Icons.search, size: 20),
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(vertical: 8),
-                    isDense: true,
-                  ),
-                  onChanged: (v) => setState(() => _query = v.toLowerCase()),
-                ),
-              ),
+              searchField,
               Expanded(
                 child: filtered.isEmpty
                     ? const _EmptyView()

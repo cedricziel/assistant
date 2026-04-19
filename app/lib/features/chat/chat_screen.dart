@@ -5,12 +5,14 @@ import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/platform/platform.dart';
 import '../../api/api_client.dart';
 import '../../api/attachment_service.dart';
 import '../../api/capabilities_provider.dart';
@@ -281,45 +283,59 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final imageBaseUrl = activeProfile?.baseUrl;
     final imageAuthToken = activeProfile?.token;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(activePersonaName),
-        leading: isWide
-            ? null
-            : Builder(
-                builder: (ctx) => IconButton(
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => Scaffold.of(ctx).openDrawer(),
-                ),
-              ),
-        actions: [
-          // Persona picker button.
-          IconButton(
-            key: const Key('persona_picker_button'),
-            icon: const Icon(Icons.switch_account_outlined),
-            tooltip: 'Switch persona',
-            onPressed: () => showPersonaPicker(context),
-          ),
-          // Navigate to traces.
-          IconButton(
-            icon: const Icon(Icons.timeline_outlined),
-            tooltip: 'Traces',
-            onPressed: () => context.go('/traces'),
-          ),
-          // Navigate to logs.
-          IconButton(
-            icon: const Icon(Icons.article_outlined),
-            tooltip: 'Logs',
-            onPressed: () => context.go('/logs'),
-          ),
-          // Navigate to skills.
-          IconButton(
-            icon: const Icon(Icons.extension_outlined),
-            tooltip: 'Skills',
-            onPressed: () => context.go('/skills'),
-          ),
-        ],
+    final chatActions = [
+      IconButton(
+        key: const Key('persona_picker_button'),
+        icon: const Icon(Icons.switch_account_outlined),
+        tooltip: 'Switch persona',
+        onPressed: () => showPersonaPicker(context),
       ),
+      IconButton(
+        icon: const Icon(Icons.timeline_outlined),
+        tooltip: 'Traces',
+        onPressed: () => context.go('/traces'),
+      ),
+      IconButton(
+        icon: const Icon(Icons.article_outlined),
+        tooltip: 'Logs',
+        onPressed: () => context.go('/logs'),
+      ),
+      IconButton(
+        icon: const Icon(Icons.extension_outlined),
+        tooltip: 'Skills',
+        onPressed: () => context.go('/skills'),
+      ),
+    ];
+
+    return Scaffold(
+      appBar: isAppleTouch
+          ? CupertinoNavigationBar(
+              middle: Text(activePersonaName),
+              leading: isWide
+                  ? null
+                  : Builder(
+                      builder: (ctx) => GestureDetector(
+                        onTap: () => Scaffold.of(ctx).openDrawer(),
+                        child: const Icon(CupertinoIcons.line_horizontal_3),
+                      ),
+                    ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: chatActions,
+              ),
+            )
+          : AppBar(
+              title: Text(activePersonaName),
+              leading: isWide
+                  ? null
+                  : Builder(
+                      builder: (ctx) => IconButton(
+                        icon: const Icon(Icons.menu),
+                        onPressed: () => Scaffold.of(ctx).openDrawer(),
+                      ),
+                    ),
+              actions: chatActions,
+            ),
 
       // Drawer on narrow screens.
       drawer: isWide

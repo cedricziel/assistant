@@ -1,8 +1,10 @@
 import 'package:assistant_api/assistant_api.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/platform/platform.dart';
 import 'workflows_provider.dart';
 
 /// Screen that lists all workflows.
@@ -12,6 +14,54 @@ class WorkflowsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final workflowsAsync = ref.watch(workflowsProvider);
+
+    final fab = FloatingActionButton(
+      onPressed: () => context.go('/workflows/new'),
+      tooltip: 'New workflow',
+      child: const Icon(Icons.add),
+    );
+
+    if (isAppleTouch) {
+      return Scaffold(
+        floatingActionButton: fab,
+        body: CustomScrollView(
+          slivers: [
+            CupertinoSliverNavigationBar(
+              largeTitle: const Text('Workflows'),
+              trailing: CupertinoButton(
+                padding: EdgeInsets.zero,
+                child: const Icon(CupertinoIcons.refresh),
+                onPressed: () => ref.read(workflowsProvider.notifier).refresh(),
+              ),
+            ),
+            workflowsAsync.when(
+              loading: () => const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (err, _) => SliverFillRemaining(
+                child: _ErrorView(
+                  error: err.toString(),
+                  onRetry: () => ref.read(workflowsProvider.notifier).refresh(),
+                ),
+              ),
+              data: (workflows) {
+                if (workflows.isEmpty) {
+                  return const SliverFillRemaining(child: _EmptyView());
+                }
+                return SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    if (index.isOdd) {
+                      return const Divider(height: 1, indent: 72);
+                    }
+                    return _WorkflowRow(workflow: workflows[index ~/ 2]);
+                  }, childCount: workflows.length * 2 - 1),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -23,11 +73,7 @@ class WorkflowsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.go('/workflows/new'),
-        tooltip: 'New workflow',
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: fab,
       body: workflowsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => _ErrorView(

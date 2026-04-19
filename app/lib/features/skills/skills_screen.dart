@@ -1,9 +1,11 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
+import '../../shared/platform/platform.dart';
 import '../personas/personas_provider.dart';
 import 'skills_provider.dart';
 
@@ -21,6 +23,70 @@ class SkillsScreen extends ConsumerWidget {
     final activePersonaName =
         personasAsync.value?.activePersona?.name ?? 'Active Persona';
 
+    final fab = FloatingActionButton(
+      onPressed: () => context.go('/skills/new'),
+      tooltip: 'New skill',
+      child: const Icon(Icons.add),
+    );
+
+    if (isAppleTouch) {
+      return Scaffold(
+        floatingActionButton: fab,
+        body: CustomScrollView(
+          slivers: [
+            CupertinoSliverNavigationBar(
+              largeTitle: Text('Skills — $activePersonaName'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: () =>
+                        ref.read(skillsProvider.notifier).refresh(),
+                  ),
+                ],
+              ),
+            ),
+            skillsAsync.when(
+              loading: () => const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (err, _) => SliverFillRemaining(
+                child: _ErrorView(
+                  error: err.toString(),
+                  onRetry: () => ref.read(skillsProvider.notifier).refresh(),
+                ),
+              ),
+              data: (state) {
+                if (state.error != null) {
+                  return SliverFillRemaining(
+                    child: _ErrorView(
+                      error: state.error!,
+                      onRetry: () =>
+                          ref.read(skillsProvider.notifier).refresh(),
+                    ),
+                  );
+                }
+                if (state.skills.isEmpty) {
+                  return SliverFillRemaining(
+                    child: _EmptyView(personaName: activePersonaName),
+                  );
+                }
+                return SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    if (index.isOdd) {
+                      return const Divider(height: 1, indent: 72);
+                    }
+                    return _SkillRow(skill: state.skills[index ~/ 2]);
+                  }, childCount: state.skills.length * 2 - 1),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Skills — $activePersonaName'),
@@ -35,11 +101,7 @@ class SkillsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.go('/skills/new'),
-        tooltip: 'New skill',
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: fab,
       body: skillsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => _ErrorView(
