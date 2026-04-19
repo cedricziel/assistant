@@ -149,21 +149,21 @@ Triggered when the user types `/` as the first character in the input field. The
 
 Timeline rendering: events from `GET /api/conversations/{id}/events` are interleaved with messages by timestamp and rendered with a distinct visual style (system-event appearance, not a chat bubble).
 
-### 8. `/compact` triggers existing compaction engine with force
+### 8. `/compact` triggers existing compaction engine directly
 
-The existing `maybe_compact()` function in `compaction.rs` checks `should_compact()` against token thresholds before proceeding. For `/compact`, we add a `force: bool` parameter that bypasses the threshold check:
+The existing `maybe_compact()` function in `compaction.rs` always performs compaction when called — the threshold check lives in `should_compact()`, which callers invoke before calling `maybe_compact()`. The `/compact` command simply calls `maybe_compact()` directly, bypassing the `should_compact()` guard:
 
 ```rust
-pub async fn maybe_compact(
-    history: &mut Vec<ChatHistoryMessage>,
-    llm: &Arc<dyn LlmProvider>,
-    cfg: &CompactionConfig,
-    conv_store: Option<(&ConversationStore, Uuid)>,
-    force: bool,  // NEW
-) -> bool {
+// Normal turn path (threshold-gated):
+if compaction::should_compact(&history, cfg) {
+    compaction::maybe_compact(&mut history, llm, cfg, conv_store).await;
+}
+
+// /compact command (always runs):
+compaction::maybe_compact(&mut history, llm, cfg, conv_store).await;
 ```
 
-When `force` is true, the function skips the `should_compact()` check and proceeds directly to summarization. All other logic (chunking, persistence) remains unchanged.
+No changes to the `maybe_compact()` signature are needed. All other logic (chunking, persistence) remains unchanged.
 
 ## Risks / Trade-offs
 

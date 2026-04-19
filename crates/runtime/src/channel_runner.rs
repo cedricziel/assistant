@@ -292,10 +292,15 @@ impl ChannelRunner {
                                         orchestrator: self.orchestrator.clone(),
                                         active_turns: self.active_turns.clone(),
                                         evict_conversation: Some(Box::new(move || {
-                                            // Evict synchronously via try_lock; the LRU
-                                            // cache Mutex is uncontended here.
-                                            if let Ok(mut convs) = conversations.try_lock() {
-                                                convs.pop(&key_clone);
+                                            // Evict via try_lock; the LRU cache uses a
+                                            // tokio Mutex so we cannot .await inside
+                                            // this sync callback. Contention is rare
+                                            // since commands run in spawned tasks.
+                                            match conversations.try_lock() {
+                                                Ok(mut convs) => { convs.pop(&key_clone); }
+                                                Err(_) => {
+                                                    tracing::warn!("failed to evict conversation from LRU cache: mutex contended");
+                                                }
                                             }
                                         })),
                                         default_model: self.orchestrator.llm.model_name().to_string(),
