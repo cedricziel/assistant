@@ -12,6 +12,7 @@ import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/attachment_meta_response.dart';
 
 class AttachmentsApi {
+
   final Dio _dio;
 
   final Serializers _serializers;
@@ -34,7 +35,7 @@ class AttachmentsApi {
   ///
   /// Returns a [Future]
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<void>> serveAttachment({
+  Future<Response<void>> serveAttachment({ 
     required String id,
     int? w,
     int? h,
@@ -45,10 +46,7 @@ class AttachmentsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/attachments/{id}'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/attachments/{id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -99,7 +97,7 @@ class AttachmentsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [AttachmentMetaResponse] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<AttachmentMetaResponse>> uploadAttachment({
+  Future<Response<AttachmentMetaResponse>> uploadAttachment({ 
     required String id,
     required MultipartFile file,
     CancelToken? cancelToken,
@@ -109,10 +107,7 @@ class AttachmentsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/conversations/{id}/attachments'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/conversations/{id}/attachments'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
@@ -138,9 +133,10 @@ class AttachmentsApi {
       _bodyData = FormData.fromMap(<String, dynamic>{
         r'file': file,
       });
-    } catch (error, stackTrace) {
+
+    } catch(error, stackTrace) {
       throw DioException(
-        requestOptions: _options.compose(
+         requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -163,12 +159,11 @@ class AttachmentsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(AttachmentMetaResponse),
-            ) as AttachmentMetaResponse;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(AttachmentMetaResponse),
+      ) as AttachmentMetaResponse;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -190,4 +185,5 @@ class AttachmentsApi {
       extra: _response.extra,
     );
   }
+
 }

@@ -13,14 +13,13 @@ part 'trace_detail_response.g.dart';
 /// Full trace detail with span list.
 ///
 /// Properties:
-/// * [durationMs]
-/// * [personaId]
-/// * [spans]
-/// * [startTime]
-/// * [traceId]
+/// * [durationMs] 
+/// * [personaId] 
+/// * [spans] 
+/// * [startTime] 
+/// * [traceId] 
 @BuiltValue()
-abstract class TraceDetailResponse
-    implements Built<TraceDetailResponse, TraceDetailResponseBuilder> {
+abstract class TraceDetailResponse implements Built<TraceDetailResponse, TraceDetailResponseBuilder> {
   @BuiltValueField(wireName: r'duration_ms')
   int get durationMs;
 
@@ -38,24 +37,18 @@ abstract class TraceDetailResponse
 
   TraceDetailResponse._();
 
-  factory TraceDetailResponse([void updates(TraceDetailResponseBuilder b)]) =
-      _$TraceDetailResponse;
+  factory TraceDetailResponse([void updates(TraceDetailResponseBuilder b)]) = _$TraceDetailResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(TraceDetailResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<TraceDetailResponse> get serializer =>
-      _$TraceDetailResponseSerializer();
+  static Serializer<TraceDetailResponse> get serializer => _$TraceDetailResponseSerializer();
 }
 
-class _$TraceDetailResponseSerializer
-    implements PrimitiveSerializer<TraceDetailResponse> {
+class _$TraceDetailResponseSerializer implements PrimitiveSerializer<TraceDetailResponse> {
   @override
-  final Iterable<Type> types = const [
-    TraceDetailResponse,
-    _$TraceDetailResponse
-  ];
+  final Iterable<Type> types = const [TraceDetailResponse, _$TraceDetailResponse];
 
   @override
   final String wireName = r'TraceDetailResponse';
@@ -98,9 +91,7 @@ class _$TraceDetailResponseSerializer
     TraceDetailResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -132,8 +123,7 @@ class _$TraceDetailResponseSerializer
         case r'spans':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType(BuiltList, [FullType(SpanEntryResponse)]),
+            specifiedType: const FullType(BuiltList, [FullType(SpanEntryResponse)]),
           ) as BuiltList<SpanEntryResponse>;
           result.spans.replace(valueDes);
           break;
@@ -179,3 +169,4 @@ class _$TraceDetailResponseSerializer
     return result.build();
   }
 }
+

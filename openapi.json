@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.1.122"
+    "version": "0.1.123"
   },
   "servers": [
     {
@@ -5531,9 +5531,23 @@
           "message"
         ],
         "properties": {
+          "context": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional context text to include with the message (e.g. clipboard\ncontents, file text).  Prepended to the user message for the LLM."
+          },
           "message": {
             "type": "string",
             "description": "The message text to send to the assistant."
+          },
+          "persona_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional persona ID to route the message to a specific persona.\nWhen absent, the server's active persona is used."
           }
         }
       },

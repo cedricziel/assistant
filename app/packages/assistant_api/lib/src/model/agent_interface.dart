@@ -16,8 +16,7 @@ part 'agent_interface.g.dart';
 /// * [tenant] - Tenant ID to be used in the request when calling the agent.
 /// * [url] - The URL where this interface is available.
 @BuiltValue()
-abstract class AgentInterface
-    implements Built<AgentInterface, AgentInterfaceBuilder> {
+abstract class AgentInterface implements Built<AgentInterface, AgentInterfaceBuilder> {
   /// The protocol binding (e.g., \"JSONRPC\", \"GRPC\", \"HTTP+JSON\").
   @BuiltValueField(wireName: r'protocolBinding')
   String get protocolBinding;
@@ -36,19 +35,16 @@ abstract class AgentInterface
 
   AgentInterface._();
 
-  factory AgentInterface([void updates(AgentInterfaceBuilder b)]) =
-      _$AgentInterface;
+  factory AgentInterface([void updates(AgentInterfaceBuilder b)]) = _$AgentInterface;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AgentInterfaceBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AgentInterface> get serializer =>
-      _$AgentInterfaceSerializer();
+  static Serializer<AgentInterface> get serializer => _$AgentInterfaceSerializer();
 }
 
-class _$AgentInterfaceSerializer
-    implements PrimitiveSerializer<AgentInterface> {
+class _$AgentInterfaceSerializer implements PrimitiveSerializer<AgentInterface> {
   @override
   final Iterable<Type> types = const [AgentInterface, _$AgentInterface];
 
@@ -90,9 +86,7 @@ class _$AgentInterfaceSerializer
     AgentInterface object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -164,3 +158,4 @@ class _$AgentInterfaceSerializer
     return result.build();
   }
 }
+

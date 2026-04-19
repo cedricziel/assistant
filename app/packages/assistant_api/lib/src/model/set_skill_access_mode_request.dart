@@ -13,34 +13,25 @@ part 'set_skill_access_mode_request.g.dart';
 /// Properties:
 /// * [mode] - One of \"all\", \"whitelist\", or \"blacklist\".
 @BuiltValue()
-abstract class SetSkillAccessModeRequest
-    implements
-        Built<SetSkillAccessModeRequest, SetSkillAccessModeRequestBuilder> {
+abstract class SetSkillAccessModeRequest implements Built<SetSkillAccessModeRequest, SetSkillAccessModeRequestBuilder> {
   /// One of \"all\", \"whitelist\", or \"blacklist\".
   @BuiltValueField(wireName: r'mode')
   String get mode;
 
   SetSkillAccessModeRequest._();
 
-  factory SetSkillAccessModeRequest(
-          [void updates(SetSkillAccessModeRequestBuilder b)]) =
-      _$SetSkillAccessModeRequest;
+  factory SetSkillAccessModeRequest([void updates(SetSkillAccessModeRequestBuilder b)]) = _$SetSkillAccessModeRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SetSkillAccessModeRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SetSkillAccessModeRequest> get serializer =>
-      _$SetSkillAccessModeRequestSerializer();
+  static Serializer<SetSkillAccessModeRequest> get serializer => _$SetSkillAccessModeRequestSerializer();
 }
 
-class _$SetSkillAccessModeRequestSerializer
-    implements PrimitiveSerializer<SetSkillAccessModeRequest> {
+class _$SetSkillAccessModeRequestSerializer implements PrimitiveSerializer<SetSkillAccessModeRequest> {
   @override
-  final Iterable<Type> types = const [
-    SetSkillAccessModeRequest,
-    _$SetSkillAccessModeRequest
-  ];
+  final Iterable<Type> types = const [SetSkillAccessModeRequest, _$SetSkillAccessModeRequest];
 
   @override
   final String wireName = r'SetSkillAccessModeRequest';
@@ -63,9 +54,7 @@ class _$SetSkillAccessModeRequestSerializer
     SetSkillAccessModeRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -115,3 +104,4 @@ class _$SetSkillAccessModeRequestSerializer
     return result.build();
   }
 }
+

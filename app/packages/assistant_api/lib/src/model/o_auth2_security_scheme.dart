@@ -16,8 +16,7 @@ part 'o_auth2_security_scheme.g.dart';
 /// * [flows] - Configuration for the supported OAuth 2.0 flows.
 /// * [oauth2MetadataUrl] - URL to the OAuth2 authorization server metadata (RFC 8414).
 @BuiltValue()
-abstract class OAuth2SecurityScheme
-    implements Built<OAuth2SecurityScheme, OAuth2SecuritySchemeBuilder> {
+abstract class OAuth2SecurityScheme implements Built<OAuth2SecurityScheme, OAuth2SecuritySchemeBuilder> {
   /// An optional description for the security scheme.
   @BuiltValueField(wireName: r'description')
   String? get description;
@@ -32,24 +31,18 @@ abstract class OAuth2SecurityScheme
 
   OAuth2SecurityScheme._();
 
-  factory OAuth2SecurityScheme([void updates(OAuth2SecuritySchemeBuilder b)]) =
-      _$OAuth2SecurityScheme;
+  factory OAuth2SecurityScheme([void updates(OAuth2SecuritySchemeBuilder b)]) = _$OAuth2SecurityScheme;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(OAuth2SecuritySchemeBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<OAuth2SecurityScheme> get serializer =>
-      _$OAuth2SecuritySchemeSerializer();
+  static Serializer<OAuth2SecurityScheme> get serializer => _$OAuth2SecuritySchemeSerializer();
 }
 
-class _$OAuth2SecuritySchemeSerializer
-    implements PrimitiveSerializer<OAuth2SecurityScheme> {
+class _$OAuth2SecuritySchemeSerializer implements PrimitiveSerializer<OAuth2SecurityScheme> {
   @override
-  final Iterable<Type> types = const [
-    OAuth2SecurityScheme,
-    _$OAuth2SecurityScheme
-  ];
+  final Iterable<Type> types = const [OAuth2SecurityScheme, _$OAuth2SecurityScheme];
 
   @override
   final String wireName = r'OAuth2SecurityScheme';
@@ -86,9 +79,7 @@ class _$OAuth2SecuritySchemeSerializer
     OAuth2SecurityScheme object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -154,3 +145,4 @@ class _$OAuth2SecuritySchemeSerializer
     return result.build();
   }
 }
+

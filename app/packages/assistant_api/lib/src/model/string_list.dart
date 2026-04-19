@@ -57,9 +57,7 @@ class _$StringListSerializer implements PrimitiveSerializer<StringList> {
     StringList object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -109,3 +107,4 @@ class _$StringListSerializer implements PrimitiveSerializer<StringList> {
     return result.build();
   }
 }
+

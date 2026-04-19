@@ -15,6 +15,7 @@ import 'package:assistant_api/src/model/execute_command_request.dart';
 import 'package:built_collection/built_collection.dart';
 
 class CommandsApi {
+
   final Dio _dio;
 
   final Serializers _serializers;
@@ -22,11 +23,11 @@ class CommandsApi {
   const CommandsApi(this._dio, this._serializers);
 
   /// &#x60;POST /api/conversations/{id}/command&#x60; — execute a slash command.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Conversation ID
-  /// * [executeCommandRequest]
+  /// * [executeCommandRequest] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -36,7 +37,7 @@ class CommandsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [CommandEventResponse] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<CommandEventResponse>> executeCommand({
+  Future<Response<CommandEventResponse>> executeCommand({ 
     required String id,
     required ExecuteCommandRequest executeCommandRequest,
     CancelToken? cancelToken,
@@ -46,10 +47,7 @@ class CommandsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/conversations/{id}/command'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/conversations/{id}/command'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
@@ -73,11 +71,11 @@ class CommandsApi {
 
     try {
       const _type = FullType(ExecuteCommandRequest);
-      _bodyData =
-          _serializers.serialize(executeCommandRequest, specifiedType: _type);
-    } catch (error, stackTrace) {
+      _bodyData = _serializers.serialize(executeCommandRequest, specifiedType: _type);
+
+    } catch(error, stackTrace) {
       throw DioException(
-        requestOptions: _options.compose(
+         requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -100,12 +98,11 @@ class CommandsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(CommandEventResponse),
-            ) as CommandEventResponse;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(CommandEventResponse),
+      ) as CommandEventResponse;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -129,7 +126,7 @@ class CommandsApi {
   }
 
   /// &#x60;GET /api/commands&#x60; — list all registered commands.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -141,7 +138,7 @@ class CommandsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<CommandDefResponse>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<CommandDefResponse>>> listCommands({
+  Future<Response<BuiltList<CommandDefResponse>>> listCommands({ 
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -180,13 +177,11 @@ class CommandsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType:
-                  const FullType(BuiltList, [FullType(CommandDefResponse)]),
-            ) as BuiltList<CommandDefResponse>;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(BuiltList, [FullType(CommandDefResponse)]),
+      ) as BuiltList<CommandDefResponse>;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -210,7 +205,7 @@ class CommandsApi {
   }
 
   /// &#x60;GET /api/conversations/{id}/events&#x60; — list command events for the timeline.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Conversation ID
@@ -223,7 +218,7 @@ class CommandsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<CommandEventResponse>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<CommandEventResponse>>> listConversationEvents({
+  Future<Response<BuiltList<CommandEventResponse>>> listConversationEvents({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -232,10 +227,7 @@ class CommandsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/conversations/{id}/events'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/conversations/{id}/events'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -266,13 +258,11 @@ class CommandsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType:
-                  const FullType(BuiltList, [FullType(CommandEventResponse)]),
-            ) as BuiltList<CommandEventResponse>;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(BuiltList, [FullType(CommandEventResponse)]),
+      ) as BuiltList<CommandEventResponse>;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -294,4 +284,5 @@ class CommandsApi {
       extra: _response.extra,
     );
   }
+
 }

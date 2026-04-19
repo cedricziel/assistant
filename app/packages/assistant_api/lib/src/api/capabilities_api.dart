@@ -11,6 +11,7 @@ import 'package:dio/dio.dart';
 import 'package:assistant_api/src/model/server_capabilities.dart';
 
 class CapabilitiesApi {
+
   final Dio _dio;
 
   final Serializers _serializers;
@@ -18,7 +19,7 @@ class CapabilitiesApi {
   const CapabilitiesApi(this._dio, this._serializers);
 
   /// &#x60;GET /api/capabilities&#x60; — return server capability flags.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -30,7 +31,7 @@ class CapabilitiesApi {
   ///
   /// Returns a [Future] containing a [Response] with a [ServerCapabilities] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<ServerCapabilities>> getCapabilities({
+  Future<Response<ServerCapabilities>> getCapabilities({ 
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -69,12 +70,11 @@ class CapabilitiesApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(ServerCapabilities),
-            ) as ServerCapabilities;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(ServerCapabilities),
+      ) as ServerCapabilities;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -96,4 +96,5 @@ class CapabilitiesApi {
       extra: _response.extra,
     );
   }
+
 }

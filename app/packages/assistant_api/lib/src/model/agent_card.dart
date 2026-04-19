@@ -164,24 +164,21 @@ class _$AgentCardSerializer implements PrimitiveSerializer<AgentCard> {
       yield r'securityRequirements';
       yield serializers.serialize(
         object.securityRequirements,
-        specifiedType:
-            const FullType(BuiltList, [FullType(SecurityRequirement)]),
+        specifiedType: const FullType(BuiltList, [FullType(SecurityRequirement)]),
       );
     }
     if (object.securitySchemes != null) {
       yield r'securitySchemes';
       yield serializers.serialize(
         object.securitySchemes,
-        specifiedType: const FullType(
-            BuiltMap, [FullType(String), FullType(SecurityScheme)]),
+        specifiedType: const FullType(BuiltMap, [FullType(String), FullType(SecurityScheme)]),
       );
     }
     if (object.signatures != null) {
       yield r'signatures';
       yield serializers.serialize(
         object.signatures,
-        specifiedType:
-            const FullType(BuiltList, [FullType(AgentCardSignature)]),
+        specifiedType: const FullType(BuiltList, [FullType(AgentCardSignature)]),
       );
     }
     yield r'skills';
@@ -207,9 +204,7 @@ class _$AgentCardSerializer implements PrimitiveSerializer<AgentCard> {
     AgentCard object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -286,24 +281,21 @@ class _$AgentCardSerializer implements PrimitiveSerializer<AgentCard> {
         case r'securityRequirements':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType(BuiltList, [FullType(SecurityRequirement)]),
+            specifiedType: const FullType(BuiltList, [FullType(SecurityRequirement)]),
           ) as BuiltList<SecurityRequirement>;
           result.securityRequirements.replace(valueDes);
           break;
         case r'securitySchemes':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(
-                BuiltMap, [FullType(String), FullType(SecurityScheme)]),
+            specifiedType: const FullType(BuiltMap, [FullType(String), FullType(SecurityScheme)]),
           ) as BuiltMap<String, SecurityScheme>;
           result.securitySchemes.replace(valueDes);
           break;
         case r'signatures':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType(BuiltList, [FullType(AgentCardSignature)]),
+            specifiedType: const FullType(BuiltList, [FullType(AgentCardSignature)]),
           ) as BuiltList<AgentCardSignature>;
           result.signatures.replace(valueDes);
           break;
@@ -317,8 +309,7 @@ class _$AgentCardSerializer implements PrimitiveSerializer<AgentCard> {
         case r'supportedInterfaces':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType(BuiltList, [FullType(AgentInterface)]),
+            specifiedType: const FullType(BuiltList, [FullType(AgentInterface)]),
           ) as BuiltList<AgentInterface>;
           result.supportedInterfaces.replace(valueDes);
           break;
@@ -357,3 +348,4 @@ class _$AgentCardSerializer implements PrimitiveSerializer<AgentCard> {
     return result.build();
   }
 }
+

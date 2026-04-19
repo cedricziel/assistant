@@ -12,16 +12,15 @@ part 'workflow_detail.g.dart';
 /// Full workflow detail including the graph definition.
 ///
 /// Properties:
-/// * [active]
-/// * [createdAt]
-/// * [description]
-/// * [graph]
+/// * [active] 
+/// * [createdAt] 
+/// * [description] 
+/// * [graph] 
 /// * [id] - Workflow UUID.
-/// * [name]
-/// * [updatedAt]
+/// * [name] 
+/// * [updatedAt] 
 @BuiltValue()
-abstract class WorkflowDetail
-    implements Built<WorkflowDetail, WorkflowDetailBuilder> {
+abstract class WorkflowDetail implements Built<WorkflowDetail, WorkflowDetailBuilder> {
   @BuiltValueField(wireName: r'active')
   bool get active;
 
@@ -46,19 +45,16 @@ abstract class WorkflowDetail
 
   WorkflowDetail._();
 
-  factory WorkflowDetail([void updates(WorkflowDetailBuilder b)]) =
-      _$WorkflowDetail;
+  factory WorkflowDetail([void updates(WorkflowDetailBuilder b)]) = _$WorkflowDetail;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WorkflowDetailBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WorkflowDetail> get serializer =>
-      _$WorkflowDetailSerializer();
+  static Serializer<WorkflowDetail> get serializer => _$WorkflowDetailSerializer();
 }
 
-class _$WorkflowDetailSerializer
-    implements PrimitiveSerializer<WorkflowDetail> {
+class _$WorkflowDetailSerializer implements PrimitiveSerializer<WorkflowDetail> {
   @override
   final Iterable<Type> types = const [WorkflowDetail, _$WorkflowDetail];
 
@@ -86,12 +82,10 @@ class _$WorkflowDetailSerializer
       specifiedType: const FullType(String),
     );
     yield r'graph';
-    yield object.graph == null
-        ? null
-        : serializers.serialize(
-            object.graph,
-            specifiedType: const FullType.nullable(JsonObject),
-          );
+    yield object.graph == null ? null : serializers.serialize(
+      object.graph,
+      specifiedType: const FullType.nullable(JsonObject),
+    );
     yield r'id';
     yield serializers.serialize(
       object.id,
@@ -115,9 +109,7 @@ class _$WorkflowDetailSerializer
     WorkflowDetail object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -210,3 +202,4 @@ class _$WorkflowDetailSerializer
     return result.build();
   }
 }
+

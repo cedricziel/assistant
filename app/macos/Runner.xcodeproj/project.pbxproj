@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXAggregateTarget section */
@@ -27,9 +27,10 @@
 		33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC10F02044A3C60003C045 /* AppDelegate.swift */; };
 		33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F22044A3C60003C045 /* Assets.xcassets */; };
 		33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F42044A3C60003C045 /* MainMenu.xib */; };
-		B7E3F8D2926A45CF0010E2B3 /* assistant in Resources */ = {isa = PBXBuildFile; fileRef = B7E3F8D1926A45CF0010E2B3 /* assistant */; };
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
 		5F1D7596A79A5CBAC505264C /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 46CD4CE89D88C5E25009496F /* Pods_RunnerTests.framework */; };
+		B7E3F8D2926A45CF0010E2B3 /* assistant in Resources */ = {isa = PBXBuildFile; fileRef = B7E3F8D1926A45CF0010E2B3 /* assistant */; };
+		E10B971F2F94FB0E00017AA7 /* AssistantIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E10B971E2F94FB0E00017AA7 /* AssistantIntents */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,6 +107,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				054D6989F6282070080C98E1 /* Pods_Runner.framework in Frameworks */,
+				E10B971F2F94FB0E00017AA7 /* AssistantIntents in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -207,7 +209,6 @@
 				179ACA193117268769F61B48 /* Pods-RunnerTests.release.xcconfig */,
 				78F978AD939169AE6DC8E1DA /* Pods-RunnerTests.profile.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -296,6 +297,9 @@
 				Base,
 			);
 			mainGroup = 33CC10E42044A3C60003C045;
+			packageReferences = (
+				E10B971D2F94FB0E00017AA7 /* XCLocalSwiftPackageReference "../packages/AssistantIntents" */,
+			);
 			productRefGroup = 33CC10EE2044A3C60003C045 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -328,21 +332,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		B7E3F8D3926A45CF0010E2B3 /* Stub assistant binary if absent */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Stub assistant binary if absent";
-			outputPaths = (
-				"$(SRCROOT)/Runner/Resources/assistant",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Create a zero-byte stub so Xcode's Copy Bundle Resources phase\n# does not fail when the real Rust binary has not been compiled yet.\n# The stub is replaced by the real binary when running make build-macos-bundle.\nBINARY_PATH=\"${SRCROOT}/Runner/Resources/assistant\"\nif [ ! -f \"$BINARY_PATH\" ]; then\n  mkdir -p \"$(dirname \"$BINARY_PATH\")\"\n  touch \"$BINARY_PATH\"\n  chmod +x \"$BINARY_PATH\"\n  echo \"Created stub at $BINARY_PATH (run make build-macos-bundle for the real binary)\"\nfi\n";
-		};
 		1CA3EC1F6789540ACB3A3C11 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -351,9 +340,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -441,6 +434,21 @@
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
+		};
+		B7E3F8D3926A45CF0010E2B3 /* Stub assistant binary if absent */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Stub assistant binary if absent";
+			outputPaths = (
+				"$(SRCROOT)/Runner/Resources/assistant",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Create a zero-byte stub so Xcode's Copy Bundle Resources phase\n# does not fail when the real Rust binary has not been compiled yet.\n# The stub is replaced by the real binary when running make build-macos-bundle.\nBINARY_PATH=\"${SRCROOT}/Runner/Resources/assistant\"\nif [ ! -f \"$BINARY_PATH\" ]; then\n  mkdir -p \"$(dirname \"$BINARY_PATH\")\"\n  touch \"$BINARY_PATH\"\n  chmod +x \"$BINARY_PATH\"\n  echo \"Created stub at $BINARY_PATH (run make build-macos-bundle for the real binary)\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -822,6 +830,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		E10B971D2F94FB0E00017AA7 /* XCLocalSwiftPackageReference "../packages/AssistantIntents" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/AssistantIntents;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E10B971E2F94FB0E00017AA7 /* AssistantIntents */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AssistantIntents;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 33CC10E52044A3C60003C045 /* Project object */;
 }

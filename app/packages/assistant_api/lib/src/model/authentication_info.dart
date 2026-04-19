@@ -14,8 +14,7 @@ part 'authentication_info.g.dart';
 /// * [credentials] - Credentials. Format depends on the scheme.
 /// * [scheme] - HTTP Authentication Scheme (e.g., \"Bearer\", \"Basic\", \"Digest\").
 @BuiltValue()
-abstract class AuthenticationInfo
-    implements Built<AuthenticationInfo, AuthenticationInfoBuilder> {
+abstract class AuthenticationInfo implements Built<AuthenticationInfo, AuthenticationInfoBuilder> {
   /// Credentials. Format depends on the scheme.
   @BuiltValueField(wireName: r'credentials')
   String? get credentials;
@@ -26,19 +25,16 @@ abstract class AuthenticationInfo
 
   AuthenticationInfo._();
 
-  factory AuthenticationInfo([void updates(AuthenticationInfoBuilder b)]) =
-      _$AuthenticationInfo;
+  factory AuthenticationInfo([void updates(AuthenticationInfoBuilder b)]) = _$AuthenticationInfo;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AuthenticationInfoBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AuthenticationInfo> get serializer =>
-      _$AuthenticationInfoSerializer();
+  static Serializer<AuthenticationInfo> get serializer => _$AuthenticationInfoSerializer();
 }
 
-class _$AuthenticationInfoSerializer
-    implements PrimitiveSerializer<AuthenticationInfo> {
+class _$AuthenticationInfoSerializer implements PrimitiveSerializer<AuthenticationInfo> {
   @override
   final Iterable<Type> types = const [AuthenticationInfo, _$AuthenticationInfo];
 
@@ -70,9 +66,7 @@ class _$AuthenticationInfoSerializer
     AuthenticationInfo object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -130,3 +124,4 @@ class _$AuthenticationInfoSerializer
     return result.build();
   }
 }
+

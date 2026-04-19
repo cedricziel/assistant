@@ -14,8 +14,7 @@ part 'agent_provider.g.dart';
 /// * [organization] - The name of the provider's organization.
 /// * [url] - A URL for the provider's website or documentation.
 @BuiltValue()
-abstract class AgentProvider
-    implements Built<AgentProvider, AgentProviderBuilder> {
+abstract class AgentProvider implements Built<AgentProvider, AgentProviderBuilder> {
   /// The name of the provider's organization.
   @BuiltValueField(wireName: r'organization')
   String get organization;
@@ -26,15 +25,13 @@ abstract class AgentProvider
 
   AgentProvider._();
 
-  factory AgentProvider([void updates(AgentProviderBuilder b)]) =
-      _$AgentProvider;
+  factory AgentProvider([void updates(AgentProviderBuilder b)]) = _$AgentProvider;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AgentProviderBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AgentProvider> get serializer =>
-      _$AgentProviderSerializer();
+  static Serializer<AgentProvider> get serializer => _$AgentProviderSerializer();
 }
 
 class _$AgentProviderSerializer implements PrimitiveSerializer<AgentProvider> {
@@ -67,9 +64,7 @@ class _$AgentProviderSerializer implements PrimitiveSerializer<AgentProvider> {
     AgentProvider object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -126,3 +121,4 @@ class _$AgentProviderSerializer implements PrimitiveSerializer<AgentProvider> {
     return result.build();
   }
 }
+

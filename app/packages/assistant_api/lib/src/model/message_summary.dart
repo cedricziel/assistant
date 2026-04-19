@@ -15,17 +15,16 @@ part 'message_summary.g.dart';
 ///
 /// Properties:
 /// * [attachments] - Attachments linked to this message.
-/// * [content]
-/// * [createdAt]
-/// * [id]
-/// * [role]
+/// * [content] 
+/// * [createdAt] 
+/// * [id] 
+/// * [role] 
 /// * [skillName] - Name of the tool or skill that produced this result (present when `role == \"tool\"`).
 /// * [toolCalls] - Tool calls made in this message (present when `role == \"assistant\"` and the message contains tool invocations).
 /// * [ttsAvailable] - Whether text-to-speech audio can be synthesised for this message. `true` when a TTS provider is configured and the message is a non-empty assistant reply.
-/// * [turn]
+/// * [turn] 
 @BuiltValue()
-abstract class MessageSummary
-    implements Built<MessageSummary, MessageSummaryBuilder> {
+abstract class MessageSummary implements Built<MessageSummary, MessageSummaryBuilder> {
   /// Attachments linked to this message.
   @BuiltValueField(wireName: r'attachments')
   BuiltList<AttachmentMetaResponse>? get attachments;
@@ -59,19 +58,16 @@ abstract class MessageSummary
 
   MessageSummary._();
 
-  factory MessageSummary([void updates(MessageSummaryBuilder b)]) =
-      _$MessageSummary;
+  factory MessageSummary([void updates(MessageSummaryBuilder b)]) = _$MessageSummary;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(MessageSummaryBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<MessageSummary> get serializer =>
-      _$MessageSummarySerializer();
+  static Serializer<MessageSummary> get serializer => _$MessageSummarySerializer();
 }
 
-class _$MessageSummarySerializer
-    implements PrimitiveSerializer<MessageSummary> {
+class _$MessageSummarySerializer implements PrimitiveSerializer<MessageSummary> {
   @override
   final Iterable<Type> types = const [MessageSummary, _$MessageSummary];
 
@@ -87,8 +83,7 @@ class _$MessageSummarySerializer
       yield r'attachments';
       yield serializers.serialize(
         object.attachments,
-        specifiedType:
-            const FullType(BuiltList, [FullType(AttachmentMetaResponse)]),
+        specifiedType: const FullType(BuiltList, [FullType(AttachmentMetaResponse)]),
       );
     }
     yield r'content';
@@ -122,8 +117,7 @@ class _$MessageSummarySerializer
       yield r'tool_calls';
       yield serializers.serialize(
         object.toolCalls,
-        specifiedType:
-            const FullType.nullable(BuiltList, [FullType(ToolCallSummary)]),
+        specifiedType: const FullType.nullable(BuiltList, [FullType(ToolCallSummary)]),
       );
     }
     yield r'tts_available';
@@ -144,9 +138,7 @@ class _$MessageSummarySerializer
     MessageSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -164,8 +156,7 @@ class _$MessageSummarySerializer
         case r'attachments':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType(BuiltList, [FullType(AttachmentMetaResponse)]),
+            specifiedType: const FullType(BuiltList, [FullType(AttachmentMetaResponse)]),
           ) as BuiltList<AttachmentMetaResponse>;
           result.attachments.replace(valueDes);
           break;
@@ -208,8 +199,7 @@ class _$MessageSummarySerializer
         case r'tool_calls':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType.nullable(BuiltList, [FullType(ToolCallSummary)]),
+            specifiedType: const FullType.nullable(BuiltList, [FullType(ToolCallSummary)]),
           ) as BuiltList<ToolCallSummary>?;
           if (valueDes == null) continue;
           result.toolCalls.replace(valueDes);
@@ -256,3 +246,4 @@ class _$MessageSummarySerializer
     return result.build();
   }
 }
+

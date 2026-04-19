@@ -11,16 +11,15 @@ part 'workflow_run_preview.g.dart';
 /// Response returned when a test-run is accepted.
 ///
 /// Properties:
-/// * [maxSteps]
-/// * [maxVisitsPerNode]
-/// * [message]
-/// * [runId]
-/// * [startedAt]
-/// * [status]
-/// * [workflowId]
+/// * [maxSteps] 
+/// * [maxVisitsPerNode] 
+/// * [message] 
+/// * [runId] 
+/// * [startedAt] 
+/// * [status] 
+/// * [workflowId] 
 @BuiltValue()
-abstract class WorkflowRunPreview
-    implements Built<WorkflowRunPreview, WorkflowRunPreviewBuilder> {
+abstract class WorkflowRunPreview implements Built<WorkflowRunPreview, WorkflowRunPreviewBuilder> {
   @BuiltValueField(wireName: r'max_steps')
   int get maxSteps;
 
@@ -44,19 +43,16 @@ abstract class WorkflowRunPreview
 
   WorkflowRunPreview._();
 
-  factory WorkflowRunPreview([void updates(WorkflowRunPreviewBuilder b)]) =
-      _$WorkflowRunPreview;
+  factory WorkflowRunPreview([void updates(WorkflowRunPreviewBuilder b)]) = _$WorkflowRunPreview;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WorkflowRunPreviewBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WorkflowRunPreview> get serializer =>
-      _$WorkflowRunPreviewSerializer();
+  static Serializer<WorkflowRunPreview> get serializer => _$WorkflowRunPreviewSerializer();
 }
 
-class _$WorkflowRunPreviewSerializer
-    implements PrimitiveSerializer<WorkflowRunPreview> {
+class _$WorkflowRunPreviewSerializer implements PrimitiveSerializer<WorkflowRunPreview> {
   @override
   final Iterable<Type> types = const [WorkflowRunPreview, _$WorkflowRunPreview];
 
@@ -111,9 +107,7 @@ class _$WorkflowRunPreviewSerializer
     WorkflowRunPreview object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -205,3 +199,4 @@ class _$WorkflowRunPreviewSerializer
     return result.build();
   }
 }
+

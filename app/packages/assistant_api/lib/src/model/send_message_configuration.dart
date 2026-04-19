@@ -18,9 +18,7 @@ part 'send_message_configuration.g.dart';
 /// * [historyLength] - Max number of recent messages to include in the response.
 /// * [pushNotificationConfig] - Push notification configuration for task updates.
 @BuiltValue()
-abstract class SendMessageConfiguration
-    implements
-        Built<SendMessageConfiguration, SendMessageConfigurationBuilder> {
+abstract class SendMessageConfiguration implements Built<SendMessageConfiguration, SendMessageConfigurationBuilder> {
   /// Media types the client accepts for response parts.
   @BuiltValueField(wireName: r'acceptedOutputModes')
   BuiltList<String>? get acceptedOutputModes;
@@ -39,25 +37,18 @@ abstract class SendMessageConfiguration
 
   SendMessageConfiguration._();
 
-  factory SendMessageConfiguration(
-          [void updates(SendMessageConfigurationBuilder b)]) =
-      _$SendMessageConfiguration;
+  factory SendMessageConfiguration([void updates(SendMessageConfigurationBuilder b)]) = _$SendMessageConfiguration;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SendMessageConfigurationBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SendMessageConfiguration> get serializer =>
-      _$SendMessageConfigurationSerializer();
+  static Serializer<SendMessageConfiguration> get serializer => _$SendMessageConfigurationSerializer();
 }
 
-class _$SendMessageConfigurationSerializer
-    implements PrimitiveSerializer<SendMessageConfiguration> {
+class _$SendMessageConfigurationSerializer implements PrimitiveSerializer<SendMessageConfiguration> {
   @override
-  final Iterable<Type> types = const [
-    SendMessageConfiguration,
-    _$SendMessageConfiguration
-  ];
+  final Iterable<Type> types = const [SendMessageConfiguration, _$SendMessageConfiguration];
 
   @override
   final String wireName = r'SendMessageConfiguration';
@@ -103,9 +94,7 @@ class _$SendMessageConfigurationSerializer
     SendMessageConfiguration object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -178,3 +167,4 @@ class _$SendMessageConfigurationSerializer
     return result.build();
   }
 }
+

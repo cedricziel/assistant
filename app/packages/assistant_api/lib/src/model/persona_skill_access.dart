@@ -12,11 +12,10 @@ part 'persona_skill_access.g.dart';
 /// Skill access configuration for a persona.
 ///
 /// Properties:
-/// * [mode]
-/// * [skills]
+/// * [mode] 
+/// * [skills] 
 @BuiltValue()
-abstract class PersonaSkillAccess
-    implements Built<PersonaSkillAccess, PersonaSkillAccessBuilder> {
+abstract class PersonaSkillAccess implements Built<PersonaSkillAccess, PersonaSkillAccessBuilder> {
   @BuiltValueField(wireName: r'mode')
   String get mode;
 
@@ -25,19 +24,16 @@ abstract class PersonaSkillAccess
 
   PersonaSkillAccess._();
 
-  factory PersonaSkillAccess([void updates(PersonaSkillAccessBuilder b)]) =
-      _$PersonaSkillAccess;
+  factory PersonaSkillAccess([void updates(PersonaSkillAccessBuilder b)]) = _$PersonaSkillAccess;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(PersonaSkillAccessBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<PersonaSkillAccess> get serializer =>
-      _$PersonaSkillAccessSerializer();
+  static Serializer<PersonaSkillAccess> get serializer => _$PersonaSkillAccessSerializer();
 }
 
-class _$PersonaSkillAccessSerializer
-    implements PrimitiveSerializer<PersonaSkillAccess> {
+class _$PersonaSkillAccessSerializer implements PrimitiveSerializer<PersonaSkillAccess> {
   @override
   final Iterable<Type> types = const [PersonaSkillAccess, _$PersonaSkillAccess];
 
@@ -67,9 +63,7 @@ class _$PersonaSkillAccessSerializer
     PersonaSkillAccess object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -126,3 +120,4 @@ class _$PersonaSkillAccessSerializer
     return result.build();
   }
 }
+

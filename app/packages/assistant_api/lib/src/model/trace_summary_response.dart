@@ -11,16 +11,15 @@ part 'trace_summary_response.g.dart';
 /// A trace summary row.
 ///
 /// Properties:
-/// * [conversationId]
-/// * [durationMs]
-/// * [personaId]
-/// * [skillName]
-/// * [startTime]
-/// * [status]
-/// * [traceId]
+/// * [conversationId] 
+/// * [durationMs] 
+/// * [personaId] 
+/// * [skillName] 
+/// * [startTime] 
+/// * [status] 
+/// * [traceId] 
 @BuiltValue()
-abstract class TraceSummaryResponse
-    implements Built<TraceSummaryResponse, TraceSummaryResponseBuilder> {
+abstract class TraceSummaryResponse implements Built<TraceSummaryResponse, TraceSummaryResponseBuilder> {
   @BuiltValueField(wireName: r'conversation_id')
   String? get conversationId;
 
@@ -44,24 +43,18 @@ abstract class TraceSummaryResponse
 
   TraceSummaryResponse._();
 
-  factory TraceSummaryResponse([void updates(TraceSummaryResponseBuilder b)]) =
-      _$TraceSummaryResponse;
+  factory TraceSummaryResponse([void updates(TraceSummaryResponseBuilder b)]) = _$TraceSummaryResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(TraceSummaryResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<TraceSummaryResponse> get serializer =>
-      _$TraceSummaryResponseSerializer();
+  static Serializer<TraceSummaryResponse> get serializer => _$TraceSummaryResponseSerializer();
 }
 
-class _$TraceSummaryResponseSerializer
-    implements PrimitiveSerializer<TraceSummaryResponse> {
+class _$TraceSummaryResponseSerializer implements PrimitiveSerializer<TraceSummaryResponse> {
   @override
-  final Iterable<Type> types = const [
-    TraceSummaryResponse,
-    _$TraceSummaryResponse
-  ];
+  final Iterable<Type> types = const [TraceSummaryResponse, _$TraceSummaryResponse];
 
   @override
   final String wireName = r'TraceSummaryResponse';
@@ -118,9 +111,7 @@ class _$TraceSummaryResponseSerializer
     TraceSummaryResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -214,3 +205,4 @@ class _$TraceSummaryResponseSerializer
     return result.build();
   }
 }
+

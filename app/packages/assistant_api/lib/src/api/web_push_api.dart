@@ -13,6 +13,7 @@ import 'package:assistant_api/src/model/unsubscribe_request.dart';
 import 'package:assistant_api/src/model/vapid_key_response.dart';
 
 class WebPushApi {
+
   final Dio _dio;
 
   final Serializers _serializers;
@@ -23,7 +24,7 @@ class WebPushApi {
   /// Upsert a browser push subscription (endpoint + key material).  Returns &#x60;201 Created&#x60; on success.
   ///
   /// Parameters:
-  /// * [subscribeRequest]
+  /// * [subscribeRequest] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -33,7 +34,7 @@ class WebPushApi {
   ///
   /// Returns a [Future]
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<void>> subscribe({
+  Future<Response<void>> subscribe({ 
     required SubscribeRequest subscribeRequest,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -66,11 +67,11 @@ class WebPushApi {
 
     try {
       const _type = FullType(SubscribeRequest);
-      _bodyData =
-          _serializers.serialize(subscribeRequest, specifiedType: _type);
-    } catch (error, stackTrace) {
+      _bodyData = _serializers.serialize(subscribeRequest, specifiedType: _type);
+
+    } catch(error, stackTrace) {
       throw DioException(
-        requestOptions: _options.compose(
+         requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -96,7 +97,7 @@ class WebPushApi {
   /// Remove a push subscription by its endpoint URL.  Returns &#x60;204 No Content&#x60; whether or not the subscription existed.
   ///
   /// Parameters:
-  /// * [unsubscribeRequest]
+  /// * [unsubscribeRequest] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -106,7 +107,7 @@ class WebPushApi {
   ///
   /// Returns a [Future]
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<void>> unsubscribe({
+  Future<Response<void>> unsubscribe({ 
     required UnsubscribeRequest unsubscribeRequest,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -139,11 +140,11 @@ class WebPushApi {
 
     try {
       const _type = FullType(UnsubscribeRequest);
-      _bodyData =
-          _serializers.serialize(unsubscribeRequest, specifiedType: _type);
-    } catch (error, stackTrace) {
+      _bodyData = _serializers.serialize(unsubscribeRequest, specifiedType: _type);
+
+    } catch(error, stackTrace) {
       throw DioException(
-        requestOptions: _options.compose(
+         requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -178,7 +179,7 @@ class WebPushApi {
   ///
   /// Returns a [Future] containing a [Response] with a [VapidKeyResponse] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<VapidKeyResponse>> vapidPublicKey({
+  Future<Response<VapidKeyResponse>> vapidPublicKey({ 
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -217,12 +218,11 @@ class WebPushApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(VapidKeyResponse),
-            ) as VapidKeyResponse;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(VapidKeyResponse),
+      ) as VapidKeyResponse;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -244,4 +244,5 @@ class WebPushApi {
       extra: _response.extra,
     );
   }
+
 }

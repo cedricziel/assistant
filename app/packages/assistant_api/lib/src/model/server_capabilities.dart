@@ -14,8 +14,7 @@ part 'server_capabilities.g.dart';
 /// * [voiceReceive] - Whether the server can serve TTS audio for messages (TTS configured).
 /// * [voiceSend] - Whether the server can accept voice messages (STT configured).
 @BuiltValue()
-abstract class ServerCapabilities
-    implements Built<ServerCapabilities, ServerCapabilitiesBuilder> {
+abstract class ServerCapabilities implements Built<ServerCapabilities, ServerCapabilitiesBuilder> {
   /// Whether the server can serve TTS audio for messages (TTS configured).
   @BuiltValueField(wireName: r'voice_receive')
   bool get voiceReceive;
@@ -26,19 +25,16 @@ abstract class ServerCapabilities
 
   ServerCapabilities._();
 
-  factory ServerCapabilities([void updates(ServerCapabilitiesBuilder b)]) =
-      _$ServerCapabilities;
+  factory ServerCapabilities([void updates(ServerCapabilitiesBuilder b)]) = _$ServerCapabilities;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ServerCapabilitiesBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ServerCapabilities> get serializer =>
-      _$ServerCapabilitiesSerializer();
+  static Serializer<ServerCapabilities> get serializer => _$ServerCapabilitiesSerializer();
 }
 
-class _$ServerCapabilitiesSerializer
-    implements PrimitiveSerializer<ServerCapabilities> {
+class _$ServerCapabilitiesSerializer implements PrimitiveSerializer<ServerCapabilities> {
   @override
   final Iterable<Type> types = const [ServerCapabilities, _$ServerCapabilities];
 
@@ -68,9 +64,7 @@ class _$ServerCapabilitiesSerializer
     ServerCapabilities object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -127,3 +121,4 @@ class _$ServerCapabilitiesSerializer
     return result.build();
   }
 }
+

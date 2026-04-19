@@ -11,12 +11,11 @@ part 'skill_entry_response.g.dart';
 /// A skill entry returned by the API.
 ///
 /// Properties:
-/// * [description]
-/// * [enabled]
-/// * [name]
+/// * [description] 
+/// * [enabled] 
+/// * [name] 
 @BuiltValue()
-abstract class SkillEntryResponse
-    implements Built<SkillEntryResponse, SkillEntryResponseBuilder> {
+abstract class SkillEntryResponse implements Built<SkillEntryResponse, SkillEntryResponseBuilder> {
   @BuiltValueField(wireName: r'description')
   String get description;
 
@@ -28,19 +27,16 @@ abstract class SkillEntryResponse
 
   SkillEntryResponse._();
 
-  factory SkillEntryResponse([void updates(SkillEntryResponseBuilder b)]) =
-      _$SkillEntryResponse;
+  factory SkillEntryResponse([void updates(SkillEntryResponseBuilder b)]) = _$SkillEntryResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SkillEntryResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SkillEntryResponse> get serializer =>
-      _$SkillEntryResponseSerializer();
+  static Serializer<SkillEntryResponse> get serializer => _$SkillEntryResponseSerializer();
 }
 
-class _$SkillEntryResponseSerializer
-    implements PrimitiveSerializer<SkillEntryResponse> {
+class _$SkillEntryResponseSerializer implements PrimitiveSerializer<SkillEntryResponse> {
   @override
   final Iterable<Type> types = const [SkillEntryResponse, _$SkillEntryResponse];
 
@@ -75,9 +71,7 @@ class _$SkillEntryResponseSerializer
     SkillEntryResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -141,3 +135,4 @@ class _$SkillEntryResponseSerializer
     return result.build();
   }
 }
+

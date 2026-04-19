@@ -13,34 +13,25 @@ part 'update_conversation_request.g.dart';
 /// Properties:
 /// * [title] - New title for the conversation.
 @BuiltValue()
-abstract class UpdateConversationRequest
-    implements
-        Built<UpdateConversationRequest, UpdateConversationRequestBuilder> {
+abstract class UpdateConversationRequest implements Built<UpdateConversationRequest, UpdateConversationRequestBuilder> {
   /// New title for the conversation.
   @BuiltValueField(wireName: r'title')
   String get title;
 
   UpdateConversationRequest._();
 
-  factory UpdateConversationRequest(
-          [void updates(UpdateConversationRequestBuilder b)]) =
-      _$UpdateConversationRequest;
+  factory UpdateConversationRequest([void updates(UpdateConversationRequestBuilder b)]) = _$UpdateConversationRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(UpdateConversationRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<UpdateConversationRequest> get serializer =>
-      _$UpdateConversationRequestSerializer();
+  static Serializer<UpdateConversationRequest> get serializer => _$UpdateConversationRequestSerializer();
 }
 
-class _$UpdateConversationRequestSerializer
-    implements PrimitiveSerializer<UpdateConversationRequest> {
+class _$UpdateConversationRequestSerializer implements PrimitiveSerializer<UpdateConversationRequest> {
   @override
-  final Iterable<Type> types = const [
-    UpdateConversationRequest,
-    _$UpdateConversationRequest
-  ];
+  final Iterable<Type> types = const [UpdateConversationRequest, _$UpdateConversationRequest];
 
   @override
   final String wireName = r'UpdateConversationRequest';
@@ -63,9 +54,7 @@ class _$UpdateConversationRequestSerializer
     UpdateConversationRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -115,3 +104,4 @@ class _$UpdateConversationRequestSerializer
     return result.build();
   }
 }
+

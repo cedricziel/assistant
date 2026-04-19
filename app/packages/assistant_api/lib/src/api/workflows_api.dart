@@ -19,6 +19,7 @@ import 'package:assistant_api/src/model/workflow_webhook_secrets.dart';
 import 'package:built_collection/built_collection.dart';
 
 class WorkflowsApi {
+
   final Dio _dio;
 
   final Serializers _serializers;
@@ -26,7 +27,7 @@ class WorkflowsApi {
   const WorkflowsApi(this._dio, this._serializers);
 
   /// &#x60;POST /api/workflows/{id}/activate&#x60; — activate a workflow.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
@@ -39,7 +40,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [WorkflowDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<WorkflowDetail>> activateWorkflow({
+  Future<Response<WorkflowDetail>> activateWorkflow({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -48,10 +49,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}/activate'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/workflows/{id}/activate'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
@@ -82,12 +80,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(WorkflowDetail),
-            ) as WorkflowDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(WorkflowDetail),
+      ) as WorkflowDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -111,10 +108,10 @@ class WorkflowsApi {
   }
 
   /// &#x60;POST /api/workflows&#x60; — create a new workflow.
-  ///
+  /// 
   ///
   /// Parameters:
-  /// * [workflowUpsertRequest]
+  /// * [workflowUpsertRequest] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -124,7 +121,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [WorkflowDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<WorkflowDetail>> createWorkflow({
+  Future<Response<WorkflowDetail>> createWorkflow({ 
     required WorkflowUpsertRequest workflowUpsertRequest,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -157,11 +154,11 @@ class WorkflowsApi {
 
     try {
       const _type = FullType(WorkflowUpsertRequest);
-      _bodyData =
-          _serializers.serialize(workflowUpsertRequest, specifiedType: _type);
-    } catch (error, stackTrace) {
+      _bodyData = _serializers.serialize(workflowUpsertRequest, specifiedType: _type);
+
+    } catch(error, stackTrace) {
       throw DioException(
-        requestOptions: _options.compose(
+         requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -184,12 +181,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(WorkflowDetail),
-            ) as WorkflowDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(WorkflowDetail),
+      ) as WorkflowDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -213,7 +209,7 @@ class WorkflowsApi {
   }
 
   /// &#x60;POST /api/workflows/{id}/deactivate&#x60; — deactivate a workflow.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
@@ -226,7 +222,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [WorkflowDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<WorkflowDetail>> deactivateWorkflow({
+  Future<Response<WorkflowDetail>> deactivateWorkflow({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -235,10 +231,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}/deactivate'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/workflows/{id}/deactivate'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
@@ -269,12 +262,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(WorkflowDetail),
-            ) as WorkflowDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(WorkflowDetail),
+      ) as WorkflowDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -298,7 +290,7 @@ class WorkflowsApi {
   }
 
   /// &#x60;DELETE /api/workflows/{id}&#x60; — delete a workflow.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
@@ -311,7 +303,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future]
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<void>> deleteWorkflow({
+  Future<Response<void>> deleteWorkflow({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -320,10 +312,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/workflows/{id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
@@ -354,7 +343,7 @@ class WorkflowsApi {
   }
 
   /// &#x60;GET /api/workflows/{id}&#x60; — fetch a workflow.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
@@ -367,7 +356,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [WorkflowDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<WorkflowDetail>> getWorkflow({
+  Future<Response<WorkflowDetail>> getWorkflow({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -376,10 +365,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/workflows/{id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -410,12 +396,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(WorkflowDetail),
-            ) as WorkflowDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(WorkflowDetail),
+      ) as WorkflowDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -439,7 +424,7 @@ class WorkflowsApi {
   }
 
   /// &#x60;GET /api/workflows/{id}/runs/{run_id}&#x60; — workflow run detail with steps.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
@@ -453,7 +438,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [WorkflowRunDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<WorkflowRunDetail>> getWorkflowRun({
+  Future<Response<WorkflowRunDetail>> getWorkflowRun({ 
     required String id,
     required String runId,
     CancelToken? cancelToken,
@@ -463,15 +448,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}/runs/{run_id}'
-        .replaceAll(
-            '{' r'id' '}',
-            encodeQueryParameter(_serializers, id, const FullType(String))
-                .toString())
-        .replaceAll(
-            '{' r'run_id' '}',
-            encodeQueryParameter(_serializers, runId, const FullType(String))
-                .toString());
+    final _path = r'/api/workflows/{id}/runs/{run_id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString()).replaceAll('{' r'run_id' '}', encodeQueryParameter(_serializers, runId, const FullType(String)).toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -502,12 +479,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(WorkflowRunDetail),
-            ) as WorkflowRunDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(WorkflowRunDetail),
+      ) as WorkflowRunDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -531,7 +507,7 @@ class WorkflowsApi {
   }
 
   /// &#x60;GET /api/workflows/{id}/webhook-secrets&#x60; — reveal webhook URL and token.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
@@ -544,7 +520,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [WorkflowWebhookSecrets] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<WorkflowWebhookSecrets>> getWorkflowWebhookSecrets({
+  Future<Response<WorkflowWebhookSecrets>> getWorkflowWebhookSecrets({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -553,10 +529,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}/webhook-secrets'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/workflows/{id}/webhook-secrets'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -587,12 +560,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(WorkflowWebhookSecrets),
-            ) as WorkflowWebhookSecrets;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(WorkflowWebhookSecrets),
+      ) as WorkflowWebhookSecrets;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -616,7 +588,7 @@ class WorkflowsApi {
   }
 
   /// &#x60;GET /api/workflows/{id}/runs&#x60; — list recent runs (up to 50).
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
@@ -629,7 +601,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<WorkflowRunSummary>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<WorkflowRunSummary>>> listWorkflowRuns({
+  Future<Response<BuiltList<WorkflowRunSummary>>> listWorkflowRuns({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -638,10 +610,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}/runs'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/workflows/{id}/runs'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -672,13 +641,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType:
-                  const FullType(BuiltList, [FullType(WorkflowRunSummary)]),
-            ) as BuiltList<WorkflowRunSummary>;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(BuiltList, [FullType(WorkflowRunSummary)]),
+      ) as BuiltList<WorkflowRunSummary>;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -702,7 +669,7 @@ class WorkflowsApi {
   }
 
   /// &#x60;GET /api/workflows&#x60; — list all workflows.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -714,7 +681,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<WorkflowSummary>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<WorkflowSummary>>> listWorkflows({
+  Future<Response<BuiltList<WorkflowSummary>>> listWorkflows({ 
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -753,13 +720,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType:
-                  const FullType(BuiltList, [FullType(WorkflowSummary)]),
-            ) as BuiltList<WorkflowSummary>;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(BuiltList, [FullType(WorkflowSummary)]),
+      ) as BuiltList<WorkflowSummary>;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -783,7 +748,7 @@ class WorkflowsApi {
   }
 
   /// &#x60;POST /api/workflows/{id}/test-run&#x60; — queue a manual test run.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
@@ -796,7 +761,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [WorkflowRunPreview] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<WorkflowRunPreview>> testRunWorkflow({
+  Future<Response<WorkflowRunPreview>> testRunWorkflow({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -805,10 +770,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}/test-run'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/workflows/{id}/test-run'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
@@ -839,12 +801,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(WorkflowRunPreview),
-            ) as WorkflowRunPreview;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(WorkflowRunPreview),
+      ) as WorkflowRunPreview;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -868,11 +829,11 @@ class WorkflowsApi {
   }
 
   /// &#x60;PUT /api/workflows/{id}&#x60; — update a workflow.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Workflow UUID
-  /// * [workflowUpsertRequest]
+  /// * [workflowUpsertRequest] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -882,7 +843,7 @@ class WorkflowsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [WorkflowDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<WorkflowDetail>> updateWorkflow({
+  Future<Response<WorkflowDetail>> updateWorkflow({ 
     required String id,
     required WorkflowUpsertRequest workflowUpsertRequest,
     CancelToken? cancelToken,
@@ -892,10 +853,7 @@ class WorkflowsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/workflows/{id}'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/workflows/{id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'PUT',
       headers: <String, dynamic>{
@@ -919,11 +877,11 @@ class WorkflowsApi {
 
     try {
       const _type = FullType(WorkflowUpsertRequest);
-      _bodyData =
-          _serializers.serialize(workflowUpsertRequest, specifiedType: _type);
-    } catch (error, stackTrace) {
+      _bodyData = _serializers.serialize(workflowUpsertRequest, specifiedType: _type);
+
+    } catch(error, stackTrace) {
       throw DioException(
-        requestOptions: _options.compose(
+         requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -946,12 +904,11 @@ class WorkflowsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(WorkflowDetail),
-            ) as WorkflowDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(WorkflowDetail),
+      ) as WorkflowDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -973,4 +930,5 @@ class WorkflowsApi {
       extra: _response.extra,
     );
   }
+
 }

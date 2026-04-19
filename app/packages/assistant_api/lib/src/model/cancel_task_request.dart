@@ -17,8 +17,7 @@ part 'cancel_task_request.g.dart';
 /// * [metadata] - Additional context or parameters.
 /// * [tenant] - Optional tenant ID.
 @BuiltValue()
-abstract class CancelTaskRequest
-    implements Built<CancelTaskRequest, CancelTaskRequestBuilder> {
+abstract class CancelTaskRequest implements Built<CancelTaskRequest, CancelTaskRequestBuilder> {
   /// The resource ID of the task to cancel.
   @BuiltValueField(wireName: r'id')
   String get id;
@@ -33,19 +32,16 @@ abstract class CancelTaskRequest
 
   CancelTaskRequest._();
 
-  factory CancelTaskRequest([void updates(CancelTaskRequestBuilder b)]) =
-      _$CancelTaskRequest;
+  factory CancelTaskRequest([void updates(CancelTaskRequestBuilder b)]) = _$CancelTaskRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(CancelTaskRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<CancelTaskRequest> get serializer =>
-      _$CancelTaskRequestSerializer();
+  static Serializer<CancelTaskRequest> get serializer => _$CancelTaskRequestSerializer();
 }
 
-class _$CancelTaskRequestSerializer
-    implements PrimitiveSerializer<CancelTaskRequest> {
+class _$CancelTaskRequestSerializer implements PrimitiveSerializer<CancelTaskRequest> {
   @override
   final Iterable<Type> types = const [CancelTaskRequest, _$CancelTaskRequest];
 
@@ -66,8 +62,7 @@ class _$CancelTaskRequestSerializer
       yield r'metadata';
       yield serializers.serialize(
         object.metadata,
-        specifiedType: const FullType.nullable(
-            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     if (object.tenant != null) {
@@ -85,9 +80,7 @@ class _$CancelTaskRequestSerializer
     CancelTaskRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -112,8 +105,7 @@ class _$CancelTaskRequestSerializer
         case r'metadata':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(
-                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.metadata.replace(valueDes);
@@ -154,3 +146,4 @@ class _$CancelTaskRequestSerializer
     return result.build();
   }
 }
+
