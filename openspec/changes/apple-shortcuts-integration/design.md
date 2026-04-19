@@ -62,7 +62,7 @@ The Rust backend exposes REST endpoints for conversations, personas, and workflo
 
 ### D4: Package structure
 
-```
+```text
 app/packages/AssistantIntents/
 ├── Package.swift
 ├── Sources/AssistantIntents/
@@ -97,7 +97,7 @@ app/packages/AssistantIntents/
 ## Risks / Trade-offs
 
 - **[Server unreachable at Shortcut-edit time]** → Entity queries return empty arrays. The picker shows "No items" rather than crashing. Users see a helpful message.
-- **[Keychain access differences macOS vs iOS]** → Both use `kSecClassGenericPassword` with bundle ID as service. `flutter_secure_storage_darwin` handles both platforms. Mitigation: verify in integration testing.
+- **[Keychain service name mismatch macOS vs iOS]** → macOS bundle ID (`com.cedricziel.assistant.macos`) differs from iOS (`com.cedricziel.assistant`). Both `flutter_secure_storage` and `KeychainHelper` use `Bundle.main.bundleIdentifier` as the Keychain service name, so they match per-platform. But this must be explicitly verified during implementation — the Swift package's `KeychainHelper` must use `Bundle.main.bundleIdentifier` (not a hardcoded fallback) to stay in sync with whatever `flutter_secure_storage_darwin` uses on macOS.
 - **[App Sandbox (macOS debug builds)]** → Debug entitlements enable App Sandbox. Network client/server entitlements are already present. App Intents run in the app process, so no additional entitlements needed.
 - **[quick-message persona_id validation]** → If an invalid persona_id is sent, the handler should fall back to the server's active persona (not error). This matches the "optional enhancement" semantics.
 - **[SPM + Flutter build integration]** → `flutter build` invokes `xcodebuild` which resolves SPM dependencies automatically. No manual `swift package resolve` step needed. Risk: first build may be slower due to SPM resolution.

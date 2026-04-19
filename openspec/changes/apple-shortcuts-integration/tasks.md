@@ -40,9 +40,10 @@
 
 ## 6. Verification and Cleanup
 
-- [ ] 6.1 Verify macOS Keychain credential sync: Flutter writes, Swift package reads (same bundle ID as service name)
-- [ ] 6.2 Test AskAssistant via macOS Shortcuts app (with and without persona)
-- [ ] 6.3 Test RunWorkflow via macOS Shortcuts app
-- [ ] 6.4 Test entity pickers show dynamic data in Shortcuts editor
-- [ ] 6.5 Run `make lint` and `make format`
-- [ ] 6.6 Run `make lint-flutter` for both iOS and macOS
+- [ ] 6.1 Verify Keychain service name consistency: confirm `KeychainHelper` uses `Bundle.main.bundleIdentifier` (no hardcoded fallback like `com.example.assistantApp`) and that this matches `flutter_secure_storage_darwin`'s service name on macOS (`com.cedricziel.assistant.macos`) and iOS (`com.cedricziel.assistant`)
+- [ ] 6.2 Verify macOS Keychain credential sync: Flutter writes, Swift package reads
+- [ ] 6.3 Test AskAssistant via macOS Shortcuts app (with and without persona)
+- [ ] 6.4 Test RunWorkflow via macOS Shortcuts app
+- [ ] 6.5 Test entity pickers show dynamic data in Shortcuts editor
+- [ ] 6.6 Run `make lint` and `make format`
+- [ ] 6.7 Run `make lint-flutter` for both iOS and macOS
