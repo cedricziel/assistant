@@ -8,13 +8,18 @@ part of 'quick_message_request.dart';
 
 class _$QuickMessageRequest extends QuickMessageRequest {
   @override
+  final String? context;
+  @override
   final String message;
+  @override
+  final String? personaId;
 
   factory _$QuickMessageRequest(
           [void Function(QuickMessageRequestBuilder)? updates]) =>
       (QuickMessageRequestBuilder()..update(updates))._build();
 
-  _$QuickMessageRequest._({required this.message}) : super._();
+  _$QuickMessageRequest._({this.context, required this.message, this.personaId})
+      : super._();
   @override
   QuickMessageRequest rebuild(
           void Function(QuickMessageRequestBuilder) updates) =>
@@ -27,13 +32,18 @@ class _$QuickMessageRequest extends QuickMessageRequest {
   @override
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
-    return other is QuickMessageRequest && message == other.message;
+    return other is QuickMessageRequest &&
+        context == other.context &&
+        message == other.message &&
+        personaId == other.personaId;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, context.hashCode);
     _$hash = $jc(_$hash, message.hashCode);
+    _$hash = $jc(_$hash, personaId.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -41,7 +51,9 @@ class _$QuickMessageRequest extends QuickMessageRequest {
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'QuickMessageRequest')
-          ..add('message', message))
+          ..add('context', context)
+          ..add('message', message)
+          ..add('personaId', personaId))
         .toString();
   }
 }
@@ -50,9 +62,17 @@ class QuickMessageRequestBuilder
     implements Builder<QuickMessageRequest, QuickMessageRequestBuilder> {
   _$QuickMessageRequest? _$v;
 
+  String? _context;
+  String? get context => _$this._context;
+  set context(String? context) => _$this._context = context;
+
   String? _message;
   String? get message => _$this._message;
   set message(String? message) => _$this._message = message;
+
+  String? _personaId;
+  String? get personaId => _$this._personaId;
+  set personaId(String? personaId) => _$this._personaId = personaId;
 
   QuickMessageRequestBuilder() {
     QuickMessageRequest._defaults(this);
@@ -61,7 +81,9 @@ class QuickMessageRequestBuilder
   QuickMessageRequestBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _context = $v.context;
       _message = $v.message;
+      _personaId = $v.personaId;
       _$v = null;
     }
     return this;
@@ -83,8 +105,10 @@ class QuickMessageRequestBuilder
   _$QuickMessageRequest _build() {
     final _$result = _$v ??
         _$QuickMessageRequest._(
+          context: context,
           message: BuiltValueNullFieldError.checkNotNull(
               message, r'QuickMessageRequest', 'message'),
+          personaId: personaId,
         );
     replace(_$result);
     return _$result;
