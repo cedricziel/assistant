@@ -1,6 +1,7 @@
 pub mod adapter_registry;
 pub mod bootstrap;
 pub mod channel_runner;
+pub mod command_registry;
 pub(crate) mod compaction;
 pub(crate) mod conversation_indexer;
 pub(crate) mod history;
@@ -17,6 +18,7 @@ pub mod webhook_dispatch;
 pub use adapter_registry::AdapterRegistry;
 pub use bootstrap::spawn_memory_indexer;
 pub use channel_runner::ChannelRunner;
+pub use command_registry::{CommandContext, CommandRegistry};
 pub use interface_runner::InterfaceRunner;
 pub use interface_trait::AssistantInterface;
 pub use metrics::MetricsRecorder;

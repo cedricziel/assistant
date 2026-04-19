@@ -19,15 +19,17 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage};
+use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ConversationConfig};
 use assistant_llm::ContentBlock;
+use assistant_storage::CommandEventStore;
 use base64::Engine as _;
 use futures::StreamExt;
 use lru::LruCache;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::command_registry::{CommandContext, CommandRegistry};
 use crate::orchestrator::Orchestrator;
 
 /// Type alias for the per-conversation serialisation map.
@@ -44,11 +46,20 @@ pub struct ChannelRunner {
     conv_locks: ConvLocks,
     /// Optional external shutdown signal (background / daemon mode).
     shutdown: Option<tokio_util::sync::CancellationToken>,
+    /// Slash-command registry (shared across all interfaces).
+    command_registry: Arc<CommandRegistry>,
+    /// Per-conversation config overrides (model, etc.).
+    conversation_configs: Arc<RwLock<HashMap<Uuid, ConversationConfig>>>,
+    /// Active turns: conv_id → request_id (for `/stop`).
+    active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
+    /// Store for persisting command events.
+    command_event_store: CommandEventStore,
 }
 
 impl ChannelRunner {
     /// Create a new runner for `adapter`.
     pub fn new(adapter: Arc<dyn ChannelAdapter>, orchestrator: Arc<Orchestrator>) -> Self {
+        let command_event_store = CommandEventStore::new(orchestrator.storage.pool.clone());
         Self {
             adapter,
             orchestrator,
@@ -57,6 +68,10 @@ impl ChannelRunner {
             ))),
             conv_locks: Arc::new(Mutex::new(HashMap::new())),
             shutdown: None,
+            command_registry: Arc::new(CommandRegistry::new()),
+            conversation_configs: Arc::new(RwLock::new(HashMap::new())),
+            active_turns: Arc::new(RwLock::new(HashMap::new())),
+            command_event_store,
         }
     }
 
@@ -193,6 +208,24 @@ impl ChannelRunner {
         }
     }
 
+    /// Send a command acknowledgement back to the user.
+    async fn send_command_ack(
+        adapter: &Arc<dyn ChannelAdapter>,
+        user: &assistant_core::ChannelUser,
+        ack_text: &str,
+        thread_id: Option<&str>,
+    ) {
+        let content = ChannelContent::Text(ack_text.to_string());
+        let result = if let Some(tid) = thread_id {
+            adapter.send_in_thread(user, content, tid).await
+        } else {
+            adapter.send(user, content).await
+        };
+        if let Err(e) = result {
+            warn!(adapter = adapter.name(), error = %e, "failed to send command ack");
+        }
+    }
+
     /// Run the adapter dispatch loop until shutdown.
     pub async fn run(self) -> Result<()> {
         let name = self.adapter.name().to_string();
@@ -239,23 +272,79 @@ impl ChannelRunner {
                             let key = self.adapter.conversation_key(&channel_msg);
                             let conv_id =
                                 Self::resolve_conv_id(&self.conversations, &key).await;
-                            let lock =
-                                Self::get_conv_lock(&self.conv_locks, conv_id).await;
 
-                            // Signal "message received / queued" immediately — before the
-                            // per-conversation lock is acquired — so adapters can add an ⏳
-                            // reaction even while another turn is still in progress.
+                            // Signal "message received / queued" immediately.
                             if let Err(e) = self.adapter.on_message_received(&channel_msg).await {
                                 warn!(adapter = self.adapter.name(), error = %e, "on_message_received hook failed");
                             }
 
+                            // -- Command interception --
+                            // Check if the text is a registered slash command.
+                            if let ChannelContent::Text(ref text) = channel_msg.content
+                                && let Some((cmd_name, args)) = self.command_registry.parse(text)
+                            {
+                                    let is_compact = cmd_name == "compact";
+                                    let conversations = self.conversations.clone();
+                                    let key_clone = key.clone();
+                                    let ctx = CommandContext {
+                                        conversation_id: conv_id,
+                                        conversation_configs: self.conversation_configs.clone(),
+                                        orchestrator: self.orchestrator.clone(),
+                                        active_turns: self.active_turns.clone(),
+                                        evict_conversation: Some(Box::new(move || {
+                                            // Evict synchronously via try_lock; the LRU
+                                            // cache Mutex is uncontended here.
+                                            if let Ok(mut convs) = conversations.try_lock() {
+                                                convs.pop(&key_clone);
+                                            }
+                                        })),
+                                        default_model: self.orchestrator.llm.model_name().to_string(),
+                                    };
+
+                                    let registry = self.command_registry.clone();
+                                    let adapter = self.adapter.clone();
+                                    let event_store = self.command_event_store.clone();
+                                    let user = channel_msg.sender.clone();
+                                    let thread_id = channel_msg.thread_id.clone();
+
+                                    if is_compact {
+                                        // /compact needs the conversation lock.
+                                        let lock = Self::get_conv_lock(&self.conv_locks, conv_id).await;
+                                        tokio::spawn(async move {
+                                            let _guard = lock.lock().await;
+                                            let result = registry.execute(&cmd_name, &args, ctx).await;
+                                            Self::send_command_ack(&adapter, &user, &result.ack_text, thread_id.as_deref()).await;
+                                            let _ = event_store.save_event(conv_id, &cmd_name, None, &result.ack_text).await;
+                                        });
+                                    } else {
+                                        // All other commands bypass the lock.
+                                        tokio::spawn(async move {
+                                            let result = registry.execute(&cmd_name, &args, ctx).await;
+                                            Self::send_command_ack(&adapter, &user, &result.ack_text, thread_id.as_deref()).await;
+                                            let _ = event_store.save_event(conv_id, &cmd_name, None, &result.ack_text).await;
+                                        });
+                                    }
+                                continue;
+                            }
+
+                            // -- Normal turn dispatch --
+                            let lock =
+                                Self::get_conv_lock(&self.conv_locks, conv_id).await;
                             let adapter = self.adapter.clone();
                             let orchestrator = self.orchestrator.clone();
+                            let active_turns = self.active_turns.clone();
 
                             tokio::spawn(async move {
                                 let _guard = lock.lock().await;
+
+                                // Track the active turn for /stop.
+                                let request_id = Uuid::new_v4();
+                                active_turns.write().await.insert(conv_id, request_id);
+
                                 Self::dispatch(channel_msg, conv_id, adapter, orchestrator)
                                     .await;
+
+                                active_turns.write().await.remove(&conv_id);
                             });
                         }
                     }

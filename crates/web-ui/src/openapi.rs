@@ -42,6 +42,9 @@ use crate::api::{
     analytics::{
         AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
     },
+    commands::{
+        CommandArgResponse, CommandDefResponse, CommandEventResponse, ExecuteCommandRequest,
+    },
     logs::LogEntryResponse,
     personas::{
         AddSkillAccessRequest, CreatePersonaRequest, PersonaDetail, PersonaFileContent,
@@ -126,6 +129,9 @@ pub struct ApiErrorResponse {
         crate::api::get_audio,
         crate::api::upload_attachment,
         crate::api::serve_attachment,
+        crate::api::commands::list_commands,
+        crate::api::commands::execute_command,
+        crate::api::commands::list_command_events,
         crate::api::personas::list_personas,
         crate::api::personas::create_persona,
         crate::api::personas::set_active_persona,
@@ -293,6 +299,11 @@ pub struct ApiErrorResponse {
             WorkflowRunDetail,
             WorkflowRunPreview,
             WorkflowWebhookSecrets,
+            // Command API types
+            CommandDefResponse,
+            CommandArgResponse,
+            CommandEventResponse,
+            ExecuteCommandRequest,
             // Web Push types
             VapidKeyResponse,
             SubscribeRequest,
@@ -304,6 +315,8 @@ pub struct ApiErrorResponse {
     tags(
         (name = "capabilities",
          description = "Server capabilities — query which optional features (voice, TTS) are enabled"),
+        (name = "commands",
+         description = "Slash commands — list, execute, and view command events for conversations"),
         (name = "conversations",
          description = "Conversation management — list, create, fetch, update, delete, and send messages"),
         (name = "agent-card",

@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod attachments;
+pub mod command_events;
 pub mod conversation_events;
 pub mod conversations;
 pub mod logs;
@@ -19,6 +20,7 @@ pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
 pub use attachments::AttachmentStore;
+pub use command_events::{CommandEventRow, CommandEventStore};
 pub use conversation_events::{
     ConversationEventRow, ConversationEventStore, LiveEvent, RunBroadcaster,
 };
@@ -360,6 +362,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "034_message_attachments",
             include_str!("../../../migrations/034_message_attachments.sql"),
+        ),
+        (
+            "035_command_events",
+            include_str!("../../../migrations/035_command_events.sql"),
         ),
     ];
 

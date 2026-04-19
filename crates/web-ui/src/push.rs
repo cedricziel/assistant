@@ -22,19 +22,19 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes_gcm::{
-    aead::{AeadMutInPlace, KeyInit},
     Aes128Gcm, Key, Nonce,
+    aead::{AeadMutInPlace, KeyInit},
 };
 use anyhow::{Context, Result};
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine as _;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use hkdf::Hkdf;
 use p256::{
+    PublicKey,
     ecdh::EphemeralSecret,
-    ecdsa::{signature::Signer, SigningKey},
+    ecdsa::{SigningKey, signature::Signer},
     elliptic_curve::sec1::ToEncodedPoint,
     pkcs8::EncodePrivateKey,
-    PublicKey,
 };
 use sha2::Sha256;
 use tracing::{debug, info, warn};
@@ -52,10 +52,12 @@ pub async fn ensure_vapid_keys(
     public_key: Option<&str>,
 ) -> Result<(String, String)> {
     if let (Some(priv_k), Some(pub_k)) = (private_key, public_key)
-        && !priv_k.is_empty() && !pub_k.is_empty() {
-            debug!("VAPID keys already present in config");
-            return Ok((priv_k.to_string(), pub_k.to_string()));
-        }
+        && !priv_k.is_empty()
+        && !pub_k.is_empty()
+    {
+        debug!("VAPID keys already present in config");
+        return Ok((priv_k.to_string(), pub_k.to_string()));
+    }
 
     info!("Generating new VAPID key pair…");
     let (priv_b64, pub_b64) = generate_vapid_keypair()?;
