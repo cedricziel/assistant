@@ -23,7 +23,7 @@ Each task follows TDD (failing test first) and results in one atomic commit.
 ## Frontend: Provider Rewrite
 
 - [x] Rewrite `ConversationListNotifier.build()` to subscribe to `streamConversations()`. On `snapshot` event, replace state. On `upserted`, insert-or-replace and re-sort. On `deleted`, remove by id. Widget test: mock stream, assert list updates reactively.
-- [ ] Add client-side debounce (~300ms) for `upserted` events. Test: emit 5 rapid upserts for the same conversation, assert only one state rebuild occurs.
+- [x] Add client-side debounce (~300ms) for `upserted` events. Test: emit 5 rapid upserts for the same conversation, assert only one state rebuild occurs.
 - [ ] Remove `refresh()` calls from `ChatNotifier` (after `DoneEvent`, voice completion, event replay). The stream handles updates now. Verify existing chat tests still pass.
 
 ## Integration

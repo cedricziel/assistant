@@ -92,6 +92,11 @@ ProviderContainer _makeContainer({ApiClient? client}) {
   );
 }
 
+/// Wait for stream events to be delivered and the debounce timer to fire.
+Future<void> _waitForDebounce() async {
+  await Future<void>.delayed(const Duration(milliseconds: 350));
+}
+
 /// Keep an autoDispose provider alive for the duration of the test.
 ProviderSubscription<AsyncValue<ConversationListState>> _keepAlive(
   ProviderContainer container,
@@ -192,7 +197,7 @@ void main() {
           _makeEntry(id: 'c2', title: 'New', updatedAt: DateTime(2024, 2, 1)),
         ),
       );
-      await Future<void>.delayed(Duration.zero);
+      await _waitForDebounce();
 
       final state = container.read(conversationListProvider).value!;
       expect(state.conversations.length, 2);
@@ -267,7 +272,7 @@ void main() {
           ),
         ),
       );
-      await Future<void>.delayed(Duration.zero);
+      await _waitForDebounce();
 
       final state = container.read(conversationListProvider).value!;
       expect(state.conversations.first.id, 'c2');
@@ -451,6 +456,62 @@ void main() {
       expect(state.conversations.length, 1);
       expect(state.conversations.first.id, 'first');
     });
+
+    // -----------------------------------------------------------------------
+    // Debounce
+    // -----------------------------------------------------------------------
+
+    test(
+      'debounces rapid upserted events into a single state rebuild',
+      () async {
+        final controller = StreamController<ConversationListEvent>.broadcast();
+        final client = _FakeApiClient(streamController: controller);
+        final container = _makeContainer(client: client);
+        addTearDown(container.dispose);
+        addTearDown(controller.close);
+        final sub = _keepAlive(container);
+        addTearDown(sub.close);
+
+        await container.read(conversationListProvider.future);
+
+        // Emit initial snapshot
+        controller.add(ConversationSnapshotEvent([_makeEntry(id: 'c1')]));
+        await Future<void>.delayed(Duration.zero);
+
+        // Track state rebuilds after snapshot
+        int rebuildCount = 0;
+        container.listen(conversationListProvider, (_, _) {
+          rebuildCount++;
+        });
+
+        // Emit 5 rapid upserts for the same conversation
+        for (int i = 0; i < 5; i++) {
+          controller.add(
+            ConversationUpsertedEvent(
+              _makeEntry(
+                id: 'c1',
+                title: 'Update $i',
+                updatedAt: DateTime(2024, 1, 1, 0, 0, i),
+              ),
+            ),
+          );
+        }
+
+        // Wait for events to be delivered and debounce timer to fire
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+
+        // Only one rebuild should have occurred (debounced batch)
+        expect(
+          rebuildCount,
+          1,
+          reason: 'rapid upserts should be debounced into one rebuild',
+        );
+
+        // Final state should have the latest title
+        final state = container.read(conversationListProvider).value!;
+        expect(state.conversations.first.title, 'Update 4');
+      },
+    );
 
     // -----------------------------------------------------------------------
     // deleteConversation()

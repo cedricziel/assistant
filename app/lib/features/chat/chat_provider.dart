@@ -43,7 +43,11 @@ class ConversationListState {
 /// `snapshot` event followed by `upserted`/`deleted` deltas. Local state
 /// is patched reactively — no manual refresh needed.
 class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
+  static const _debounceDuration = Duration(milliseconds: 300);
+
   StreamSubscription<ConversationListEvent>? _subscription;
+  Timer? _debounceTimer;
+  final Map<String, ConversationListEntry> _pendingUpserts = {};
 
   @override
   Future<ConversationListState> build() async {
@@ -55,6 +59,8 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     ref.onDispose(() {
       _subscription?.cancel();
       _subscription = null;
+      _debounceTimer?.cancel();
+      _debounceTimer = null;
     });
 
     // Return loading state — the snapshot event will replace it.
@@ -75,12 +81,31 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   void _onEvent(ConversationListEvent event) {
     switch (event) {
       case ConversationSnapshotEvent(:final conversations):
+        _flushPendingUpserts();
         state = AsyncData(ConversationListState(conversations: conversations));
       case ConversationUpsertedEvent(:final conversation):
-        _upsert(conversation);
+        _pendingUpserts[conversation.id] = conversation;
+        _debounceTimer?.cancel();
+        _debounceTimer = Timer(_debounceDuration, _flushPendingUpserts);
       case ConversationDeletedEvent(:final conversationId):
+        _pendingUpserts.remove(conversationId);
         _remove(conversationId);
     }
+  }
+
+  void _flushPendingUpserts() {
+    if (_pendingUpserts.isEmpty) return;
+    _debounceTimer?.cancel();
+    _debounceTimer = null;
+
+    final current = state.value ?? const ConversationListState();
+    final ids = _pendingUpserts.keys.toSet();
+    final updated =
+        current.conversations.where((c) => !ids.contains(c.id)).toList()
+          ..addAll(_pendingUpserts.values)
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    _pendingUpserts.clear();
+    state = AsyncData(current.copyWith(conversations: updated));
   }
 
   void _upsert(ConversationListEntry conv) {
