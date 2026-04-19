@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart';
@@ -1056,6 +1057,361 @@ void main() {
       expect(copy.subagentId, 'a1');
       expect(copy.subagentTask, 'task');
       expect(copy.subagentSummary, 'summary');
+    });
+  });
+
+  // -- Deferred reconnection on transient errors --------------------------------
+
+  group('ChatNotifier — deferred reconnection', () {
+    testWidgets(
+      'transient error without run ID shows friendly error immediately',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+
+        // Connection closed before RunStartedEvent — no run ID available.
+        await tester.runAsync(() async {
+          ctrl.addError(
+            const HttpException('Connection closed while receiving data'),
+          );
+          await ctrl.close();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+
+        final chatState = notifier.state.value!;
+        // No run ID → can't defer → show friendly error immediately.
+        expect(chatState.error, isNotNull, reason: 'should have an error set');
+        expect(
+          chatState.error,
+          isNot(contains('HttpException')),
+          reason: 'should not expose raw exception type to user',
+        );
+        expect(
+          chatState.error!.toLowerCase(),
+          contains('connection lost'),
+          reason: 'should show a friendly connection-lost message',
+        );
+        expect(
+          notifier.needsReconnect,
+          isFalse,
+          reason: 'cannot defer without a run ID',
+        );
+      },
+    );
+
+    testWidgets(
+      'transient error with run ID defers reconnection (no error shown)',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+
+        await tester.runAsync(() async {
+          // Emit run ID so deferred reconnect is possible.
+          ctrl.add(const RunStartedEvent('run-defer'));
+          await Future<void>.delayed(Duration.zero);
+          // Connection closed (iOS backgrounding).
+          ctrl.addError(
+            const HttpException('Connection closed while receiving data'),
+          );
+          await ctrl.close();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+
+        final chatState = notifier.state.value!;
+        expect(
+          chatState.error,
+          isNull,
+          reason: 'transient error with run ID should NOT show error',
+        );
+        expect(
+          notifier.needsReconnect,
+          isTrue,
+          reason: 'should flag for reconnection on resume',
+        );
+        expect(
+          chatState.isSending,
+          isFalse,
+          reason: 'should clear sending state',
+        );
+        // User message should still be in sending status, not failed.
+        final userMsg = chatState.messages.firstWhere((m) => m.isUser);
+        expect(
+          userMsg.status,
+          MessageStatus.sending,
+          reason:
+              'user message stays in sending status until reconnect resolves',
+        );
+      },
+    );
+
+    testWidgets('immediate replay succeeds — no deferred reconnect needed', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      // Replay stream succeeds immediately.
+      fakeApi.enqueueReplayStream()
+        ..add(const TokenEvent('recovered'))
+        ..add(const DoneEvent(role: 'assistant', content: 'recovered'))
+        ..close();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl.add(const RunStartedEvent('run-replay'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl.addError(
+          const HttpException('Connection closed while receiving data'),
+        );
+        await ctrl.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final chatState = notifier.state.value!;
+      expect(
+        chatState.error,
+        isNull,
+        reason: 'successful immediate replay should clear the error',
+      );
+      expect(
+        notifier.needsReconnect,
+        isFalse,
+        reason: 'no deferred reconnect needed when immediate replay works',
+      );
+      final userMsg = chatState.messages.firstWhere((m) => m.isUser);
+      expect(
+        userMsg.status,
+        MessageStatus.ok,
+        reason: 'user message should be ok after successful replay',
+      );
+    });
+
+    testWidgets('attemptReconnect replays successfully on resume', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      // First replay (in catch block) fails.
+      fakeApi.enqueueReplayError(404);
+      // Second replay (in attemptReconnect) succeeds.
+      fakeApi.enqueueReplayStream()
+        ..add(const TokenEvent('resumed'))
+        ..add(const DoneEvent(role: 'assistant', content: 'resumed'))
+        ..close();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl.add(const RunStartedEvent('run-resume'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl.addError(
+          const HttpException('Connection closed while receiving data'),
+        );
+        await ctrl.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      expect(notifier.needsReconnect, isTrue);
+
+      // Simulate app resume → attemptReconnect.
+      await tester.runAsync(() async {
+        await notifier.attemptReconnect();
+      });
+      await tester.pumpAndSettle();
+
+      final chatState = notifier.state.value!;
+      expect(
+        chatState.error,
+        isNull,
+        reason: 'replay on resume should succeed silently',
+      );
+      expect(
+        notifier.needsReconnect,
+        isFalse,
+        reason: 'reconnect flag should be cleared after attempt',
+      );
+      final userMsg = chatState.messages.firstWhere((m) => m.isUser);
+      expect(
+        userMsg.status,
+        MessageStatus.ok,
+        reason: 'user message should be ok after replay on resume',
+      );
+    });
+
+    testWidgets(
+      'attemptReconnect shows error when both replay and history fail',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+        // First replay (in catch block) fails.
+        fakeApi.enqueueReplayError(404);
+        // Second replay (in attemptReconnect) also fails.
+        fakeApi.enqueueReplayError(404);
+        // loadConversation will also fail (fake API has no real server).
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+
+        await tester.runAsync(() async {
+          ctrl.add(const RunStartedEvent('run-fail'));
+          await Future<void>.delayed(Duration.zero);
+          ctrl.addError(
+            const HttpException('Connection closed while receiving data'),
+          );
+          await ctrl.close();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+
+        expect(notifier.needsReconnect, isTrue);
+
+        // attemptReconnect: replay fails, loadConversation fails.
+        await tester.runAsync(() async {
+          await notifier.attemptReconnect();
+        });
+        await tester.pumpAndSettle();
+
+        final chatState = notifier.state.value!;
+        expect(
+          chatState.error,
+          isNotNull,
+          reason: 'should show error when all recovery strategies fail',
+        );
+        expect(
+          chatState.error!.toLowerCase(),
+          contains('connection lost'),
+          reason: 'should show friendly error message',
+        );
+        expect(
+          notifier.needsReconnect,
+          isFalse,
+          reason: 'reconnect flag cleared even on failure',
+        );
+        final userMsg = chatState.messages.firstWhere((m) => m.isUser);
+        expect(
+          userMsg.status,
+          MessageStatus.failed,
+          reason: 'user message should be marked failed when all retries fail',
+        );
+      },
+    );
+
+    testWidgets(
+      'non-transient error shows immediately (no deferred reconnect)',
+      (tester) async {
+        final fakeApi = _FakeApiClient();
+        final ctrl = fakeApi.enqueueStream();
+
+        final notifier = await _pumpTestApp(tester, fakeApi);
+
+        unawaited(notifier.sendMessage('hello'));
+        await tester.pump();
+
+        await tester.runAsync(() async {
+          ctrl.add(const RunStartedEvent('run-nontransient'));
+          await Future<void>.delayed(Duration.zero);
+          ctrl.addError(const FormatException('malformed response'));
+          await ctrl.close();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+
+        final chatState = notifier.state.value!;
+        expect(
+          chatState.error,
+          isNotNull,
+          reason: 'non-transient errors should show immediately',
+        );
+        expect(
+          notifier.needsReconnect,
+          isFalse,
+          reason: 'should not defer non-transient errors',
+        );
+      },
+    );
+
+    testWidgets('attemptReconnect is no-op when not needed', (tester) async {
+      final fakeApi = _FakeApiClient();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      final stateBefore = notifier.state.value;
+      await tester.runAsync(() async {
+        await notifier.attemptReconnect();
+      });
+      await tester.pumpAndSettle();
+
+      expect(
+        notifier.state.value,
+        same(stateBefore),
+        reason: 'state should be unchanged when no reconnect is needed',
+      );
+    });
+
+    testWidgets('clearConversation resets reconnect state', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+      // Replay fails in catch so deferred reconnect is set.
+      fakeApi.enqueueReplayError(404);
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl.add(const RunStartedEvent('run-clear'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl.addError(
+          const HttpException('Connection closed while receiving data'),
+        );
+        await ctrl.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      expect(notifier.needsReconnect, isTrue);
+
+      notifier.clearConversation();
+
+      expect(
+        notifier.needsReconnect,
+        isFalse,
+        reason: 'clearConversation should reset reconnect state',
+      );
     });
   });
 }

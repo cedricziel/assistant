@@ -44,6 +44,10 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _lifecycleState = state;
+    if (state == AppLifecycleState.resumed) {
+      // Silently recover any stream interrupted by iOS backgrounding.
+      ref.read(chatProvider.notifier).attemptReconnect();
+    }
   }
 
   bool get _isResumed =>

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
@@ -566,6 +567,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Used as the `since` cursor when requesting event-log replay.
   int _lastSeq = 0;
 
+  /// When `true`, a transient connection error occurred and silent recovery
+  /// should be attempted on app resume (via [attemptReconnect]).
+  bool _needsReconnect = false;
+
+  /// User message ID from the interrupted stream (for replay status updates).
+  String? _disconnectedUserMsgId;
+
+  /// Conversation ID at the time the stream was interrupted.
+  String? _disconnectedConversationId;
+
+  /// Whether a transient stream interruption occurred that should be retried
+  /// on app resume.
+  bool get needsReconnect => _needsReconnect;
+
   @override
   Future<ChatState> build() async {
     return const ChatState();
@@ -594,6 +609,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   /// Load an existing conversation by ID.
   Future<void> loadConversation(String conversationId) async {
+    _resetReconnectState();
     state = AsyncData(
       (state.value ?? const ChatState()).copyWith(
         isLoadingHistory: true,
@@ -658,6 +674,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   /// Start a fresh conversation (no conversation ID set).
   void clearConversation() {
+    _resetReconnectState();
     state = const AsyncData(ChatState());
   }
 
@@ -1102,6 +1119,27 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
     } catch (e) {
       unawaited(tokenController.close());
+
+      // Transient error with a run ID: defer recovery to app resume.
+      if (_isTransientError(e) && _currentRunId != null) {
+        _needsReconnect = true;
+        _disconnectedUserMsgId = userMsgId;
+        _disconnectedConversationId = conversationId;
+
+        final chatState = state.value ?? const ChatState();
+        final msgs = List<ChatMessage>.from(chatState.messages)
+          ..removeWhere((m) => m.id == 'assistant-streaming');
+        state = AsyncData(
+          chatState.copyWith(
+            messages: msgs,
+            isSending: false,
+            streamingContent: '',
+            clearStatusMessage: true,
+          ),
+        );
+        return;
+      }
+
       final chatState = state.value ?? const ChatState();
       final msgs = List<ChatMessage>.from(chatState.messages)
         ..removeWhere((m) => m.id == 'assistant-streaming');
@@ -1114,7 +1152,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           messages: msgs,
           isSending: false,
           streamingContent: '',
-          error: 'Voice stream error: $e',
+          error: _friendlyErrorMessage(e),
         ),
       );
     }
@@ -1133,6 +1171,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     _cancelled = false;
     _currentRunId = null;
     _lastSeq = 0;
+    _resetReconnectState();
     final current = state.value ?? const ChatState();
 
     // Create a broadcast stream controller for token-by-token rendering.
@@ -1316,7 +1355,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
     } catch (e) {
       unawaited(tokenController.close());
-      // If we have a run ID, attempt replay before marking as failed.
+      // Attempt immediate replay (works for brief network blips).
       if (_currentRunId != null) {
         final replayed = await _replayRun(
           api,
@@ -1328,10 +1367,31 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (replayed) return;
       }
 
+      // Transient error with a run ID: defer recovery to app resume
+      // instead of showing an error banner.
+      if (_isTransientError(e) && _currentRunId != null) {
+        _needsReconnect = true;
+        _disconnectedUserMsgId = userMsgId;
+        _disconnectedConversationId = conversationId;
+
+        final chatState = state.value ?? const ChatState();
+        final msgs = List<ChatMessage>.from(chatState.messages)
+          ..removeWhere((m) => m.id == 'assistant-streaming');
+        state = AsyncData(
+          chatState.copyWith(
+            messages: msgs,
+            isSending: false,
+            streamingContent: '',
+            clearStatusMessage: true,
+          ),
+        );
+        return;
+      }
+
+      // Non-transient error or no run ID: show error immediately.
       final chatState = state.value ?? const ChatState();
       final msgs = List<ChatMessage>.from(chatState.messages)
         ..removeWhere((m) => m.id == 'assistant-streaming');
-      // Mark user message as failed.
       final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
       if (userIdx != -1) {
         msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.failed);
@@ -1341,10 +1401,101 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           messages: msgs,
           isSending: false,
           streamingContent: '',
-          error: 'Stream error: $e',
+          error: _friendlyErrorMessage(e),
         ),
       );
     }
+  }
+
+  /// Returns `true` if [error] looks like a transient connection failure
+  /// (iOS backgrounding, network blip) rather than a permanent server error.
+  static bool _isTransientError(Object error) {
+    if (error is HttpException) return true;
+    if (error is DioException &&
+        error.type == DioExceptionType.connectionError) {
+      return true;
+    }
+    final msg = error.toString();
+    return msg.contains('Connection closed') ||
+        msg.contains('Connection reset') ||
+        msg.contains('SocketException');
+  }
+
+  /// Returns a user-friendly error message for stream exceptions.
+  static String _friendlyErrorMessage(Object error) {
+    if (_isTransientError(error)) {
+      return 'Connection lost — tap retry to resend';
+    }
+    return 'Stream error: $error';
+  }
+
+  /// Attempt to silently recover from a transient stream interruption.
+  ///
+  /// Called from the app lifecycle observer on [AppLifecycleState.resumed].
+  /// Tries: 1) replay from last sequence, 2) fetch full conversation history,
+  /// 3) show error only if both fail.
+  Future<void> attemptReconnect() async {
+    if (!_needsReconnect) return;
+
+    // Clear immediately to prevent re-entrant calls.
+    _needsReconnect = false;
+
+    final api = _api;
+    final conversationId = _disconnectedConversationId;
+    final userMsgId = _disconnectedUserMsgId;
+    final runId = _currentRunId;
+
+    _disconnectedUserMsgId = null;
+    _disconnectedConversationId = null;
+
+    if (api == null || conversationId == null) return;
+
+    // Strategy 1: Replay from last event sequence.
+    if (runId != null && userMsgId != null) {
+      try {
+        final replayed = await _replayRun(
+          api,
+          conversationId,
+          userMsgId,
+          runId,
+          _lastSeq,
+        );
+        if (replayed) return;
+      } catch (_) {
+        // Replay failed — fall through to history fetch.
+      }
+    }
+
+    // Strategy 2: Fetch full conversation history.
+    // Save current messages in case loadConversation fails and wipes them.
+    final preLoadMessages = List<ChatMessage>.from(state.value?.messages ?? []);
+    await loadConversation(conversationId);
+    // loadConversation catches errors internally — check if it succeeded.
+    final afterLoad = state.value;
+    if (afterLoad != null && afterLoad.error == null) return;
+
+    // Both strategies failed: restore messages and show friendly error.
+    final msgs = List<ChatMessage>.from(preLoadMessages);
+    if (userMsgId != null) {
+      final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
+      if (userIdx != -1) {
+        msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.failed);
+      }
+    }
+    state = AsyncData(
+      ChatState(
+        conversationId: conversationId,
+        messages: msgs,
+        error: 'Connection lost — tap retry to resend',
+      ),
+    );
+  }
+
+  /// Clears deferred reconnection state.
+  void _resetReconnectState() {
+    _needsReconnect = false;
+    _disconnectedUserMsgId = null;
+    _disconnectedConversationId = null;
   }
 }
 
