@@ -61,6 +61,12 @@ Add to `~/.assistant/config.toml`:
 bot_token = "xoxb-..."   # Bot OAuth token
 app_token = "xapp-..."   # App-level token (Socket Mode)
 
+# Listen mode: "mention" (default) or "all"
+#   mention — respond only to @-mentions, DMs, and replies in threads
+#             where the bot was previously @-mentioned.
+#   all     — respond to every message in allowed channels.
+# mode = "mention"
+
 # Optional: restrict to specific channels or users
 # allowed_channels = ["C0123456789"]
 # allowed_users    = ["U0123456789"]
@@ -100,12 +106,18 @@ When Slack is configured the assistant automatically gains these tools (availabl
 
 ## Security
 
-- Use `allowed_channels` and `allowed_users` allowlists to restrict which channels/users the bot responds to. Empty lists mean all are accepted.
+- The default listen mode (`mention`) prevents the bot from responding to messages where it was not explicitly invoked.
+- Use `allowed_channels` and `allowed_users` allowlists to further restrict which channels/users the bot responds to. Empty lists mean all are accepted.
 
 ## Triggers
 
-- Plain text messages in any channel/thread the bot can read start a turn.
-- Emoji reactions (`reaction_added`) are also forwarded as synthetic messages, so a quick ":eyes:" or ":question:" reaction can nudge the assistant without typing.
+With the default `mode = "mention"`, the bot responds to:
+
+- **Direct messages** — always processed.
+- **@-mentions** — any message containing `@bot-name` starts a turn and activates the thread.
+- **Thread replies** — replies in threads where the bot was previously @-mentioned are processed automatically.
+
+With `mode = "all"`, every message in allowed channels starts a turn (previous default behavior).
 
 ## Conversation continuity
 

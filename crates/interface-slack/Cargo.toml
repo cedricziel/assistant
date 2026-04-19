@@ -24,6 +24,7 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
 futures = { workspace = true }
+lru = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-tungstenite = { workspace = true }
 

@@ -13,7 +13,7 @@ use std::time::Duration;
 use anyhow::Result;
 use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ChannelType, ChannelUser, Message, MessageRole,
-    SlackConfig, ToolHandler,
+    SlackConfig, SlackListenMode, ToolHandler,
 };
 use assistant_storage::StorageLayer;
 use assistant_transcription::{TranscriptionProvider, TranscriptionRequest, is_audio_mime};
@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use futures::SinkExt;
 use futures::stream::Stream;
+use lru::LruCache;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -117,13 +118,34 @@ impl ChannelAdapter for SlackAdapter {
         let client = self.client.clone();
         let allowed_channels = self.config.allowed_channels.clone();
         let allowed_users = self.config.allowed_users.clone();
+        let listen_mode = self.config.mode.clone();
+        let storage = self.storage.clone();
         let mut stop_rx = self.stop_rx.clone();
         let transcription = self.transcription.clone();
         let transcription_language = self.transcription_language.clone();
 
+        // Resolve the bot's own Slack user ID so we can detect @-mentions
+        // and filter self-messages.
+        let bot_user_id = match client.auth_test().await {
+            Ok(id) => {
+                info!(bot_user_id = %id, mode = ?listen_mode, "Slack listen mode configured");
+                id
+            }
+            Err(e) => {
+                warn!(error = %e, "auth.test failed; falling back to empty bot_user_id (mention filtering will not work)");
+                String::new()
+            }
+        };
+
         let (tx, rx) = mpsc::channel::<ChannelMessage>(64);
 
         tokio::spawn(async move {
+            // In-memory LRU cache for active threads (bot was @-mentioned).
+            // Survives reconnects within the same process; DB provides
+            // persistence across restarts.
+            let mut active_threads: LruCache<String, ()> =
+                LruCache::new(std::num::NonZeroUsize::new(1024).unwrap());
+
             let mut backoff = BACKOFF_MIN;
             loop {
                 // Check stop signal.
@@ -218,6 +240,107 @@ impl ChannelAdapter for SlackAdapter {
                                         &allowed_channels,
                                         &allowed_users,
                                     ) {
+                                        // Filter self-messages by user ID.
+                                        let sender_user_id = inner
+                                            .get("user")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        if !bot_user_id.is_empty()
+                                            && sender_user_id == bot_user_id
+                                        {
+                                            debug!("Slack: ignoring self-message");
+                                            continue;
+                                        }
+
+                                        // Apply listen-mode filtering.
+                                        let channel_id = inner
+                                            .get("channel")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let msg_text = inner
+                                            .get("text")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let ts_val = inner
+                                            .get("ts")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let thread_ts_val = inner
+                                            .get("thread_ts")
+                                            .and_then(|v| v.as_str());
+
+                                        // Build the thread key for cache/DB lookups.
+                                        let thread_key = format!(
+                                            "{}/{}",
+                                            channel_id,
+                                            thread_ts_val.unwrap_or(ts_val)
+                                        );
+
+                                        // Check if this thread is already tracked
+                                        // (LRU first, then DB fallback).
+                                        let is_tracked =
+                                            active_threads.contains(&thread_key) || {
+                                                let db_tracked = if let Some(ref st) = storage {
+                                                    st.slack_active_thread_store()
+                                                        .contains(
+                                                            channel_id,
+                                                            thread_ts_val.unwrap_or(ts_val),
+                                                        )
+                                                        .await
+                                                        .unwrap_or(false)
+                                                } else {
+                                                    false
+                                                };
+                                                if db_tracked {
+                                                    // Warm the LRU cache from DB.
+                                                    active_threads
+                                                        .put(thread_key.clone(), ());
+                                                }
+                                                db_tracked
+                                            };
+
+                                        let decision = should_process(
+                                            &listen_mode,
+                                            &bot_user_id,
+                                            channel_id,
+                                            msg_text,
+                                            thread_ts_val,
+                                            ts_val,
+                                            is_tracked,
+                                        );
+
+                                        match decision {
+                                            ShouldProcessResult::Reject => {
+                                                debug!(
+                                                    channel = channel_id,
+                                                    mode = ?listen_mode,
+                                                    "Slack: message filtered by listen mode"
+                                                );
+                                                continue;
+                                            }
+                                            ShouldProcessResult::AcceptAndTrack => {
+                                                // Track this thread so future replies
+                                                // are also accepted.
+                                                active_threads
+                                                    .put(thread_key.clone(), ());
+                                                if let Some(ref st) = storage
+                                                    && let Err(e) = st
+                                                        .slack_active_thread_store()
+                                                        .upsert(
+                                                            channel_id,
+                                                            thread_ts_val.unwrap_or(ts_val),
+                                                        )
+                                                        .await
+                                                {
+                                                    warn!(
+                                                        error = %e,
+                                                        "failed to persist active thread"
+                                                    );
+                                                }
+                                            }
+                                            ShouldProcessResult::Accept => {}
+                                        }
+
                                         // Transcribe audio attachments on file_share events.
                                         if let Some(ref provider) = transcription {
                                             let transcript = transcribe_audio_from_event(
@@ -789,6 +912,61 @@ fn rand_jitter() -> f64 {
     (v >> 33) as f64 / (u32::MAX as f64)
 }
 
+// -- Listen-mode filtering ----------------------------------------------------
+
+/// Result of evaluating whether the bot should process a Slack message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShouldProcessResult {
+    /// Process the message normally.
+    Accept,
+    /// Process the message and remember this thread (bot was @-mentioned).
+    AcceptAndTrack,
+    /// Skip the message.
+    Reject,
+}
+
+/// Pure, sync filter function that decides whether a message should be processed
+/// based on the configured [`SlackListenMode`].
+///
+/// `is_thread_tracked` should be `true` when the thread identified by `thread_ts`
+/// is already in the active-thread cache (LRU or DB).
+fn should_process(
+    mode: &SlackListenMode,
+    bot_user_id: &str,
+    channel_id: &str,
+    text: &str,
+    thread_ts: Option<&str>,
+    ts: &str,
+    is_thread_tracked: bool,
+) -> ShouldProcessResult {
+    match mode {
+        SlackListenMode::All => ShouldProcessResult::Accept,
+        SlackListenMode::Mention => {
+            // DMs (Slack DM channel IDs start with "D") are always accepted.
+            if channel_id.starts_with('D') {
+                return ShouldProcessResult::Accept;
+            }
+
+            // Messages containing an @-mention of the bot are always accepted
+            // and the thread is tracked for future replies.
+            let mention_tag = format!("<@{bot_user_id}>");
+            if text.contains(&mention_tag) {
+                return ShouldProcessResult::AcceptAndTrack;
+            }
+
+            // Thread replies in a tracked thread are accepted.
+            if let Some(tts) = thread_ts
+                && tts != ts
+                && is_thread_tracked
+            {
+                return ShouldProcessResult::Accept;
+            }
+
+            ShouldProcessResult::Reject
+        }
+    }
+}
+
 // -- Tests --------------------------------------------------------------------
 
 #[cfg(test)]
@@ -1060,5 +1238,115 @@ mod tests {
 
         let result = extract_image_from_event(&event, &client).await;
         assert!(result.is_none(), "should skip non-image files");
+    }
+
+    // -- should_process tests -------------------------------------------------
+
+    #[test]
+    fn mention_mode_accepts_dm() {
+        let result = should_process(
+            &assistant_core::SlackListenMode::Mention,
+            "U_BOT",
+            "D123ABC", // DM channel
+            "hello",
+            None,
+            "111.222",
+            false,
+        );
+        assert_eq!(
+            result,
+            ShouldProcessResult::Accept,
+            "DMs should always be accepted in Mention mode"
+        );
+    }
+
+    #[test]
+    fn mention_mode_accepts_at_mention() {
+        let result = should_process(
+            &assistant_core::SlackListenMode::Mention,
+            "U_BOT",
+            "C123",
+            "hey <@U_BOT> help me",
+            None,
+            "111.222",
+            false,
+        );
+        assert_eq!(
+            result,
+            ShouldProcessResult::AcceptAndTrack,
+            "@-mention should accept and track thread"
+        );
+    }
+
+    #[test]
+    fn mention_mode_accepts_tracked_thread_reply() {
+        let result = should_process(
+            &assistant_core::SlackListenMode::Mention,
+            "U_BOT",
+            "C123",
+            "thanks!",
+            Some("100.000"), // thread_ts differs from ts → is a reply
+            "111.222",
+            true, // thread is tracked
+        );
+        assert_eq!(
+            result,
+            ShouldProcessResult::Accept,
+            "replies in tracked threads should be accepted"
+        );
+    }
+
+    #[test]
+    fn mention_mode_rejects_unmentioned_channel_message() {
+        let result = should_process(
+            &assistant_core::SlackListenMode::Mention,
+            "U_BOT",
+            "C123",
+            "just chatting",
+            None,
+            "111.222",
+            false,
+        );
+        assert_eq!(
+            result,
+            ShouldProcessResult::Reject,
+            "channel messages without mention should be rejected"
+        );
+    }
+
+    #[test]
+    fn mention_mode_rejects_untracked_thread_reply() {
+        let result = should_process(
+            &assistant_core::SlackListenMode::Mention,
+            "U_BOT",
+            "C123",
+            "reply without prior mention",
+            Some("100.000"),
+            "111.222",
+            false, // thread is NOT tracked
+        );
+        assert_eq!(
+            result,
+            ShouldProcessResult::Reject,
+            "replies in untracked threads should be rejected"
+        );
+    }
+
+    #[test]
+    fn all_mode_accepts_everything() {
+        let result = should_process(
+            &assistant_core::SlackListenMode::All,
+            "U_BOT",
+            "C123",
+            "random message",
+            None,
+            "111.222",
+            false,
+        );
+        assert_eq!(
+            result,
+            ShouldProcessResult::Accept,
+            "All mode should accept every message"
+        );
     }
 }
