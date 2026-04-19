@@ -38,7 +38,7 @@
 - [x] 5.2 Add `POST /api/conversations/{id}/command` endpoint accepting `ExecuteCommandRequest { command, args }`, returning `CommandEventResponse`. Include OpenAPI docs with `operationId: execute_command`.
 - [x] 5.3 Add `GET /api/conversations/{id}/events` endpoint returning bare JSON array of `CommandEventResponse` sorted by created_at. Include OpenAPI docs with `operationId: list_conversation_events`.
 - [x] 5.4 Write handler tests: list commands, execute valid command, execute unknown command (400), list events.
-- [ ] 5.5 Run `make dump-openapi` to update `openapi.json` with the new endpoints.
+- [x] 5.5 Run `make dump-openapi` to update `openapi.json` with the new endpoints.
 
 ## 6. CLI migration
 
