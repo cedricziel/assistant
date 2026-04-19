@@ -46,9 +46,11 @@ pub use workflows::{
     WorkflowTriggerKind, WorkflowWebhookEndpoint,
 };
 
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anyhow::Result;
 use sqlx::SqlitePool;
-use std::path::Path;
 use tracing::info;
 
 /// The top-level storage layer — owns the SQLite connection pool and runs migrations.
@@ -75,13 +77,19 @@ impl StorageLayer {
 
     /// Create an in-memory SQLite database (useful for tests).
     ///
-    /// Uses `max_connections(1)` to ensure all operations share the same
-    /// connection — required for `:memory:` databases where each SQLite
-    /// connection has its own isolated in-memory store.
+    /// Create an in-memory storage layer for tests.
+    ///
+    /// Uses a named shared-cache URI (`file:memdbN?mode=memory&cache=shared`)
+    /// so that multiple pool connections see the same in-memory database.
+    /// This avoids data loss when a connection is invalidated (e.g. after a
+    /// `tokio::task::abort`) and the pool opens a replacement.
     pub async fn new_in_memory() -> Result<Self> {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let uri = format!("sqlite:file:memdb{id}?mode=memory&cache=shared");
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+            .max_connections(2)
+            .connect(&uri)
             .await?;
         run_migrations(&pool).await?;
         Ok(Self { pool })
