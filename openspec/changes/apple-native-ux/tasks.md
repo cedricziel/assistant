@@ -89,19 +89,19 @@ Capture the current state on each matrix entry before any changes. These screens
 
 ### 2.1 CupertinoTabBar (Compact)
 
-- [ ] 2.1.1 🔴 Write widget test `app/test/widget/platform/adaptive_tab_shell_test.dart`: pump `NavShell` with `debugDefaultTargetPlatformOverride = TargetPlatform.iOS` and screen width 375dp. Assert a `CupertinoTabBar` is found in the widget tree. Assert 5 tab items exist (4 primary + More). Confirm tests fail.
-- [ ] 2.1.2 🔴 Write widget test: same setup, assert tapping the "More" item triggers `showCupertinoModalPopup` (or finds an overflow menu with the expected destinations). Confirm tests fail.
-- [ ] 2.1.3 🟢 Create `app/lib/shared/platform/adaptive_tab_shell.dart` — renders `CupertinoTabBar` on Apple touch compact, `NavigationBar` on Material compact. Wire destinations and "More" overflow. Make tests green.
+- [x] 2.1.1 🔴 Write widget test `app/test/widget/platform/adaptive_tab_shell_test.dart`: pump `NavShell` with `debugDefaultTargetPlatformOverride = TargetPlatform.iOS` and screen width 375dp. Assert a `CupertinoTabBar` is found in the widget tree. Assert 5 tab items exist (4 primary + More). Confirm tests fail.
+- [x] 2.1.2 🔴 Write widget test: same setup, assert tapping the "More" item triggers `showCupertinoModalPopup` (or finds an overflow menu with the expected destinations). Confirm tests fail.
+- [x] 2.1.3 🟢 Create `app/lib/shared/platform/adaptive_tab_shell.dart` — renders `CupertinoTabBar` on Apple touch compact, `NavigationBar` on Material compact. Wire destinations and "More" overflow. Make tests green.
 
 ### 2.2 Cupertino Sidebar (Regular Width)
 
-- [ ] 2.2.1 🔴 Write widget test: pump `NavShell` with `debugDefaultTargetPlatformOverride = TargetPlatform.iOS` and screen width 1024dp. Assert no `CupertinoTabBar` is found. Assert a sidebar `ListView` with all destinations (primary + overflow) is present. Confirm tests fail.
-- [ ] 2.2.2 🟢 Implement sidebar list for Apple touch regular-width (>= 768dp) with all destinations. Style to match Apple iPad sidebar pattern. Make tests green.
+- [x] 2.2.1 🔴 Write widget test: pump `NavShell` with `debugDefaultTargetPlatformOverride = TargetPlatform.iOS` and screen width 1024dp. Assert no `CupertinoTabBar` is found. Assert a sidebar `ListView` with all destinations (primary + overflow) is present. Confirm tests fail.
+- [x] 2.2.2 🟢 Implement sidebar list for Apple touch regular-width (>= 768dp) with all destinations. Style to match Apple iPad sidebar pattern. Make tests green.
 
 ### 2.3 Non-Regression Tests
 
-- [ ] 2.3.1 🔴 Write widget test: pump `NavShell` with `debugDefaultTargetPlatformOverride = TargetPlatform.macOS` and screen width 375dp. Assert `NavigationBar` (Material) is found, not `CupertinoTabBar`. Pump with width 1024dp — assert `NavigationRail` is found. Confirm tests pass (should be green immediately if Material path is untouched — if not, fix).
-- [ ] 2.3.2 🟢 Update `nav_shell.dart` to delegate to platform-specific navigation based on `platformStyle`.
+- [x] 2.3.1 🔴 Write widget test: pump `NavShell` with `debugDefaultTargetPlatformOverride = TargetPlatform.macOS` and screen width 375dp. Assert `NavigationBar` (Material) is found, not `CupertinoTabBar`. Pump with width 1024dp — assert `NavigationRail` is found. Confirm tests pass (should be green immediately if Material path is untouched — if not, fix).
+- [x] 2.3.2 🟢 Update `nav_shell.dart` to delegate to platform-specific navigation based on `platformStyle`.
 
 ### 2.4 Phase 2 Verification — Per Matrix Entry
 
@@ -112,8 +112,8 @@ Capture the current state on each matrix entry before any changes. These screens
 - [ ] 2.4.5 **M4 Mac Catalyst**: Sidebar visible (regular width). All destinations accessible. Compare to baseline 0.1.4.
 - [ ] 2.4.6 **M5 macOS native**: NavigationRail unchanged from baseline. No visual regression.
 - [ ] 2.4.7 **M6 Web**: NavigationBar (compact) and NavigationRail (wide) unchanged from baseline. No visual regression.
-- [ ] 2.4.8 Run `flutter analyze --fatal-infos` — zero issues
-- [ ] 2.4.9 Run `flutter test` — all tests pass
+- [x] 2.4.8 Run `flutter analyze --fatal-infos` — zero issues
+- [x] 2.4.9 Run `flutter test` — all tests pass (390/390)
 
 ---
 

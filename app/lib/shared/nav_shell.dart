@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import '../features/notifications/agent_event_listener.dart';
 import '../features/pwa/pwa_provider.dart';
 import '../features/updater/update_banner.dart';
 import '../router/app_router.dart';
+import 'platform/platform.dart';
 
 /// Breakpoint above which the navigation rail is shown instead of bottom nav.
 const double _kNavRailBreakpoint = 768;
@@ -106,6 +108,14 @@ const _NavDest _settingsDestination = _NavDest(
   selectedIcon: Icons.settings,
   label: 'Settings',
 );
+
+/// Tab bar destinations used on iOS: primary + Contexts promoted to a tab.
+final List<_NavDest> _iosTabDestinations = [
+  _primaryDestinations[0], // Chat
+  _contextsDestination, // Contexts (promoted from overflow)
+  _primaryDestinations[1], // Skills
+  _primaryDestinations[2], // Workflows
+];
 
 /// Returns true when [currentPath] belongs to any overflow destination.
 bool _isOverflowRouteActive(String currentPath) {
@@ -226,6 +236,58 @@ class NavShell extends ConsumerWidget {
     );
   }
 
+  /// Index for the iOS [CupertinoTabBar].
+  ///
+  /// iOS tab destinations: Chat(0), Contexts(1), Skills(2), Workflows(3).
+  /// Index 4 is the "More" item for overflow destinations.
+  int _iosMobileSelectedIndex(BuildContext context) {
+    final location = GoRouterState.of(context).uri.toString();
+    for (var i = 0; i < _iosTabDestinations.length; i++) {
+      if (location.startsWith(_iosTabDestinations[i].path)) return i;
+    }
+    // Settings and all overflow destinations map to "More".
+    if (location.startsWith(_settingsDestination.path) ||
+        _isOverflowRouteActive(location)) {
+      return _iosTabDestinations.length;
+    }
+    return 0;
+  }
+
+  /// Shows a Cupertino action sheet listing all overflow destinations.
+  void _showCupertinoMoreSheet(BuildContext context) {
+    showCupertinoModalPopup<void>(
+      context: context,
+      builder: (popupContext) {
+        return CupertinoActionSheet(
+          title: const Text('More'),
+          actions: [
+            ..._overflowDestinations.map(
+              (d) => CupertinoActionSheetAction(
+                onPressed: () {
+                  Navigator.of(popupContext).pop();
+                  context.go(d.path);
+                },
+                child: Text(d.label),
+              ),
+            ),
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.of(popupContext).pop();
+                context.go(_settingsDestination.path);
+              },
+              child: Text(_settingsDestination.label),
+            ),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.of(popupContext).pop(),
+            child: const Text('Cancel'),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final width = MediaQuery.of(context).size.width;
@@ -235,6 +297,91 @@ class NavShell extends ConsumerWidget {
     final isInstallable = ref.watch(pwaInstallProvider);
     // True when on iOS Safari and not yet installed as a PWA.
     final isSafariInstallable = ref.watch(safariInstallProvider);
+
+    // Apple touch: CupertinoTabBar (compact) or sidebar (wide).
+    if (isAppleTouch) {
+      if (isWide) {
+        final location = GoRouterState.of(context).uri.toString();
+        return Scaffold(
+          body: SafeArea(
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 240,
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    children: [
+                      for (final d in _iosTabDestinations)
+                        _AppleSidebarItem(
+                          icon: d.icon,
+                          selectedIcon: d.selectedIcon,
+                          label: d.label,
+                          selected: location.startsWith(d.path),
+                          onTap: () => context.go(d.path),
+                        ),
+                      const Divider(height: 16, indent: 16, endIndent: 16),
+                      for (final d in _overflowDestinations)
+                        _AppleSidebarItem(
+                          icon: d.icon,
+                          selectedIcon: d.selectedIcon,
+                          label: d.label,
+                          selected: location.startsWith(d.path),
+                          onTap: () => context.go(d.path),
+                        ),
+                      const Divider(height: 16, indent: 16, endIndent: 16),
+                      _AppleSidebarItem(
+                        icon: _settingsDestination.icon,
+                        selectedIcon: _settingsDestination.selectedIcon,
+                        label: _settingsDestination.label,
+                        selected: location.startsWith(
+                          _settingsDestination.path,
+                        ),
+                        onTap: () => context.go(_settingsDestination.path),
+                      ),
+                    ],
+                  ),
+                ),
+                const VerticalDivider(width: 1, thickness: 1),
+                Expanded(
+                  child: AgentEventListener(
+                    child: UpdateBannerWrapper(child: child),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      // iOS compact: CupertinoTabBar with 5 items.
+      final selected = _iosMobileSelectedIndex(context);
+      return Scaffold(
+        body: AgentEventListener(child: UpdateBannerWrapper(child: child)),
+        bottomNavigationBar: CupertinoTabBar(
+          currentIndex: selected,
+          onTap: (i) {
+            if (i == _iosTabDestinations.length) {
+              _showCupertinoMoreSheet(context);
+            } else {
+              context.go(_iosTabDestinations[i].path);
+            }
+          },
+          items: [
+            for (final d in _iosTabDestinations)
+              BottomNavigationBarItem(
+                icon: Icon(d.icon),
+                activeIcon: Icon(d.selectedIcon),
+                label: d.label,
+              ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.more_horiz),
+              activeIcon: Icon(Icons.more_horiz),
+              label: 'More',
+            ),
+          ],
+        ),
+      );
+    }
 
     if (isWide) {
       final selected = _railSelectedIndex(context);
@@ -602,6 +749,52 @@ class _SafariStep extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(child: Text(text)),
       ],
+    );
+  }
+}
+
+/// Sidebar item for the Apple wide-screen navigation.
+class _AppleSidebarItem extends StatelessWidget {
+  const _AppleSidebarItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: ListTile(
+        dense: true,
+        leading: Icon(
+          selected ? selectedIcon : icon,
+          color: selected
+              ? CupertinoColors.activeBlue
+              : theme.colorScheme.onSurfaceVariant,
+          size: 22,
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            color: selected ? CupertinoColors.activeBlue : null,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+        selected: selected,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        selectedTileColor: CupertinoColors.activeBlue.withValues(alpha: 0.12),
+        onTap: onTap,
+      ),
     );
   }
 }
