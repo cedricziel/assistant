@@ -109,7 +109,11 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
                       child: state.searchQuery.isNotEmpty
                           ? Text(
                               'No logs matching "${state.searchQuery}"',
-                              style: const TextStyle(color: Colors.black45),
+                              style: TextStyle(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
                             )
                           : const _EmptyView(),
                     );
@@ -160,9 +164,9 @@ class _LogRowState extends State<_LogRow> {
               width: 68,
               child: Text(
                 _formatTime(entry.timestamp),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: Colors.black54,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontFamily: 'monospace',
                 ),
               ),
@@ -190,9 +194,9 @@ class _LogRowState extends State<_LogRow> {
                     const SizedBox(height: 2),
                     Text(
                       entry.target,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: Colors.black38,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontFamily: 'monospace',
                       ),
                     ),
@@ -221,8 +225,9 @@ class _SeverityChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final (bgColor, textColor) = switch (severity.toUpperCase()) {
-      'ERROR' => (Colors.red.shade100, Colors.red.shade800),
+      'ERROR' => (colorScheme.errorContainer, colorScheme.error),
       'WARN' => (Colors.orange.shade100, Colors.orange.shade800),
       'INFO' => (Colors.blue.shade100, Colors.blue.shade800),
       'DEBUG' => (Colors.grey.shade200, Colors.grey.shade700),
@@ -255,15 +260,22 @@ class _EmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.article_outlined, size: 64, color: Colors.black26),
-          SizedBox(height: 12),
+          Icon(
+            Icons.article_outlined,
+            size: 64,
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+          const SizedBox(height: 12),
           Text(
             'No log entries',
-            style: TextStyle(fontSize: 16, color: Colors.black45),
+            style: TextStyle(
+              fontSize: 16,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -283,7 +295,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),

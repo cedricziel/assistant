@@ -44,7 +44,7 @@ class PersonaPicker extends ConsumerWidget {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.black26,
+                  color: Theme.of(context).colorScheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -69,11 +69,16 @@ class PersonaPicker extends ConsumerWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.error_outline, color: Colors.red.shade700),
+                      Icon(
+                        Icons.error_outline,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                       const SizedBox(height: 8),
                       Text(
                         'Failed to load personas',
-                        style: TextStyle(color: Colors.red.shade700),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
                       TextButton(
                         onPressed: () =>
@@ -85,10 +90,12 @@ class PersonaPicker extends ConsumerWidget {
                 ),
                 data: (state) {
                   if (state.personas.isEmpty) {
-                    return const Center(
+                    return Center(
                       child: Text(
                         'No personas available',
-                        style: TextStyle(color: Colors.black45),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     );
                   }
@@ -150,7 +157,9 @@ class _PersonaTile extends StatelessWidget {
         child: Text(
           persona.name.isNotEmpty ? persona.name[0].toUpperCase() : '?',
           style: TextStyle(
-            color: isActive ? Colors.white : Colors.black54,
+            color: isActive
+                ? Theme.of(context).colorScheme.onPrimary
+                : Theme.of(context).colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.bold,
           ),
         ),

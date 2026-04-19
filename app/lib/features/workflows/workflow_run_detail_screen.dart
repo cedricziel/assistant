@@ -77,22 +77,24 @@ class _RunDetailBody extends StatelessWidget {
     final isSuccess = run.status == 'completed' || run.status == 'success';
     final isError = run.status == 'failed' || run.status == 'error';
 
+    final colorScheme = theme.colorScheme;
+
     final statusColor = isSuccess
         ? Colors.green.shade600
         : isError
-        ? Colors.red.shade600
+        ? colorScheme.error
         : Colors.orange.shade600;
 
     final statusBg = isSuccess
         ? Colors.green.shade50
         : isError
-        ? Colors.red.shade50
+        ? colorScheme.errorContainer
         : Colors.orange.shade50;
 
     final statusBorder = isSuccess
         ? Colors.green.shade300
         : isError
-        ? Colors.red.shade300
+        ? colorScheme.error
         : Colors.orange.shade300;
 
     return ListView(
@@ -164,9 +166,9 @@ class _RunDetailBody extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.red.shade50,
+                      color: colorScheme.errorContainer,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red.shade200),
+                      border: Border.all(color: colorScheme.error),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,7 +176,7 @@ class _RunDetailBody extends StatelessWidget {
                         Icon(
                           Icons.error_outline,
                           size: 16,
-                          color: Colors.red.shade600,
+                          color: colorScheme.error,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -182,7 +184,7 @@ class _RunDetailBody extends StatelessWidget {
                             run.errorMessage!,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.red.shade700,
+                              color: colorScheme.onErrorContainer,
                             ),
                           ),
                         ),
@@ -201,12 +203,12 @@ class _RunDetailBody extends StatelessWidget {
         const SizedBox(height: 8),
 
         if (steps.isEmpty)
-          const Center(
+          Center(
             child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
+              padding: const EdgeInsets.symmetric(vertical: 24),
               child: Text(
                 'No steps recorded',
-                style: TextStyle(color: Colors.black45),
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
               ),
             ),
           )
@@ -301,7 +303,12 @@ class _StepTileState extends State<_StepTile> {
                   ),
                 ),
                 if (!widget.isLast)
-                  Expanded(child: Container(width: 2, color: Colors.black12)),
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -359,9 +366,11 @@ class _StepTileState extends State<_StepTile> {
                             ),
                             Text(
                               '#${step.stepIndex}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.black38,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                               ),
                             ),
                             if (hasOutput || hasNote)
@@ -370,7 +379,9 @@ class _StepTileState extends State<_StepTile> {
                                     ? Icons.keyboard_arrow_up
                                     : Icons.keyboard_arrow_down,
                                 size: 14,
-                                color: Colors.black38,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                               ),
                           ],
                         ),
@@ -378,9 +389,11 @@ class _StepTileState extends State<_StepTile> {
                           const SizedBox(height: 4),
                           Text(
                             step.note!,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: Colors.black54,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -392,7 +405,9 @@ class _StepTileState extends State<_StepTile> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.04),
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withValues(alpha: 0.04),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: SelectableText(
@@ -434,13 +449,20 @@ class _InfoRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Icon(icon, size: 14, color: Colors.black38),
+          Icon(
+            icon,
+            size: 14,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: 6),
           SizedBox(
             width: 60,
             child: Text(
               label,
-              style: const TextStyle(fontSize: 12, color: Colors.black45),
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
           Expanded(
@@ -467,7 +489,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),

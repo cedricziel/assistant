@@ -105,7 +105,7 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: Material(
-                      color: Colors.red.shade50,
+                      color: Theme.of(context).colorScheme.errorContainer,
                       borderRadius: BorderRadius.circular(8),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
@@ -113,14 +113,16 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
                           children: [
                             Icon(
                               Icons.warning_amber_outlined,
-                              color: Colors.red.shade700,
+                              color: Theme.of(context).colorScheme.error,
                               size: 18,
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 _error!,
-                                style: TextStyle(color: Colors.red.shade700),
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
                               ),
                             ),
                           ],
@@ -181,12 +183,14 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
                       child: FilledButton(
                         onPressed: _submitting ? null : _submit,
                         child: _submitting
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 18,
                                 height: 18,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onPrimary,
                                 ),
                               )
                             : const Text('Create Persona'),

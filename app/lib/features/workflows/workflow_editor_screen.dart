@@ -184,6 +184,7 @@ class _EdgePainter extends CustomPainter {
     required this.nodes,
     required this.edges,
     required this.nodeSize,
+    required this.labelBgColor,
     this.pendingFrom,
     this.pendingEnd,
   });
@@ -191,6 +192,7 @@ class _EdgePainter extends CustomPainter {
   final List<EditorNode> nodes;
   final List<EditorEdge> edges;
   final Size nodeSize;
+  final Color labelBgColor;
   final String? pendingFrom;
   final Offset? pendingEnd;
 
@@ -214,7 +216,7 @@ class _EdgePainter extends CustomPainter {
     final arrowPaint = Paint()..style = PaintingStyle.fill;
 
     final labelBg = Paint()
-      ..color = Colors.white
+      ..color = labelBgColor
       ..style = PaintingStyle.fill;
 
     for (final edge in edges) {
@@ -697,13 +699,13 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
                     horizontal: 16,
                     vertical: 8,
                   ),
-                  color: Colors.red.shade50,
+                  color: theme.colorScheme.errorContainer,
                   child: Row(
                     children: [
                       Icon(
                         Icons.error_outline,
                         size: 16,
-                        color: Colors.red.shade700,
+                        color: theme.colorScheme.onErrorContainer,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -711,7 +713,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
                           _error!,
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.red.shade700,
+                            color: theme.colorScheme.onErrorContainer,
                           ),
                         ),
                       ),
@@ -864,7 +866,15 @@ class _DesktopCanvasEditor extends StatelessWidget {
               child: Stack(
                 children: [
                   // Grid background
-                  Positioned.fill(child: CustomPaint(painter: _GridPainter())),
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _GridPainter(
+                        gridColor: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.04,
+                        ),
+                      ),
+                    ),
+                  ),
 
                   // Edges layer
                   Positioned.fill(
@@ -877,6 +887,7 @@ class _DesktopCanvasEditor extends StatelessWidget {
                           nodes: nodes,
                           edges: edges,
                           nodeSize: _kNodeSize,
+                          labelBgColor: theme.colorScheme.surface,
                           pendingFrom: connectingFrom,
                           pendingEnd: pendingEdgeEnd,
                         ),
@@ -1074,7 +1085,7 @@ class _MobileNodeCard extends StatelessWidget {
               icon: Icon(
                 Icons.delete_outline,
                 size: 20,
-                color: Colors.red.shade400,
+                color: Theme.of(context).colorScheme.error,
               ),
               onPressed: onDelete,
               tooltip: 'Delete',
@@ -1082,10 +1093,10 @@ class _MobileNodeCard extends StatelessWidget {
             ),
             ReorderableDelayedDragStartListener(
               index: index,
-              child: const Icon(
+              child: Icon(
                 Icons.drag_handle,
                 size: 24,
-                color: Colors.black38,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -1099,11 +1110,15 @@ class _MobileNodeCard extends StatelessWidget {
 // Grid background painter
 
 class _GridPainter extends CustomPainter {
+  _GridPainter({required this.gridColor});
+
+  final Color gridColor;
+
   @override
   void paint(Canvas canvas, Size size) {
     const spacing = 30.0;
     final paint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.04)
+      ..color = gridColor
       ..strokeWidth = 1;
 
     for (double x = 0; x <= size.width; x += spacing) {
@@ -1115,7 +1130,7 @@ class _GridPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_GridPainter old) => false;
+  bool shouldRepaint(_GridPainter old) => gridColor != old.gridColor;
 }
 
 // ---------------------------------------------------------------------------
@@ -1166,10 +1181,14 @@ class _EdgeDeleteHandle extends StatelessWidget {
           width: 20,
           height: 20,
           decoration: BoxDecoration(
-            color: Colors.red.shade400,
+            color: Theme.of(context).colorScheme.error,
             shape: BoxShape.circle,
           ),
-          child: const Icon(Icons.close, size: 12, color: Colors.white),
+          child: Icon(
+            Icons.close,
+            size: 12,
+            color: Theme.of(context).colorScheme.surface,
+          ),
         ),
       ),
     );
@@ -1222,7 +1241,7 @@ class _NodeWidget extends StatelessWidget {
                 elevation: isConnectingFrom ? 6 : 2,
                 borderRadius: BorderRadius.circular(12),
                 color: isConnecting && !isConnectingFrom
-                    ? Colors.white
+                    ? Theme.of(context).colorScheme.surface
                     : color.withValues(alpha: 0.08),
                 child: Container(
                   decoration: BoxDecoration(
@@ -1261,10 +1280,12 @@ class _NodeWidget extends StatelessWidget {
                           node.id.length > 8
                               ? node.id.substring(0, 8)
                               : node.id,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 10,
                             fontFamily: 'monospace',
-                            color: Colors.black38,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -1294,10 +1315,10 @@ class _NodeWidget extends StatelessWidget {
                           ),
                         ],
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.edit,
                         size: 12,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                       ),
                     ),
                   ),
@@ -1313,19 +1334,21 @@ class _NodeWidget extends StatelessWidget {
                       width: 22,
                       height: 22,
                       decoration: BoxDecoration(
-                        color: Colors.red.shade400,
+                        color: Theme.of(context).colorScheme.error,
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.red.withValues(alpha: 0.3),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.error.withValues(alpha: 0.3),
                             blurRadius: 4,
                           ),
                         ],
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.close,
                         size: 12,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                       ),
                     ),
                   ),
@@ -1350,10 +1373,10 @@ class _NodeWidget extends StatelessWidget {
                           ),
                         ],
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.arrow_downward,
                         size: 12,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                       ),
                     ),
                   ),
@@ -1698,12 +1721,17 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
         return Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurface.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: const Text(
+          child: Text(
             'No configuration required for this node type.',
-            style: TextStyle(fontSize: 13, color: Colors.black54),
+            style: TextStyle(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         );
 
@@ -1954,7 +1982,7 @@ class _SheetHandle extends StatelessWidget {
           width: 40,
           height: 4,
           decoration: BoxDecoration(
-            color: Colors.black26,
+            color: Theme.of(context).colorScheme.outlineVariant,
             borderRadius: BorderRadius.circular(2),
           ),
         ),

@@ -132,21 +132,22 @@ class _EmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.webhook, size: 64, color: Colors.black26),
-          SizedBox(height: 12),
+          Icon(Icons.webhook, size: 64, color: colorScheme.outlineVariant),
+          const SizedBox(height: 12),
           Text(
             'No webhooks configured',
-            style: TextStyle(fontSize: 16, color: Colors.black45),
+            style: TextStyle(fontSize: 16, color: colorScheme.onSurfaceVariant),
           ),
-          SizedBox(height: 4),
+          const SizedBox(height: 4),
           Text(
             'Webhooks receive event notifications from the assistant.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black38),
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -166,7 +167,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),

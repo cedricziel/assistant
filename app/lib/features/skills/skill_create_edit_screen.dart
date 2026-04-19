@@ -142,13 +142,16 @@ class _SkillCreateEditScreenState extends ConsumerState<SkillCreateEditScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: theme.colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade300),
+                  border: Border.all(color: theme.colorScheme.error),
                 ),
                 child: Text(
                   _error!,
-                  style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+                  style: TextStyle(
+                    color: theme.colorScheme.onErrorContainer,
+                    fontSize: 13,
+                  ),
                 ),
               ),
               const SizedBox(height: 16),

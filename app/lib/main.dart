@@ -8,6 +8,7 @@ import 'features/embedded_server/embedded_server_provider.dart';
 import 'features/notifications/notification_badge_notifier.dart';
 import 'features/pwa/pwa_update_service.dart';
 import 'router/app_router.dart';
+import 'shared/platform/adaptive_app.dart';
 import 'tray/platform_init.dart';
 import 'tray/tray_platform.dart';
 import 'tray/window_handler_platform.dart';
@@ -105,15 +106,9 @@ class _AssistantAppState extends ConsumerState<AssistantApp>
     final router = ref.watch(routerProvider);
 
     return MacosWindowCloseHandler(
-      child: MaterialApp.router(
-        title: 'Assistant',
-        scaffoldMessengerKey: _scaffoldMessengerKey,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A73E8)),
-          useMaterial3: true,
-        ),
+      child: AdaptiveApp(
         routerConfig: router,
-        debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: _scaffoldMessengerKey,
       ),
     );
   }

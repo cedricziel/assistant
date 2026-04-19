@@ -66,11 +66,16 @@ class ConversationList extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline, color: Colors.red),
+                  Icon(
+                    Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     'Failed to load conversations',
-                    style: TextStyle(color: Colors.red.shade700),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
                   ),
                   TextButton(
                     onPressed: () =>
@@ -82,13 +87,15 @@ class ConversationList extends ConsumerWidget {
             ),
             data: (listState) {
               if (listState.conversations.isEmpty) {
-                return const Center(
+                return Center(
                   child: Padding(
-                    padding: EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(16),
                     child: Text(
                       'No conversations yet.\nTap "New Chat" to start.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.black45),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 );
@@ -104,8 +111,11 @@ class ConversationList extends ConsumerWidget {
                     background: Container(
                       alignment: Alignment.centerRight,
                       padding: const EdgeInsets.only(right: 16),
-                      color: Colors.red,
-                      child: const Icon(Icons.delete, color: Colors.white),
+                      color: Theme.of(context).colorScheme.error,
+                      child: Icon(
+                        Icons.delete,
+                        color: Theme.of(context).colorScheme.onError,
+                      ),
                     ),
                     confirmDismiss: (_) async {
                       final confirm = await showDialog<bool>(
@@ -122,7 +132,9 @@ class ConversationList extends ConsumerWidget {
                             ),
                             FilledButton(
                               style: FilledButton.styleFrom(
-                                backgroundColor: Colors.red,
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.error,
                               ),
                               onPressed: () => Navigator.of(ctx).pop(true),
                               child: const Text('Delete'),

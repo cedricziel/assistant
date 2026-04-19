@@ -43,8 +43,8 @@ class _ToolCallChipState extends State<ToolCallChip> {
         Colors.green,
       ),
       ToolCallStatus.error => (
-        const Icon(Icons.error_outline, size: 14, color: Colors.red),
-        Colors.red,
+        Icon(Icons.error_outline, size: 14, color: colorScheme.error),
+        colorScheme.error,
       ),
       ToolCallStatus.denied => (
         const Icon(Icons.block, size: 14, color: Colors.amber),

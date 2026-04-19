@@ -108,9 +108,9 @@ class _PersonaDetailBody extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   'ID: ${detail.id}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Colors.black54,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontFamily: 'monospace',
                   ),
                 ),
@@ -216,10 +216,10 @@ class _FileSlotTile extends StatelessWidget {
             if (slot.displayName.isNotEmpty)
               Text(
                 slot.filename,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 11,
-                  color: Colors.black45,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             if (slot.description.isNotEmpty)
@@ -245,7 +245,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),

@@ -168,11 +168,11 @@ class _SkillRowState extends State<_SkillRow> {
                       style: const TextStyle(fontSize: 12),
                     ),
                     if (!_expanded)
-                      const Text(
+                      Text(
                         'Tap to expand',
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.black38,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontStyle: FontStyle.italic,
                         ),
                       ),
@@ -202,17 +202,17 @@ class _EmptyView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.extension_off_outlined,
               size: 64,
-              color: Colors.black26,
+              color: Theme.of(context).colorScheme.outlineVariant,
             ),
             const SizedBox(height: 16),
             Text(
               'No skills configured',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
-                color: Colors.black45,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -220,7 +220,9 @@ class _EmptyView extends StatelessWidget {
             Text(
               'The "$personaName" persona has no skills configured.',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.black38),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -241,7 +243,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: Colors.red.shade600, size: 48),
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.error,
+            size: 48,
+          ),
           const SizedBox(height: 12),
           Text(error, textAlign: TextAlign.center),
           const SizedBox(height: 12),
