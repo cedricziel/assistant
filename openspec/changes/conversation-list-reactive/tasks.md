@@ -28,4 +28,4 @@ Each task follows TDD (failing test first) and results in one atomic commit.
 
 ## Integration
 
-- [ ] End-to-end test: create a conversation via REST, assert it appears on an active SSE stream. Delete it, assert `deleted` event arrives. (Can be a Rust integration test or a Flutter integration test.)
+- [x] End-to-end test: create a conversation via REST, assert it appears on an active SSE stream. Delete it, assert `deleted` event arrives. (Can be a Rust integration test or a Flutter integration test.)

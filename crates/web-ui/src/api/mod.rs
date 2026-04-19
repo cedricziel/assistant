@@ -3888,4 +3888,93 @@ mod tests {
             "should contain event for filtered agent, got: {text}"
         );
     }
+
+    #[tokio::test]
+    async fn stream_conversations_e2e_create_and_delete() {
+        let (state, _storage) = event_log_state().await;
+
+        // Clone app router so we can issue multiple requests.
+        let router = app(state);
+
+        // Spawn the SSE stream reader in a background task.
+        let stream_router = router.clone();
+        let handle = tokio::spawn(async move {
+            let resp = stream_router
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            body_bytes(resp.into_body()).await
+        });
+
+        // Give the stream time to subscribe.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Create a conversation via REST.
+        let create_resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"title":"E2E Conv"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_resp.status(), StatusCode::CREATED);
+        let json = body_json(create_resp.into_body()).await;
+        let conv_id = json["id"].as_str().expect("should have an id").to_string();
+
+        // Give the stream time to forward the upserted event.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Delete the conversation via REST.
+        let delete_resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/conversations/{conv_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_resp.status(), StatusCode::NO_CONTENT);
+
+        // Give the stream time to forward the deleted event, then drop
+        // broadcaster indirectly by dropping the router.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(router);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("stream should finish within timeout")
+            .expect("stream task should not panic");
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(
+            text.contains("event: upserted"),
+            "stream should contain upserted event from REST create, got: {text}"
+        );
+        assert!(
+            text.contains("E2E Conv"),
+            "upserted event should contain conversation title"
+        );
+        assert!(
+            text.contains("event: deleted"),
+            "stream should contain deleted event from REST delete, got: {text}"
+        );
+        assert!(
+            text.contains(&conv_id),
+            "deleted event should contain the conversation ID"
+        );
+    }
 }
