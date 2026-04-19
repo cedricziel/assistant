@@ -3773,4 +3773,54 @@ mod tests {
             "snapshot should contain the conversation title"
         );
     }
+
+    #[tokio::test]
+    async fn stream_conversations_forwards_upserted_delta() {
+        let (state, _storage) = event_log_state().await;
+        let broadcaster = state.conversation_broadcaster.clone();
+        let pool = state.pool.clone();
+
+        // Spawn the SSE stream reader in a task.
+        let app = app(state);
+        let handle = tokio::spawn(async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            body_bytes(resp.into_body()).await
+        });
+
+        // Give the stream a moment to subscribe.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Create a conversation through a broadcaster-wired store.
+        let store = ConversationStore::for_agent(pool, "default").with_broadcaster(broadcaster);
+        store.create_conversation(Some("Delta Test")).await.unwrap();
+
+        // Give the stream a moment to forward the event, then drop broadcaster
+        // to close the channel so the SSE task finishes.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(store);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("stream should finish within timeout")
+            .expect("stream task should not panic");
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(
+            text.contains("event: upserted"),
+            "stream should contain upserted event, got: {text}"
+        );
+        assert!(
+            text.contains("Delta Test"),
+            "upserted event should contain the conversation title"
+        );
+    }
 }
