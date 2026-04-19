@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 
 import 'platform.dart';
@@ -13,6 +14,10 @@ import 'platform.dart';
 /// - Bouncing scroll physics
 /// - iOS text selection handles
 /// - SF Pro system font
+///
+/// The Cupertino path includes [GlobalMaterialLocalizations] and a
+/// [Material] + [Theme] wrapper so that Material widgets (TextField,
+/// Scaffold, SnackBar, etc.) continue to work inside the Cupertino shell.
 class AdaptiveApp extends StatelessWidget {
   const AdaptiveApp({
     super.key,
@@ -30,6 +35,15 @@ class AdaptiveApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isAppleTouch) {
+      final brightness = MediaQuery.platformBrightnessOf(context);
+      final materialTheme = ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: _seedColor,
+          brightness: brightness,
+        ),
+        useMaterial3: true,
+      );
+
       return CupertinoApp.router(
         title: title,
         theme: const CupertinoThemeData(
@@ -37,6 +51,20 @@ class AdaptiveApp extends StatelessWidget {
         ),
         routerConfig: routerConfig,
         debugShowCheckedModeBanner: false,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        builder: (context, child) {
+          return Theme(
+            data: materialTheme,
+            child: Material(
+              type: MaterialType.transparency,
+              child: child ?? const SizedBox.shrink(),
+            ),
+          );
+        },
       );
     }
 
