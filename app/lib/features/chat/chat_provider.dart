@@ -969,7 +969,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               pendingQueue: chatState.pendingQueue,
             ),
           );
-          ref.read(conversationListProvider.notifier).refresh();
           return true;
         } else if (event is ErrorEvent) {
           _lastSeq++;
@@ -1158,7 +1157,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               pendingQueue: chatState.pendingQueue,
             ),
           );
-          ref.read(conversationListProvider.notifier).refresh();
           return;
         } else if (event is ErrorEvent) {
           unawaited(tokenController.close());
@@ -1346,7 +1344,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
           // Refresh conversation list to update timestamps/titles.
-          ref.read(conversationListProvider.notifier).refresh();
           return;
         } else if (event is AudioReadyEvent) {
           _lastSeq++;
