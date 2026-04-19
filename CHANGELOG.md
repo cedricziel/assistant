@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.124](https://github.com/cedricziel/assistant/compare/v0.1.123...v0.1.124) (2026-04-19)
+
+
+### Features
+
+* **app:** silent SSE stream reconnection on iOS background/resume ([#547](https://github.com/cedricziel/assistant/issues/547)) ([b7aa3c7](https://github.com/cedricziel/assistant/commit/b7aa3c7401603f28e71a5edf89892a88028f7437))
+* **app:** slash-command autocomplete and timeline integration ([#550](https://github.com/cedricziel/assistant/issues/550)) ([132e5d7](https://github.com/cedricziel/assistant/commit/132e5d77f6e4ede1db29ce80d6d160e0fd634521))
+* **shortcuts:** Apple Shortcuts integration via shared Swift Package ([#545](https://github.com/cedricziel/assistant/issues/545)) ([72512db](https://github.com/cedricziel/assistant/commit/72512db067b3a69c4bb6e7c61fe13069ec129fb2))
+* **slack:** restore mention/thread-based message filtering ([#549](https://github.com/cedricziel/assistant/issues/549)) ([7413439](https://github.com/cedricziel/assistant/commit/7413439c086403620ef59bcac1ef31ecc8ba64e9))
+* unified slash-command system across all interfaces ([#540](https://github.com/cedricziel/assistant/issues/540)) ([8be6acd](https://github.com/cedricziel/assistant/commit/8be6acd9d48c5820e341367548b76bb0ca43d6e5))
+
 ## [0.1.123](https://github.com/cedricziel/assistant/compare/v0.1.122...v0.1.123) (2026-04-19)
 
 
