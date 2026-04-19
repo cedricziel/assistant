@@ -121,30 +121,30 @@ Capture the current state on each matrix entry before any changes. These screens
 
 ### 3.1 Adaptive Scaffold & Nav Bar
 
-- [ ] 3.1.1 🔴 Write widget test `app/test/widget/platform/adaptive_scaffold_test.dart`: pump `AdaptiveScaffold` with iOS platform override — assert `CupertinoPageScaffold` found. Pump with macOS override — assert `Scaffold` found. Confirm tests fail.
-- [ ] 3.1.2 🔴 Write widget test `app/test/widget/platform/adaptive_nav_bar_test.dart`: pump `AdaptiveNavBar` with iOS override — assert `CupertinoNavigationBar` found. Pump with macOS override — assert `AppBar` found. Confirm tests fail.
-- [ ] 3.1.3 🟢 Create `app/lib/shared/platform/adaptive_scaffold.dart` and `adaptive_nav_bar.dart`. Make tests green.
+- [x] 3.1.1 🔴 Write widget test `app/test/widget/platform/adaptive_scaffold_test.dart`: pump `AdaptiveScaffold` with iOS platform override — assert `CupertinoPageScaffold` found. Pump with macOS override — assert `Scaffold` found. Confirm tests fail.
+- [x] 3.1.2 🔴 Write widget test `app/test/widget/platform/adaptive_nav_bar_test.dart`: pump `AdaptiveNavBar` with iOS override — assert `CupertinoNavigationBar` found. Pump with macOS override — assert `AppBar` found. Confirm tests fail.
+- [x] 3.1.3 🟢 Create `app/lib/shared/platform/adaptive_scaffold.dart` and `adaptive_nav_bar.dart`. Make tests green.
 
 ### 3.2 Large Title Screens
 
-- [ ] 3.2.1 🔴 Write widget test: pump `SettingsScreen` with iOS platform override inside a `CustomScrollView`-compatible ancestor. Assert `CupertinoSliverNavigationBar` is found with `largeTitle` text "Settings". Confirm test fails.
-- [ ] 3.2.2 🟢 Convert Settings screen to use `CupertinoSliverNavigationBar` on Apple touch. Make test green.
-- [ ] 3.2.3 🔴 Write parameterized widget test for remaining list screens (Skills, Personas, Traces, Logs, Contexts, Webhooks, Agents, Analytics, Workflows): for each, assert `CupertinoSliverNavigationBar` found on iOS and `AppBar` found on macOS/web. Confirm tests fail.
-- [ ] 3.2.4 🟢 Convert Skills screen to use large title. Make its test green.
-- [ ] 3.2.5 🟢 Convert Personas screen. Green.
-- [ ] 3.2.6 🟢 Convert Traces screen. Green.
-- [ ] 3.2.7 🟢 Convert Logs screen. Green.
-- [ ] 3.2.8 🟢 Convert Contexts screen. Green.
-- [ ] 3.2.9 🟢 Convert Webhooks screen. Green.
-- [ ] 3.2.10 🟢 Convert Agents screen. Green.
-- [ ] 3.2.11 🟢 Convert Analytics screen. Green.
-- [ ] 3.2.12 🟢 Convert Workflows screen. Green.
+- [x] 3.2.1 🔴 Write widget test: pump `SettingsScreen` with iOS platform override inside a `CustomScrollView`-compatible ancestor. Assert `CupertinoSliverNavigationBar` is found with `largeTitle` text "Settings". Confirm test fails.
+- [x] 3.2.2 🟢 Convert Settings screen to use `CupertinoSliverNavigationBar` on Apple touch. Make test green.
+- [x] 3.2.3 🔴 Write parameterized widget test for remaining list screens (Skills, Personas, Traces, Logs, Contexts, Webhooks, Agents, Analytics, Workflows): for each, assert `CupertinoSliverNavigationBar` found on iOS and `AppBar` found on macOS/web. Confirm tests fail.
+- [x] 3.2.4 🟢 Convert Skills screen to use large title. Make its test green.
+- [x] 3.2.5 🟢 Convert Personas screen. Green.
+- [x] 3.2.6 🟢 Convert Traces screen. Green.
+- [x] 3.2.7 🟢 Convert Logs screen. Green.
+- [x] 3.2.8 🟢 Convert Contexts screen. Green.
+- [x] 3.2.9 🟢 Convert Webhooks screen. Green.
+- [x] 3.2.10 🟢 Convert Agents screen. Green.
+- [x] 3.2.11 🟢 Convert Analytics screen. Green.
+- [x] 3.2.12 🟢 Convert Workflows screen. Green.
 
 ### 3.3 Chat Screen Chrome
 
-- [ ] 3.3.1 🔴 Write widget test: pump `ChatScreen` with iOS override. Assert `CupertinoNavigationBar` found (not `CupertinoSliverNavigationBar` — no large title). Assert `AppBar` is NOT found. Confirm test fails.
-- [ ] 3.3.2 🟢 Update Chat screen to use `CupertinoNavigationBar` on Apple touch. Make test green.
-- [ ] 3.3.3 🔴 Write widget test: pump `ChatScreen` with macOS override. Assert `AppBar` found (Material, unchanged). Confirm test passes immediately (non-regression).
+- [x] 3.3.1 🔴 Write widget test: pump `ChatScreen` with iOS override. Assert `CupertinoNavigationBar` found (not `CupertinoSliverNavigationBar` — no large title). Assert `AppBar` is NOT found. Confirm test fails.
+- [x] 3.3.2 🟢 Update Chat screen to use `CupertinoNavigationBar` on Apple touch. Make test green.
+- [x] 3.3.3 🔴 Write widget test: pump `ChatScreen` with macOS override. Assert `AppBar` found (Material, unchanged). Confirm test passes immediately (non-regression).
 
 ### 3.4 Phase 3 Verification — Per Matrix Entry
 
@@ -155,8 +155,8 @@ Capture the current state on each matrix entry before any changes. These screens
 - [ ] 3.4.5 **M4 Mac Catalyst**: Large titles work. Edge-swipe-to-go-back works (if trackpad gesture supported).
 - [ ] 3.4.6 **M5 macOS native**: All screens use Scaffold + AppBar unchanged. No visual regression from baseline.
 - [ ] 3.4.7 **M6 Web**: All screens use Scaffold + AppBar unchanged. No visual regression from baseline.
-- [ ] 3.4.8 Run `flutter analyze --fatal-infos` — zero issues
-- [ ] 3.4.9 Run `flutter test` — all tests pass
+- [x] 3.4.8 Run `flutter analyze --fatal-infos` — zero issues
+- [x] 3.4.9 Run `flutter test` — all tests pass (418/418)
 
 ---
 

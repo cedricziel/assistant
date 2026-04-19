@@ -1,7 +1,9 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../shared/platform/platform.dart';
 import '../models/context_model.dart';
 import '../providers/context_providers.dart';
 import 'edit_context_screen.dart';
@@ -18,6 +20,48 @@ class ContextSwitcherScreen extends ConsumerWidget {
     final contextsAsync = ref.watch(contextsProvider);
     final activeAsync = ref.watch(activeContextProvider);
     final activeContext = activeAsync.value;
+
+    final fab = FloatingActionButton(
+      tooltip: 'Add context',
+      onPressed: () => _openCreate(context, ref),
+      child: const Icon(Icons.add),
+    );
+
+    if (isAppleTouch) {
+      return Scaffold(
+        floatingActionButton: fab,
+        body: CustomScrollView(
+          slivers: [
+            const CupertinoSliverNavigationBar(largeTitle: Text('Contexts')),
+            contextsAsync.when(
+              loading: () => const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) =>
+                  SliverFillRemaining(child: Center(child: Text('Error: $e'))),
+              data: (contexts) {
+                if (contexts.isEmpty) {
+                  return const SliverFillRemaining(child: _EmptyState());
+                }
+                return SliverList(
+                  delegate: SliverChildBuilderDelegate((ctx, i) {
+                    final item = contexts[i];
+                    final isActive = activeContext?.id == item.id;
+                    return _ContextTile(
+                      context: item,
+                      isActive: isActive,
+                      onTap: () => _activateAndNavigate(ctx, ref, item),
+                      onEdit: () => _openEdit(ctx, item),
+                      onDelete: () => _confirmDelete(ctx, ref, item),
+                    );
+                  }, childCount: contexts.length),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Contexts')),
@@ -44,11 +88,7 @@ class ContextSwitcherScreen extends ConsumerWidget {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        tooltip: 'Add context',
-        onPressed: () => _openCreate(context, ref),
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: fab,
     );
   }
 
