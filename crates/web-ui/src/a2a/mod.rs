@@ -8,8 +8,8 @@ pub mod agent_store;
 pub mod handlers;
 pub mod task_store;
 
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
 
 use crate::a2a::handlers::A2AState;
 

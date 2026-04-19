@@ -26,6 +26,10 @@ doc/AuthorizationCodeOAuthFlow.md
 doc/CancelTaskRequest.md
 doc/CapabilitiesApi.md
 doc/ClientCredentialsOAuthFlow.md
+doc/CommandArgResponse.md
+doc/CommandDefResponse.md
+doc/CommandEventResponse.md
+doc/CommandsApi.md
 doc/ConversationDetail.md
 doc/ConversationSummary.md
 doc/ConversationsApi.md
@@ -35,6 +39,7 @@ doc/CreateSkillRequest.md
 doc/CreateTaskPushNotificationConfigRequest.md
 doc/CreateWebhookRequest.md
 doc/DeviceCodeOAuthFlow.md
+doc/ExecuteCommandRequest.md
 doc/HttpAuthSecurityScheme.md
 doc/ImplicitOAuthFlow.md
 doc/ListTaskPushNotificationConfigsResponse.md
@@ -120,6 +125,7 @@ lib/src/api/agents_api.dart
 lib/src/api/analytics_api.dart
 lib/src/api/attachments_api.dart
 lib/src/api/capabilities_api.dart
+lib/src/api/commands_api.dart
 lib/src/api/conversations_api.dart
 lib/src/api/logs_api.dart
 lib/src/api/messages_api.dart
@@ -158,6 +164,9 @@ lib/src/model/authentication_info.dart
 lib/src/model/authorization_code_o_auth_flow.dart
 lib/src/model/cancel_task_request.dart
 lib/src/model/client_credentials_o_auth_flow.dart
+lib/src/model/command_arg_response.dart
+lib/src/model/command_def_response.dart
+lib/src/model/command_event_response.dart
 lib/src/model/conversation_detail.dart
 lib/src/model/conversation_summary.dart
 lib/src/model/create_conversation_request.dart
@@ -167,6 +176,7 @@ lib/src/model/create_task_push_notification_config_request.dart
 lib/src/model/create_webhook_request.dart
 lib/src/model/date.dart
 lib/src/model/device_code_o_auth_flow.dart
+lib/src/model/execute_command_request.dart
 lib/src/model/http_auth_security_scheme.dart
 lib/src/model/implicit_o_auth_flow.dart
 lib/src/model/list_task_push_notification_configs_response.dart
@@ -237,5 +247,8 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/quick_message_request_test.dart
-test/quick_message_response_test.dart
+test/command_arg_response_test.dart
+test/command_def_response_test.dart
+test/command_event_response_test.dart
+test/commands_api_test.dart
+test/execute_command_request_test.dart

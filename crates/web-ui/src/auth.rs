@@ -7,13 +7,13 @@
 
 use std::sync::Arc;
 
+use axum::Form;
 use axum::body::Body;
 use axum::extract::{Extension, Request};
 use axum::http::header::{COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
-use axum::Form;
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
@@ -98,20 +98,21 @@ pub async fn require_auth(
     // 1. Check session cookie.
     if let Some(cookie_header) = request.headers().get(COOKIE)
         && let Ok(cookies) = cookie_header.to_str()
-            && extract_cookie(cookies, SESSION_COOKIE)
-                .map(|v| constant_time_eq(v.as_bytes(), auth.session_value.as_bytes()))
-                .unwrap_or(false)
-            {
-                return next.run(request).await;
-            }
+        && extract_cookie(cookies, SESSION_COOKIE)
+            .map(|v| constant_time_eq(v.as_bytes(), auth.session_value.as_bytes()))
+            .unwrap_or(false)
+    {
+        return next.run(request).await;
+    }
 
     // 2. Check Authorization: Bearer <token>.
     if let Some(auth_header) = request.headers().get("authorization")
         && let Ok(value) = auth_header.to_str()
-            && let Some(bearer) = value.strip_prefix("Bearer ")
-                && constant_time_eq(bearer.trim().as_bytes(), auth.token.as_bytes()) {
-                    return next.run(request).await;
-                }
+        && let Some(bearer) = value.strip_prefix("Bearer ")
+        && constant_time_eq(bearer.trim().as_bytes(), auth.token.as_bytes())
+    {
+        return next.run(request).await;
+    }
 
     // 3. Not authenticated — decide response type.
     let accepts_html = request

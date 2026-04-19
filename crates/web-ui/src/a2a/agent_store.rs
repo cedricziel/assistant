@@ -241,15 +241,16 @@ impl AgentStore {
         // If we removed the default, pick a new one.
         let default_id = self.read_default_marker().await;
         if default_id.as_deref() == Some(id)
-            && let Ok(agents) = self.list().await {
-                if let Some(first) = agents.first() {
-                    let _ = self.write_default_marker(&first.id).await;
-                } else {
-                    // No agents left -- remove the marker.
-                    let marker = self.agents_dir.join(DEFAULT_MARKER);
-                    let _ = tokio::fs::remove_file(&marker).await;
-                }
+            && let Ok(agents) = self.list().await
+        {
+            if let Some(first) = agents.first() {
+                let _ = self.write_default_marker(&first.id).await;
+            } else {
+                // No agents left -- remove the marker.
+                let marker = self.agents_dir.join(DEFAULT_MARKER);
+                let _ = tokio::fs::remove_file(&marker).await;
             }
+        }
 
         true
     }

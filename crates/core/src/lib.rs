@@ -3,6 +3,7 @@ pub mod attachment;
 pub mod bus;
 pub mod bus_messages;
 pub mod channel;
+pub mod command;
 pub mod config;
 pub mod context;
 pub mod memory;
@@ -23,6 +24,7 @@ pub use bus_messages::{
     TurnResult, TurnStatus, topic,
 };
 pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
+pub use command::{CommandArg, CommandDef, CommandResult, ConversationConfig};
 pub use config::{default_config_path, load_config};
 pub use context::{
     agent_base_dir, apply_agent_context, default_agent_id, default_workspace_dir,

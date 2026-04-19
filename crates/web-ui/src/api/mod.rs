@@ -9,6 +9,7 @@
 
 pub mod agents;
 pub mod analytics;
+pub mod commands;
 pub mod logs;
 pub mod personas;
 pub mod push;
@@ -76,10 +77,12 @@ use assistant_transcription::{
     TranscriptionProvider, TranscriptionRequest, TtsProvider, TtsRequest,
 };
 
-use assistant_core::{Interface, MessageRole};
-use assistant_runtime::{AssistantInterface, OrchestratorEvent};
+use std::collections::HashMap;
+
+use assistant_core::{ConversationConfig, Interface, MessageRole};
+use assistant_runtime::{AssistantInterface, CommandRegistry, Orchestrator, OrchestratorEvent};
 use assistant_storage::{
-    AttachmentStore, ConversationEventStore, ConversationStore, RunBroadcaster,
+    AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore, RunBroadcaster,
 };
 use axum::{
     Json, Router,
@@ -123,6 +126,18 @@ pub struct ApiState {
     pub run_broadcaster: RunBroadcaster,
     /// Persistent attachment storage (metadata in SQLite, bytes on disk).
     pub attachment_store: AttachmentStore,
+    /// Slash-command registry (shared with all interfaces).
+    pub command_registry: Arc<CommandRegistry>,
+    /// Durable store for slash-command events.
+    pub command_event_store: CommandEventStore,
+    /// Per-conversation config overrides (model selection, etc.).
+    pub conversation_configs: Arc<RwLock<HashMap<Uuid, ConversationConfig>>>,
+    /// Concrete orchestrator reference for command execution.
+    pub orchestrator_ref: Arc<Orchestrator>,
+    /// Active turns map: conv_id → request_id (for `/stop`).
+    pub active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
+    /// Default model name from global config.
+    pub default_model: String,
 }
 
 impl ApiState {
@@ -130,9 +145,12 @@ impl ApiState {
         pool: SqlitePool,
         orchestrator: Arc<dyn AssistantInterface>,
         agent_id: Arc<RwLock<String>>,
+        orchestrator_ref: Arc<Orchestrator>,
     ) -> Self {
         let event_store = ConversationEventStore::new(pool.clone());
         let attachment_store = AttachmentStore::new(pool.clone());
+        let command_event_store = CommandEventStore::new(pool.clone());
+        let default_model = orchestrator_ref.llm.model_name().to_string();
         Self {
             pool,
             agent_id,
@@ -144,6 +162,12 @@ impl ApiState {
             event_store,
             run_broadcaster: RunBroadcaster::new(),
             attachment_store,
+            command_registry: Arc::new(CommandRegistry::new()),
+            command_event_store,
+            conversation_configs: Arc::new(RwLock::new(HashMap::new())),
+            orchestrator_ref,
+            active_turns: Arc::new(RwLock::new(HashMap::new())),
+            default_model,
         }
     }
 
@@ -298,6 +322,15 @@ pub fn api_router() -> Router<ApiState> {
         )
         .route("/messages/{id}/audio", get(get_message_audio))
         .route("/audio/{id}", get(get_audio))
+        .route("/commands", get(commands::list_commands))
+        .route(
+            "/conversations/{id}/command",
+            post(commands::execute_command),
+        )
+        .route(
+            "/conversations/{id}/events",
+            get(commands::list_command_events),
+        )
 }
 
 // -- Handlers ----------------------------------------------------------------
@@ -1900,12 +1933,14 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    use std::collections::HashMap;
+
     use assistant_core::AssistantConfig;
     use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
-    use assistant_runtime::Orchestrator;
+    use assistant_runtime::{CommandRegistry, Orchestrator};
     use assistant_storage::{
-        AttachmentStore, ConversationEventStore, ConversationStore, RunBroadcaster, SkillRegistry,
-        StorageLayer,
+        AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
+        RunBroadcaster, SkillRegistry, StorageLayer,
     };
     use assistant_tool_executor::ToolExecutor;
     use assistant_transcription::{
@@ -1994,6 +2029,8 @@ mod tests {
             worker_orch.run_worker("test-worker").await;
         });
 
+        let orchestrator_ref = orchestrator.clone();
+        let default_model = orchestrator_ref.llm.model_name().to_string();
         let state = ApiState {
             pool: storage.pool.clone(),
             agent_id: Arc::new(RwLock::new("default".to_string())),
@@ -2005,6 +2042,12 @@ mod tests {
             event_store: ConversationEventStore::new(storage.pool.clone()),
             run_broadcaster: RunBroadcaster::new(),
             attachment_store: AttachmentStore::new(storage.pool.clone()),
+            command_registry: Arc::new(CommandRegistry::new()),
+            command_event_store: CommandEventStore::new(storage.pool.clone()),
+            conversation_configs: Arc::new(RwLock::new(HashMap::new())),
+            orchestrator_ref,
+            active_turns: Arc::new(RwLock::new(HashMap::new())),
+            default_model,
         };
         (state, storage)
     }
@@ -2048,6 +2091,8 @@ mod tests {
             &config,
         ));
         // NOTE: No worker task spawned — avoids contention on the single in-memory connection.
+        let orchestrator_ref = orchestrator.clone();
+        let default_model = orchestrator_ref.llm.model_name().to_string();
         let state = ApiState {
             pool: storage.pool.clone(),
             agent_id: Arc::new(RwLock::new("default".to_string())),
@@ -2059,6 +2104,12 @@ mod tests {
             event_store: ConversationEventStore::new(storage.pool.clone()),
             run_broadcaster: RunBroadcaster::new(),
             attachment_store: AttachmentStore::new(storage.pool.clone()),
+            command_registry: Arc::new(CommandRegistry::new()),
+            command_event_store: CommandEventStore::new(storage.pool.clone()),
+            conversation_configs: Arc::new(RwLock::new(HashMap::new())),
+            orchestrator_ref,
+            active_turns: Arc::new(RwLock::new(HashMap::new())),
+            default_model,
         };
         (state, storage)
     }
@@ -3058,6 +3109,8 @@ mod tests {
             bus,
             &config,
         ));
+        let orchestrator_ref = orchestrator.clone();
+        let default_model = orchestrator_ref.llm.model_name().to_string();
         let state = ApiState {
             pool: sl.pool.clone(),
             agent_id: Arc::new(RwLock::new("default".to_string())),
@@ -3069,6 +3122,12 @@ mod tests {
             event_store: short_ttl_store,
             run_broadcaster: RunBroadcaster::new(),
             attachment_store: AttachmentStore::new(sl.pool.clone()),
+            command_registry: Arc::new(CommandRegistry::new()),
+            command_event_store: CommandEventStore::new(sl.pool.clone()),
+            conversation_configs: Arc::new(RwLock::new(HashMap::new())),
+            orchestrator_ref,
+            active_turns: Arc::new(RwLock::new(HashMap::new())),
+            default_model,
         };
 
         let app = app(state);

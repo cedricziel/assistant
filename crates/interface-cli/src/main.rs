@@ -1,6 +1,6 @@
 mod cmd_backup;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,9 +15,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use assistant_core::{
-    AssistantConfig, EmbeddingConfig, EmbeddingProviderKind, Interface, LlmProviderKind,
-    MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
-    set_runtime_workspace_dir, validate_agent_id,
+    AssistantConfig, ConversationConfig, EmbeddingConfig, EmbeddingProviderKind, Interface,
+    LlmProviderKind, MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir,
+    set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
 use assistant_llm::{
     EmbeddingProvider, LlmEmbedder, LlmProvider, VoyageConfig, VoyageEmbedder,
@@ -28,8 +28,9 @@ use assistant_provider_moonshot::MoonshotProvider;
 use assistant_provider_ollama::{OllamaConfig, OllamaProvider};
 use assistant_provider_openai::{OpenAIProvider, OpenAIProviderConfig};
 use assistant_runtime::{
-    Orchestrator, init_tracing, orchestrator::ConfirmationCallback, spawn_memory_indexer,
-    spawn_scheduler, start_conversation_context,
+    CommandContext, CommandRegistry, Orchestrator, init_tracing,
+    orchestrator::ConfirmationCallback, spawn_memory_indexer, spawn_scheduler,
+    start_conversation_context,
 };
 use assistant_skills::SkillSource;
 use assistant_storage::{
@@ -574,17 +575,15 @@ fn print_help() {
     println!(
         "\nAssistant REPL commands:\n\
          \n\
-         /skills [name]                 List all skills, or show detail for one\n\
+         /new                          Start a new conversation\n\
+         /stop                         Cancel the current turn\n\
+         /model [name]                 Show or switch the model for this conversation\n\
+         /compact                      Compress conversation context\n\
+         /status                       Show conversation status\n\
+         /help                         Show this help message\n\
+         /skills [name]                List all skills, or show detail for one\n\
          /review                       Review pending skill refinement proposals\n\
          /install <path|owner/repo>    Install a skill from disk or GitHub\n\
-         Persona management: run `assistant persona --help` in another shell\n\
-         Runtime modes:\n\
-           assistant orchestrator run [--interfaces ...] [--no-repl]\n\
-           assistant worker --interface <name|any> --id <worker-id>\n\
-           assistant webui serve [--listen ... --auth-token ...]\n\
-           assistant signal link [--device-name Assistant]\n\
-         /model <name>                 Switch model (takes effect on next startup)\n\
-         /help                         Show this help message\n\
          /quit | /exit                 Exit the assistant\n\
          \n\
          Any other input is sent to the AI assistant.\n"
@@ -1796,7 +1795,15 @@ async fn main() -> Result<()> {
         selected_persona, bs.config.llm.model
     );
 
-    // 13. Build the reedline editor and prompt.
+    // 13. Shared command registry and per-conversation state.
+    let command_registry = CommandRegistry::new();
+    let conversation_configs: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationConfig>>> =
+        Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+    let active_turns: Arc<tokio::sync::RwLock<HashMap<Uuid, Uuid>>> =
+        Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+    let default_model = bs.config.llm.model.clone();
+
+    // 14. Build the reedline editor and prompt.
     let mut editor = Reedline::create();
     let prompt = DefaultPrompt::new(
         DefaultPromptSegment::Basic("assistant".to_string()),
@@ -1816,12 +1823,20 @@ async fn main() -> Result<()> {
                 }
 
                 // Handle slash commands.
+                // CLI-local commands first, then shared registry commands.
                 if let Some(rest) = input.strip_prefix('/') {
                     let mut parts = rest.splitn(2, ' ');
                     let cmd = parts.next().unwrap_or("");
                     let arg = parts.next().unwrap_or("").trim();
+                    let mut is_command = true;
 
                     match cmd {
+                        // -- CLI-local commands (not in the shared registry) --
+                        "quit" | "exit" | "q" => {
+                            println!("Goodbye.");
+                            break;
+                        }
+
                         "skills" => {
                             if arg.is_empty() {
                                 let skills = bs.registry.list().await;
@@ -1864,22 +1879,6 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        "model" => {
-                            if arg.is_empty() {
-                                println!("Current model: {}", bs.config.llm.model);
-                                println!(
-                                    "To switch models, update ~/.assistant/config.toml \
-                                     and restart."
-                                );
-                            } else {
-                                println!(
-                                    "Model '{}' requested. Update ~/.assistant/config.toml \
-                                     with:\n  [llm]\n  model = \"{}\"\nand restart.",
-                                    arg, arg
-                                );
-                            }
-                        }
-
                         "install" => {
                             if arg.is_empty() {
                                 eprintln!("Usage: /install <local-path> | <owner/repo[/path]>");
@@ -1902,23 +1901,34 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        "help" | "?" => {
+                        "?" => {
                             print_help();
                         }
 
-                        "quit" | "exit" | "q" => {
-                            println!("Goodbye.");
-                            break;
-                        }
-
-                        other => {
-                            eprintln!(
-                                "Unknown command '/{other}'. Type /help for available commands."
-                            );
+                        // -- Shared registry commands (/help, /new, /stop, /model, /compact, /status) --
+                        _ => {
+                            if let Some((cmd_name, args)) = command_registry.parse(input) {
+                                let ctx = CommandContext {
+                                    conversation_id,
+                                    conversation_configs: conversation_configs.clone(),
+                                    orchestrator: bs.orchestrator.clone(),
+                                    active_turns: active_turns.clone(),
+                                    evict_conversation: None,
+                                    default_model: default_model.clone(),
+                                };
+                                let result = command_registry.execute(&cmd_name, &args, ctx).await;
+                                println!("{}", result.ack_text);
+                            } else {
+                                // Not a recognized command — fall through to normal
+                                // assistant submission (e.g. "/new-york pizza").
+                                is_command = false;
+                            }
                         }
                     }
 
-                    continue;
+                    if is_command {
+                        continue;
+                    }
                 }
 
                 // Normal user input — submit through the message bus with
