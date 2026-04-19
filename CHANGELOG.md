@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.121](https://github.com/cedricziel/assistant/compare/v0.1.120...v0.1.121) (2026-04-19)
+
+
+### Features
+
+* **app:** add Siri and Action Button integration ([#532](https://github.com/cedricziel/assistant/issues/532)) ([a057403](https://github.com/cedricziel/assistant/commit/a057403b9b3fa6138a54bd7de7fe6c0a23e38e94))
+* **app:** Apple-native UX foundation — Phase 1 ([#531](https://github.com/cedricziel/assistant/issues/531)) ([3438693](https://github.com/cedricziel/assistant/commit/34386930966dce8d386d3ead5e83ee3ddbed152a))
+
+
+### Bug Fixes
+
+* **app:** add MaterialLocalizations to CupertinoApp shell ([#534](https://github.com/cedricziel/assistant/issues/534)) ([15d01eb](https://github.com/cedricziel/assistant/commit/15d01ebf7b284a7b1489603b4dc05e853af6ee29))
+
 ## [0.1.120](https://github.com/cedricziel/assistant/compare/v0.1.119...v0.1.120) (2026-04-18)
 
 
