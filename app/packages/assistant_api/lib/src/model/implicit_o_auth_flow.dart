@@ -16,8 +16,7 @@ part 'implicit_o_auth_flow.g.dart';
 /// * [refreshUrl] - The URL for obtaining refresh tokens.
 /// * [scopes] - Available scopes.
 @BuiltValue()
-abstract class ImplicitOAuthFlow
-    implements Built<ImplicitOAuthFlow, ImplicitOAuthFlowBuilder> {
+abstract class ImplicitOAuthFlow implements Built<ImplicitOAuthFlow, ImplicitOAuthFlowBuilder> {
   /// The authorization URL.
   @BuiltValueField(wireName: r'authorizationUrl')
   String? get authorizationUrl;
@@ -32,19 +31,16 @@ abstract class ImplicitOAuthFlow
 
   ImplicitOAuthFlow._();
 
-  factory ImplicitOAuthFlow([void updates(ImplicitOAuthFlowBuilder b)]) =
-      _$ImplicitOAuthFlow;
+  factory ImplicitOAuthFlow([void updates(ImplicitOAuthFlowBuilder b)]) = _$ImplicitOAuthFlow;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ImplicitOAuthFlowBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ImplicitOAuthFlow> get serializer =>
-      _$ImplicitOAuthFlowSerializer();
+  static Serializer<ImplicitOAuthFlow> get serializer => _$ImplicitOAuthFlowSerializer();
 }
 
-class _$ImplicitOAuthFlowSerializer
-    implements PrimitiveSerializer<ImplicitOAuthFlow> {
+class _$ImplicitOAuthFlowSerializer implements PrimitiveSerializer<ImplicitOAuthFlow> {
   @override
   final Iterable<Type> types = const [ImplicitOAuthFlow, _$ImplicitOAuthFlow];
 
@@ -74,8 +70,7 @@ class _$ImplicitOAuthFlowSerializer
       yield r'scopes';
       yield serializers.serialize(
         object.scopes,
-        specifiedType:
-            const FullType(BuiltMap, [FullType(String), FullType(String)]),
+        specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
       );
     }
   }
@@ -86,9 +81,7 @@ class _$ImplicitOAuthFlowSerializer
     ImplicitOAuthFlow object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -122,8 +115,7 @@ class _$ImplicitOAuthFlowSerializer
         case r'scopes':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType(BuiltMap, [FullType(String), FullType(String)]),
+            specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
           ) as BuiltMap<String, String>;
           result.scopes.replace(valueDes);
           break;
@@ -155,3 +147,4 @@ class _$ImplicitOAuthFlowSerializer
     return result.build();
   }
 }
+

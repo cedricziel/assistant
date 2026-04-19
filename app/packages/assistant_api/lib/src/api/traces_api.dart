@@ -14,6 +14,7 @@ import 'package:assistant_api/src/model/trace_summary_response.dart';
 import 'package:built_collection/built_collection.dart';
 
 class TracesApi {
+
   final Dio _dio;
 
   final Serializers _serializers;
@@ -21,7 +22,7 @@ class TracesApi {
   const TracesApi(this._dio, this._serializers);
 
   /// &#x60;GET /api/traces/{trace_id}&#x60; — get a single trace with span breakdown.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [traceId] - Trace ID
@@ -34,7 +35,7 @@ class TracesApi {
   ///
   /// Returns a [Future] containing a [Response] with a [TraceDetailResponse] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<TraceDetailResponse>> getTrace({
+  Future<Response<TraceDetailResponse>> getTrace({ 
     required String traceId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -43,10 +44,7 @@ class TracesApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/traces/{trace_id}'.replaceAll(
-        '{' r'trace_id' '}',
-        encodeQueryParameter(_serializers, traceId, const FullType(String))
-            .toString());
+    final _path = r'/api/traces/{trace_id}'.replaceAll('{' r'trace_id' '}', encodeQueryParameter(_serializers, traceId, const FullType(String)).toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -77,12 +75,11 @@ class TracesApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(TraceDetailResponse),
-            ) as TraceDetailResponse;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(TraceDetailResponse),
+      ) as TraceDetailResponse;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -106,16 +103,16 @@ class TracesApi {
   }
 
   /// &#x60;GET /api/traces&#x60; — list recent traces, newest first.
-  ///
+  /// 
   ///
   /// Parameters:
-  /// * [limit]
-  /// * [offset]
-  /// * [since]
-  /// * [until]
-  /// * [skill]
-  /// * [status]
-  /// * [conversation]
+  /// * [limit] 
+  /// * [offset] 
+  /// * [since] 
+  /// * [until] 
+  /// * [skill] 
+  /// * [status] 
+  /// * [conversation] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -125,7 +122,7 @@ class TracesApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<TraceSummaryResponse>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<TraceSummaryResponse>>> listTraces({
+  Future<Response<BuiltList<TraceSummaryResponse>>> listTraces({ 
     int? limit,
     int? offset,
     DateTime? since,
@@ -161,18 +158,12 @@ class TracesApi {
 
     final _queryParameters = <String, dynamic>{
       r'limit': encodeQueryParameter(_serializers, limit, const FullType(int)),
-      r'offset':
-          encodeQueryParameter(_serializers, offset, const FullType(int)),
-      r'since':
-          encodeQueryParameter(_serializers, since, const FullType(DateTime)),
-      r'until':
-          encodeQueryParameter(_serializers, until, const FullType(DateTime)),
-      r'skill':
-          encodeQueryParameter(_serializers, skill, const FullType(String)),
-      r'status':
-          encodeQueryParameter(_serializers, status, const FullType(String)),
-      r'conversation': encodeQueryParameter(
-          _serializers, conversation, const FullType(String)),
+      r'offset': encodeQueryParameter(_serializers, offset, const FullType(int)),
+      r'since': encodeQueryParameter(_serializers, since, const FullType(DateTime)),
+      r'until': encodeQueryParameter(_serializers, until, const FullType(DateTime)),
+      r'skill': encodeQueryParameter(_serializers, skill, const FullType(String)),
+      r'status': encodeQueryParameter(_serializers, status, const FullType(String)),
+      r'conversation': encodeQueryParameter(_serializers, conversation, const FullType(String)),
     };
 
     final _response = await _dio.request<Object>(
@@ -188,13 +179,11 @@ class TracesApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType:
-                  const FullType(BuiltList, [FullType(TraceSummaryResponse)]),
-            ) as BuiltList<TraceSummaryResponse>;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(BuiltList, [FullType(TraceSummaryResponse)]),
+      ) as BuiltList<TraceSummaryResponse>;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -216,4 +205,5 @@ class TracesApi {
       extra: _response.extra,
     );
   }
+
 }

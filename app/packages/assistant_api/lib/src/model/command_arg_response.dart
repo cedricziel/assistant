@@ -15,8 +15,7 @@ part 'command_arg_response.g.dart';
 /// * [name] - Argument name shown in autocomplete.
 /// * [required_] - Whether this argument is required.
 @BuiltValue()
-abstract class CommandArgResponse
-    implements Built<CommandArgResponse, CommandArgResponseBuilder> {
+abstract class CommandArgResponse implements Built<CommandArgResponse, CommandArgResponseBuilder> {
   /// Optional API endpoint that returns completions for this argument.
   @BuiltValueField(wireName: r'completions_endpoint')
   String? get completionsEndpoint;
@@ -31,19 +30,16 @@ abstract class CommandArgResponse
 
   CommandArgResponse._();
 
-  factory CommandArgResponse([void updates(CommandArgResponseBuilder b)]) =
-      _$CommandArgResponse;
+  factory CommandArgResponse([void updates(CommandArgResponseBuilder b)]) = _$CommandArgResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(CommandArgResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<CommandArgResponse> get serializer =>
-      _$CommandArgResponseSerializer();
+  static Serializer<CommandArgResponse> get serializer => _$CommandArgResponseSerializer();
 }
 
-class _$CommandArgResponseSerializer
-    implements PrimitiveSerializer<CommandArgResponse> {
+class _$CommandArgResponseSerializer implements PrimitiveSerializer<CommandArgResponse> {
   @override
   final Iterable<Type> types = const [CommandArgResponse, _$CommandArgResponse];
 
@@ -80,9 +76,7 @@ class _$CommandArgResponseSerializer
     CommandArgResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -147,3 +141,4 @@ class _$CommandArgResponseSerializer
     return result.build();
   }
 }
+

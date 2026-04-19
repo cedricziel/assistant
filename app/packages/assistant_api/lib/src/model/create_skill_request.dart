@@ -11,12 +11,11 @@ part 'create_skill_request.g.dart';
 /// Body for `POST /api/skills`.
 ///
 /// Properties:
-/// * [body]
-/// * [description]
-/// * [name]
+/// * [body] 
+/// * [description] 
+/// * [name] 
 @BuiltValue()
-abstract class CreateSkillRequest
-    implements Built<CreateSkillRequest, CreateSkillRequestBuilder> {
+abstract class CreateSkillRequest implements Built<CreateSkillRequest, CreateSkillRequestBuilder> {
   @BuiltValueField(wireName: r'body')
   String get body;
 
@@ -28,19 +27,16 @@ abstract class CreateSkillRequest
 
   CreateSkillRequest._();
 
-  factory CreateSkillRequest([void updates(CreateSkillRequestBuilder b)]) =
-      _$CreateSkillRequest;
+  factory CreateSkillRequest([void updates(CreateSkillRequestBuilder b)]) = _$CreateSkillRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(CreateSkillRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<CreateSkillRequest> get serializer =>
-      _$CreateSkillRequestSerializer();
+  static Serializer<CreateSkillRequest> get serializer => _$CreateSkillRequestSerializer();
 }
 
-class _$CreateSkillRequestSerializer
-    implements PrimitiveSerializer<CreateSkillRequest> {
+class _$CreateSkillRequestSerializer implements PrimitiveSerializer<CreateSkillRequest> {
   @override
   final Iterable<Type> types = const [CreateSkillRequest, _$CreateSkillRequest];
 
@@ -75,9 +71,7 @@ class _$CreateSkillRequestSerializer
     CreateSkillRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -141,3 +135,4 @@ class _$CreateSkillRequestSerializer
     return result.build();
   }
 }
+

@@ -13,33 +13,25 @@ part 'mutual_tls_security_scheme.g.dart';
 /// Properties:
 /// * [description] - An optional description for the security scheme.
 @BuiltValue()
-abstract class MutualTlsSecurityScheme
-    implements Built<MutualTlsSecurityScheme, MutualTlsSecuritySchemeBuilder> {
+abstract class MutualTlsSecurityScheme implements Built<MutualTlsSecurityScheme, MutualTlsSecuritySchemeBuilder> {
   /// An optional description for the security scheme.
   @BuiltValueField(wireName: r'description')
   String? get description;
 
   MutualTlsSecurityScheme._();
 
-  factory MutualTlsSecurityScheme(
-          [void updates(MutualTlsSecuritySchemeBuilder b)]) =
-      _$MutualTlsSecurityScheme;
+  factory MutualTlsSecurityScheme([void updates(MutualTlsSecuritySchemeBuilder b)]) = _$MutualTlsSecurityScheme;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(MutualTlsSecuritySchemeBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<MutualTlsSecurityScheme> get serializer =>
-      _$MutualTlsSecuritySchemeSerializer();
+  static Serializer<MutualTlsSecurityScheme> get serializer => _$MutualTlsSecuritySchemeSerializer();
 }
 
-class _$MutualTlsSecuritySchemeSerializer
-    implements PrimitiveSerializer<MutualTlsSecurityScheme> {
+class _$MutualTlsSecuritySchemeSerializer implements PrimitiveSerializer<MutualTlsSecurityScheme> {
   @override
-  final Iterable<Type> types = const [
-    MutualTlsSecurityScheme,
-    _$MutualTlsSecurityScheme
-  ];
+  final Iterable<Type> types = const [MutualTlsSecurityScheme, _$MutualTlsSecurityScheme];
 
   @override
   final String wireName = r'MutualTlsSecurityScheme';
@@ -64,9 +56,7 @@ class _$MutualTlsSecuritySchemeSerializer
     MutualTlsSecurityScheme object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -117,3 +107,4 @@ class _$MutualTlsSecuritySchemeSerializer
     return result.build();
   }
 }
+

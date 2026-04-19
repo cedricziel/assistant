@@ -18,8 +18,7 @@ part 'agent_capabilities.g.dart';
 /// * [pushNotifications] - Indicates if the agent supports push notifications.
 /// * [streaming] - Indicates if the agent supports streaming responses.
 @BuiltValue()
-abstract class AgentCapabilities
-    implements Built<AgentCapabilities, AgentCapabilitiesBuilder> {
+abstract class AgentCapabilities implements Built<AgentCapabilities, AgentCapabilitiesBuilder> {
   /// Indicates if the agent supports providing an extended agent card.
   @BuiltValueField(wireName: r'extendedAgentCard')
   bool? get extendedAgentCard;
@@ -38,19 +37,16 @@ abstract class AgentCapabilities
 
   AgentCapabilities._();
 
-  factory AgentCapabilities([void updates(AgentCapabilitiesBuilder b)]) =
-      _$AgentCapabilities;
+  factory AgentCapabilities([void updates(AgentCapabilitiesBuilder b)]) = _$AgentCapabilities;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AgentCapabilitiesBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AgentCapabilities> get serializer =>
-      _$AgentCapabilitiesSerializer();
+  static Serializer<AgentCapabilities> get serializer => _$AgentCapabilitiesSerializer();
 }
 
-class _$AgentCapabilitiesSerializer
-    implements PrimitiveSerializer<AgentCapabilities> {
+class _$AgentCapabilitiesSerializer implements PrimitiveSerializer<AgentCapabilities> {
   @override
   final Iterable<Type> types = const [AgentCapabilities, _$AgentCapabilities];
 
@@ -98,9 +94,7 @@ class _$AgentCapabilitiesSerializer
     AgentCapabilities object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -126,8 +120,7 @@ class _$AgentCapabilitiesSerializer
         case r'extensions':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType(BuiltList, [FullType(AgentExtension)]),
+            specifiedType: const FullType(BuiltList, [FullType(AgentExtension)]),
           ) as BuiltList<AgentExtension>;
           result.extensions.replace(valueDes);
           break;
@@ -175,3 +168,4 @@ class _$AgentCapabilitiesSerializer
     return result.build();
   }
 }
+

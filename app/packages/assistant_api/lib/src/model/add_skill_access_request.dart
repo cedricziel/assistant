@@ -11,33 +11,26 @@ part 'add_skill_access_request.g.dart';
 /// Body for `POST /api/personas/{id}/skill-access/skills`.
 ///
 /// Properties:
-/// * [skillName]
+/// * [skillName] 
 @BuiltValue()
-abstract class AddSkillAccessRequest
-    implements Built<AddSkillAccessRequest, AddSkillAccessRequestBuilder> {
+abstract class AddSkillAccessRequest implements Built<AddSkillAccessRequest, AddSkillAccessRequestBuilder> {
   @BuiltValueField(wireName: r'skill_name')
   String get skillName;
 
   AddSkillAccessRequest._();
 
-  factory AddSkillAccessRequest(
-      [void updates(AddSkillAccessRequestBuilder b)]) = _$AddSkillAccessRequest;
+  factory AddSkillAccessRequest([void updates(AddSkillAccessRequestBuilder b)]) = _$AddSkillAccessRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AddSkillAccessRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AddSkillAccessRequest> get serializer =>
-      _$AddSkillAccessRequestSerializer();
+  static Serializer<AddSkillAccessRequest> get serializer => _$AddSkillAccessRequestSerializer();
 }
 
-class _$AddSkillAccessRequestSerializer
-    implements PrimitiveSerializer<AddSkillAccessRequest> {
+class _$AddSkillAccessRequestSerializer implements PrimitiveSerializer<AddSkillAccessRequest> {
   @override
-  final Iterable<Type> types = const [
-    AddSkillAccessRequest,
-    _$AddSkillAccessRequest
-  ];
+  final Iterable<Type> types = const [AddSkillAccessRequest, _$AddSkillAccessRequest];
 
   @override
   final String wireName = r'AddSkillAccessRequest';
@@ -60,9 +53,7 @@ class _$AddSkillAccessRequestSerializer
     AddSkillAccessRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -112,3 +103,4 @@ class _$AddSkillAccessRequestSerializer
     return result.build();
   }
 }
+

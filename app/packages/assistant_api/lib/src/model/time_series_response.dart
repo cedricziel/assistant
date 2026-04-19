@@ -11,11 +11,10 @@ part 'time_series_response.g.dart';
 /// A single point in a time series.
 ///
 /// Properties:
-/// * [bucket]
-/// * [value]
+/// * [bucket] 
+/// * [value] 
 @BuiltValue()
-abstract class TimeSeriesResponse
-    implements Built<TimeSeriesResponse, TimeSeriesResponseBuilder> {
+abstract class TimeSeriesResponse implements Built<TimeSeriesResponse, TimeSeriesResponseBuilder> {
   @BuiltValueField(wireName: r'bucket')
   String get bucket;
 
@@ -24,19 +23,16 @@ abstract class TimeSeriesResponse
 
   TimeSeriesResponse._();
 
-  factory TimeSeriesResponse([void updates(TimeSeriesResponseBuilder b)]) =
-      _$TimeSeriesResponse;
+  factory TimeSeriesResponse([void updates(TimeSeriesResponseBuilder b)]) = _$TimeSeriesResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(TimeSeriesResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<TimeSeriesResponse> get serializer =>
-      _$TimeSeriesResponseSerializer();
+  static Serializer<TimeSeriesResponse> get serializer => _$TimeSeriesResponseSerializer();
 }
 
-class _$TimeSeriesResponseSerializer
-    implements PrimitiveSerializer<TimeSeriesResponse> {
+class _$TimeSeriesResponseSerializer implements PrimitiveSerializer<TimeSeriesResponse> {
   @override
   final Iterable<Type> types = const [TimeSeriesResponse, _$TimeSeriesResponse];
 
@@ -66,9 +62,7 @@ class _$TimeSeriesResponseSerializer
     TimeSeriesResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -125,3 +119,4 @@ class _$TimeSeriesResponseSerializer
     return result.build();
   }
 }
+

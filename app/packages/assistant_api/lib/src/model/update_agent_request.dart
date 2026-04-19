@@ -12,28 +12,24 @@ part 'update_agent_request.g.dart';
 /// Body for `PUT /api/agents/{id}`.
 ///
 /// Properties:
-/// * [card]
+/// * [card] 
 @BuiltValue()
-abstract class UpdateAgentRequest
-    implements Built<UpdateAgentRequest, UpdateAgentRequestBuilder> {
+abstract class UpdateAgentRequest implements Built<UpdateAgentRequest, UpdateAgentRequestBuilder> {
   @BuiltValueField(wireName: r'card')
   JsonObject? get card;
 
   UpdateAgentRequest._();
 
-  factory UpdateAgentRequest([void updates(UpdateAgentRequestBuilder b)]) =
-      _$UpdateAgentRequest;
+  factory UpdateAgentRequest([void updates(UpdateAgentRequestBuilder b)]) = _$UpdateAgentRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(UpdateAgentRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<UpdateAgentRequest> get serializer =>
-      _$UpdateAgentRequestSerializer();
+  static Serializer<UpdateAgentRequest> get serializer => _$UpdateAgentRequestSerializer();
 }
 
-class _$UpdateAgentRequestSerializer
-    implements PrimitiveSerializer<UpdateAgentRequest> {
+class _$UpdateAgentRequestSerializer implements PrimitiveSerializer<UpdateAgentRequest> {
   @override
   final Iterable<Type> types = const [UpdateAgentRequest, _$UpdateAgentRequest];
 
@@ -46,12 +42,10 @@ class _$UpdateAgentRequestSerializer
     FullType specifiedType = FullType.unspecified,
   }) sync* {
     yield r'card';
-    yield object.card == null
-        ? null
-        : serializers.serialize(
-            object.card,
-            specifiedType: const FullType.nullable(JsonObject),
-          );
+    yield object.card == null ? null : serializers.serialize(
+      object.card,
+      specifiedType: const FullType.nullable(JsonObject),
+    );
   }
 
   @override
@@ -60,9 +54,7 @@ class _$UpdateAgentRequestSerializer
     UpdateAgentRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -113,3 +105,4 @@ class _$UpdateAgentRequestSerializer
     return result.build();
   }
 }
+

@@ -12,13 +12,12 @@ part 'tool_call_summary.g.dart';
 /// Summary of a single tool invocation within an assistant message.
 ///
 /// Properties:
-/// * [arguments]
+/// * [arguments] 
 /// * [name] - The tool that was called.
 /// * [result] - The tool's output, truncated to a reasonable display length.
 /// * [status] - `\"ok\"`, `\"error\"`, or `\"denied\"`.
 @BuiltValue()
-abstract class ToolCallSummary
-    implements Built<ToolCallSummary, ToolCallSummaryBuilder> {
+abstract class ToolCallSummary implements Built<ToolCallSummary, ToolCallSummaryBuilder> {
   @BuiltValueField(wireName: r'arguments')
   JsonObject? get arguments;
 
@@ -36,19 +35,16 @@ abstract class ToolCallSummary
 
   ToolCallSummary._();
 
-  factory ToolCallSummary([void updates(ToolCallSummaryBuilder b)]) =
-      _$ToolCallSummary;
+  factory ToolCallSummary([void updates(ToolCallSummaryBuilder b)]) = _$ToolCallSummary;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ToolCallSummaryBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ToolCallSummary> get serializer =>
-      _$ToolCallSummarySerializer();
+  static Serializer<ToolCallSummary> get serializer => _$ToolCallSummarySerializer();
 }
 
-class _$ToolCallSummarySerializer
-    implements PrimitiveSerializer<ToolCallSummary> {
+class _$ToolCallSummarySerializer implements PrimitiveSerializer<ToolCallSummary> {
   @override
   final Iterable<Type> types = const [ToolCallSummary, _$ToolCallSummary];
 
@@ -92,9 +88,7 @@ class _$ToolCallSummarySerializer
     ToolCallSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -167,3 +161,4 @@ class _$ToolCallSummarySerializer
     return result.build();
   }
 }
+

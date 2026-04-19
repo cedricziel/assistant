@@ -22,8 +22,7 @@ part 'security_scheme.g.dart';
 /// * [oauth2SecurityScheme] - OAuth 2.0 authentication.
 /// * [openIdConnectSecurityScheme] - OpenID Connect authentication.
 @BuiltValue()
-abstract class SecurityScheme
-    implements Built<SecurityScheme, SecuritySchemeBuilder> {
+abstract class SecurityScheme implements Built<SecurityScheme, SecuritySchemeBuilder> {
   /// API key-based authentication.
   @BuiltValueField(wireName: r'apiKeySecurityScheme')
   ApiKeySecurityScheme? get apiKeySecurityScheme;
@@ -46,19 +45,16 @@ abstract class SecurityScheme
 
   SecurityScheme._();
 
-  factory SecurityScheme([void updates(SecuritySchemeBuilder b)]) =
-      _$SecurityScheme;
+  factory SecurityScheme([void updates(SecuritySchemeBuilder b)]) = _$SecurityScheme;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SecuritySchemeBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SecurityScheme> get serializer =>
-      _$SecuritySchemeSerializer();
+  static Serializer<SecurityScheme> get serializer => _$SecuritySchemeSerializer();
 }
 
-class _$SecuritySchemeSerializer
-    implements PrimitiveSerializer<SecurityScheme> {
+class _$SecuritySchemeSerializer implements PrimitiveSerializer<SecurityScheme> {
   @override
   final Iterable<Type> types = const [SecurityScheme, _$SecurityScheme];
 
@@ -113,9 +109,7 @@ class _$SecuritySchemeSerializer
     SecurityScheme object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -198,3 +192,4 @@ class _$SecuritySchemeSerializer
     return result.build();
   }
 }
+

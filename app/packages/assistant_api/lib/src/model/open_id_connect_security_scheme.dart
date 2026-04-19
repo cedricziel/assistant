@@ -14,9 +14,7 @@ part 'open_id_connect_security_scheme.g.dart';
 /// * [description] - An optional description for the security scheme.
 /// * [openIdConnectUrl] - The OpenID Connect Discovery URL.
 @BuiltValue()
-abstract class OpenIdConnectSecurityScheme
-    implements
-        Built<OpenIdConnectSecurityScheme, OpenIdConnectSecuritySchemeBuilder> {
+abstract class OpenIdConnectSecurityScheme implements Built<OpenIdConnectSecurityScheme, OpenIdConnectSecuritySchemeBuilder> {
   /// An optional description for the security scheme.
   @BuiltValueField(wireName: r'description')
   String? get description;
@@ -27,25 +25,18 @@ abstract class OpenIdConnectSecurityScheme
 
   OpenIdConnectSecurityScheme._();
 
-  factory OpenIdConnectSecurityScheme(
-          [void updates(OpenIdConnectSecuritySchemeBuilder b)]) =
-      _$OpenIdConnectSecurityScheme;
+  factory OpenIdConnectSecurityScheme([void updates(OpenIdConnectSecuritySchemeBuilder b)]) = _$OpenIdConnectSecurityScheme;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(OpenIdConnectSecuritySchemeBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<OpenIdConnectSecurityScheme> get serializer =>
-      _$OpenIdConnectSecuritySchemeSerializer();
+  static Serializer<OpenIdConnectSecurityScheme> get serializer => _$OpenIdConnectSecuritySchemeSerializer();
 }
 
-class _$OpenIdConnectSecuritySchemeSerializer
-    implements PrimitiveSerializer<OpenIdConnectSecurityScheme> {
+class _$OpenIdConnectSecuritySchemeSerializer implements PrimitiveSerializer<OpenIdConnectSecurityScheme> {
   @override
-  final Iterable<Type> types = const [
-    OpenIdConnectSecurityScheme,
-    _$OpenIdConnectSecurityScheme
-  ];
+  final Iterable<Type> types = const [OpenIdConnectSecurityScheme, _$OpenIdConnectSecurityScheme];
 
   @override
   final String wireName = r'OpenIdConnectSecurityScheme';
@@ -75,9 +66,7 @@ class _$OpenIdConnectSecuritySchemeSerializer
     OpenIdConnectSecurityScheme object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -135,3 +124,4 @@ class _$OpenIdConnectSecuritySchemeSerializer
     return result.build();
   }
 }
+

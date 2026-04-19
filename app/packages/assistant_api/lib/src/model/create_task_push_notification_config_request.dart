@@ -16,10 +16,7 @@ part 'create_task_push_notification_config_request.g.dart';
 /// * [taskId] - The parent task resource ID.
 /// * [tenant] - Optional tenant ID.
 @BuiltValue()
-abstract class CreateTaskPushNotificationConfigRequest
-    implements
-        Built<CreateTaskPushNotificationConfigRequest,
-            CreateTaskPushNotificationConfigRequestBuilder> {
+abstract class CreateTaskPushNotificationConfigRequest implements Built<CreateTaskPushNotificationConfigRequest, CreateTaskPushNotificationConfigRequestBuilder> {
   /// The configuration to create.
   @BuiltValueField(wireName: r'config')
   PushNotificationConfig get config;
@@ -34,25 +31,18 @@ abstract class CreateTaskPushNotificationConfigRequest
 
   CreateTaskPushNotificationConfigRequest._();
 
-  factory CreateTaskPushNotificationConfigRequest(
-          [void updates(CreateTaskPushNotificationConfigRequestBuilder b)]) =
-      _$CreateTaskPushNotificationConfigRequest;
+  factory CreateTaskPushNotificationConfigRequest([void updates(CreateTaskPushNotificationConfigRequestBuilder b)]) = _$CreateTaskPushNotificationConfigRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(CreateTaskPushNotificationConfigRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<CreateTaskPushNotificationConfigRequest> get serializer =>
-      _$CreateTaskPushNotificationConfigRequestSerializer();
+  static Serializer<CreateTaskPushNotificationConfigRequest> get serializer => _$CreateTaskPushNotificationConfigRequestSerializer();
 }
 
-class _$CreateTaskPushNotificationConfigRequestSerializer
-    implements PrimitiveSerializer<CreateTaskPushNotificationConfigRequest> {
+class _$CreateTaskPushNotificationConfigRequestSerializer implements PrimitiveSerializer<CreateTaskPushNotificationConfigRequest> {
   @override
-  final Iterable<Type> types = const [
-    CreateTaskPushNotificationConfigRequest,
-    _$CreateTaskPushNotificationConfigRequest
-  ];
+  final Iterable<Type> types = const [CreateTaskPushNotificationConfigRequest, _$CreateTaskPushNotificationConfigRequest];
 
   @override
   final String wireName = r'CreateTaskPushNotificationConfigRequest';
@@ -87,9 +77,7 @@ class _$CreateTaskPushNotificationConfigRequestSerializer
     CreateTaskPushNotificationConfigRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -154,3 +142,4 @@ class _$CreateTaskPushNotificationConfigRequestSerializer
     return result.build();
   }
 }
+

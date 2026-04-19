@@ -15,8 +15,7 @@ part 'quick_message_response.g.dart';
 /// * [conversationId] - The ID of the newly created conversation.
 /// * [messageId] - The ID of the persisted assistant message, if available.
 @BuiltValue()
-abstract class QuickMessageResponse
-    implements Built<QuickMessageResponse, QuickMessageResponseBuilder> {
+abstract class QuickMessageResponse implements Built<QuickMessageResponse, QuickMessageResponseBuilder> {
   /// The full assistant response text.
   @BuiltValueField(wireName: r'answer')
   String get answer;
@@ -31,24 +30,18 @@ abstract class QuickMessageResponse
 
   QuickMessageResponse._();
 
-  factory QuickMessageResponse([void updates(QuickMessageResponseBuilder b)]) =
-      _$QuickMessageResponse;
+  factory QuickMessageResponse([void updates(QuickMessageResponseBuilder b)]) = _$QuickMessageResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(QuickMessageResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<QuickMessageResponse> get serializer =>
-      _$QuickMessageResponseSerializer();
+  static Serializer<QuickMessageResponse> get serializer => _$QuickMessageResponseSerializer();
 }
 
-class _$QuickMessageResponseSerializer
-    implements PrimitiveSerializer<QuickMessageResponse> {
+class _$QuickMessageResponseSerializer implements PrimitiveSerializer<QuickMessageResponse> {
   @override
-  final Iterable<Type> types = const [
-    QuickMessageResponse,
-    _$QuickMessageResponse
-  ];
+  final Iterable<Type> types = const [QuickMessageResponse, _$QuickMessageResponse];
 
   @override
   final String wireName = r'QuickMessageResponse';
@@ -83,9 +76,7 @@ class _$QuickMessageResponseSerializer
     QuickMessageResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -150,3 +141,4 @@ class _$QuickMessageResponseSerializer
     return result.build();
   }
 }
+

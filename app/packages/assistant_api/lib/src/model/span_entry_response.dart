@@ -12,14 +12,13 @@ part 'span_entry_response.g.dart';
 /// A single span within a trace.
 ///
 /// Properties:
-/// * [attributes]
-/// * [durationMs]
-/// * [name]
-/// * [spanId]
-/// * [startTime]
+/// * [attributes] 
+/// * [durationMs] 
+/// * [name] 
+/// * [spanId] 
+/// * [startTime] 
 @BuiltValue()
-abstract class SpanEntryResponse
-    implements Built<SpanEntryResponse, SpanEntryResponseBuilder> {
+abstract class SpanEntryResponse implements Built<SpanEntryResponse, SpanEntryResponseBuilder> {
   @BuiltValueField(wireName: r'attributes')
   JsonObject? get attributes;
 
@@ -37,19 +36,16 @@ abstract class SpanEntryResponse
 
   SpanEntryResponse._();
 
-  factory SpanEntryResponse([void updates(SpanEntryResponseBuilder b)]) =
-      _$SpanEntryResponse;
+  factory SpanEntryResponse([void updates(SpanEntryResponseBuilder b)]) = _$SpanEntryResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SpanEntryResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SpanEntryResponse> get serializer =>
-      _$SpanEntryResponseSerializer();
+  static Serializer<SpanEntryResponse> get serializer => _$SpanEntryResponseSerializer();
 }
 
-class _$SpanEntryResponseSerializer
-    implements PrimitiveSerializer<SpanEntryResponse> {
+class _$SpanEntryResponseSerializer implements PrimitiveSerializer<SpanEntryResponse> {
   @override
   final Iterable<Type> types = const [SpanEntryResponse, _$SpanEntryResponse];
 
@@ -62,12 +58,10 @@ class _$SpanEntryResponseSerializer
     FullType specifiedType = FullType.unspecified,
   }) sync* {
     yield r'attributes';
-    yield object.attributes == null
-        ? null
-        : serializers.serialize(
-            object.attributes,
-            specifiedType: const FullType.nullable(JsonObject),
-          );
+    yield object.attributes == null ? null : serializers.serialize(
+      object.attributes,
+      specifiedType: const FullType.nullable(JsonObject),
+    );
     yield r'duration_ms';
     yield serializers.serialize(
       object.durationMs,
@@ -96,9 +90,7 @@ class _$SpanEntryResponseSerializer
     SpanEntryResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -177,3 +169,4 @@ class _$SpanEntryResponseSerializer
     return result.build();
   }
 }
+

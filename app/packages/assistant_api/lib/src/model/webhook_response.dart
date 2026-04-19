@@ -12,18 +12,17 @@ part 'webhook_response.g.dart';
 /// A webhook entry returned by the API.
 ///
 /// Properties:
-/// * [active]
-/// * [createdAt]
-/// * [eventTypes]
-/// * [id]
-/// * [name]
-/// * [secret]
-/// * [updatedAt]
-/// * [url]
-/// * [verifiedAt]
+/// * [active] 
+/// * [createdAt] 
+/// * [eventTypes] 
+/// * [id] 
+/// * [name] 
+/// * [secret] 
+/// * [updatedAt] 
+/// * [url] 
+/// * [verifiedAt] 
 @BuiltValue()
-abstract class WebhookResponse
-    implements Built<WebhookResponse, WebhookResponseBuilder> {
+abstract class WebhookResponse implements Built<WebhookResponse, WebhookResponseBuilder> {
   @BuiltValueField(wireName: r'active')
   bool get active;
 
@@ -53,19 +52,16 @@ abstract class WebhookResponse
 
   WebhookResponse._();
 
-  factory WebhookResponse([void updates(WebhookResponseBuilder b)]) =
-      _$WebhookResponse;
+  factory WebhookResponse([void updates(WebhookResponseBuilder b)]) = _$WebhookResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WebhookResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WebhookResponse> get serializer =>
-      _$WebhookResponseSerializer();
+  static Serializer<WebhookResponse> get serializer => _$WebhookResponseSerializer();
 }
 
-class _$WebhookResponseSerializer
-    implements PrimitiveSerializer<WebhookResponse> {
+class _$WebhookResponseSerializer implements PrimitiveSerializer<WebhookResponse> {
   @override
   final Iterable<Type> types = const [WebhookResponse, _$WebhookResponse];
 
@@ -132,9 +128,7 @@ class _$WebhookResponseSerializer
     WebhookResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -241,3 +235,4 @@ class _$WebhookResponseSerializer
     return result.build();
   }
 }
+

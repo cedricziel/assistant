@@ -15,8 +15,7 @@ part 'http_auth_security_scheme.g.dart';
 /// * [description] - An optional description for the security scheme.
 /// * [scheme] - The HTTP Authentication scheme (e.g., \"Bearer\").
 @BuiltValue()
-abstract class HttpAuthSecurityScheme
-    implements Built<HttpAuthSecurityScheme, HttpAuthSecuritySchemeBuilder> {
+abstract class HttpAuthSecurityScheme implements Built<HttpAuthSecurityScheme, HttpAuthSecuritySchemeBuilder> {
   /// A hint for how the bearer token is formatted (e.g., \"JWT\").
   @BuiltValueField(wireName: r'bearerFormat')
   String? get bearerFormat;
@@ -31,25 +30,18 @@ abstract class HttpAuthSecurityScheme
 
   HttpAuthSecurityScheme._();
 
-  factory HttpAuthSecurityScheme(
-          [void updates(HttpAuthSecuritySchemeBuilder b)]) =
-      _$HttpAuthSecurityScheme;
+  factory HttpAuthSecurityScheme([void updates(HttpAuthSecuritySchemeBuilder b)]) = _$HttpAuthSecurityScheme;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(HttpAuthSecuritySchemeBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<HttpAuthSecurityScheme> get serializer =>
-      _$HttpAuthSecuritySchemeSerializer();
+  static Serializer<HttpAuthSecurityScheme> get serializer => _$HttpAuthSecuritySchemeSerializer();
 }
 
-class _$HttpAuthSecuritySchemeSerializer
-    implements PrimitiveSerializer<HttpAuthSecurityScheme> {
+class _$HttpAuthSecuritySchemeSerializer implements PrimitiveSerializer<HttpAuthSecurityScheme> {
   @override
-  final Iterable<Type> types = const [
-    HttpAuthSecurityScheme,
-    _$HttpAuthSecurityScheme
-  ];
+  final Iterable<Type> types = const [HttpAuthSecurityScheme, _$HttpAuthSecurityScheme];
 
   @override
   final String wireName = r'HttpAuthSecurityScheme';
@@ -86,9 +78,7 @@ class _$HttpAuthSecuritySchemeSerializer
     HttpAuthSecurityScheme object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -154,3 +144,4 @@ class _$HttpAuthSecuritySchemeSerializer
     return result.build();
   }
 }
+

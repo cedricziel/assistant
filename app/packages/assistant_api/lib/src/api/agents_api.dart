@@ -16,6 +16,7 @@ import 'package:assistant_api/src/model/update_agent_request.dart';
 import 'package:built_collection/built_collection.dart';
 
 class AgentsApi {
+
   final Dio _dio;
 
   final Serializers _serializers;
@@ -23,7 +24,7 @@ class AgentsApi {
   const AgentsApi(this._dio, this._serializers);
 
   /// &#x60;DELETE /api/agents/{id}&#x60; — remove a registered agent.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Agent ID
@@ -36,7 +37,7 @@ class AgentsApi {
   ///
   /// Returns a [Future]
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<void>> deleteAgent({
+  Future<Response<void>> deleteAgent({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -45,10 +46,7 @@ class AgentsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/agents/{id}'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/agents/{id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'DELETE',
       headers: <String, dynamic>{
@@ -79,7 +77,7 @@ class AgentsApi {
   }
 
   /// &#x60;GET /api/agents/{id}&#x60; — get an agent by ID.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Agent ID
@@ -92,7 +90,7 @@ class AgentsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [AgentDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<AgentDetail>> getAgent({
+  Future<Response<AgentDetail>> getAgent({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -101,10 +99,7 @@ class AgentsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/agents/{id}'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/agents/{id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -135,12 +130,11 @@ class AgentsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(AgentDetail),
-            ) as AgentDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(AgentDetail),
+      ) as AgentDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -164,7 +158,7 @@ class AgentsApi {
   }
 
   /// &#x60;GET /api/agents&#x60; — list all registered agents.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
@@ -176,7 +170,7 @@ class AgentsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<AgentSummary>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<AgentSummary>>> listAgents({
+  Future<Response<BuiltList<AgentSummary>>> listAgents({ 
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -215,13 +209,11 @@ class AgentsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType:
-                  const FullType(BuiltList, [FullType(AgentSummary)]),
-            ) as BuiltList<AgentSummary>;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(BuiltList, [FullType(AgentSummary)]),
+      ) as BuiltList<AgentSummary>;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -245,10 +237,10 @@ class AgentsApi {
   }
 
   /// &#x60;POST /api/agents&#x60; — register a new agent.
-  ///
+  /// 
   ///
   /// Parameters:
-  /// * [registerAgentRequest]
+  /// * [registerAgentRequest] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -258,7 +250,7 @@ class AgentsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [AgentDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<AgentDetail>> registerAgent({
+  Future<Response<AgentDetail>> registerAgent({ 
     required RegisterAgentRequest registerAgentRequest,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -291,11 +283,11 @@ class AgentsApi {
 
     try {
       const _type = FullType(RegisterAgentRequest);
-      _bodyData =
-          _serializers.serialize(registerAgentRequest, specifiedType: _type);
-    } catch (error, stackTrace) {
+      _bodyData = _serializers.serialize(registerAgentRequest, specifiedType: _type);
+
+    } catch(error, stackTrace) {
       throw DioException(
-        requestOptions: _options.compose(
+         requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -318,12 +310,11 @@ class AgentsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(AgentDetail),
-            ) as AgentDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(AgentDetail),
+      ) as AgentDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -347,7 +338,7 @@ class AgentsApi {
   }
 
   /// &#x60;POST /api/agents/{id}/set-default&#x60; — set an agent as the default.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Agent ID
@@ -360,7 +351,7 @@ class AgentsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [AgentDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<AgentDetail>> setDefaultAgent({
+  Future<Response<AgentDetail>> setDefaultAgent({ 
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -369,10 +360,7 @@ class AgentsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/agents/{id}/set-default'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/agents/{id}/set-default'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
@@ -403,12 +391,11 @@ class AgentsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(AgentDetail),
-            ) as AgentDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(AgentDetail),
+      ) as AgentDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -432,11 +419,11 @@ class AgentsApi {
   }
 
   /// &#x60;PUT /api/agents/{id}&#x60; — update an agent&#39;s card.
-  ///
+  /// 
   ///
   /// Parameters:
   /// * [id] - Agent ID
-  /// * [updateAgentRequest]
+  /// * [updateAgentRequest] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -446,7 +433,7 @@ class AgentsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [AgentDetail] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<AgentDetail>> updateAgent({
+  Future<Response<AgentDetail>> updateAgent({ 
     required String id,
     required UpdateAgentRequest updateAgentRequest,
     CancelToken? cancelToken,
@@ -456,10 +443,7 @@ class AgentsApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/agents/{id}'.replaceAll(
-        '{' r'id' '}',
-        encodeQueryParameter(_serializers, id, const FullType(String))
-            .toString());
+    final _path = r'/api/agents/{id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
     final _options = Options(
       method: r'PUT',
       headers: <String, dynamic>{
@@ -483,11 +467,11 @@ class AgentsApi {
 
     try {
       const _type = FullType(UpdateAgentRequest);
-      _bodyData =
-          _serializers.serialize(updateAgentRequest, specifiedType: _type);
-    } catch (error, stackTrace) {
+      _bodyData = _serializers.serialize(updateAgentRequest, specifiedType: _type);
+
+    } catch(error, stackTrace) {
       throw DioException(
-        requestOptions: _options.compose(
+         requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -510,12 +494,11 @@ class AgentsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType: const FullType(AgentDetail),
-            ) as AgentDetail;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(AgentDetail),
+      ) as AgentDetail;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -537,4 +520,5 @@ class AgentsApi {
       extra: _response.extra,
     );
   }
+
 }

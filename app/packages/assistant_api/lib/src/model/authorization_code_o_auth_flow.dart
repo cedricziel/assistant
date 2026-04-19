@@ -18,9 +18,7 @@ part 'authorization_code_o_auth_flow.g.dart';
 /// * [scopes] - Available scopes for the OAuth2 security scheme.
 /// * [tokenUrl] - The token URL.
 @BuiltValue()
-abstract class AuthorizationCodeOAuthFlow
-    implements
-        Built<AuthorizationCodeOAuthFlow, AuthorizationCodeOAuthFlowBuilder> {
+abstract class AuthorizationCodeOAuthFlow implements Built<AuthorizationCodeOAuthFlow, AuthorizationCodeOAuthFlowBuilder> {
   /// The authorization URL.
   @BuiltValueField(wireName: r'authorizationUrl')
   String get authorizationUrl;
@@ -43,25 +41,18 @@ abstract class AuthorizationCodeOAuthFlow
 
   AuthorizationCodeOAuthFlow._();
 
-  factory AuthorizationCodeOAuthFlow(
-          [void updates(AuthorizationCodeOAuthFlowBuilder b)]) =
-      _$AuthorizationCodeOAuthFlow;
+  factory AuthorizationCodeOAuthFlow([void updates(AuthorizationCodeOAuthFlowBuilder b)]) = _$AuthorizationCodeOAuthFlow;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AuthorizationCodeOAuthFlowBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AuthorizationCodeOAuthFlow> get serializer =>
-      _$AuthorizationCodeOAuthFlowSerializer();
+  static Serializer<AuthorizationCodeOAuthFlow> get serializer => _$AuthorizationCodeOAuthFlowSerializer();
 }
 
-class _$AuthorizationCodeOAuthFlowSerializer
-    implements PrimitiveSerializer<AuthorizationCodeOAuthFlow> {
+class _$AuthorizationCodeOAuthFlowSerializer implements PrimitiveSerializer<AuthorizationCodeOAuthFlow> {
   @override
-  final Iterable<Type> types = const [
-    AuthorizationCodeOAuthFlow,
-    _$AuthorizationCodeOAuthFlow
-  ];
+  final Iterable<Type> types = const [AuthorizationCodeOAuthFlow, _$AuthorizationCodeOAuthFlow];
 
   @override
   final String wireName = r'AuthorizationCodeOAuthFlow';
@@ -93,8 +84,7 @@ class _$AuthorizationCodeOAuthFlowSerializer
     yield r'scopes';
     yield serializers.serialize(
       object.scopes,
-      specifiedType:
-          const FullType(BuiltMap, [FullType(String), FullType(String)]),
+      specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
     );
     yield r'tokenUrl';
     yield serializers.serialize(
@@ -109,9 +99,7 @@ class _$AuthorizationCodeOAuthFlowSerializer
     AuthorizationCodeOAuthFlow object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -151,8 +139,7 @@ class _$AuthorizationCodeOAuthFlowSerializer
         case r'scopes':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType:
-                const FullType(BuiltMap, [FullType(String), FullType(String)]),
+            specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
           ) as BuiltMap<String, String>;
           result.scopes.replace(valueDes);
           break;
@@ -191,3 +178,4 @@ class _$AuthorizationCodeOAuthFlowSerializer
     return result.build();
   }
 }
+

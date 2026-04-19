@@ -11,13 +11,12 @@ part 'persona_file_slot.g.dart';
 /// A single persona file slot.
 ///
 /// Properties:
-/// * [description]
-/// * [displayName]
-/// * [exists]
-/// * [filename]
+/// * [description] 
+/// * [displayName] 
+/// * [exists] 
+/// * [filename] 
 @BuiltValue()
-abstract class PersonaFileSlot
-    implements Built<PersonaFileSlot, PersonaFileSlotBuilder> {
+abstract class PersonaFileSlot implements Built<PersonaFileSlot, PersonaFileSlotBuilder> {
   @BuiltValueField(wireName: r'description')
   String get description;
 
@@ -32,19 +31,16 @@ abstract class PersonaFileSlot
 
   PersonaFileSlot._();
 
-  factory PersonaFileSlot([void updates(PersonaFileSlotBuilder b)]) =
-      _$PersonaFileSlot;
+  factory PersonaFileSlot([void updates(PersonaFileSlotBuilder b)]) = _$PersonaFileSlot;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(PersonaFileSlotBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<PersonaFileSlot> get serializer =>
-      _$PersonaFileSlotSerializer();
+  static Serializer<PersonaFileSlot> get serializer => _$PersonaFileSlotSerializer();
 }
 
-class _$PersonaFileSlotSerializer
-    implements PrimitiveSerializer<PersonaFileSlot> {
+class _$PersonaFileSlotSerializer implements PrimitiveSerializer<PersonaFileSlot> {
   @override
   final Iterable<Type> types = const [PersonaFileSlot, _$PersonaFileSlot];
 
@@ -84,9 +80,7 @@ class _$PersonaFileSlotSerializer
     PersonaFileSlot object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -157,3 +151,4 @@ class _$PersonaFileSlotSerializer
     return result.build();
   }
 }
+

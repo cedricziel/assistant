@@ -15,8 +15,7 @@ part 'subscribe_request.g.dart';
 /// * [endpoint] - The push endpoint URL assigned by the browser's push service.
 /// * [p256dh] - Base64url-encoded P-256 ECDH public key from the browser subscription.
 @BuiltValue()
-abstract class SubscribeRequest
-    implements Built<SubscribeRequest, SubscribeRequestBuilder> {
+abstract class SubscribeRequest implements Built<SubscribeRequest, SubscribeRequestBuilder> {
   /// Base64url-encoded 16-byte authentication secret from the browser subscription.
   @BuiltValueField(wireName: r'auth')
   String get auth;
@@ -31,19 +30,16 @@ abstract class SubscribeRequest
 
   SubscribeRequest._();
 
-  factory SubscribeRequest([void updates(SubscribeRequestBuilder b)]) =
-      _$SubscribeRequest;
+  factory SubscribeRequest([void updates(SubscribeRequestBuilder b)]) = _$SubscribeRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SubscribeRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SubscribeRequest> get serializer =>
-      _$SubscribeRequestSerializer();
+  static Serializer<SubscribeRequest> get serializer => _$SubscribeRequestSerializer();
 }
 
-class _$SubscribeRequestSerializer
-    implements PrimitiveSerializer<SubscribeRequest> {
+class _$SubscribeRequestSerializer implements PrimitiveSerializer<SubscribeRequest> {
   @override
   final Iterable<Type> types = const [SubscribeRequest, _$SubscribeRequest];
 
@@ -78,9 +74,7 @@ class _$SubscribeRequestSerializer
     SubscribeRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -144,3 +138,4 @@ class _$SubscribeRequestSerializer
     return result.build();
   }
 }
+

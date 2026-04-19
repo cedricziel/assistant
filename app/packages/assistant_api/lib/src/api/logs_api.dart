@@ -13,6 +13,7 @@ import 'package:assistant_api/src/model/log_entry_response.dart';
 import 'package:built_collection/built_collection.dart';
 
 class LogsApi {
+
   final Dio _dio;
 
   final Serializers _serializers;
@@ -20,17 +21,17 @@ class LogsApi {
   const LogsApi(this._dio, this._serializers);
 
   /// &#x60;GET /api/logs&#x60; — list recent log entries, newest first.
-  ///
+  /// 
   ///
   /// Parameters:
-  /// * [limit]
-  /// * [offset]
-  /// * [search]
-  /// * [severity]
-  /// * [since]
-  /// * [until]
-  /// * [traceId]
-  /// * [conversation]
+  /// * [limit] 
+  /// * [offset] 
+  /// * [search] 
+  /// * [severity] 
+  /// * [since] 
+  /// * [until] 
+  /// * [traceId] 
+  /// * [conversation] 
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -40,7 +41,7 @@ class LogsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [BuiltList<LogEntryResponse>] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<BuiltList<LogEntryResponse>>> listLogs({
+  Future<Response<BuiltList<LogEntryResponse>>> listLogs({ 
     int? limit,
     int? offset,
     String? search,
@@ -77,20 +78,13 @@ class LogsApi {
 
     final _queryParameters = <String, dynamic>{
       r'limit': encodeQueryParameter(_serializers, limit, const FullType(int)),
-      r'offset':
-          encodeQueryParameter(_serializers, offset, const FullType(int)),
-      r'search':
-          encodeQueryParameter(_serializers, search, const FullType(String)),
-      r'severity':
-          encodeQueryParameter(_serializers, severity, const FullType(String)),
-      r'since':
-          encodeQueryParameter(_serializers, since, const FullType(DateTime)),
-      r'until':
-          encodeQueryParameter(_serializers, until, const FullType(DateTime)),
-      r'trace_id':
-          encodeQueryParameter(_serializers, traceId, const FullType(String)),
-      r'conversation': encodeQueryParameter(
-          _serializers, conversation, const FullType(String)),
+      r'offset': encodeQueryParameter(_serializers, offset, const FullType(int)),
+      r'search': encodeQueryParameter(_serializers, search, const FullType(String)),
+      r'severity': encodeQueryParameter(_serializers, severity, const FullType(String)),
+      r'since': encodeQueryParameter(_serializers, since, const FullType(DateTime)),
+      r'until': encodeQueryParameter(_serializers, until, const FullType(DateTime)),
+      r'trace_id': encodeQueryParameter(_serializers, traceId, const FullType(String)),
+      r'conversation': encodeQueryParameter(_serializers, conversation, const FullType(String)),
     };
 
     final _response = await _dio.request<Object>(
@@ -106,13 +100,11 @@ class LogsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null
-          ? null
-          : _serializers.deserialize(
-              rawResponse,
-              specifiedType:
-                  const FullType(BuiltList, [FullType(LogEntryResponse)]),
-            ) as BuiltList<LogEntryResponse>;
+      _responseData = rawResponse == null ? null : _serializers.deserialize(
+        rawResponse,
+        specifiedType: const FullType(BuiltList, [FullType(LogEntryResponse)]),
+      ) as BuiltList<LogEntryResponse>;
+
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -134,4 +126,5 @@ class LogsApi {
       extra: _response.extra,
     );
   }
+
 }

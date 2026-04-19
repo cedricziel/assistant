@@ -15,32 +15,25 @@ part 'security_requirement.g.dart';
 /// Properties:
 /// * [schemes] - A map of security schemes to the required scopes.
 @BuiltValue()
-abstract class SecurityRequirement
-    implements Built<SecurityRequirement, SecurityRequirementBuilder> {
+abstract class SecurityRequirement implements Built<SecurityRequirement, SecurityRequirementBuilder> {
   /// A map of security schemes to the required scopes.
   @BuiltValueField(wireName: r'schemes')
   BuiltMap<String, StringList>? get schemes;
 
   SecurityRequirement._();
 
-  factory SecurityRequirement([void updates(SecurityRequirementBuilder b)]) =
-      _$SecurityRequirement;
+  factory SecurityRequirement([void updates(SecurityRequirementBuilder b)]) = _$SecurityRequirement;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SecurityRequirementBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SecurityRequirement> get serializer =>
-      _$SecurityRequirementSerializer();
+  static Serializer<SecurityRequirement> get serializer => _$SecurityRequirementSerializer();
 }
 
-class _$SecurityRequirementSerializer
-    implements PrimitiveSerializer<SecurityRequirement> {
+class _$SecurityRequirementSerializer implements PrimitiveSerializer<SecurityRequirement> {
   @override
-  final Iterable<Type> types = const [
-    SecurityRequirement,
-    _$SecurityRequirement
-  ];
+  final Iterable<Type> types = const [SecurityRequirement, _$SecurityRequirement];
 
   @override
   final String wireName = r'SecurityRequirement';
@@ -54,8 +47,7 @@ class _$SecurityRequirementSerializer
       yield r'schemes';
       yield serializers.serialize(
         object.schemes,
-        specifiedType:
-            const FullType(BuiltMap, [FullType(String), FullType(StringList)]),
+        specifiedType: const FullType(BuiltMap, [FullType(String), FullType(StringList)]),
       );
     }
   }
@@ -66,9 +58,7 @@ class _$SecurityRequirementSerializer
     SecurityRequirement object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -86,8 +76,7 @@ class _$SecurityRequirementSerializer
         case r'schemes':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(
-                BuiltMap, [FullType(String), FullType(StringList)]),
+            specifiedType: const FullType(BuiltMap, [FullType(String), FullType(StringList)]),
           ) as BuiltMap<String, StringList>;
           result.schemes.replace(valueDes);
           break;
@@ -119,3 +108,4 @@ class _$SecurityRequirementSerializer
     return result.build();
   }
 }
+

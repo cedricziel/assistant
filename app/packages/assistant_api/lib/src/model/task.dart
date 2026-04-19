@@ -99,8 +99,7 @@ class _$TaskSerializer implements PrimitiveSerializer<Task> {
       yield r'metadata';
       yield serializers.serialize(
         object.metadata,
-        specifiedType: const FullType.nullable(
-            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     yield r'status';
@@ -116,9 +115,7 @@ class _$TaskSerializer implements PrimitiveSerializer<Task> {
     Task object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -164,8 +161,7 @@ class _$TaskSerializer implements PrimitiveSerializer<Task> {
         case r'metadata':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(
-                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.metadata.replace(valueDes);
@@ -205,3 +201,4 @@ class _$TaskSerializer implements PrimitiveSerializer<Task> {
     return result.build();
   }
 }
+

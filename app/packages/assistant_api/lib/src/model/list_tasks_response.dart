@@ -18,8 +18,7 @@ part 'list_tasks_response.g.dart';
 /// * [tasks] - Tasks matching the specified criteria.
 /// * [totalSize] - Total number of tasks available (before pagination).
 @BuiltValue()
-abstract class ListTasksResponse
-    implements Built<ListTasksResponse, ListTasksResponseBuilder> {
+abstract class ListTasksResponse implements Built<ListTasksResponse, ListTasksResponseBuilder> {
   /// A token to retrieve the next page of results.
   @BuiltValueField(wireName: r'nextPageToken')
   String get nextPageToken;
@@ -38,19 +37,16 @@ abstract class ListTasksResponse
 
   ListTasksResponse._();
 
-  factory ListTasksResponse([void updates(ListTasksResponseBuilder b)]) =
-      _$ListTasksResponse;
+  factory ListTasksResponse([void updates(ListTasksResponseBuilder b)]) = _$ListTasksResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ListTasksResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ListTasksResponse> get serializer =>
-      _$ListTasksResponseSerializer();
+  static Serializer<ListTasksResponse> get serializer => _$ListTasksResponseSerializer();
 }
 
-class _$ListTasksResponseSerializer
-    implements PrimitiveSerializer<ListTasksResponse> {
+class _$ListTasksResponseSerializer implements PrimitiveSerializer<ListTasksResponse> {
   @override
   final Iterable<Type> types = const [ListTasksResponse, _$ListTasksResponse];
 
@@ -90,9 +86,7 @@ class _$ListTasksResponseSerializer
     ListTasksResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -163,3 +157,4 @@ class _$ListTasksResponseSerializer
     return result.build();
   }
 }
+

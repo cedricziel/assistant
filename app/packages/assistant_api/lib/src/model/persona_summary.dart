@@ -11,13 +11,12 @@ part 'persona_summary.g.dart';
 /// A persona summary returned by the API.
 ///
 /// Properties:
-/// * [description]
-/// * [id]
-/// * [isDefault]
-/// * [name]
+/// * [description] 
+/// * [id] 
+/// * [isDefault] 
+/// * [name] 
 @BuiltValue()
-abstract class PersonaSummary
-    implements Built<PersonaSummary, PersonaSummaryBuilder> {
+abstract class PersonaSummary implements Built<PersonaSummary, PersonaSummaryBuilder> {
   @BuiltValueField(wireName: r'description')
   String get description;
 
@@ -32,19 +31,16 @@ abstract class PersonaSummary
 
   PersonaSummary._();
 
-  factory PersonaSummary([void updates(PersonaSummaryBuilder b)]) =
-      _$PersonaSummary;
+  factory PersonaSummary([void updates(PersonaSummaryBuilder b)]) = _$PersonaSummary;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(PersonaSummaryBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<PersonaSummary> get serializer =>
-      _$PersonaSummarySerializer();
+  static Serializer<PersonaSummary> get serializer => _$PersonaSummarySerializer();
 }
 
-class _$PersonaSummarySerializer
-    implements PrimitiveSerializer<PersonaSummary> {
+class _$PersonaSummarySerializer implements PrimitiveSerializer<PersonaSummary> {
   @override
   final Iterable<Type> types = const [PersonaSummary, _$PersonaSummary];
 
@@ -84,9 +80,7 @@ class _$PersonaSummarySerializer
     PersonaSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object,
-            specifiedType: specifiedType)
-        .toList();
+    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
   }
 
   void _deserializeProperties(
@@ -157,3 +151,4 @@ class _$PersonaSummarySerializer
     return result.build();
   }
 }
+

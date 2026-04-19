@@ -283,6 +283,14 @@ pub struct SendMessageRequest {
 pub struct QuickMessageRequest {
     /// The message text to send to the assistant.
     pub message: String,
+    /// Optional persona ID to route the message to a specific persona.
+    /// When absent, the server's active persona is used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persona_id: Option<String>,
+    /// Optional context text to include with the message (e.g. clipboard
+    /// contents, file text).  Prepended to the user message for the LLM.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 /// Response for `POST /api/quick-message`.
@@ -1163,9 +1171,26 @@ pub async fn quick_message(
             .into_response();
     }
 
-    // Resolve active persona.
-    let agent_id = state.agent_id.read().await.clone();
+    // Resolve persona: use explicit persona_id if valid, otherwise active.
+    let agent_id = if let Some(ref pid) = body.persona_id {
+        let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
+        if persona_store.get(pid).await.ok().flatten().is_some() {
+            pid.clone()
+        } else {
+            state.agent_id.read().await.clone()
+        }
+    } else {
+        state.agent_id.read().await.clone()
+    };
     let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+
+    // Build the prompt: prepend context if provided.
+    let prompt = match body.context.as_deref() {
+        Some(ctx) if !ctx.trim().is_empty() => {
+            format!("<context>\n{}\n</context>\n\n{}", ctx.trim(), content)
+        }
+        _ => content.clone(),
+    };
 
     // Create a new conversation.
     let title = if content.chars().count() > 60 {
@@ -1188,7 +1213,7 @@ pub async fn quick_message(
     // Submit the turn and await the full result (synchronous).
     let result = state
         .orchestrator
-        .submit_turn(&content, conv.id, Interface::Web, None)
+        .submit_turn(&prompt, conv.id, Interface::Web, None)
         .await;
 
     match result {
@@ -3470,5 +3495,119 @@ mod tests {
             conv.title.as_deref(),
             Some("What should I cook for dinner tonight?")
         );
+    }
+
+    #[tokio::test]
+    async fn quick_message_with_persona_id_routes_to_persona() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "persona answer").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+
+        // Create a persona so it can be resolved.
+        let persona_store = assistant_storage::personas::PersonaStore::new(storage.pool.clone());
+        persona_store.create("reviewer", "Reviewer").await.unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hello","persona_id":"reviewer"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        let conv_id: Uuid = json["conversation_id"].as_str().unwrap().parse().unwrap();
+
+        // Conversation should be scoped to the "reviewer" persona.
+        let store = ConversationStore::for_agent(storage.pool.clone(), "reviewer");
+        let conv = store.get_conversation(conv_id).await.unwrap();
+        assert!(
+            conv.is_some(),
+            "conversation should exist under 'reviewer' persona"
+        );
+    }
+
+    #[tokio::test]
+    async fn quick_message_with_invalid_persona_falls_back() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "fallback answer").await;
+
+        let (state, _storage) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"message":"hello","persona_id":"nonexistent"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should succeed using fallback persona, not error.
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["answer"].as_str().unwrap(), "fallback answer");
+    }
+
+    #[tokio::test]
+    async fn quick_message_with_context_prepends_to_prompt() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "context answer").await;
+
+        let (state, _storage) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"message":"summarize this","context":"Lorem ipsum dolor sit amet"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["answer"].as_str().unwrap(), "context answer");
+    }
+
+    #[tokio::test]
+    async fn quick_message_backward_compatible() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "compat answer").await;
+
+        let (state, _storage) = test_state(&server.uri()).await;
+
+        // Send only `message` — no persona_id, no context.
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hi"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["answer"].as_str().unwrap(), "compat answer");
     }
 }
