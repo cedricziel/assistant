@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.122](https://github.com/cedricziel/assistant/compare/v0.1.121...v0.1.122) (2026-04-19)
+
+
+### Features
+
+* **app:** Cupertino page chrome — large titles and adaptive nav bars ([#538](https://github.com/cedricziel/assistant/issues/538)) ([7dbc868](https://github.com/cedricziel/assistant/commit/7dbc8680381a42dcf7eac424688b7035c7365f4f))
+* **app:** CupertinoTabBar and sidebar navigation for iOS/iPadOS ([#535](https://github.com/cedricziel/assistant/issues/535)) ([83e1c28](https://github.com/cedricziel/assistant/commit/83e1c2833cb243ae72ef27d0d4b8797f612c728f))
+
+
+### Bug Fixes
+
+* **app:** convert HEIC images to PNG before upload on iOS ([#539](https://github.com/cedricziel/assistant/issues/539)) ([1d4f971](https://github.com/cedricziel/assistant/commit/1d4f97190cc2abd06dd4e579f4e59c2cd7807752))
+* **app:** pass MIME type to audioplayers BytesSource on iOS ([#537](https://github.com/cedricziel/assistant/issues/537)) ([8f3c458](https://github.com/cedricziel/assistant/commit/8f3c458bde1fc678ec61d00074fee4088a240bda))
+
 ## [0.1.121](https://github.com/cedricziel/assistant/compare/v0.1.120...v0.1.121) (2026-04-19)
 
 
