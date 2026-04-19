@@ -38,7 +38,7 @@ class TracesScreen extends ConsumerWidget {
             ),
             tracesAsync.when(
               loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator.adaptive()),
               ),
               error: (err, _) => SliverFillRemaining(
                 child: _ErrorView(
@@ -86,7 +86,8 @@ class TracesScreen extends ConsumerWidget {
         ],
       ),
       body: tracesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () => ref.read(tracesProvider.notifier).refresh(),

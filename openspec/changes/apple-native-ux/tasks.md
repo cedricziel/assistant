@@ -164,34 +164,34 @@ Capture the current state on each matrix entry before any changes. These screens
 
 ### 4.1 Adaptive Switches & Spinners
 
-- [ ] 4.1.1 🔴 Write widget test: pump `SettingsScreen` with iOS override. Assert `CupertinoSwitch` widgets are found (rendered by `SwitchListTile.adaptive`). Pump with macOS override — assert Material `Switch` found. Confirm tests fail.
-- [ ] 4.1.2 🟢 Replace 3 `SwitchListTile` in Settings with `SwitchListTile.adaptive`. Make tests green.
-- [ ] 4.1.3 🔴 Write widget test: pump a screen that shows a loading state with iOS override. Assert `CupertinoActivityIndicator` found (rendered by `CircularProgressIndicator.adaptive`). Confirm test fails.
-- [ ] 4.1.4 🟢 Replace all `CircularProgressIndicator` with `CircularProgressIndicator.adaptive`. Make tests green.
+- [x] 4.1.1 🔴 Write widget test: pump `SettingsScreen` with iOS override. Assert `CupertinoSwitch` widgets are found (rendered by `SwitchListTile.adaptive`). Pump with macOS override — assert Material `Switch` found. Confirm tests fail.
+- [x] 4.1.2 🟢 Replace 3 `SwitchListTile` in Settings with `SwitchListTile.adaptive`. Make tests green.
+- [x] 4.1.3 🔴 Write widget test: pump a screen that shows a loading state with iOS override. Assert `CupertinoActivityIndicator` found (rendered by `CircularProgressIndicator.adaptive`). Confirm test fails.
+- [x] 4.1.4 🟢 Replace all `CircularProgressIndicator` with `CircularProgressIndicator.adaptive`. Make tests green.
 
 ### 4.2 Adaptive Dialogs
 
-- [ ] 4.2.1 🔴 Write unit test `app/test/unit/platform/adaptive_dialog_test.dart`: call `showAdaptiveConfirmDialog` in a test harness with iOS override. Assert `CupertinoAlertDialog` is shown. Call with macOS override — assert `AlertDialog` is shown. Confirm tests fail.
-- [ ] 4.2.2 🟢 Create `app/lib/shared/platform/adaptive_dialog.dart` with `showAdaptiveConfirmDialog` helper. Make tests green.
-- [ ] 4.2.3 🟢 Update delete context confirmation to use adaptive dialog.
-- [ ] 4.2.4 🟢 Update delete conversation confirmation to use adaptive dialog.
+- [x] 4.2.1 🔴 Write unit test `app/test/unit/platform/adaptive_dialog_test.dart`: call `showAdaptiveConfirmDialog` in a test harness with iOS override. Assert `CupertinoAlertDialog` is shown. Call with macOS override — assert `AlertDialog` is shown. Confirm tests fail.
+- [x] 4.2.2 🟢 Create `app/lib/shared/platform/adaptive_dialog.dart` with `showAdaptiveConfirmDialog` helper. Make tests green.
+- [x] 4.2.3 🟢 Update delete context confirmation to use adaptive dialog.
+- [x] 4.2.4 🟢 Update delete conversation confirmation to use adaptive dialog.
 
 ### 4.3 Chat Input
 
-- [ ] 4.3.1 🔴 Write widget test: pump `ChatScreen` (or `_InputRow` directly) with iOS override. Assert `CupertinoTextField` found. Pump with macOS override — assert Material `TextField` found. Confirm tests fail.
-- [ ] 4.3.2 🟢 Update `_InputRow` to render `CupertinoTextField` on Apple touch (rounded-rect, placeholder). Make tests green.
-- [ ] 4.3.3 🔴 Write widget test: with iOS override, enter text in `CupertinoTextField`, trigger submit action. Assert `onSend` callback fires. Verify multiline expansion (set text with newlines, assert `maxLines` behavior). Confirm tests pass (functional parity).
+- [x] 4.3.1 🔴 Write widget test: pump `ChatScreen` (or `_InputRow` directly) with iOS override. Assert `CupertinoTextField` found. Pump with macOS override — assert Material `TextField` found. Confirm tests fail.
+- [x] 4.3.2 🟢 Update `_InputRow` to render `CupertinoTextField` on Apple touch (rounded-rect, placeholder). Make tests green.
+- [x] 4.3.3 🔴 Write widget test: with iOS override, enter text in `CupertinoTextField`, trigger submit action. Assert `onSend` callback fires. Verify multiline expansion (set text with newlines, assert `maxLines` behavior). Confirm tests pass (functional parity).
 
 ### 4.4 Settings Screen
 
-- [ ] 4.4.1 🔴 Write widget test: pump `SettingsScreen` with iOS override. Assert `CupertinoListSection` found. Pump with macOS override — assert no `CupertinoListSection` (Material layout). Confirm tests fail.
-- [ ] 4.4.2 🟢 Update Settings screen to use `CupertinoListSection.insetGrouped` on Apple touch. Make tests green.
+- [x] 4.4.1 🔴 Write widget test: pump `SettingsScreen` with iOS override. Assert `CupertinoListSection` found. Pump with macOS override — assert no `CupertinoListSection` (Material layout). Confirm tests fail.
+- [x] 4.4.2 🟢 Update Settings screen to use `CupertinoListSection.insetGrouped` on Apple touch. Make tests green.
 
 ### 4.5 Haptic Feedback
 
-- [ ] 4.5.1 🔴 Write test: mock `HapticFeedback` channel. On iOS override, trigger message send. Assert `HapticFeedback.lightImpact` was called. On web, assert it was NOT called. Confirm tests fail.
-- [ ] 4.5.2 🟢 Add `HapticFeedback.lightImpact()` on message send, conversation selection, switch toggles (Apple touch only).
-- [ ] 4.5.3 🟢 Add `HapticFeedback.mediumImpact()` on destructive actions (delete). Make all haptic tests green.
+- [x] 4.5.1 🔴 Write test: mock `HapticFeedback` channel. On iOS override, trigger message send. Assert `HapticFeedback.lightImpact` was called. On web, assert it was NOT called. Confirm tests fail.
+- [x] 4.5.2 🟢 Add `HapticFeedback.lightImpact()` on message send, conversation selection, switch toggles (Apple touch only).
+- [x] 4.5.3 🟢 Add `HapticFeedback.mediumImpact()` on destructive actions (delete). Make all haptic tests green.
 
 ### 4.6 Phase 4 Verification — Per Matrix Entry
 
@@ -202,8 +202,8 @@ Capture the current state on each matrix entry before any changes. These screens
 - [ ] 4.6.5 **M4 Mac Catalyst**: Adaptive widgets render Cupertino. Haptic feedback is silent (no Taptic Engine — verify no crash).
 - [ ] 4.6.6 **M5 macOS native**: All widgets remain Material. No visual regression.
 - [ ] 4.6.7 **M6 Web**: All widgets remain Material. No visual regression from baseline.
-- [ ] 4.6.8 Run `flutter analyze --fatal-infos` — zero issues
-- [ ] 4.6.9 Run `flutter test` — all tests pass
+- [x] 4.6.8 Run `flutter analyze --fatal-infos` — zero issues
+- [x] 4.6.9 Run `flutter test` — all tests pass (433/433)
 
 ---
 

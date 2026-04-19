@@ -55,7 +55,7 @@ class _ChatTimelineSectionState extends State<ChatTimelineSection> {
       ToolCallStatus.pending => const SizedBox(
         width: 12,
         height: 12,
-        child: CircularProgressIndicator(strokeWidth: 1.5),
+        child: CircularProgressIndicator.adaptive(strokeWidth: 1.5),
       ),
       ToolCallStatus.ok => const Icon(
         Icons.check_circle_outline,
@@ -143,7 +143,7 @@ class _ChatTimelineSectionState extends State<ChatTimelineSection> {
           ? const SizedBox(
               width: 12,
               height: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.5),
+              child: CircularProgressIndicator.adaptive(strokeWidth: 1.5),
             )
           : null,
       expandable: widget.message.thinkingContent != null,
@@ -177,7 +177,7 @@ class _ChatTimelineSectionState extends State<ChatTimelineSection> {
           : const SizedBox(
               width: 12,
               height: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.5),
+              child: CircularProgressIndicator.adaptive(strokeWidth: 1.5),
             ),
       expandable: hasCompleted,
       expandedContent: hasCompleted

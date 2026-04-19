@@ -31,9 +31,9 @@ class _ToolCallChipState extends State<ToolCallChip> {
         SizedBox(
           width: 12,
           height: 12,
-          child: CircularProgressIndicator(
+          child: CircularProgressIndicator.adaptive(
             strokeWidth: 1.5,
-            color: colorScheme.primary,
+            valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
           ),
         ),
         colorScheme.primary,

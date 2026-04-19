@@ -36,7 +36,7 @@ class WorkflowsScreen extends ConsumerWidget {
             ),
             workflowsAsync.when(
               loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator.adaptive()),
               ),
               error: (err, _) => SliverFillRemaining(
                 child: _ErrorView(
@@ -75,7 +75,8 @@ class WorkflowsScreen extends ConsumerWidget {
       ),
       floatingActionButton: fab,
       body: workflowsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () => ref.read(workflowsProvider.notifier).refresh(),

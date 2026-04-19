@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../shared/platform/adaptive_dialog.dart';
 import '../../../shared/platform/platform.dart';
 import '../models/context_model.dart';
 import '../providers/context_providers.dart';
@@ -35,7 +36,7 @@ class ContextSwitcherScreen extends ConsumerWidget {
             const CupertinoSliverNavigationBar(largeTitle: Text('Contexts')),
             contextsAsync.when(
               loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator.adaptive()),
               ),
               error: (e, _) =>
                   SliverFillRemaining(child: Center(child: Text('Error: $e'))),
@@ -66,7 +67,8 @@ class ContextSwitcherScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Contexts')),
       body: contextsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (contexts) {
           if (contexts.isEmpty) {
@@ -123,27 +125,14 @@ class ContextSwitcherScreen extends ConsumerWidget {
     WidgetRef ref,
     AssistantContext ctx,
   ) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAdaptiveConfirmDialog(
       context: context,
-      builder: (dlg) => AlertDialog(
-        title: const Text('Delete context?'),
-        content: Text('Remove "${ctx.name}"? This cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dlg).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dlg).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      title: 'Delete context?',
+      content: 'Remove "${ctx.name}"? This cannot be undone.',
+      confirmLabel: 'Delete',
+      isDestructive: true,
     );
-    if (confirmed == true) {
+    if (confirmed) {
       await ref.read(contextsProvider.notifier).deleteContext(ctx.id);
       // If active context was deleted, deactivate it.
       final activeId = ref.read(activeContextProvider).value?.id;
@@ -364,7 +353,7 @@ class _CreateContextDialogState extends ConsumerState<_CreateContextDialog> {
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: CircularProgressIndicator.adaptive(strokeWidth: 2),
                 )
               : const Text('Save'),
         ),
