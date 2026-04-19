@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.123](https://github.com/cedricziel/assistant/compare/v0.1.122...v0.1.123) (2026-04-19)
+
+
+### Features
+
+* **app:** adaptive widget polish — Phase 4 Apple-native UX ([#541](https://github.com/cedricziel/assistant/issues/541)) ([064e981](https://github.com/cedricziel/assistant/commit/064e981bf07782a000763965510bd35654a6b060))
+
 ## [0.1.122](https://github.com/cedricziel/assistant/compare/v0.1.121...v0.1.122) (2026-04-19)
 
 
