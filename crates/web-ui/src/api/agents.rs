@@ -12,11 +12,11 @@
 //! | POST   | `/api/agents/{id}/set-default`| Set an agent as the default    |
 
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -159,7 +159,7 @@ pub async fn register_agent(
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": format!("Invalid agent card: {e}")})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -235,7 +235,7 @@ pub async fn update_agent(
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": format!("Invalid agent card: {e}")})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -329,7 +329,7 @@ mod tests {
 
     use crate::a2a::agent_store::AgentStore;
 
-    use super::{agents_api_router, AgentsApiState};
+    use super::{AgentsApiState, agents_api_router};
 
     async fn test_state() -> (AgentsApiState, TempDir) {
         let tmp = TempDir::new().unwrap();

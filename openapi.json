@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.1.105"
+    "version": "0.1.120"
   },
   "servers": [
     {
@@ -1776,6 +1776,52 @@
           },
           "401": {
             "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/quick-message": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`POST /api/quick-message` — create a new conversation, send a message, and\nreturn the complete assistant response as a synchronous JSON reply.",
+        "description": "This endpoint is designed for machine clients (Apple Shortcuts, Siri App\nIntents, curl, webhooks) that need a single request/response round-trip.",
+        "operationId": "create_quick_message",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuickMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Message processed, conversation created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickMessageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty message"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
           }
         },
         "security": [
@@ -5235,6 +5281,46 @@
           "url": {
             "type": "string",
             "description": "The URL where the notification should be sent."
+          }
+        }
+      },
+      "QuickMessageRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/quick-message`.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The message text to send to the assistant."
+          }
+        }
+      },
+      "QuickMessageResponse": {
+        "type": "object",
+        "description": "Response for `POST /api/quick-message`.",
+        "required": [
+          "conversation_id",
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "The full assistant response text."
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The ID of the newly created conversation."
+          },
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The ID of the persisted assistant message, if available."
           }
         }
       },

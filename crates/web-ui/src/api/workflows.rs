@@ -678,7 +678,7 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
-    use super::{workflows_api_router, WorkflowsApiState};
+    use super::{WorkflowsApiState, workflows_api_router};
 
     async fn test_state() -> (WorkflowsApiState, std::sync::Arc<StorageLayer>) {
         let storage = std::sync::Arc::new(StorageLayer::new_in_memory().await.unwrap());

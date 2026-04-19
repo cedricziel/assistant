@@ -14,11 +14,11 @@
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -111,7 +111,7 @@ pub async fn list_persona_skills(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Persona not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get persona {persona_id}: {e}");
@@ -377,9 +377,9 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    use assistant_storage::{registry::SkillRegistry, StorageLayer};
+    use assistant_storage::{StorageLayer, registry::SkillRegistry};
 
-    use super::{skills_router, SkillsApiState};
+    use super::{SkillsApiState, skills_router};
 
     async fn test_state() -> (SkillsApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());

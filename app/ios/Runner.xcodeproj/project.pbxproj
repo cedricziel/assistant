@@ -14,6 +14,10 @@
 		590A9C19E5080B671DF1ABA5 /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F388ABB91ECF644DE3719EED /* Pods_RunnerTests.framework */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */; };
+		B67CEB6FC444D6799A51D8A0 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE75EC1A1F345BD934BA013 /* KeychainHelper.swift */; };
+		EF50AB3C878ECBD21D90E0AC /* AssistantAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57ADFF92532DC673AD049C66 /* AssistantAPIClient.swift */; };
+		FD0AB5CD204915D1DD23B673 /* AskAssistantIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9914ED2F6655A030FE30BED8 /* AskAssistantIntent.swift */; };
+		328BFC2D5F2D32AA30D68916 /* AppShortcutsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A9FB866467846800D214B7D /* AppShortcutsProvider.swift */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
@@ -66,6 +70,10 @@
 		E2FA8BE815A1045EF110DEFA /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
 		EDF9668C1012FAED68DFB479 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		F0A4163A05F51012854E48B7 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
+		DEE75EC1A1F345BD934BA013 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		57ADFF92532DC673AD049C66 /* AssistantAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantAPIClient.swift; sourceTree = "<group>"; };
+		9914ED2F6655A030FE30BED8 /* AskAssistantIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskAssistantIntent.swift; sourceTree = "<group>"; };
+		7A9FB866467846800D214B7D /* AppShortcutsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcutsProvider.swift; sourceTree = "<group>"; };
 		F388ABB91ECF644DE3719EED /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -143,9 +151,21 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		2D31CA78E0009114D9972379 /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				DEE75EC1A1F345BD934BA013 /* KeychainHelper.swift */,
+				57ADFF92532DC673AD049C66 /* AssistantAPIClient.swift */,
+				9914ED2F6655A030FE30BED8 /* AskAssistantIntent.swift */,
+				7A9FB866467846800D214B7D /* AppShortcutsProvider.swift */,
+			);
+			path = Intents;
+			sourceTree = "<group>";
+		};
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				2D31CA78E0009114D9972379 /* Intents */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -383,6 +403,10 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
+				B67CEB6FC444D6799A51D8A0 /* KeychainHelper.swift in Sources */,
+				EF50AB3C878ECBD21D90E0AC /* AssistantAPIClient.swift in Sources */,
+				FD0AB5CD204915D1DD23B673 /* AskAssistantIntent.swift in Sources */,
+				328BFC2D5F2D32AA30D68916 /* AppShortcutsProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

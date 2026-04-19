@@ -10,6 +10,7 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**createConversation**](ConversationsApi.md#createconversation) | **POST** /api/conversations | &#x60;POST /api/conversations&#x60; — create a new conversation.
+[**createQuickMessage**](ConversationsApi.md#createquickmessage) | **POST** /api/quick-message | &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
 [**deleteConversation**](ConversationsApi.md#deleteconversation) | **DELETE** /api/conversations/{id} | &#x60;DELETE /api/conversations/{id}&#x60; — delete a conversation and all its messages.
 [**getAudio**](ConversationsApi.md#getaudio) | **GET** /api/audio/{id} | &#x60;GET /api/audio/{id}&#x60; — serve a synthesized audio blob from the in-memory store.
 [**getConversation**](ConversationsApi.md#getconversation) | **GET** /api/conversations/{id} | &#x60;GET /api/conversations/{id}&#x60; — get a conversation and its message history.
@@ -50,6 +51,49 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**ConversationSummary**](ConversationSummary.md)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **createQuickMessage**
+> QuickMessageResponse createQuickMessage(quickMessageRequest)
+
+`POST /api/quick-message` — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
+
+This endpoint is designed for machine clients (Apple Shortcuts, Siri App Intents, curl, webhooks) that need a single request/response round-trip.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final QuickMessageRequest quickMessageRequest = ; // QuickMessageRequest | 
+
+try {
+    final response = api.createQuickMessage(quickMessageRequest);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->createQuickMessage: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **quickMessageRequest** | [**QuickMessageRequest**](QuickMessageRequest.md)|  | 
+
+### Return type
+
+[**QuickMessageResponse**](QuickMessageResponse.md)
 
 ### Authorization
 

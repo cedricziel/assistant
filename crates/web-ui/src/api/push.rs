@@ -8,10 +8,10 @@
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::State,
     http::StatusCode,
     routing::{delete, get, post},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 

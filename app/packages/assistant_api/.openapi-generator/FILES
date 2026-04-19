@@ -59,6 +59,8 @@ doc/PersonaSummary.md
 doc/PersonasApi.md
 doc/PushNotificationConfig.md
 doc/PushNotificationsApi.md
+doc/QuickMessageRequest.md
+doc/QuickMessageResponse.md
 doc/RegisterAgentRequest.md
 doc/Role.md
 doc/RotateSecretResponse.md
@@ -185,6 +187,8 @@ lib/src/model/persona_file_slot.dart
 lib/src/model/persona_skill_access.dart
 lib/src/model/persona_summary.dart
 lib/src/model/push_notification_config.dart
+lib/src/model/quick_message_request.dart
+lib/src/model/quick_message_response.dart
 lib/src/model/register_agent_request.dart
 lib/src/model/role.dart
 lib/src/model/rotate_secret_response.dart
@@ -233,3 +237,5 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
+test/quick_message_request_test.dart
+test/quick_message_response_test.dart

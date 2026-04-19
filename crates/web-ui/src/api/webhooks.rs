@@ -16,11 +16,11 @@
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -276,7 +276,7 @@ pub async fn update_webhook(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Webhook not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get webhook {id}: {e}");
@@ -295,13 +295,14 @@ pub async fn update_webhook(
 
     // Validate the URL if it changed.
     if body.url.is_some()
-        && let Err(e) = validate_webhook_url(new_url) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": e})),
-            )
-                .into_response();
-        }
+        && let Err(e) = validate_webhook_url(new_url)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": e})),
+        )
+            .into_response();
+    }
 
     match store
         .update(&id, new_name, new_url, &new_event_types, new_active)
@@ -476,7 +477,7 @@ pub async fn verify_webhook(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Webhook not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             warn!("Failed to get webhook {id}: {e}");
@@ -511,7 +512,7 @@ pub async fn verify_webhook(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Failed to build HTTP client: {e}")})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -559,7 +560,7 @@ fn validate_webhook_url(url: &str) -> Result<(), String> {
         other => {
             return Err(format!(
                 "Unsupported scheme '{other}': only http and https are allowed"
-            ))
+            ));
         }
     }
     let host = parsed.host_str().ok_or("URL has no host")?;
@@ -568,14 +569,16 @@ fn validate_webhook_url(url: &str) -> Result<(), String> {
         return Err("Loopback addresses are not allowed".to_string());
     }
     if let Ok(ip) = host.parse::<IpAddr>()
-        && is_private_ip(ip) {
-            return Err(format!("Private/reserved IP address {ip} is not allowed"));
-        }
+        && is_private_ip(ip)
+    {
+        return Err(format!("Private/reserved IP address {ip} is not allowed"));
+    }
     let trimmed = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = trimmed.parse::<IpAddr>()
-        && is_private_ip(ip) {
-            return Err(format!("Private/reserved IP address {ip} is not allowed"));
-        }
+        && is_private_ip(ip)
+    {
+        return Err(format!("Private/reserved IP address {ip} is not allowed"));
+    }
     Ok(())
 }
 
@@ -634,7 +637,7 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
-    use super::{webhooks_api_router, WebhooksApiState};
+    use super::{WebhooksApiState, webhooks_api_router};
 
     async fn test_state() -> (WebhooksApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());

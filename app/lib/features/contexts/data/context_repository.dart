@@ -9,6 +9,11 @@ const _kContextsKey = 'assistant_contexts';
 const _kActiveContextIdKey = 'assistant_active_context_id';
 const _kTokenPrefix = 'assistant_context_token_';
 
+/// Well-known Keychain keys for native Siri/Shortcuts integration.
+/// Swift App Intent code reads these directly from the Keychain.
+const _kSiriServerUrl = 'assistant_siri_server_url';
+const _kSiriAuthToken = 'assistant_siri_auth_token';
+
 /// Abstraction over platform secure key-value storage.
 ///
 /// The real app uses [FlutterSecureStorageAdapter]; tests use [FakeSecureStorage].
@@ -101,6 +106,11 @@ class ContextRepository {
     } else {
       await _secureStorage.delete(key: '$_kTokenPrefix${context.id}');
     }
+
+    // Keep Siri credentials in sync if this is the active context.
+    if (context.id == getActiveContextId()) {
+      await syncSiriCredentials();
+    }
   }
 
   // -- Upsert by URL --------------------------------------------------------
@@ -136,6 +146,10 @@ class ContextRepository {
     } else {
       await _secureStorage.delete(key: '$_kTokenPrefix${toSave.id}');
     }
+
+    if (toSave.id == getActiveContextId()) {
+      await syncSiriCredentials();
+    }
     return toSave;
   }
 
@@ -160,12 +174,49 @@ class ContextRepository {
   String? getActiveContextId() => _prefs.getString(_kActiveContextIdKey);
 
   /// Persists [id] as the active context.  Pass `null` to clear.
+  ///
+  /// Also syncs Siri credentials so the native App Intent can reach the server.
   Future<void> setActiveContextId(String? id) async {
     if (id == null) {
       await _prefs.remove(_kActiveContextIdKey);
     } else {
       await _prefs.setString(_kActiveContextIdKey, id);
     }
+    await syncSiriCredentials();
+  }
+
+  // -- Siri credential sync -------------------------------------------------
+
+  /// Writes the active context's server URL and auth token to well-known
+  /// Keychain keys so native Swift App Intent code can access them without
+  /// the Flutter engine running.
+  ///
+  /// Call this whenever the active context changes or credentials are updated.
+  Future<void> syncSiriCredentials() async {
+    final activeId = getActiveContextId();
+    if (activeId == null) {
+      await _secureStorage.delete(key: _kSiriServerUrl);
+      await _secureStorage.delete(key: _kSiriAuthToken);
+      return;
+    }
+
+    final contexts = await loadContexts();
+    final active = contexts.where((c) => c.id == activeId).firstOrNull;
+    if (active == null) {
+      await _secureStorage.delete(key: _kSiriServerUrl);
+      await _secureStorage.delete(key: _kSiriAuthToken);
+      return;
+    }
+
+    await _secureStorage.write(key: _kSiriServerUrl, value: active.serverUrl);
+    if (active.authToken != null && active.authToken!.isNotEmpty) {
+      await _secureStorage.write(
+        key: _kSiriAuthToken,
+        value: active.authToken!,
+      );
+    }
+    // When authToken is null it may be a transient read error — preserve the
+    // existing Keychain value rather than deleting it.
   }
 
   // -- Internal helpers -----------------------------------------------------

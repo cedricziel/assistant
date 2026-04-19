@@ -254,6 +254,25 @@ pub struct SendMessageRequest {
     pub attachment_ids: Vec<Uuid>,
 }
 
+/// Body for `POST /api/quick-message`.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct QuickMessageRequest {
+    /// The message text to send to the assistant.
+    pub message: String,
+}
+
+/// Response for `POST /api/quick-message`.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct QuickMessageResponse {
+    /// The ID of the newly created conversation.
+    pub conversation_id: Uuid,
+    /// The ID of the persisted assistant message, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<Uuid>,
+    /// The full assistant response text.
+    pub answer: String,
+}
+
 // -- Router ------------------------------------------------------------------
 
 /// Build the conversations API sub-router.  Mounted under `/api`.
@@ -267,6 +286,7 @@ pub fn api_router() -> Router<ApiState> {
         .route("/conversations/{id}", patch(update_conversation))
         .route("/conversations/{id}/messages", post(send_message))
         .route("/conversations/{id}/voice", post(send_voice_message))
+        .route("/quick-message", post(quick_message))
         .route(
             "/conversations/{id}/attachments",
             post(upload_attachment).layer(DefaultBodyLimit::max(12 * 1024 * 1024)), // 12 MB
@@ -1074,6 +1094,96 @@ pub async fn stream_run_events(
     });
 
     Sse::new(ReceiverStream::new(sse_rx)).into_response()
+}
+
+// -- Quick-message handler --------------------------------------------------
+
+/// `POST /api/quick-message` — create a new conversation, send a message, and
+/// return the complete assistant response as a synchronous JSON reply.
+///
+/// This endpoint is designed for machine clients (Apple Shortcuts, Siri App
+/// Intents, curl, webhooks) that need a single request/response round-trip.
+#[utoipa::path(
+    post,
+    path = "/api/quick-message",
+    operation_id = "create_quick_message",
+    tag = "conversations",
+    request_body = QuickMessageRequest,
+    responses(
+        (status = 201, description = "Message processed, conversation created", body = QuickMessageResponse),
+        (status = 400, description = "Empty message"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error"),
+    ),
+    security(("bearer_token" = []))
+)]
+pub async fn quick_message(
+    State(state): State<ApiState>,
+    Json(body): Json<QuickMessageRequest>,
+) -> Response {
+    let content = body.message.trim().to_string();
+    if content.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Message cannot be empty"})),
+        )
+            .into_response();
+    }
+
+    // Resolve active persona.
+    let agent_id = state.agent_id.read().await.clone();
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+
+    // Create a new conversation.
+    let title = if content.chars().count() > 60 {
+        format!("{}...", content.chars().take(57).collect::<String>())
+    } else {
+        content.clone()
+    };
+    let conv = match store.create_conversation(Some(&title)).await {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("quick-message: failed to create conversation: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create conversation"})),
+            )
+                .into_response();
+        }
+    };
+
+    // Submit the turn and await the full result (synchronous).
+    let result = state
+        .orchestrator
+        .submit_turn(&content, conv.id, Interface::Web, None)
+        .await;
+
+    match result {
+        Ok(turn_result) => (
+            StatusCode::CREATED,
+            Json(QuickMessageResponse {
+                conversation_id: conv.id,
+                message_id: turn_result.message_id,
+                answer: turn_result.answer,
+            }),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!("quick-message: orchestrator error for {}: {e}", conv.id);
+            // Clean up the orphan conversation.
+            if let Err(del_err) = store.delete_conversation(conv.id).await {
+                warn!(
+                    "quick-message: failed to delete orphan conversation {}: {del_err}",
+                    conv.id
+                );
+            }
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to process message"})),
+            )
+                .into_response()
+        }
+    }
 }
 
 // -- Voice / capabilities handlers ------------------------------------------
@@ -3205,6 +3315,96 @@ mod tests {
         assert!(
             body_bytes.len() < png_data.len(),
             "resized should be smaller"
+        );
+    }
+
+    // -- POST /quick-message ---------------------------------------------------
+
+    #[tokio::test]
+    async fn quick_message_returns_201_with_answer() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Hello from quick message").await;
+
+        let (state, _storage) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"ping"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert!(
+            json["conversation_id"].as_str().is_some(),
+            "should have a conversation_id"
+        );
+        assert_eq!(
+            json["answer"].as_str().unwrap(),
+            "Hello from quick message",
+            "answer should match the LLM reply"
+        );
+    }
+
+    #[tokio::test]
+    async fn quick_message_empty_body_returns_400() {
+        let server = MockServer::start().await;
+        let (state, _) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"   "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["error"], "Message cannot be empty");
+    }
+
+    #[tokio::test]
+    async fn quick_message_auto_titles_conversation() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "response").await;
+
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/quick-message")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"message":"What should I cook for dinner tonight?"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        let conv_id: Uuid = json["conversation_id"].as_str().unwrap().parse().unwrap();
+
+        // Verify the conversation was titled with the message.
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        let conv = store.get_conversation(conv_id).await.unwrap().unwrap();
+        assert_eq!(
+            conv.title.as_deref(),
+            Some("What should I cook for dinner tonight?")
         );
     }
 }

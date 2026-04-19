@@ -13,6 +13,8 @@ import 'package:assistant_api/src/model/api_send_message_request.dart';
 import 'package:assistant_api/src/model/conversation_detail.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
 import 'package:assistant_api/src/model/create_conversation_request.dart';
+import 'package:assistant_api/src/model/quick_message_request.dart';
+import 'package:assistant_api/src/model/quick_message_response.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
 import 'package:built_collection/built_collection.dart';
 
@@ -114,6 +116,108 @@ class ConversationsApi {
     }
 
     return Response<ConversationSummary>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
+  }
+
+  /// &#x60;POST /api/quick-message&#x60; — create a new conversation, send a message, and return the complete assistant response as a synchronous JSON reply.
+  /// This endpoint is designed for machine clients (Apple Shortcuts, Siri App Intents, curl, webhooks) that need a single request/response round-trip.
+  ///
+  /// Parameters:
+  /// * [quickMessageRequest]
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [QuickMessageResponse] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<QuickMessageResponse>> createQuickMessage({
+    required QuickMessageRequest quickMessageRequest,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/api/quick-message';
+    final _options = Options(
+      method: r'POST',
+      headers: <String, dynamic>{
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+        ],
+        ...?extra,
+      },
+      contentType: 'application/json',
+      validateStatus: validateStatus,
+    );
+
+    dynamic _bodyData;
+
+    try {
+      const _type = FullType(QuickMessageRequest);
+      _bodyData =
+          _serializers.serialize(quickMessageRequest, specifiedType: _type);
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final _response = await _dio.request<Object>(
+      _path,
+      data: _bodyData,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    QuickMessageResponse? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(QuickMessageResponse),
+            ) as QuickMessageResponse;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<QuickMessageResponse>(
       data: _responseData,
       headers: _response.headers,
       isRedirect: _response.isRedirect,
