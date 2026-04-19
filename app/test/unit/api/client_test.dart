@@ -326,4 +326,101 @@ void main() {
       expect(count, equals(events.length));
     });
   });
+
+  group('parseConversationSseByteStream', () {
+    test('emits ConversationSnapshotEvent from snapshot SSE event', () async {
+      final payload = jsonEncode([
+        {
+          'id': 'c1',
+          'title': 'Hello',
+          'created_at': '2026-01-01T00:00:00Z',
+          'updated_at': '2026-01-01T00:00:00Z',
+        },
+      ]);
+      final sse = 'event: snapshot\ndata: $payload\n\n';
+      final events = await parseConversationSseByteStream(
+        _sseBytes(sse),
+      ).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<ConversationSnapshotEvent>());
+      final snapshot = events.first as ConversationSnapshotEvent;
+      expect(snapshot.conversations.length, equals(1));
+      expect(snapshot.conversations.first.id, equals('c1'));
+      expect(snapshot.conversations.first.title, equals('Hello'));
+    });
+
+    test('emits ConversationUpsertedEvent from upserted SSE event', () async {
+      final payload = jsonEncode({
+        'id': 'c2',
+        'title': 'Updated',
+        'created_at': '2026-01-01T00:00:00Z',
+        'updated_at': '2026-01-02T00:00:00Z',
+      });
+      final sse = 'event: upserted\ndata: $payload\n\n';
+      final events = await parseConversationSseByteStream(
+        _sseBytes(sse),
+      ).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<ConversationUpsertedEvent>());
+      final upserted = events.first as ConversationUpsertedEvent;
+      expect(upserted.conversation.id, equals('c2'));
+      expect(upserted.conversation.title, equals('Updated'));
+    });
+
+    test('emits ConversationDeletedEvent from deleted SSE event', () async {
+      final payload = jsonEncode({'conversation_id': 'c3'});
+      final sse = 'event: deleted\ndata: $payload\n\n';
+      final events = await parseConversationSseByteStream(
+        _sseBytes(sse),
+      ).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<ConversationDeletedEvent>());
+      expect(
+        (events.first as ConversationDeletedEvent).conversationId,
+        equals('c3'),
+      );
+    });
+
+    test('handles full sequence: snapshot + upserted + deleted', () async {
+      final snapshot = jsonEncode([
+        {
+          'id': 'c1',
+          'title': 'First',
+          'created_at': '2026-01-01T00:00:00Z',
+          'updated_at': '2026-01-01T00:00:00Z',
+        },
+      ]);
+      final upserted = jsonEncode({
+        'id': 'c2',
+        'title': 'New',
+        'created_at': '2026-01-02T00:00:00Z',
+        'updated_at': '2026-01-02T00:00:00Z',
+      });
+      final deleted = jsonEncode({'conversation_id': 'c1'});
+      final sse =
+          'event: snapshot\ndata: $snapshot\n\n'
+          'event: upserted\ndata: $upserted\n\n'
+          'event: deleted\ndata: $deleted\n\n';
+
+      final events = await parseConversationSseByteStream(
+        _sseBytes(sse),
+      ).toList();
+
+      expect(events.length, equals(3));
+      expect(events[0], isA<ConversationSnapshotEvent>());
+      expect(events[1], isA<ConversationUpsertedEvent>());
+      expect(events[2], isA<ConversationDeletedEvent>());
+    });
+
+    test('ignores unknown event types without crashing', () async {
+      const sse = 'event: unknown\ndata: {}\n\n';
+      final events = await parseConversationSseByteStream(
+        _sseBytes(sse),
+      ).toList();
+      expect(events, isEmpty);
+    });
+  });
 }
