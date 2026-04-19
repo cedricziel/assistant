@@ -28,3 +28,6 @@
 - [x] 4.1 Run `make lint && make format` to verify Rust changes pass clippy and formatting
 - [x] 4.2 Run `make lint-flutter` to verify Flutter changes pass analysis
 - [x] 4.3 Verify `flutter build ios --no-codesign` succeeds with the new Swift files
+- [ ] 4.4 Manual: verify Action Button → Shortcuts → "Ask Assistant a question" flow
+- [ ] 4.5 Manual: verify missing-credentials dialog ("open the app first")
+- [ ] 4.6 Manual: verify timeout dialog ("still working on that")
