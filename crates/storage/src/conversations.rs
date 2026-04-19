@@ -196,6 +196,13 @@ impl ConversationStore {
         if result.rows_affected() == 0 {
             anyhow::bail!("conversation {id} not found");
         }
+
+        if let Some(b) = &self.broadcaster {
+            if let Ok(Some(conv)) = self.get_conversation(id).await {
+                b.emit(ConversationEvent::Upserted(conv));
+            }
+        }
+
         Ok(())
     }
 
@@ -280,6 +287,12 @@ impl ConversationStore {
             .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
+
+        if let Some(b) = &self.broadcaster {
+            if let Ok(Some(conv)) = self.get_conversation(msg.conversation_id).await {
+                b.emit(ConversationEvent::Upserted(conv));
+            }
+        }
 
         Ok(())
     }
@@ -607,6 +620,60 @@ mod tests {
                 assert_eq!(agent_id, "default", "agent_id should match");
             }
             _ => panic!("expected Deleted event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_title_emits_upserted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+
+        let conv = store.create_conversation(Some("Old")).await.unwrap();
+
+        let mut rx = broadcaster.subscribe();
+        store.update_title(conv.id, "New").await.unwrap();
+
+        let event = rx.recv().await.expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => {
+                assert_eq!(record.id, conv.id);
+                assert_eq!(
+                    record.title.as_deref(),
+                    Some("New"),
+                    "title should be updated"
+                );
+            }
+            _ => panic!("expected Upserted event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_save_message_emits_upserted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut rx = broadcaster.subscribe();
+
+        let mut msg = Message::user(conv.id, "Hello");
+        msg.turn = 1;
+        store.save_message(&msg).await.unwrap();
+
+        let event = rx.recv().await.expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => {
+                assert_eq!(record.id, conv.id, "should emit for the conversation");
+            }
+            _ => panic!("expected Upserted event"),
         }
     }
 }
