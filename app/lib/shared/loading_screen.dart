@@ -15,7 +15,7 @@ class LoadingScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(),
+            CircularProgressIndicator.adaptive(),
             SizedBox(height: 16),
             Text('Starting\u2026'),
           ],

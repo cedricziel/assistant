@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../shared/platform/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -61,7 +63,8 @@ class ConversationList extends ConsumerWidget {
         // Conversation list
         Expanded(
           child: listAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            loading: () =>
+                const Center(child: CircularProgressIndicator.adaptive()),
             error: (err, _) => Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -118,31 +121,14 @@ class ConversationList extends ConsumerWidget {
                       ),
                     ),
                     confirmDismiss: (_) async {
-                      final confirm = await showDialog<bool>(
+                      final confirm = await showAdaptiveConfirmDialog(
                         context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Delete conversation?'),
-                          content: Text(
-                            '"${conv.title}" will be permanently deleted.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(false),
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.error,
-                              ),
-                              onPressed: () => Navigator.of(ctx).pop(true),
-                              child: const Text('Delete'),
-                            ),
-                          ],
-                        ),
+                        title: 'Delete conversation?',
+                        content: '"${conv.title}" will be permanently deleted.',
+                        confirmLabel: 'Delete',
+                        isDestructive: true,
                       );
-                      if (confirm != true) return false;
+                      if (!confirm) return false;
                       try {
                         await ref
                             .read(conversationListProvider.notifier)

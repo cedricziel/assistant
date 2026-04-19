@@ -25,7 +25,8 @@ class TraceDetailScreen extends ConsumerWidget {
         ),
       ),
       body: detailAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () => ref.invalidate(traceDetailProvider(traceId)),

@@ -64,7 +64,8 @@ class PersonaPicker extends ConsumerWidget {
             // Content
             Expanded(
               child: personasAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
+                loading: () =>
+                    const Center(child: CircularProgressIndicator.adaptive()),
                 error: (err, _) => Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -183,7 +184,7 @@ class _PersonaTile extends StatelessWidget {
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator.adaptive(strokeWidth: 2),
                   )
                 : null),
       onTap: isSwitching ? null : onTap,

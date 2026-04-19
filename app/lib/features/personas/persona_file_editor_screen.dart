@@ -159,7 +159,9 @@ class _PersonaFileEditorScreenState
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator.adaptive(
+                          strokeWidth: 2,
+                        ),
                       )
                     : const Text('Save'),
               ),
@@ -167,7 +169,8 @@ class _PersonaFileEditorScreenState
         ),
         body: SafeArea(
           child: contentAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            loading: () =>
+                const Center(child: CircularProgressIndicator.adaptive()),
             error: (err, _) => Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,

@@ -75,7 +75,7 @@ class _PersonasScreenState extends ConsumerState<PersonasScreen> {
             SliverToBoxAdapter(child: searchField),
             personasAsync.when(
               loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator.adaptive()),
               ),
               error: (err, _) => SliverFillRemaining(
                 child: _ErrorView(
@@ -133,7 +133,8 @@ class _PersonasScreenState extends ConsumerState<PersonasScreen> {
       ),
       floatingActionButton: fab,
       body: personasAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () => ref.read(personasProvider.notifier).refresh(),

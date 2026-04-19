@@ -186,11 +186,11 @@ class _PersonaCreateScreenState extends ConsumerState<PersonaCreateScreen> {
                             ? SizedBox(
                                 width: 18,
                                 height: 18,
-                                child: CircularProgressIndicator(
+                                child: CircularProgressIndicator.adaptive(
                                   strokeWidth: 2,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onPrimary,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Theme.of(context).colorScheme.onPrimary,
+                                  ),
                                 ),
                               )
                             : const Text('Create Persona'),

@@ -86,7 +86,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
       return const SizedBox(
         width: 20,
         height: 20,
-        child: CircularProgressIndicator(strokeWidth: 2),
+        child: CircularProgressIndicator.adaptive(strokeWidth: 2),
       );
     }
     if (_hasError) {

@@ -49,7 +49,7 @@ class SkillsScreen extends ConsumerWidget {
             ),
             skillsAsync.when(
               loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator.adaptive()),
               ),
               error: (err, _) => SliverFillRemaining(
                 child: _ErrorView(
@@ -103,7 +103,8 @@ class SkillsScreen extends ConsumerWidget {
       ),
       floatingActionButton: fab,
       body: skillsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () => ref.read(skillsProvider.notifier).refresh(),

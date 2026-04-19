@@ -152,6 +152,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final text = _inputController.text.trim();
     final pending = ref.read(pendingAttachmentsProvider);
     if (text.isEmpty && pending.isEmpty) return;
+    if (isAppleTouch) HapticFeedback.lightImpact();
     _inputController.clear();
     _inputFocus.requestFocus();
 
@@ -796,7 +797,7 @@ class _MessageBubble extends StatelessWidget {
                     child: SizedBox(
                       width: 24,
                       height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: CircularProgressIndicator.adaptive(strokeWidth: 2),
                     ),
                   ),
                 ),
@@ -853,7 +854,7 @@ class _MessageBubble extends StatelessWidget {
                     ? {'Authorization': 'Bearer $imageAuthToken'}
                     : const {},
                 placeholder: (_, _) =>
-                    const Center(child: CircularProgressIndicator()),
+                    const Center(child: CircularProgressIndicator.adaptive()),
                 errorWidget: (_, _, _) => Center(
                   child: Icon(
                     Icons.broken_image,
@@ -1142,9 +1143,9 @@ class _ReadAloudActionState extends State<_ReadAloudAction> {
                 SizedBox(
                   width: 14,
                   height: 14,
-                  child: CircularProgressIndicator(
+                  child: CircularProgressIndicator.adaptive(
                     strokeWidth: 2,
-                    color: widget.color,
+                    valueColor: AlwaysStoppedAnimation<Color>(widget.color),
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -1441,26 +1442,43 @@ class _InputRow extends StatelessWidget {
                       });
                     }
                   },
-                  child: TextField(
-                    key: const Key('message_input'),
-                    controller: controller,
-                    focusNode: focusNode,
-                    decoration: InputDecoration(
-                      hintText: pendingAttachments.isNotEmpty
-                          ? 'Add a caption...'
-                          : 'Type a message...',
-                      border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      isDense: true,
-                    ),
-                    minLines: 1,
-                    maxLines: 6,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => onSend(),
-                  ),
+                  child: isAppleTouch
+                      ? CupertinoTextField(
+                          key: const Key('message_input'),
+                          controller: controller,
+                          focusNode: focusNode,
+                          placeholder: pendingAttachments.isNotEmpty
+                              ? 'Add a caption...'
+                              : 'Type a message...',
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          minLines: 1,
+                          maxLines: 6,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => onSend(),
+                        )
+                      : TextField(
+                          key: const Key('message_input'),
+                          controller: controller,
+                          focusNode: focusNode,
+                          decoration: InputDecoration(
+                            hintText: pendingAttachments.isNotEmpty
+                                ? 'Add a caption...'
+                                : 'Type a message...',
+                            border: const OutlineInputBorder(),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            isDense: true,
+                          ),
+                          minLines: 1,
+                          maxLines: 6,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => onSend(),
+                        ),
                 ),
               ),
               const SizedBox(width: 8),

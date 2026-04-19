@@ -125,11 +125,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ? SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(
+                            child: CircularProgressIndicator.adaptive(
                               strokeWidth: 2,
-                              color: Theme.of(
-                                buildContext,
-                              ).colorScheme.onPrimary,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Theme.of(buildContext).colorScheme.onPrimary,
+                              ),
                             ),
                           )
                         : const Text('Connect'),

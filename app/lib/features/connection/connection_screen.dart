@@ -263,7 +263,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                                 ? const SizedBox(
                                     height: 18,
                                     width: 18,
-                                    child: CircularProgressIndicator(
+                                    child: CircularProgressIndicator.adaptive(
                                       strokeWidth: 2,
                                     ),
                                   )
@@ -293,7 +293,7 @@ class _EmbeddedServerStatus extends StatelessWidget {
     return embeddedState.when(
       loading: () => const _StatusCard(
         key: Key('embedded_loading'),
-        icon: CircularProgressIndicator(strokeWidth: 2),
+        icon: CircularProgressIndicator.adaptive(strokeWidth: 2),
         message: 'Starting local server…',
       ),
       error: (e, _) => _StatusCard(
@@ -308,7 +308,7 @@ class _EmbeddedServerStatus extends StatelessWidget {
       data: (serverState) => switch (serverState) {
         EmbeddedServerStarting() => const _StatusCard(
           key: Key('embedded_starting'),
-          icon: CircularProgressIndicator(strokeWidth: 2),
+          icon: CircularProgressIndicator.adaptive(strokeWidth: 2),
           message: 'Starting local server…',
         ),
         EmbeddedServerReady(baseUrl: final url) => _StatusCard(

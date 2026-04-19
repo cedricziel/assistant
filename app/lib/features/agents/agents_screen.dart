@@ -29,7 +29,7 @@ class AgentsScreen extends ConsumerWidget {
             ),
             agentsAsync.when(
               loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator.adaptive()),
               ),
               error: (err, _) => SliverFillRemaining(
                 child: _ErrorView(
@@ -76,7 +76,8 @@ class AgentsScreen extends ConsumerWidget {
         ],
       ),
       body: agentsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () => ref.read(agentsProvider.notifier).refresh(),

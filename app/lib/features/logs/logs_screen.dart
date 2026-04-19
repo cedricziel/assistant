@@ -60,7 +60,7 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
                   child: SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator.adaptive(strokeWidth: 2),
                   ),
                 )
               : null,
@@ -94,7 +94,7 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
               SliverToBoxAdapter(child: searchField),
               logsAsync.when(
                 loading: () => const SliverFillRemaining(
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(child: CircularProgressIndicator.adaptive()),
                 ),
                 error: (err, _) => SliverFillRemaining(
                   child: _ErrorView(
@@ -170,7 +170,8 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
             // Log list
             Expanded(
               child: logsAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
+                loading: () =>
+                    const Center(child: CircularProgressIndicator.adaptive()),
                 error: (err, _) => _ErrorView(
                   error: err.toString(),
                   onRetry: () => ref.read(logsProvider.notifier).refresh(),

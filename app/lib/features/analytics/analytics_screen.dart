@@ -28,7 +28,7 @@ class AnalyticsScreen extends ConsumerWidget {
             ),
             analyticsAsync.when(
               loading: () => const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: CircularProgressIndicator.adaptive()),
               ),
               error: (err, _) => SliverFillRemaining(
                 child: _ErrorView(
@@ -65,7 +65,8 @@ class AnalyticsScreen extends ConsumerWidget {
         ],
       ),
       body: analyticsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () =>
+            const Center(child: CircularProgressIndicator.adaptive()),
         error: (err, _) => _ErrorView(
           error: err.toString(),
           onRetry: () => ref.read(analyticsProvider.notifier).refresh(),
