@@ -1170,6 +1170,13 @@ pub async fn quick_message(
             .into_response(),
         Err(e) => {
             warn!("quick-message: orchestrator error for {}: {e}", conv.id);
+            // Clean up the orphan conversation.
+            if let Err(del_err) = store.delete_conversation(conv.id).await {
+                warn!(
+                    "quick-message: failed to delete orphan conversation {}: {del_err}",
+                    conv.id
+                );
+            }
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": "Failed to process message"})),
@@ -3338,7 +3345,11 @@ mod tests {
             json["conversation_id"].as_str().is_some(),
             "should have a conversation_id"
         );
-        assert!(json["answer"].as_str().is_some(), "should have an answer");
+        assert_eq!(
+            json["answer"].as_str().unwrap(),
+            "Hello from quick message",
+            "answer should match the LLM reply"
+        );
     }
 
     #[tokio::test]

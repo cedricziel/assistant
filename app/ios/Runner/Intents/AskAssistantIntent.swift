@@ -38,7 +38,7 @@ struct AskAssistantIntent: AppIntent {
             )
         } catch {
             return .result(
-                dialog: "Something went wrong: \(error.localizedDescription)"
+                dialog: "Something went wrong. Please try again later."
             )
         }
     }

@@ -11,16 +11,22 @@ final class AssistantAPIClient {
     private let timeoutSeconds: TimeInterval = 25
 
     struct QuickMessageResponse: Decodable {
-        let conversation_id: String
-        let message_id: String?
+        let conversationId: String
+        let messageId: String?
         let answer: String
+
+        private enum CodingKeys: String, CodingKey {
+            case conversationId = "conversation_id"
+            case messageId = "message_id"
+            case answer
+        }
     }
 
     enum APIError: Error, LocalizedError {
         case noCredentials
         case invalidURL
         case timeout
-        case serverError(Int, String)
+        case serverError(Int)
         case networkError(Error)
 
         var errorDescription: String? {
@@ -31,10 +37,10 @@ final class AssistantAPIClient {
                 return "Invalid server URL configured."
             case .timeout:
                 return "The request timed out. The assistant may still be working."
-            case .serverError(let code, let message):
-                return "Server error (\(code)): \(message)"
-            case .networkError(let error):
-                return "Network error: \(error.localizedDescription)"
+            case .serverError(let code):
+                return "Server returned status \(code)."
+            case .networkError:
+                return "A network error occurred."
             }
         }
     }
@@ -76,8 +82,7 @@ final class AssistantAPIClient {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
-            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw APIError.serverError(httpResponse.statusCode, errorBody)
+            throw APIError.serverError(httpResponse.statusCode)
         }
 
         return try JSONDecoder().decode(QuickMessageResponse.self, from: data)

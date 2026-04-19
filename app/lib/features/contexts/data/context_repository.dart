@@ -214,9 +214,9 @@ class ContextRepository {
         key: _kSiriAuthToken,
         value: active.authToken!,
       );
-    } else {
-      await _secureStorage.delete(key: _kSiriAuthToken);
     }
+    // When authToken is null it may be a transient read error — preserve the
+    // existing Keychain value rather than deleting it.
   }
 
   // -- Internal helpers -----------------------------------------------------
