@@ -594,6 +594,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
+ "lru",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
