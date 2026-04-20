@@ -82,6 +82,16 @@ import 'package:assistant_api/src/model/set_skill_access_mode_request.dart';
 import 'package:assistant_api/src/model/skill_detail.dart';
 import 'package:assistant_api/src/model/skill_entry_response.dart';
 import 'package:assistant_api/src/model/span_entry_response.dart';
+import 'package:assistant_api/src/model/sse_status_event.dart';
+import 'package:assistant_api/src/model/sse_subagent_completed_event.dart';
+import 'package:assistant_api/src/model/sse_subagent_started_event.dart';
+import 'package:assistant_api/src/model/sse_subagent_status_event.dart';
+import 'package:assistant_api/src/model/sse_subagent_thinking_event.dart';
+import 'package:assistant_api/src/model/sse_subagent_token_event.dart';
+import 'package:assistant_api/src/model/sse_subagent_tool_result_event.dart';
+import 'package:assistant_api/src/model/sse_thinking_event.dart';
+import 'package:assistant_api/src/model/sse_token_event.dart';
+import 'package:assistant_api/src/model/sse_tool_result_event.dart';
 import 'package:assistant_api/src/model/stream_response.dart';
 import 'package:assistant_api/src/model/stream_run_events_query.dart';
 import 'package:assistant_api/src/model/string_list.dart';
@@ -186,6 +196,16 @@ part 'serializers.g.dart';
   SkillDetail,
   SkillEntryResponse,
   SpanEntryResponse,
+  SseStatusEvent,
+  SseSubagentCompletedEvent,
+  SseSubagentStartedEvent,
+  SseSubagentStatusEvent,
+  SseSubagentThinkingEvent,
+  SseSubagentTokenEvent,
+  SseSubagentToolResultEvent,
+  SseThinkingEvent,
+  SseTokenEvent,
+  SseToolResultEvent,
   StreamResponse,
   StreamRunEventsQuery,
   StringList,
@@ -275,8 +295,8 @@ Serializers serializers = (_$serializers.toBuilder()
       ..add(const OneOfSerializer())
       ..add(const AnyOfSerializer())
       ..add(const DateSerializer())
-      ..add(Iso8601DateTimeSerializer())
-    ).build();
+      ..add(Iso8601DateTimeSerializer()))
+    .build();
 
 Serializers standardSerializers =
     (serializers.toBuilder()..addPlugin(StandardJsonPlugin())).build();

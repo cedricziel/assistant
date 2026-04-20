@@ -5957,6 +5957,192 @@
           }
         }
       },
+      "SseStatusEvent": {
+        "type": "object",
+        "description": "SSE `status` event — a status message (e.g. \"Calling tool X\").",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Human-readable status message."
+          }
+        }
+      },
+      "SseSubagentCompletedEvent": {
+        "type": "object",
+        "description": "SSE `subagent_completed` event — a subagent has finished.",
+        "required": [
+          "agent_id",
+          "status"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Unique identifier of the subagent."
+          },
+          "status": {
+            "type": "string",
+            "description": "Completion status (e.g. \"success\", \"error\")."
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Summary of the subagent's work."
+          }
+        }
+      },
+      "SseSubagentStartedEvent": {
+        "type": "object",
+        "description": "SSE `subagent_started` event — a subagent has been spawned.",
+        "required": [
+          "agent_id",
+          "task"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Unique identifier of the subagent."
+          },
+          "task": {
+            "type": "string",
+            "description": "The task description given to the subagent."
+          }
+        }
+      },
+      "SseSubagentStatusEvent": {
+        "type": "object",
+        "description": "SSE `subagent_status` event — a status update from a subagent.",
+        "required": [
+          "agent_id",
+          "data"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "The subagent that emitted this status."
+          },
+          "data": {
+            "$ref": "#/components/schemas/SseStatusEvent",
+            "description": "Inner event payload."
+          }
+        }
+      },
+      "SseSubagentThinkingEvent": {
+        "type": "object",
+        "description": "SSE `subagent_thinking` event — a thinking token from a subagent.",
+        "required": [
+          "agent_id",
+          "data"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "The subagent that produced this thinking token."
+          },
+          "data": {
+            "$ref": "#/components/schemas/SseThinkingEvent",
+            "description": "Inner event payload."
+          }
+        }
+      },
+      "SseSubagentTokenEvent": {
+        "type": "object",
+        "description": "SSE `subagent_token` event — a text token from a subagent's response.",
+        "required": [
+          "agent_id",
+          "data"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "The subagent that produced this token."
+          },
+          "data": {
+            "$ref": "#/components/schemas/SseTokenEvent",
+            "description": "Inner event payload."
+          }
+        }
+      },
+      "SseSubagentToolResultEvent": {
+        "type": "object",
+        "description": "SSE `subagent_tool_result` event — a tool result from a subagent.",
+        "required": [
+          "agent_id",
+          "data"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "The subagent that executed the tool."
+          },
+          "data": {
+            "$ref": "#/components/schemas/SseToolResultEvent",
+            "description": "Inner event payload."
+          }
+        }
+      },
+      "SseThinkingEvent": {
+        "type": "object",
+        "description": "SSE `thinking` event — a thinking/reasoning token from the model.",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The thinking text content."
+          }
+        }
+      },
+      "SseTokenEvent": {
+        "type": "object",
+        "description": "SSE `token` event — a text chunk from the assistant's response.",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The text content of this token chunk."
+          }
+        }
+      },
+      "SseToolResultEvent": {
+        "type": "object",
+        "description": "SSE `tool_result` event — result of a tool invocation.",
+        "required": [
+          "tool_name",
+          "status"
+        ],
+        "properties": {
+          "arguments": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The arguments passed to the tool (JSON string)."
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The tool's output or error message."
+          },
+          "status": {
+            "type": "string",
+            "description": "Whether the tool call succeeded or failed."
+          },
+          "tool_name": {
+            "type": "string",
+            "description": "Name of the tool that was called."
+          }
+        }
+      },
       "StreamResponse": {
         "type": "object",
         "description": "A wrapper for streaming operations encapsulating different response types.\n\nIn SSE, each chunk is one `StreamResponse` serialized as JSON.",
