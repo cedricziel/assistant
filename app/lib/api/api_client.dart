@@ -225,10 +225,44 @@ class ApiClient {
     return null;
   }
 
+  // -- Conversation list stream -----------------------------------------------
+
+  /// Stream conversation list changes via SSE.
+  ///
+  /// Yields [ConversationSnapshotEvent] first (full list), then
+  /// [ConversationUpsertedEvent] and [ConversationDeletedEvent] deltas.
+  Stream<ConversationListEvent> streamConversations({String? agentId}) async* {
+    final queryParams = <String, dynamic>{};
+    if (agentId != null) queryParams['agent_id'] = agentId;
+
+    final Response<ResponseBody> response;
+    try {
+      response = await _dio.get<ResponseBody>(
+        '/api/conversations/stream',
+        queryParameters: queryParams,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {
+            'Accept': 'text/event-stream',
+            'Authorization': 'Bearer $_token',
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw Exception('Failed to connect to conversation stream: ${e.message}');
+    }
+
+    yield* _parseConversationSse(response.data!.stream);
+  }
+
   // -- SSE parser -------------------------------------------------------------
 
   Stream<StreamEvent> _parseSse(Stream<List<int>> byteStream) =>
       parseSseByteStream(byteStream);
+
+  Stream<ConversationListEvent> _parseConversationSse(
+    Stream<List<int>> byteStream,
+  ) => parseConversationSseByteStream(byteStream);
 }
 
 // -- SSE parser (top-level for testability) -----------------------------------
@@ -236,11 +270,10 @@ class ApiClient {
 /// Parses a raw SSE byte stream into [StreamEvent]s.
 ///
 /// Accepts [Stream<List<int>>] or [Stream<Uint8List>] (both are [List<int>]).
-/// Uses [utf8.decode] via [Stream.map] instead of [utf8.decoder] to avoid a
-/// runtime type error on iOS where [Utf8Decoder] is not accepted as a
-/// [StreamTransformer<Uint8List, String>].
+/// Uses [utf8.decoder.bind] for correct handling of multi-byte characters
+/// that may be split across chunk boundaries.
 Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
-  final lines = byteStream.map(utf8.decode).transform(const LineSplitter());
+  final lines = utf8.decoder.bind(byteStream).transform(const LineSplitter());
 
   String? eventType;
   String? dataLine;
@@ -323,6 +356,44 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           yield AudioReadyEvent.fromJson(json);
         } catch (_) {
           // ignore malformed audio_ready events
+        }
+      }
+      eventType = null;
+      dataLine = null;
+    }
+  }
+}
+
+/// Parses a raw SSE byte stream into [ConversationListEvent]s.
+Stream<ConversationListEvent> parseConversationSseByteStream(
+  Stream<List<int>> byteStream,
+) async* {
+  final lines = utf8.decoder.bind(byteStream).transform(const LineSplitter());
+
+  String? eventType;
+  String? dataLine;
+
+  await for (final line in lines) {
+    if (line.startsWith('event:')) {
+      eventType = line.substring('event:'.length).trim();
+    } else if (line.startsWith('data:')) {
+      dataLine = line.substring('data:'.length).trim();
+    } else if (line.isEmpty) {
+      if (eventType != null && dataLine != null) {
+        try {
+          switch (eventType) {
+            case 'snapshot':
+              final json = jsonDecode(dataLine) as List<dynamic>;
+              yield ConversationSnapshotEvent.fromJson(json);
+            case 'upserted':
+              final json = jsonDecode(dataLine) as Map<String, dynamic>;
+              yield ConversationUpsertedEvent.fromJson(json);
+            case 'deleted':
+              final json = jsonDecode(dataLine) as Map<String, dynamic>;
+              yield ConversationDeletedEvent.fromJson(json);
+          }
+        } catch (_) {
+          // ignore malformed conversation events
         }
       }
       eventType = null;

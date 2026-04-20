@@ -19,12 +19,12 @@ class ConversationListState {
     this.error,
   });
 
-  final List<ConversationSummary> conversations;
+  final List<ConversationListEntry> conversations;
   final bool isLoading;
   final String? error;
 
   ConversationListState copyWith({
-    List<ConversationSummary>? conversations,
+    List<ConversationListEntry>? conversations,
     bool? isLoading,
     String? error,
     bool clearError = false,
@@ -37,43 +37,118 @@ class ConversationListState {
   }
 }
 
-/// Manages the list of conversations.
+/// Manages the list of conversations via an SSE stream.
+///
+/// Subscribes to `GET /api/conversations/stream` which sends an initial
+/// `snapshot` event followed by `upserted`/`deleted` deltas. Local state
+/// is patched reactively — no manual refresh needed.
 class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
+  static const _debounceDuration = Duration(milliseconds: 300);
+
+  StreamSubscription<ConversationListEvent>? _subscription;
+  Timer? _debounceTimer;
+  final Map<String, ConversationListEntry> _pendingUpserts = {};
+
   @override
   Future<ConversationListState> build() async {
-    // Watch so we rebuild reactively when the API client becomes available
-    // (e.g. after the active context loads asynchronously on first launch).
     final api = ref.watch(apiClientProvider);
-    if (api == null) return const ConversationListState();
-
-    try {
-      final response = await api.conversations.listConversations();
-      final conversations = response.data!.toList();
-      return ConversationListState(conversations: conversations);
-    } catch (e) {
-      return ConversationListState(error: e.toString());
+    if (api == null) {
+      _resetStream();
+      return const ConversationListState();
     }
+
+    _subscribe(api);
+
+    ref.onDispose(() {
+      _subscription?.cancel();
+      _subscription = null;
+      _debounceTimer?.cancel();
+      _debounceTimer = null;
+    });
+
+    // Return loading state — the snapshot event will replace it.
+    return const ConversationListState(isLoading: true);
+  }
+
+  void _resetStream() {
+    _subscription?.cancel();
+    _subscription = null;
+    _debounceTimer?.cancel();
+    _debounceTimer = null;
+    _pendingUpserts.clear();
+  }
+
+  void _subscribe(ApiClient api) {
+    _resetStream();
+    _subscription = api.streamConversations().listen(
+      _onEvent,
+      onError: (Object e) {
+        state = AsyncData(ConversationListState(error: e.toString()));
+      },
+      cancelOnError: false,
+    );
+  }
+
+  void _onEvent(ConversationListEvent event) {
+    switch (event) {
+      case ConversationSnapshotEvent(:final conversations):
+        _flushPendingUpserts();
+        state = AsyncData(ConversationListState(conversations: conversations));
+      case ConversationUpsertedEvent(:final conversation):
+        _pendingUpserts[conversation.id] = conversation;
+        _debounceTimer?.cancel();
+        _debounceTimer = Timer(_debounceDuration, _flushPendingUpserts);
+      case ConversationDeletedEvent(:final conversationId):
+        _pendingUpserts.remove(conversationId);
+        _remove(conversationId);
+    }
+  }
+
+  void _flushPendingUpserts() {
+    if (_pendingUpserts.isEmpty) return;
+    _debounceTimer?.cancel();
+    _debounceTimer = null;
+
+    final current = state.value ?? const ConversationListState();
+    final ids = _pendingUpserts.keys.toSet();
+    final updated =
+        current.conversations.where((c) => !ids.contains(c.id)).toList()
+          ..addAll(_pendingUpserts.values)
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    _pendingUpserts.clear();
+    state = AsyncData(current.copyWith(conversations: updated));
+  }
+
+  void _upsert(ConversationListEntry conv) {
+    final current = state.value ?? const ConversationListState();
+    final updated = current.conversations.where((c) => c.id != conv.id).toList()
+      ..insert(0, conv)
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    state = AsyncData(current.copyWith(conversations: updated));
+  }
+
+  void _remove(String id) {
+    final current = state.value ?? const ConversationListState();
+    state = AsyncData(
+      current.copyWith(
+        conversations: current.conversations.where((c) => c.id != id).toList(),
+      ),
+    );
   }
 
   ApiClient? get _api => ref.read(apiClientProvider);
 
-  /// Reload conversations from the server.
+  /// Reconnect the stream. Useful as a retry after errors.
   Future<void> refresh() async {
     final api = _api;
     if (api == null) return;
-
     state = const AsyncLoading();
-    try {
-      final response = await api.conversations.listConversations();
-      final conversations = response.data!.toList();
-      state = AsyncData(ConversationListState(conversations: conversations));
-    } catch (e) {
-      state = AsyncData(ConversationListState(error: e.toString()));
-    }
+    _subscribe(api);
   }
 
-  /// Create a new conversation and add it to the list.
-  Future<ConversationSummary?> createConversation({String? title}) async {
+  /// Create a new conversation. Returns the ID for navigation.
+  /// The stream will deliver the list update automatically.
+  Future<String?> createConversation({String? title}) async {
     final api = _api;
     if (api == null) return null;
 
@@ -83,12 +158,7 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
           (b) => b.title = title ?? 'New Chat',
         ),
       );
-      final created = response.data!;
-      final current = state.value ?? const ConversationListState();
-      state = AsyncData(
-        current.copyWith(conversations: [created, ...current.conversations]),
-      );
-      return created;
+      return response.data?.id;
     } catch (e) {
       return null;
     }
@@ -96,28 +166,26 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
 
   /// Add an already-created conversation to the front of the local list.
   ///
-  /// Unlike [createConversation], this does NOT make a network call — it only
-  /// updates local state. Use this when the conversation was already created
-  /// by a different code path (e.g. [ChatNotifier.sendMessage]).
+  /// Accepts a [ConversationSummary] from the generated API and converts it.
+  /// This is a compatibility shim — the stream will also deliver the update,
+  /// but this provides immediate feedback before the event arrives.
   void prependConversation(ConversationSummary conv) {
-    final current = state.value ?? const ConversationListState();
-    state = AsyncData(
-      current.copyWith(conversations: [conv, ...current.conversations]),
+    _upsert(
+      ConversationListEntry(
+        id: conv.id,
+        title: conv.title,
+        createdAt: conv.createdAt.toUtc(),
+        updatedAt: conv.updatedAt.toUtc(),
+      ),
     );
   }
 
   /// Delete a conversation by ID.
+  /// The stream will deliver the list update automatically.
   Future<void> deleteConversation(String id) async {
     final api = _api;
     if (api == null) return;
-
     await api.conversations.deleteConversation(id: id);
-    final current = state.value ?? const ConversationListState();
-    state = AsyncData(
-      current.copyWith(
-        conversations: current.conversations.where((c) => c.id != id).toList(),
-      ),
-    );
   }
 }
 
@@ -912,7 +980,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               pendingQueue: chatState.pendingQueue,
             ),
           );
-          ref.read(conversationListProvider.notifier).refresh();
           return true;
         } else if (event is ErrorEvent) {
           _lastSeq++;
@@ -1101,7 +1168,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               pendingQueue: chatState.pendingQueue,
             ),
           );
-          ref.read(conversationListProvider.notifier).refresh();
           return;
         } else if (event is ErrorEvent) {
           unawaited(tokenController.close());
@@ -1289,7 +1355,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
           // Refresh conversation list to update timestamps/titles.
-          ref.read(conversationListProvider.notifier).refresh();
           return;
         } else if (event is AudioReadyEvent) {
           _lastSeq++;

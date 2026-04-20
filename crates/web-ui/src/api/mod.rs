@@ -82,7 +82,8 @@ use std::collections::HashMap;
 use assistant_core::{ConversationConfig, Interface, MessageRole};
 use assistant_runtime::{AssistantInterface, CommandRegistry, Orchestrator, OrchestratorEvent};
 use assistant_storage::{
-    AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore, RunBroadcaster,
+    AttachmentStore, CommandEventStore, ConversationBroadcast, ConversationEvent,
+    ConversationEventStore, ConversationStore, InMemoryConversationBroadcaster, RunBroadcaster,
 };
 use axum::{
     Json, Router,
@@ -130,6 +131,8 @@ pub struct ApiState {
     pub command_registry: Arc<CommandRegistry>,
     /// Durable store for slash-command events.
     pub command_event_store: CommandEventStore,
+    /// Conversation-list broadcaster for reactive SSE streaming.
+    pub conversation_broadcaster: Arc<dyn ConversationBroadcast>,
     /// Per-conversation config overrides (model selection, etc.).
     pub conversation_configs: Arc<RwLock<HashMap<Uuid, ConversationConfig>>>,
     /// Concrete orchestrator reference for command execution.
@@ -164,6 +167,7 @@ impl ApiState {
             attachment_store,
             command_registry: Arc::new(CommandRegistry::new()),
             command_event_store,
+            conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
             conversation_configs: Arc::new(RwLock::new(HashMap::new())),
             orchestrator_ref,
             active_turns: Arc::new(RwLock::new(HashMap::new())),
@@ -312,6 +316,7 @@ pub fn api_router() -> Router<ApiState> {
     Router::new()
         .route("/capabilities", get(get_capabilities))
         .route("/conversations", get(list_conversations))
+        .route("/conversations/stream", get(stream_conversations))
         .route("/conversations", post(create_conversation))
         .route("/conversations/{id}", get(get_conversation))
         .route("/conversations/{id}", delete(delete_conversation))
@@ -381,6 +386,136 @@ pub async fn list_conversations(State(state): State<ApiState>) -> Response {
     }
 }
 
+/// Query parameters for `GET /api/conversations/stream`.
+#[derive(Debug, Deserialize)]
+pub struct StreamConversationsQuery {
+    /// Filter events to a single agent. If omitted, events for all agents are streamed.
+    pub agent_id: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/conversations/stream",
+    tag = "conversations",
+    params(
+        ("agent_id" = Option<String>, Query, description = "Filter events to a single agent. If omitted, events for all agents are streamed."),
+    ),
+    responses(
+        (status = 200, description = "SSE event stream. Events: `snapshot` (full list), `upserted` (single ConversationSummary), `deleted` ({conversation_id})", content_type = "text/event-stream"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Failed to fetch conversations"),
+    ),
+    security(("bearer_token" = []))
+)]
+/// `GET /api/conversations/stream` — SSE stream of conversation list changes.
+///
+/// Sends an initial `snapshot` event with the full conversation list, then
+/// pushes `upserted` and `deleted` delta events as conversations change.
+pub async fn stream_conversations(
+    State(state): State<ApiState>,
+    axum::extract::Query(query): axum::extract::Query<StreamConversationsQuery>,
+) -> Response {
+    let broadcaster = state.conversation_broadcaster.clone();
+    let pool = state.pool.clone();
+
+    // D4: subscribe *before* snapshot to avoid race window.
+    let mut rx = broadcaster.subscribe();
+
+    // Resolve the agent scope for the snapshot.
+    let default_agent_id = state.agent_id.read().await.clone();
+    let filter_agent_id = query.agent_id.clone();
+    let snapshot_agent_id = filter_agent_id
+        .as_deref()
+        .unwrap_or(&default_agent_id)
+        .to_string();
+
+    // Fetch snapshot from DB.
+    let store = ConversationStore::for_agent(pool.clone(), &snapshot_agent_id);
+    let snapshot = match store.list_conversations().await {
+        Ok(convs) => convs
+            .into_iter()
+            .map(|c| ConversationSummary {
+                id: c.id,
+                title: c.title.unwrap_or_else(|| "Untitled".into()),
+                created_at: c.created_at,
+                updated_at: c.updated_at,
+            })
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            warn!("Failed to list conversations for stream snapshot: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to fetch conversations",
+            )
+                .into_response();
+        }
+    };
+
+    let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+
+    tokio::spawn(async move {
+        // Send snapshot.
+        let snapshot_json = serde_json::to_string(&snapshot).unwrap_or_default();
+        let event = Event::default().event("snapshot").data(snapshot_json);
+        if sse_tx.send(Ok(event)).await.is_err() {
+            return;
+        }
+
+        // Forward delta events.
+        loop {
+            match rx.recv().await {
+                Ok(conv_event) => {
+                    let sse_event = match &conv_event {
+                        ConversationEvent::Upserted(record) => {
+                            // Apply agent filter.
+                            if let Some(ref filter) = filter_agent_id
+                                && record.agent_id != *filter
+                            {
+                                continue;
+                            }
+                            let summary = ConversationSummary {
+                                id: record.id,
+                                title: record.title.clone().unwrap_or_else(|| "Untitled".into()),
+                                created_at: record.created_at,
+                                updated_at: record.updated_at,
+                            };
+                            let json = serde_json::to_string(&summary).unwrap_or_default();
+                            Event::default().event("upserted").data(json)
+                        }
+                        ConversationEvent::Deleted {
+                            conversation_id,
+                            agent_id,
+                        } => {
+                            if let Some(ref filter) = filter_agent_id
+                                && agent_id != filter
+                            {
+                                continue;
+                            }
+                            let json = serde_json::json!({
+                                "conversation_id": conversation_id,
+                            })
+                            .to_string();
+                            Event::default().event("deleted").data(json)
+                        }
+                    };
+                    if sse_tx.send(Ok(sse_event)).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    warn!("conversation stream lagged by {n} events");
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    break;
+                }
+            }
+        }
+    });
+
+    Sse::new(ReceiverStream::new(sse_rx)).into_response()
+}
+
 /// `POST /api/conversations` — create a new conversation.
 #[utoipa::path(
     post,
@@ -399,7 +534,8 @@ pub async fn create_conversation(
     Json(body): Json<CreateConversationRequest>,
 ) -> Response {
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool, &agent_id);
+    let store = ConversationStore::for_agent(state.pool, &agent_id)
+        .with_broadcaster(state.conversation_broadcaster.clone());
     let title = body.title.as_deref().unwrap_or("New Chat");
     match store.create_conversation(Some(title)).await {
         Ok(c) => (
@@ -583,7 +719,8 @@ pub async fn delete_conversation(
     };
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool, &agent_id);
+    let store = ConversationStore::for_agent(state.pool, &agent_id)
+        .with_broadcaster(state.conversation_broadcaster.clone());
     match store.delete_conversation(conv_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
@@ -624,7 +761,8 @@ pub async fn update_conversation(
     };
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool, &agent_id);
+    let store = ConversationStore::for_agent(state.pool, &agent_id)
+        .with_broadcaster(state.conversation_broadcaster.clone());
     match store.update_title(conv_id, &body.title).await {
         Ok(()) => {}
         Err(e) if e.to_string().contains("not found") => {
@@ -693,7 +831,8 @@ pub async fn send_message(
 
     // Verify the conversation exists before streaming.
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id)
+        .with_broadcaster(state.conversation_broadcaster.clone());
 
     match store.get_conversation(conv_id).await {
         Ok(None) => {
@@ -1182,7 +1321,8 @@ pub async fn quick_message(
     } else {
         state.agent_id.read().await.clone()
     };
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id)
+        .with_broadcaster(state.conversation_broadcaster.clone());
 
     // Build the prompt: prepend context if provided.
     let prompt = match body.context.as_deref() {
@@ -1965,7 +2105,7 @@ mod tests {
     use assistant_runtime::{CommandRegistry, Orchestrator};
     use assistant_storage::{
         AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
-        RunBroadcaster, SkillRegistry, StorageLayer,
+        InMemoryConversationBroadcaster, RunBroadcaster, SkillRegistry, StorageLayer,
     };
     use assistant_tool_executor::ToolExecutor;
     use assistant_transcription::{
@@ -2069,6 +2209,7 @@ mod tests {
             attachment_store: AttachmentStore::new(storage.pool.clone()),
             command_registry: Arc::new(CommandRegistry::new()),
             command_event_store: CommandEventStore::new(storage.pool.clone()),
+            conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
             conversation_configs: Arc::new(RwLock::new(HashMap::new())),
             orchestrator_ref,
             active_turns: Arc::new(RwLock::new(HashMap::new())),
@@ -2131,6 +2272,7 @@ mod tests {
             attachment_store: AttachmentStore::new(storage.pool.clone()),
             command_registry: Arc::new(CommandRegistry::new()),
             command_event_store: CommandEventStore::new(storage.pool.clone()),
+            conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
             conversation_configs: Arc::new(RwLock::new(HashMap::new())),
             orchestrator_ref,
             active_turns: Arc::new(RwLock::new(HashMap::new())),
@@ -3149,6 +3291,7 @@ mod tests {
             attachment_store: AttachmentStore::new(sl.pool.clone()),
             command_registry: Arc::new(CommandRegistry::new()),
             command_event_store: CommandEventStore::new(sl.pool.clone()),
+            conversation_broadcaster: Arc::new(InMemoryConversationBroadcaster::new()),
             conversation_configs: Arc::new(RwLock::new(HashMap::new())),
             orchestrator_ref,
             active_turns: Arc::new(RwLock::new(HashMap::new())),
@@ -3609,5 +3752,245 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::CREATED);
         let json = body_json(resp.into_body()).await;
         assert_eq!(json["answer"].as_str().unwrap(), "compat answer");
+    }
+
+    // -- stream_conversations tests --------------------------------------------
+
+    #[tokio::test]
+    async fn stream_conversations_returns_snapshot() {
+        let (state, storage) = event_log_state().await;
+
+        // Create a conversation so the snapshot is non-empty.
+        let store = ConversationStore::for_agent(storage.pool.clone(), "default");
+        store.create_conversation(Some("Hello")).await.unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/conversations/stream")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = body_bytes(resp.into_body()).await;
+        let text = String::from_utf8_lossy(&body);
+
+        // Should contain a snapshot event.
+        assert!(
+            text.contains("event: snapshot"),
+            "response should contain snapshot event, got: {text}"
+        );
+        assert!(
+            text.contains("Hello"),
+            "snapshot should contain the conversation title"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_conversations_forwards_upserted_delta() {
+        let (state, _storage) = event_log_state().await;
+        let broadcaster = state.conversation_broadcaster.clone();
+        let pool = state.pool.clone();
+
+        // Spawn the SSE stream reader in a task.
+        let app = app(state);
+        let handle = tokio::spawn(async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            body_bytes(resp.into_body()).await
+        });
+
+        // Give the stream a moment to subscribe.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Create a conversation through a broadcaster-wired store.
+        let store = ConversationStore::for_agent(pool, "default").with_broadcaster(broadcaster);
+        store.create_conversation(Some("Delta Test")).await.unwrap();
+
+        // Give the stream a moment to forward the event, then drop broadcaster
+        // to close the channel so the SSE task finishes.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(store);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("stream should finish within timeout")
+            .expect("stream task should not panic");
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(
+            text.contains("event: upserted"),
+            "stream should contain upserted event, got: {text}"
+        );
+        assert!(
+            text.contains("Delta Test"),
+            "upserted event should contain the conversation title"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_conversations_filters_by_agent_id() {
+        use assistant_storage::ConversationEvent;
+
+        let (state, _storage) = event_log_state().await;
+        let broadcaster = state.conversation_broadcaster.clone();
+
+        // Stream filtered to agent "work".
+        let app = app(state);
+        let handle = tokio::spawn(async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream?agent_id=work")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            body_bytes(resp.into_body()).await
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Emit an event for agent "default" — should be filtered out.
+        broadcaster.emit(ConversationEvent::Upserted(
+            assistant_storage::ConversationRecord {
+                id: Uuid::new_v4(),
+                agent_id: "default".to_string(),
+                title: Some("DefaultConv".to_string()),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+        ));
+
+        // Emit an event for agent "work" — should pass through.
+        broadcaster.emit(ConversationEvent::Upserted(
+            assistant_storage::ConversationRecord {
+                id: Uuid::new_v4(),
+                agent_id: "work".to_string(),
+                title: Some("WorkConv".to_string()),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+        ));
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(broadcaster);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("timeout")
+            .expect("no panic");
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(
+            !text.contains("DefaultConv"),
+            "should NOT contain event for wrong agent, got: {text}"
+        );
+        assert!(
+            text.contains("WorkConv"),
+            "should contain event for filtered agent, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_conversations_e2e_create_and_delete() {
+        let (state, _storage) = event_log_state().await;
+
+        // Clone app router so we can issue multiple requests.
+        let router = app(state);
+
+        // Spawn the SSE stream reader in a background task.
+        let stream_router = router.clone();
+        let handle = tokio::spawn(async move {
+            let resp = stream_router
+                .oneshot(
+                    Request::builder()
+                        .uri("/conversations/stream")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            body_bytes(resp.into_body()).await
+        });
+
+        // Give the stream time to subscribe.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Create a conversation via REST.
+        let create_resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/conversations")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"title":"E2E Conv"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_resp.status(), StatusCode::CREATED);
+        let json = body_json(create_resp.into_body()).await;
+        let conv_id = json["id"].as_str().expect("should have an id").to_string();
+
+        // Give the stream time to forward the upserted event.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Delete the conversation via REST.
+        let delete_resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/conversations/{conv_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_resp.status(), StatusCode::NO_CONTENT);
+
+        // Give the stream time to forward the deleted event, then drop
+        // broadcaster indirectly by dropping the router.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(router);
+
+        let body = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("stream should finish within timeout")
+            .expect("stream task should not panic");
+        let text = String::from_utf8_lossy(&body);
+
+        assert!(
+            text.contains("event: upserted"),
+            "stream should contain upserted event from REST create, got: {text}"
+        );
+        assert!(
+            text.contains("E2E Conv"),
+            "upserted event should contain conversation title"
+        );
+        assert!(
+            text.contains("event: deleted"),
+            "stream should contain deleted event from REST delete, got: {text}"
+        );
+        assert!(
+            text.contains(&conv_id),
+            "deleted event should contain the conversation ID"
+        );
     }
 }

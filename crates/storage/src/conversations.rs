@@ -1,10 +1,14 @@
 //! Conversation and message persistence backed by the `conversations` and `messages` tables.
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use assistant_core::{Message, MessageRole};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
+
+use crate::conversation_broadcaster::{ConversationBroadcast, ConversationEvent};
 
 /// A stored conversation record (metadata only — messages are loaded separately).
 #[derive(Debug, Clone)]
@@ -20,6 +24,7 @@ pub struct ConversationRecord {
 pub struct ConversationStore {
     pool: SqlitePool,
     agent_id: String,
+    broadcaster: Option<Arc<dyn ConversationBroadcast>>,
 }
 
 impl ConversationStore {
@@ -27,6 +32,7 @@ impl ConversationStore {
         Self {
             pool,
             agent_id: "default".to_string(),
+            broadcaster: None,
         }
     }
 
@@ -34,7 +40,14 @@ impl ConversationStore {
         Self {
             pool,
             agent_id: agent_id.into(),
+            broadcaster: None,
         }
+    }
+
+    /// Attach a broadcaster that will receive events on every conversation mutation.
+    pub fn with_broadcaster(mut self, broadcaster: Arc<dyn ConversationBroadcast>) -> Self {
+        self.broadcaster = Some(broadcaster);
+        self
     }
 
     // -----------------------------------------------------------------------
@@ -66,9 +79,16 @@ impl ConversationStore {
         self.ensure_conversation_agent(id).await?;
 
         // Fetch whatever row is there (new or existing).
-        self.get_conversation(id)
+        let conv = self
+            .get_conversation(id)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Conversation {} not found after upsert", id))
+            .ok_or_else(|| anyhow::anyhow!("Conversation {} not found after upsert", id))?;
+
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(conv.clone()));
+        }
+
+        Ok(conv)
     }
 
     /// Create a new conversation row and return its metadata.
@@ -88,13 +108,19 @@ impl ConversationStore {
         .execute(&self.pool)
         .await?;
 
-        Ok(ConversationRecord {
+        let conv = ConversationRecord {
             id,
             agent_id: self.agent_id.clone(),
             title: title.map(|s| s.to_string()),
             created_at: now,
             updated_at: now,
-        })
+        };
+
+        if let Some(b) = &self.broadcaster {
+            b.emit(ConversationEvent::Upserted(conv.clone()));
+        }
+
+        Ok(conv)
     }
 
     /// Fetch a conversation by ID. Returns `None` if not found.
@@ -170,6 +196,13 @@ impl ConversationStore {
         if result.rows_affected() == 0 {
             anyhow::bail!("conversation {id} not found");
         }
+
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
+        }
+
         Ok(())
     }
 
@@ -201,11 +234,21 @@ impl ConversationStore {
 
     pub async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
-        sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
+        let result = sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
             .bind(&id_str)
             .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
+
+        if result.rows_affected() > 0
+            && let Some(b) = &self.broadcaster
+        {
+            b.emit(ConversationEvent::Deleted {
+                conversation_id: id,
+                agent_id: self.agent_id.clone(),
+            });
+        }
+
         Ok(())
     }
 
@@ -246,6 +289,12 @@ impl ConversationStore {
             .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
+
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(msg.conversation_id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
+        }
 
         Ok(())
     }
@@ -401,7 +450,12 @@ fn parse_role(s: &str) -> Result<MessageRole> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::StorageLayer;
+    use crate::conversation_broadcaster::{
+        ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
+    };
     use assistant_core::Message;
 
     #[tokio::test]
@@ -516,5 +570,127 @@ mod tests {
             err.to_string().contains("belongs to agent"),
             "expected ownership error, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_create_conversation_emits_upserted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+
+        let conv = store.create_conversation(Some("Hello")).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => {
+                assert_eq!(
+                    record.id, conv.id,
+                    "event should carry created conversation id"
+                );
+            }
+            _ => panic!("expected Upserted event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_conversation_emits_deleted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+
+        let conv = store.create_conversation(Some("To delete")).await.unwrap();
+
+        // Subscribe after create to skip the Upserted event from creation.
+        let mut rx = broadcaster.subscribe();
+
+        store.delete_conversation(conv.id).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
+        match event {
+            ConversationEvent::Deleted {
+                conversation_id,
+                agent_id,
+            } => {
+                assert_eq!(conversation_id, conv.id, "deleted id should match");
+                assert_eq!(agent_id, "default", "agent_id should match");
+            }
+            _ => panic!("expected Deleted event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_title_emits_upserted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+
+        let conv = store.create_conversation(Some("Old")).await.unwrap();
+
+        let mut rx = broadcaster.subscribe();
+        store.update_title(conv.id, "New").await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => {
+                assert_eq!(
+                    record.id, conv.id,
+                    "updated event should carry conversation id"
+                );
+                assert_eq!(
+                    record.title.as_deref(),
+                    Some("New"),
+                    "title should be updated"
+                );
+            }
+            _ => panic!("expected Upserted event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_save_message_emits_upserted_event() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let broadcaster = Arc::new(InMemoryConversationBroadcaster::new());
+
+        let store = storage
+            .conversation_store()
+            .with_broadcaster(broadcaster.clone());
+
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut rx = broadcaster.subscribe();
+
+        let mut msg = Message::user(conv.id, "Hello");
+        msg.turn = 1;
+        store.save_message(&msg).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
+        match event {
+            ConversationEvent::Upserted(record) => {
+                assert_eq!(record.id, conv.id, "should emit for the conversation");
+            }
+            _ => panic!("expected Upserted event"),
+        }
     }
 }

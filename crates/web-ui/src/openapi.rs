@@ -117,6 +117,7 @@ pub struct ApiErrorResponse {
     paths(
         crate::api::get_capabilities,
         crate::api::list_conversations,
+        crate::api::stream_conversations,
         crate::api::create_conversation,
         crate::api::get_conversation,
         crate::api::delete_conversation,

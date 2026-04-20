@@ -614,6 +614,46 @@
         ]
       }
     },
+    "/api/conversations/stream": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "`GET /api/conversations/stream` — SSE stream of conversation list changes.",
+        "description": "Sends an initial `snapshot` event with the full conversation list, then\npushes `upserted` and `deleted` delta events as conversations change.",
+        "operationId": "stream_conversations",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "description": "Filter events to a single agent. If omitted, events for all agents are streamed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE event stream. Events: `snapshot` (full list), `upserted` (single ConversationSummary), `deleted` ({conversation_id})",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Failed to fetch conversations"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/api/conversations/{id}": {
       "get": {
         "tags": [

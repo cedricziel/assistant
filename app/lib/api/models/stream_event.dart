@@ -6,6 +6,83 @@ sealed class StreamEvent {
   const StreamEvent();
 }
 
+// -- Conversation list stream events -----------------------------------------
+
+/// Sealed class for events from `GET /api/conversations/stream`.
+sealed class ConversationListEvent {
+  const ConversationListEvent();
+}
+
+/// Full snapshot of the conversation list, sent on initial connect.
+class ConversationSnapshotEvent extends ConversationListEvent {
+  const ConversationSnapshotEvent(this.conversations);
+
+  final List<ConversationListEntry> conversations;
+
+  factory ConversationSnapshotEvent.fromJson(List<dynamic> json) {
+    return ConversationSnapshotEvent(
+      json
+          .cast<Map<String, dynamic>>()
+          .map(ConversationListEntry.fromJson)
+          .toList(),
+    );
+  }
+}
+
+/// A conversation was created or updated.
+class ConversationUpsertedEvent extends ConversationListEvent {
+  const ConversationUpsertedEvent(this.conversation);
+
+  final ConversationListEntry conversation;
+
+  factory ConversationUpsertedEvent.fromJson(Map<String, dynamic> json) {
+    return ConversationUpsertedEvent(ConversationListEntry.fromJson(json));
+  }
+}
+
+/// A conversation was deleted.
+class ConversationDeletedEvent extends ConversationListEvent {
+  const ConversationDeletedEvent(this.conversationId);
+
+  final String conversationId;
+
+  factory ConversationDeletedEvent.fromJson(Map<String, dynamic> json) {
+    final conversationId = json['conversation_id'] as String?;
+    if (conversationId == null || conversationId.isEmpty) {
+      throw const FormatException('conversation_id is required');
+    }
+    return ConversationDeletedEvent(conversationId);
+  }
+}
+
+/// Lightweight conversation summary carried in stream events.
+class ConversationListEntry {
+  const ConversationListEntry({
+    required this.id,
+    required this.title,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String title;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  factory ConversationListEntry.fromJson(Map<String, dynamic> json) {
+    final id = json['id'] as String?;
+    if (id == null || id.isEmpty) {
+      throw const FormatException('id is required');
+    }
+    return ConversationListEntry(
+      id: id,
+      title: json['title'] as String? ?? 'Untitled',
+      createdAt: DateTime.parse(json['created_at'] as String),
+      updatedAt: DateTime.parse(json['updated_at'] as String),
+    );
+  }
+}
+
 /// An incremental text token emitted by the assistant.
 ///
 /// Corresponds to `event:token` in the SSE stream.  The caller should
