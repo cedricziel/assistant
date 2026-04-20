@@ -197,10 +197,10 @@ impl ConversationStore {
             anyhow::bail!("conversation {id} not found");
         }
 
-        if let Some(b) = &self.broadcaster {
-            if let Ok(Some(conv)) = self.get_conversation(id).await {
-                b.emit(ConversationEvent::Upserted(conv));
-            }
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
         }
 
         Ok(())
@@ -288,10 +288,10 @@ impl ConversationStore {
             .execute(&self.pool)
             .await?;
 
-        if let Some(b) = &self.broadcaster {
-            if let Ok(Some(conv)) = self.get_conversation(msg.conversation_id).await {
-                b.emit(ConversationEvent::Upserted(conv));
-            }
+        if let Some(b) = &self.broadcaster
+            && let Ok(Some(conv)) = self.get_conversation(msg.conversation_id).await
+        {
+            b.emit(ConversationEvent::Upserted(conv));
         }
 
         Ok(())

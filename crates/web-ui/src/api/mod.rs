@@ -454,10 +454,10 @@ pub async fn stream_conversations(
                     let sse_event = match &conv_event {
                         ConversationEvent::Upserted(record) => {
                             // Apply agent filter.
-                            if let Some(ref filter) = filter_agent_id {
-                                if record.agent_id != *filter {
-                                    continue;
-                                }
+                            if let Some(ref filter) = filter_agent_id
+                                && record.agent_id != *filter
+                            {
+                                continue;
                             }
                             let summary = ConversationSummary {
                                 id: record.id,
@@ -472,10 +472,10 @@ pub async fn stream_conversations(
                             conversation_id,
                             agent_id,
                         } => {
-                            if let Some(ref filter) = filter_agent_id {
-                                if agent_id != filter {
-                                    continue;
-                                }
+                            if let Some(ref filter) = filter_agent_id
+                                && agent_id != filter
+                            {
+                                continue;
                             }
                             let json = serde_json::json!({
                                 "conversation_id": conversation_id,
