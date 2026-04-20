@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +10,7 @@ import 'features/embedded_server/embedded_server_provider.dart';
 import 'features/notifications/notification_badge_notifier.dart';
 import 'features/pwa/pwa_update_service.dart';
 import 'router/app_router.dart';
+import 'shared/error_screen.dart';
 import 'shared/platform/adaptive_app.dart';
 import 'tray/platform_init.dart';
 import 'tray/tray_platform.dart';
@@ -19,6 +22,21 @@ final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // -- Global error handling --------------------------------------------------
+  // Replace the default red/grey error widget with a styled error screen that
+  // shows crash details visibly instead of only logging to the console.
+  ErrorWidget.builder = (details) => ErrorScreen(details: details);
+
+  // Catch async errors that escape the Flutter framework (e.g. unhandled
+  // Future rejections). Log them so they appear in the browser console /
+  // device log rather than being silently swallowed.
+  PlatformDispatcher.instance.onError = (error, stack) {
+    FlutterError.reportError(
+      FlutterErrorDetails(exception: error, stack: stack),
+    );
+    return true;
+  };
 
   // Use /path URLs instead of /#/path. The Rust server's SPA handler serves
   // index.html for every unmatched path, so deep-linking works correctly.
