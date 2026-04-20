@@ -234,13 +234,15 @@ impl ConversationStore {
 
     pub async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
-        sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
+        let result = sqlx::query("DELETE FROM conversations WHERE id = ?1 AND agent_id = ?2")
             .bind(&id_str)
             .bind(&self.agent_id)
             .execute(&self.pool)
             .await?;
 
-        if let Some(b) = &self.broadcaster {
+        if result.rows_affected() > 0
+            && let Some(b) = &self.broadcaster
+        {
             b.emit(ConversationEvent::Deleted {
                 conversation_id: id,
                 agent_id: self.agent_id.clone(),

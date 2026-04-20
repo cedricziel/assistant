@@ -831,7 +831,8 @@ pub async fn send_message(
 
     // Verify the conversation exists before streaming.
     let agent_id = state.agent_id.read().await.clone();
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id)
+        .with_broadcaster(state.conversation_broadcaster.clone());
 
     match store.get_conversation(conv_id).await {
         Ok(None) => {
@@ -1320,7 +1321,8 @@ pub async fn quick_message(
     } else {
         state.agent_id.read().await.clone()
     };
-    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id);
+    let store = ConversationStore::for_agent(state.pool.clone(), &agent_id)
+        .with_broadcaster(state.conversation_broadcaster.clone());
 
     // Build the prompt: prepend context if provided.
     let prompt = match body.context.as_deref() {
