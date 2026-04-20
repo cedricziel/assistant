@@ -19,6 +19,11 @@
           "type": "yaml",
           "path": "app/pubspec.yaml",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "openapi.json",
+          "jsonpath": "$.info.version"
         }
       ]
     }
