@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:audioplayers_platform_interface/audioplayers_platform_interface.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:assistant_app/api/connectivity_provider.dart';
 import 'package:assistant_app/features/chat/audio_player_widget.dart';
 import 'package:assistant_app/features/chat/voice_recorder_button.dart';
 
@@ -394,16 +396,22 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('VoiceRecorderButton', () {
+    /// Wraps a VoiceRecorderButton in the required ProviderScope.
+    Widget wrapWithProviders(Widget child) {
+      return ProviderScope(
+        overrides: [isOnlineProvider.overrideWithValue(true)],
+        child: MaterialApp(home: Scaffold(body: child)),
+      );
+    }
+
     testWidgets('initially shows the mic icon and no stop icon', (
       tester,
     ) async {
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: VoiceRecorderButton(
-              onRecordingComplete: (bytes, mime) {},
-              onError: (_) {},
-            ),
+        wrapWithProviders(
+          VoiceRecorderButton(
+            onRecordingComplete: (bytes, mime) {},
+            onError: (_) {},
           ),
         ),
       );
@@ -420,12 +428,10 @@ void main() {
       String? capturedError;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: VoiceRecorderButton(
-              onRecordingComplete: (bytes, mime) {},
-              onError: (e) => capturedError = e,
-            ),
+        wrapWithProviders(
+          VoiceRecorderButton(
+            onRecordingComplete: (bytes, mime) {},
+            onError: (e) => capturedError = e,
           ),
         ),
       );
@@ -460,13 +466,8 @@ void main() {
       _setPathProviderMock();
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: VoiceRecorderButton(
-              onRecordingComplete: (_, _) {},
-              onError: (_) {},
-            ),
-          ),
+        wrapWithProviders(
+          VoiceRecorderButton(onRecordingComplete: (_, _) {}, onError: (_) {}),
         ),
       );
 
@@ -506,15 +507,13 @@ void main() {
       String? capturedMime;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: VoiceRecorderButton(
-              onRecordingComplete: (bytes, mime) {
-                capturedBytes = bytes;
-                capturedMime = mime;
-              },
-              onError: (_) {},
-            ),
+        wrapWithProviders(
+          VoiceRecorderButton(
+            onRecordingComplete: (bytes, mime) {
+              capturedBytes = bytes;
+              capturedMime = mime;
+            },
+            onError: (_) {},
           ),
         ),
       );
