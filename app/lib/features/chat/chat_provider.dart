@@ -220,7 +220,9 @@ class ToolCallRecord {
     required this.status,
     this.arguments,
     this.result,
-  });
+    DateTime? startedAt,
+    this.duration,
+  }) : startedAt = startedAt ?? DateTime.now();
 
   final String toolName;
 
@@ -233,6 +235,12 @@ class ToolCallRecord {
 
   /// The tool's output, truncated for display (populated on completion).
   String? result;
+
+  /// When this tool call started (set on StatusEvent).
+  final DateTime startedAt;
+
+  /// Elapsed time from start to completion. Null while pending.
+  Duration? duration;
 }
 
 /// The kind of entry shown in the chat timeline.
@@ -282,6 +290,11 @@ class ChatMessage {
   final String role;
   String content;
   bool isStreaming;
+
+  /// Whether this timeline entry has been superseded by newer activity
+  /// (e.g. final answer streaming has begun). Used to derive [EntryState.stale].
+  bool isStale = false;
+
   MessageStatus status;
 
   /// Non-null when the server has produced audio for this assistant message.
@@ -315,6 +328,10 @@ class ChatMessage {
 
   /// Reasoning text for [TimelineEntryType.thinking] entries.
   final String? thinkingContent;
+
+  /// Live stream of thinking tokens during streaming. Used by the timeline
+  /// entry for incremental rendering. Null for non-streaming messages.
+  Stream<String>? thinkingTokenStream;
 
   /// Subagent identifier for [TimelineEntryType.subagent] entries.
   final String? subagentId;
@@ -490,6 +507,13 @@ class ChatState {
 class ChatNotifier extends AsyncNotifier<ChatState> {
   bool _cancelled = false;
   bool _draining = false;
+  StreamController<String>? _thinkingController;
+
+  void _closeThinkingController() {
+    final c = _thinkingController;
+    _thinkingController = null;
+    if (c != null) unawaited(c.close());
+  }
 
   /// Extract a tool name from a [StatusEvent] message.
   ///
@@ -511,6 +535,30 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       'denied' => ToolCallStatus.denied,
       _ => ToolCallStatus.ok,
     };
+  }
+
+  /// Mark all currently-active timeline entries (thinking, subagent) as
+  /// complete. Called when a new timeline entry starts, so the previous one
+  /// auto-collapses.
+  void _completeActiveTimelineEntries(List<ChatMessage> msgs) {
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i].timelineType != TimelineEntryType.message &&
+          msgs[i].isStreaming) {
+        msgs[i].isStreaming = false;
+      }
+    }
+  }
+
+  /// Mark all timeline entries as stale — called when final answer tokens
+  /// begin streaming, causing all timeline entries to collapse with reduced
+  /// opacity.
+  void _markTimelineEntriesStale(List<ChatMessage> msgs) {
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i].timelineType != TimelineEntryType.message) {
+        msgs[i].isStreaming = false;
+        msgs[i].isStale = true;
+      }
+    }
   }
 
   /// Push a pending [ToolCallRecord] onto the streaming assistant message and
@@ -546,6 +594,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         msgs[idx].toolCalls[callIdx].status = resolvedStatus;
         msgs[idx].toolCalls[callIdx].arguments = event.arguments;
         msgs[idx].toolCalls[callIdx].result = event.result;
+        msgs[idx].toolCalls[callIdx].duration = DateTime.now().difference(
+          msgs[idx].toolCalls[callIdx].startedAt,
+        );
       } else {
         // No matching pending chip — append a resolved record directly.
         msgs[idx].toolCalls.add(
@@ -572,7 +623,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   /// Insert or update a thinking timeline entry in the message list.
   /// Multiple [ThinkingEvent]s accumulate into a single entry.
+  /// Also feeds tokens to the thinking stream for incremental rendering.
   void _onThinkingEvent(ChatState chatState, ThinkingEvent event) {
+    // Feed token to the thinking stream controller.
+    _thinkingController?.add(event.content);
+
     final msgs = List<ChatMessage>.from(chatState.messages);
     final existing = msgs.indexWhere(
       (m) => m.timelineType == TimelineEntryType.thinking && m.isStreaming,
@@ -584,6 +639,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         thinkingContent: (prev.thinkingContent ?? '') + event.content,
       );
     } else {
+      // Complete previous active timeline entries before starting a new one.
+      _completeActiveTimelineEntries(msgs);
       // Insert a new thinking entry before the assistant-streaming placeholder.
       final insertIdx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
       final entry = ChatMessage(
@@ -594,6 +651,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         timelineType: TimelineEntryType.thinking,
         thinkingContent: event.content,
       );
+      entry.thinkingTokenStream = _thinkingController?.stream;
       if (insertIdx != -1) {
         msgs.insert(insertIdx, entry);
       } else {
@@ -1011,6 +1069,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _lastSeq++;
           final newContent = chatState.streamingContent + event.token;
           final ms = List<ChatMessage>.from(chatState.messages);
+          if (chatState.streamingContent.isEmpty) {
+            _markTimelineEntriesStale(ms);
+          }
           final idx = ms.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) ms[idx].content = newContent;
           state = AsyncData(
@@ -1177,6 +1238,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           tokenController.add(event.token);
           final newContent = chatState.streamingContent + event.token;
           final msgs = List<ChatMessage>.from(chatState.messages);
+          if (chatState.streamingContent.isEmpty) {
+            _markTimelineEntriesStale(msgs);
+          }
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) msgs[idx].content = newContent;
           state = AsyncData(
@@ -1325,8 +1389,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     _resetReconnectState();
     final current = state.value ?? const ChatState();
 
-    // Create a broadcast stream controller for token-by-token rendering.
+    // Create broadcast stream controllers for token-by-token rendering.
     final tokenController = StreamController<String>.broadcast();
+    _thinkingController = StreamController<String>.broadcast();
 
     // Add user message with status=sending and assistant streaming placeholder.
     final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
@@ -1373,6 +1438,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           tokenController.add(event.token);
           final newContent = chatState.streamingContent + event.token;
           final msgs = List<ChatMessage>.from(chatState.messages);
+          // On first token, mark all timeline entries as stale (answer is
+          // streaming — collapse previous thinking/tool/subagent entries).
+          if (chatState.streamingContent.isEmpty) {
+            _markTimelineEntriesStale(msgs);
+          }
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
             msgs[idx].content = newContent;
@@ -1402,7 +1472,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         } else if (event is DoneEvent) {
           _lastSeq++;
           unawaited(tokenController.close());
+          _closeThinkingController();
           final msgs = List<ChatMessage>.from(chatState.messages);
+          // Mark thinking entries as complete (no longer streaming).
+          for (var i = 0; i < msgs.length; i++) {
+            if (msgs[i].timelineType == TimelineEntryType.thinking &&
+                msgs[i].isStreaming) {
+              msgs[i] = msgs[i].copyWith(isStreaming: false);
+            }
+          }
           // Mark user message as successfully acknowledged.
           final userIdx = msgs.indexWhere((m) => m.id == userMsgId);
           if (userIdx != -1) {
@@ -1448,6 +1526,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         } else if (event is ErrorEvent) {
           _lastSeq++;
           unawaited(tokenController.close());
+          _closeThinkingController();
           final msgs = List<ChatMessage>.from(chatState.messages)
             ..removeWhere((m) => m.id == 'assistant-streaming');
           // Mark user message as failed (keep it in the list for retry).

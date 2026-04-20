@@ -32,7 +32,7 @@ import 'command_event_tile.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'image_utils.dart';
-import 'timeline_section.dart';
+import 'streaming_timeline_entry.dart';
 import 'tool_call_chip.dart';
 import 'voice_recorder_button.dart';
 
@@ -507,10 +507,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
                                     // Render non-message timeline entries
                                     // (thinking, tool call, subagent) as
-                                    // compact expandable sections.
+                                    // streaming-aware adaptive sections.
                                     if (msg.timelineType !=
                                         TimelineEntryType.message) {
-                                      return ChatTimelineSection(message: msg);
+                                      final density = TimelineDensity.fromWidth(
+                                        MediaQuery.of(context).size.width,
+                                      );
+                                      return StreamingTimelineEntry(
+                                        message: msg,
+                                        density: density,
+                                        entryState: msg.isStale
+                                            ? EntryState.stale
+                                            : msg.isStreaming
+                                            ? EntryState.active
+                                            : EntryState.complete,
+                                      );
                                     }
 
                                     final prevMsg = index > 0
