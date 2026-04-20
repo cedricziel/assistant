@@ -14,8 +14,9 @@ import AssistantIntents
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
 
-    if let controller = window?.rootViewController as? FlutterViewController {
-      SharedCredentialsChannel.register(with: controller.binaryMessenger)
-    }
+    let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "SharedCredentialsChannel"
+    )
+    SharedCredentialsChannel.register(with: registrar.messenger())
   }
 }

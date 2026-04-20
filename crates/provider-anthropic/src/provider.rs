@@ -933,12 +933,24 @@ mod tests {
         }];
         let (messages, _) = build_anthropic_messages(&history);
         let content = messages[0]["content"].as_array().expect("content array");
-        assert_eq!(content.len(), 2);
-        assert_eq!(content[0]["type"], "text");
-        assert_eq!(content[1]["type"], "document");
-        assert_eq!(content[1]["source"]["type"], "base64");
-        assert_eq!(content[1]["source"]["media_type"], "application/pdf");
-        assert_eq!(content[1]["source"]["data"], "JVBERi0xLjQ=");
+        assert_eq!(content.len(), 2, "should have text and document blocks");
+        assert_eq!(content[0]["type"], "text", "first block should be text");
+        assert_eq!(
+            content[1]["type"], "document",
+            "second block should be document"
+        );
+        assert_eq!(
+            content[1]["source"]["type"], "base64",
+            "document source should be base64"
+        );
+        assert_eq!(
+            content[1]["source"]["media_type"], "application/pdf",
+            "document media type should be PDF"
+        );
+        assert_eq!(
+            content[1]["source"]["data"], "JVBERi0xLjQ=",
+            "document data should match encoded PDF"
+        );
     }
 
     #[test]

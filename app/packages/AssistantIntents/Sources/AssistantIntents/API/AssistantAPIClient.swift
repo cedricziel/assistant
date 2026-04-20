@@ -235,8 +235,8 @@ public final class AssistantAPIClient {
         return try JSONDecoder().decode(AttachmentResponse.self, from: data)
     }
 
-    /// Uploads a file from a URL as a streamed multipart attachment.
-    /// Suitable for large files within iOS share extension memory limits.
+    /// Convenience overload that reads the file at `fileURL` into memory
+    /// and delegates to the `Data`-based upload method.
     public func uploadAttachment(
         conversationId: String,
         fileURL: URL,
