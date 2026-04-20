@@ -143,9 +143,13 @@ public struct KeychainHelper {
         return status == errSecSuccess || status == errSecItemNotFound
     }
 
-    /// Returns `true` if credentials are available.
+    /// Returns `true` if non-empty credentials are available.
     public var hasCredentials: Bool {
-        serverURL != nil && authToken != nil
+        guard let url = serverURL, !url.isEmpty,
+              let token = authToken, !token.isEmpty else {
+            return false
+        }
+        return true
     }
 
     /// Returns the server URL stored by the Flutter app, or `nil` if not set.

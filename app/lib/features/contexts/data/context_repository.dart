@@ -221,20 +221,24 @@ class ContextRepository {
       return;
     }
 
+    // Normalize empty token to null so both scopes stay consistent.
+    final authToken = (active.authToken != null && active.authToken!.isNotEmpty)
+        ? active.authToken
+        : null;
+
     // Write to default scope (Siri/Shortcuts backward compat).
     await _secureStorage.write(key: _kSiriServerUrl, value: active.serverUrl);
-    if (active.authToken != null && active.authToken!.isNotEmpty) {
-      await _secureStorage.write(
-        key: _kSiriAuthToken,
-        value: active.authToken!,
-      );
+    if (authToken != null) {
+      await _secureStorage.write(key: _kSiriAuthToken, value: authToken);
+    } else {
+      await _secureStorage.delete(key: _kSiriAuthToken);
     }
 
     // Write to shared Keychain group (share extension access).
     // Fire-and-forget: don't block the save flow on platform channel response.
     SharedCredentialsChannel.syncCredentials(
       serverUrl: active.serverUrl,
-      authToken: active.authToken,
+      authToken: authToken,
     );
   }
 

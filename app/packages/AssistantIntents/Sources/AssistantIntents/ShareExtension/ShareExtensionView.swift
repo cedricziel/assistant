@@ -222,6 +222,9 @@ public struct ShareExtensionView: View {
 
         // Extract shared content from NSItemProviders.
         sharedContent = await extractContent(from: items)
+        if sharedContent == nil {
+            errorMessage = "No supported content found in the shared items."
+        }
 
         // Fetch conversations and personas in parallel.
         async let convos = api.listConversations()
@@ -283,7 +286,11 @@ public struct ShareExtensionView: View {
                     urlString: url.absoluteString
                 )
             }
-        } catch {}
+        } catch {
+            await MainActor.run {
+                self.errorMessage = "Could not read shared URL: \(error.localizedDescription)"
+            }
+        }
         return nil
     }
 
@@ -292,25 +299,19 @@ public struct ShareExtensionView: View {
             let item = try await provider.loadItem(forTypeIdentifier: type)
 
             if let url = item as? URL {
+                // Acquire security-scoped access for sandboxed share extensions.
+                let didStart = url.startAccessingSecurityScopedResource()
+                defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
                 let data = try Data(contentsOf: url)
                 let filename = url.lastPathComponent
                 let mime = mimeType(for: filename, uti: type)
 
                 // Handle HEIC → PNG conversion.
                 if mime == "image/heic" || mime == "image/heif" {
-                    #if canImport(UIKit)
-                    if let uiImage = UIImage(data: data),
-                       let pngData = uiImage.pngData() {
-                        let pngName = filename.replacingOccurrences(
-                            of: "\\.(heic|heif)$",
-                            with: ".png",
-                            options: [.regularExpression, .caseInsensitive]
-                        )
-                        return SharedContent(
-                            fileData: pngData, filename: pngName, mimeType: "image/png"
-                        )
+                    if let converted = convertHEICToPNG(data: data, filename: filename) {
+                        return converted
                     }
-                    #endif
                 }
 
                 return SharedContent(
@@ -323,7 +324,34 @@ public struct ShareExtensionView: View {
                 let mime = mimeType(for: filename, uti: type)
                 return SharedContent(fileData: data, filename: filename, mimeType: mime)
             }
-        } catch {}
+        } catch {
+            await MainActor.run {
+                self.errorMessage = "Could not read shared file: \(error.localizedDescription)"
+            }
+        }
+        return nil
+    }
+
+    /// Converts HEIC/HEIF image data to PNG, returning nil if conversion fails.
+    private func convertHEICToPNG(data: Data, filename: String) -> SharedContent? {
+        let pngName = filename.replacingOccurrences(
+            of: "\\.(heic|heif)$",
+            with: ".png",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        #if canImport(UIKit)
+        if let uiImage = UIImage(data: data),
+           let pngData = uiImage.pngData() {
+            return SharedContent(fileData: pngData, filename: pngName, mimeType: "image/png")
+        }
+        #elseif canImport(AppKit)
+        if let nsImage = NSImage(data: data),
+           let tiffData = nsImage.tiffRepresentation,
+           let bitmap = NSBitmapImageRep(data: tiffData),
+           let pngData = bitmap.representation(using: .png, properties: [:]) {
+            return SharedContent(fileData: pngData, filename: pngName, mimeType: "image/png")
+        }
+        #endif
         return nil
     }
 
@@ -348,7 +376,7 @@ public struct ShareExtensionView: View {
             case "public.json": return "application/json"
             case "public.comma-separated-values-text": return "text/csv"
             case "net.daringfireball.markdown": return "text/markdown"
-            case "public.image": return "image/png"
+            case "public.image": return "application/octet-stream"
             default: return "application/octet-stream"
             }
         }
@@ -421,4 +449,6 @@ public struct ShareExtensionView: View {
 
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif

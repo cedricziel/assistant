@@ -166,8 +166,8 @@ public final class AssistantAPIClient {
     }
 
     /// Sends a message to a conversation. The server responds with SSE but
-    /// this method fire-and-forgets — it validates the initial response status
-    /// and returns immediately.
+    /// this method validates the initial HTTP status and returns without
+    /// waiting for the stream to complete.
     public func sendMessage(
         conversationId: String,
         message: String,
@@ -177,10 +177,22 @@ public final class AssistantAPIClient {
         if !attachmentIds.isEmpty {
             body["attachment_ids"] = attachmentIds
         }
-        try await postIgnoringBody(
-            path: "/api/conversations/\(conversationId)/messages",
-            body: body
-        )
+
+        let base = try baseURL()
+        let path = "/api/conversations/\(conversationId)/messages"
+        guard let url = URL(string: "\(base)\(path)") else {
+            throw APIError.invalidURL
+        }
+
+        var request = makeRequest(url: url, method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        // Use bytes to get the response headers without consuming the full SSE stream.
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        try validateResponse(response)
+        // Cancel the stream — we only needed the status code.
+        bytes.task.cancel()
     }
 
     // MARK: - Attachments
@@ -205,9 +217,14 @@ public final class AssistantAPIClient {
             forHTTPHeaderField: "Content-Type"
         )
 
+        let safeFilename = filename
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
         var body = Data()
         body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(safeFilename)\"\r\n")
         body.append("Content-Type: \(mimeType)\r\n\r\n")
         body.append(fileData)
         body.append("\r\n--\(boundary)--\r\n")

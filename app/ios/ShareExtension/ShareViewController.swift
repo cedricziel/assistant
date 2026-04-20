@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AssistantIntents
 
 /// Entry point for the iOS share extension.
 ///

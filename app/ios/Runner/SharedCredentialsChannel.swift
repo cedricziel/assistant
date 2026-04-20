@@ -23,18 +23,28 @@ final class SharedCredentialsChannel {
                     sharedAccessGroup: "\(KeychainHelper.teamPrefix)com.cedricziel.assistant.shared"
                 )
 
-                if let url = serverUrl {
-                    keychain.write(key: "assistant_siri_server_url", value: url)
+                let serverOK: Bool
+                if let url = serverUrl, !url.isEmpty {
+                    serverOK = keychain.write(key: "assistant_siri_server_url", value: url)
                 } else {
-                    keychain.delete(key: "assistant_siri_server_url")
+                    serverOK = keychain.delete(key: "assistant_siri_server_url")
                 }
 
-                if let token = authToken {
-                    keychain.write(key: "assistant_siri_auth_token", value: token)
+                let tokenOK: Bool
+                if let token = authToken, !token.isEmpty {
+                    tokenOK = keychain.write(key: "assistant_siri_auth_token", value: token)
                 } else {
-                    keychain.delete(key: "assistant_siri_auth_token")
+                    tokenOK = keychain.delete(key: "assistant_siri_auth_token")
                 }
 
+                guard serverOK && tokenOK else {
+                    result(FlutterError(
+                        code: "KEYCHAIN_SYNC_FAILED",
+                        message: "Failed to sync credentials to the shared Keychain access group",
+                        details: nil
+                    ))
+                    return
+                }
                 result(true)
 
             default:
