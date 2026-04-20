@@ -16,6 +16,7 @@ import '../../shared/platform/platform.dart';
 import '../../api/api_client.dart';
 import '../../api/attachment_service.dart';
 import '../../api/capabilities_provider.dart';
+import '../../api/connectivity_provider.dart';
 import '../../api/models/server_capabilities.dart';
 import '../connection/connection_provider.dart';
 import '../personas/persona_picker.dart';
@@ -224,6 +225,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _pickImages() async {
+    if (!ref.read(isOnlineProvider)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('File upload requires an internet connection'),
+          ),
+        );
+      }
+      return;
+    }
+
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: [

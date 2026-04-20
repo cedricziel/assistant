@@ -2,9 +2,11 @@ import 'dart:async' show Timer, unawaited;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import '../../api/connectivity_provider.dart';
 import 'recorder_bytes_io.dart'
     if (dart.library.js_interop) 'recorder_bytes_web.dart';
 
@@ -19,7 +21,7 @@ import 'recorder_bytes_io.dart'
 /// - **Web fallback**: PCM/WAV.
 /// - **Native (iOS, macOS, Android)**: AAC-LC → audio/aac.
 /// - **Native fallback**: Opus → audio/ogg, then WAV → audio/wav.
-class VoiceRecorderButton extends StatefulWidget {
+class VoiceRecorderButton extends ConsumerStatefulWidget {
   const VoiceRecorderButton({
     super.key,
     required this.onRecordingComplete,
@@ -35,10 +37,11 @@ class VoiceRecorderButton extends StatefulWidget {
   final AudioRecorder? audioRecorder;
 
   @override
-  State<VoiceRecorderButton> createState() => _VoiceRecorderButtonState();
+  ConsumerState<VoiceRecorderButton> createState() =>
+      _VoiceRecorderButtonState();
 }
 
-class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
+class _VoiceRecorderButtonState extends ConsumerState<VoiceRecorderButton> {
   late final AudioRecorder _recorder;
   bool _isRecording = false;
   int _secondsElapsed = 0;
@@ -112,6 +115,17 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
   }
 
   Future<void> _start() async {
+    if (!ref.read(isOnlineProvider)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Voice recording requires an internet connection'),
+          ),
+        );
+      }
+      return;
+    }
+
     try {
       final hasPermission = await _recorder.hasPermission();
       if (!hasPermission) {

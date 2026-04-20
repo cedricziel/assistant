@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../api/connectivity_provider.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/notifications/agent_event_listener.dart';
 import '../features/pwa/pwa_provider.dart';
@@ -344,7 +345,9 @@ class NavShell extends ConsumerWidget {
                 const VerticalDivider(width: 1, thickness: 1),
                 Expanded(
                   child: AgentEventListener(
-                    child: UpdateBannerWrapper(child: child),
+                    child: _OfflineBanner(
+                      child: UpdateBannerWrapper(child: child),
+                    ),
                   ),
                 ),
               ],
@@ -356,7 +359,9 @@ class NavShell extends ConsumerWidget {
       // iOS compact: CupertinoTabBar with 5 items.
       final selected = _iosMobileSelectedIndex(context);
       return Scaffold(
-        body: AgentEventListener(child: UpdateBannerWrapper(child: child)),
+        body: AgentEventListener(
+          child: _OfflineBanner(child: UpdateBannerWrapper(child: child)),
+        ),
         bottomNavigationBar: CupertinoTabBar(
           currentIndex: selected,
           onTap: (i) {
@@ -478,7 +483,9 @@ class NavShell extends ConsumerWidget {
               const VerticalDivider(width: 1, thickness: 1),
               Expanded(
                 child: AgentEventListener(
-                  child: UpdateBannerWrapper(child: child),
+                  child: _OfflineBanner(
+                    child: UpdateBannerWrapper(child: child),
+                  ),
                 ),
               ),
             ],
@@ -492,7 +499,9 @@ class NavShell extends ConsumerWidget {
     // prompt is available.
     final selected = _mobileSelectedIndex(context);
     return Scaffold(
-      body: AgentEventListener(child: UpdateBannerWrapper(child: child)),
+      body: AgentEventListener(
+        child: _OfflineBanner(child: UpdateBannerWrapper(child: child)),
+      ),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -748,6 +757,63 @@ class _SafariStep extends StatelessWidget {
         Icon(icon, color: color),
         const SizedBox(width: 8),
         Expanded(child: Text(text)),
+      ],
+    );
+  }
+}
+
+/// Persistent banner shown when the device has no network connectivity.
+///
+/// Skipped on web — browsers provide their own offline indicators.
+/// Uses a Cupertino-style slim bar on iOS, MaterialBanner elsewhere.
+class _OfflineBanner extends ConsumerWidget {
+  const _OfflineBanner({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (kIsWeb) return child;
+
+    final isOnline = ref.watch(isOnlineProvider);
+    if (isOnline) return child;
+
+    return Column(
+      children: [
+        if (isAppleTouch)
+          Builder(
+            builder: (context) {
+              final fgColor = Theme.of(context).colorScheme.onInverseSurface;
+              return Container(
+                width: double.infinity,
+                color: CupertinoColors.systemOrange.resolveFrom(context),
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(CupertinoIcons.wifi_slash, size: 14, color: fgColor),
+                    const SizedBox(width: 6),
+                    Text(
+                      'No Connection',
+                      style: TextStyle(
+                        color: fgColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          )
+        else
+          MaterialBanner(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: const Icon(Icons.wifi_off),
+            content: const Text('No internet connection'),
+            actions: const [SizedBox.shrink()],
+          ),
+        Expanded(child: child),
       ],
     );
   }

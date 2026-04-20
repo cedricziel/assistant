@@ -1,6 +1,8 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/connectivity_provider.dart';
 import '../chat/chat_provider.dart';
 import 'notification_preferences.dart';
 import 'notification_service.dart';
@@ -29,6 +31,10 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
     with WidgetsBindingObserver {
   AppLifecycleState? _lifecycleState;
 
+  /// Tracks whether the last known connectivity state was offline, so we can
+  /// detect none→connected transitions and trigger SSE reconnection.
+  bool _wasOffline = false;
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +62,26 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
   @override
   Widget build(BuildContext context) {
     ref.listen<AsyncValue<ChatState>>(chatProvider, _onChatStateChanged);
+
+    // Watch connectivity and trigger reconnect on none→connected transitions.
+    ref.listen<AsyncValue<List<ConnectivityResult>>>(connectivityProvider, (
+      prev,
+      next,
+    ) {
+      final isNowOnline =
+          next.whenOrNull(
+            data: (results) =>
+                results.isNotEmpty &&
+                !results.every((r) => r == ConnectivityResult.none),
+          ) ??
+          true;
+
+      if (_wasOffline && isNowOnline) {
+        ref.read(chatProvider.notifier).attemptReconnect();
+      }
+      _wasOffline = !isNowOnline;
+    });
+
     return widget.child;
   }
 
