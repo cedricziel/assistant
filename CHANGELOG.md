@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.126](https://github.com/cedricziel/assistant/compare/v0.1.125...v0.1.126) (2026-04-20)
+
+
+### Features
+
+* expand attachment support and add native share extensions ([#552](https://github.com/cedricziel/assistant/issues/552)) ([abb6586](https://github.com/cedricziel/assistant/commit/abb6586200dfe6f673e65af18a04f1fe1d923271))
+* reactive conversation list via SSE streaming ([#546](https://github.com/cedricziel/assistant/issues/546)) ([d1a1c6f](https://github.com/cedricziel/assistant/commit/d1a1c6f7240baab01c9dd080503a39c5a78f02b9))
+
 ## [0.1.125](https://github.com/cedricziel/assistant/compare/v0.1.124...v0.1.125) (2026-04-20)
 
 
