@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.127](https://github.com/cedricziel/assistant/compare/v0.1.126...v0.1.127) (2026-04-20)
+
+
+### Bug Fixes
+
+* **release:** sign PlugIns/*.appex for macOS notarization ([#560](https://github.com/cedricziel/assistant/issues/560)) ([7a325f2](https://github.com/cedricziel/assistant/commit/7a325f272b916e0c2a0c61d028f912a3e867171c))
+
 ## [0.1.126](https://github.com/cedricziel/assistant/compare/v0.1.125...v0.1.126) (2026-04-20)
 
 
