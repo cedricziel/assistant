@@ -313,7 +313,7 @@ mod tests {
     use std::sync::Arc;
 
     use assistant_llm::{
-        Capabilities, ChatHistoryMessage, LlmResponse, LlmResponseMeta, ToolSupport,
+        Capabilities, ChatHistoryMessage, LlmResponse, LlmResponseMeta, StreamChunk, ToolSupport,
         tool_spec::ToolSpec,
     };
     use assistant_storage::TraceStats;
@@ -359,7 +359,7 @@ mod tests {
             _system_prompt: &str,
             _history: &[ChatHistoryMessage],
             _tools: &[ToolSpec],
-            _token_sink: Option<mpsc::Sender<String>>,
+            _token_sink: Option<mpsc::Sender<StreamChunk>>,
         ) -> anyhow::Result<LlmResponse> {
             Ok(LlmResponse::FinalAnswer(
                 self.response.clone(),
