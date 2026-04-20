@@ -697,6 +697,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
     if (idx != -1) {
       msgs[idx].subagentSummary = event.summary;
+      msgs[idx].isStreaming = false;
+      // Mark cancelled subagents as stale for amber/collapsed display.
+      if (event.status == 'cancelled') {
+        msgs[idx].isStale = true;
+      }
     }
     state = AsyncData(chatState.copyWith(messages: msgs));
   }

@@ -938,7 +938,34 @@ pub async fn send_message(
         let mut seq: i64 = 1; // sequence 0 was run_started
         let conv_id_str = conv_id_for_push.to_string();
 
+        // Throttle thinking persistence: accumulate tokens, flush every 20 tokens
+        // or when a non-thinking event arrives. SSE is still sent immediately.
+        let mut thinking_buf = String::new();
+        let mut thinking_token_count: usize = 0;
+        const THINKING_BATCH_SIZE: usize = 20;
+
         while let Some(orch_event) = event_rx.recv().await {
+            // Flush accumulated thinking buffer before non-thinking events.
+            let is_thinking = matches!(orch_event, OrchestratorEvent::Thinking(_));
+            if !is_thinking && !thinking_buf.is_empty() {
+                let p = serde_json::json!({"content": thinking_buf});
+                if let Err(e) = event_store
+                    .append_event(&run_id_str, &conv_id_str, seq, "thinking", &p)
+                    .await
+                {
+                    warn!("Failed to persist thinking batch seq={seq} for run {run_id}: {e}");
+                }
+                let live = assistant_storage::LiveEvent {
+                    sequence: seq,
+                    event_type: "thinking".to_string(),
+                    payload: p,
+                };
+                let _ = broadcast_tx.send(live);
+                seq += 1;
+                thinking_buf.clear();
+                thinking_token_count = 0;
+            }
+
             let (event_type, payload, sse_event) = match orch_event {
                 OrchestratorEvent::Token(ref token) => {
                     full_text.push_str(token);
@@ -1009,9 +1036,36 @@ pub async fn send_message(
                     ("error", p, e)
                 }
                 OrchestratorEvent::Thinking(ref content) => {
+                    // Send SSE immediately for real-time rendering.
                     let p = serde_json::json!({"content": content});
                     let e = Event::default().event("thinking").data(p.to_string());
-                    ("thinking", p, e)
+                    if sse_tx.send(Ok(e)).await.is_err() {
+                        break;
+                    }
+                    // Accumulate for batched persistence.
+                    thinking_buf.push_str(content);
+                    thinking_token_count += 1;
+                    if thinking_token_count >= THINKING_BATCH_SIZE {
+                        let batch_p = serde_json::json!({"content": thinking_buf});
+                        if let Err(e) = event_store
+                            .append_event(&run_id_str, &conv_id_str, seq, "thinking", &batch_p)
+                            .await
+                        {
+                            warn!(
+                                "Failed to persist thinking batch seq={seq} for run {run_id}: {e}"
+                            );
+                        }
+                        let live = assistant_storage::LiveEvent {
+                            sequence: seq,
+                            event_type: "thinking".to_string(),
+                            payload: batch_p,
+                        };
+                        let _ = broadcast_tx.send(live);
+                        seq += 1;
+                        thinking_buf.clear();
+                        thinking_token_count = 0;
+                    }
+                    continue;
                 }
                 OrchestratorEvent::SubagentStarted {
                     ref agent_id,
@@ -1092,6 +1146,24 @@ pub async fn send_message(
             if sse_tx.send(Ok(sse_event)).await.is_err() {
                 break;
             }
+        }
+
+        // Flush any remaining thinking tokens that didn't reach the batch threshold.
+        if !thinking_buf.is_empty() {
+            let p = serde_json::json!({"content": thinking_buf});
+            if let Err(e) = event_store
+                .append_event(&run_id_str, &conv_id_str, seq, "thinking", &p)
+                .await
+            {
+                warn!("Failed to persist final thinking batch seq={seq} for run {run_id}: {e}");
+            }
+            let live = assistant_storage::LiveEvent {
+                sequence: seq,
+                event_type: "thinking".to_string(),
+                payload: p,
+            };
+            let _ = broadcast_tx.send(live);
+            seq += 1;
         }
 
         let (reply_text, reply_message_id, reply_attachment_ids) = match turn_result_rx.await {

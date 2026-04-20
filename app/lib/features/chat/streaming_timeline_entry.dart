@@ -394,21 +394,34 @@ class _StreamingTimelineEntryState extends State<StreamingTimelineEntry> {
       expandedContent = _buildSubagentInnerTimeline(context);
     }
 
+    // Determine status icon: cancelled (stale+completed) → amber,
+    // completed → green, active → spinner.
+    final Widget statusIcon;
+    if (hasCompleted && widget.entryState == EntryState.stale) {
+      statusIcon = const Icon(
+        Icons.cancel_outlined,
+        size: 14,
+        color: Colors.amber,
+      );
+    } else if (hasCompleted) {
+      statusIcon = const Icon(
+        Icons.check_circle_outline,
+        size: 14,
+        color: Colors.green,
+      );
+    } else {
+      statusIcon = const SizedBox(
+        width: 12,
+        height: 12,
+        child: CircularProgressIndicator.adaptive(strokeWidth: 1.5),
+      );
+    }
+
     return _buildSection(
       context,
       icon: Icons.smart_toy_outlined,
       label: widget.message.subagentTask ?? widget.message.subagentId ?? '',
-      statusWidget: hasCompleted
-          ? const Icon(
-              Icons.check_circle_outline,
-              size: 14,
-              color: Colors.green,
-            )
-          : const SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator.adaptive(strokeWidth: 1.5),
-            ),
+      statusWidget: statusIcon,
       expandable: hasCompleted || isActive,
       expandedContent: expandedContent,
     );
