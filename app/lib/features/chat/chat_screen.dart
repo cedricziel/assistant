@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:http/http.dart' as http;
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -12,7 +13,9 @@ import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/platform/adaptive_context_menu.dart';
 import '../../shared/platform/platform.dart';
+import '../../services/share_service.dart';
 import '../../api/api_client.dart';
 import '../../api/attachment_service.dart';
 import '../../api/capabilities_provider.dart';
@@ -671,11 +674,18 @@ class _MessageBubble extends StatelessWidget {
                         _attachmentThumbnails(context),
                       // Voice message: show audio player + collapsible transcript.
                       if (message.audioBytes != null)
-                        _VoiceMessagePlayer(
-                          audioBytes: message.audioBytes!,
-                          audioMimeType: message.audioMimeType,
-                          transcript: message.content,
-                          foregroundColor: colorScheme.onPrimary,
+                        AdaptiveMediaContextMenu(
+                          actions: _voiceMessageActions(
+                            context,
+                            message.audioBytes!,
+                            message.audioMimeType ?? 'audio/webm',
+                          ),
+                          child: _VoiceMessagePlayer(
+                            audioBytes: message.audioBytes!,
+                            audioMimeType: message.audioMimeType,
+                            transcript: message.content,
+                            foregroundColor: colorScheme.onPrimary,
+                          ),
                         )
                       // Hide text row when content is only whitespace /
                       // zero-width space and attachments provide the visual.
@@ -696,6 +706,8 @@ class _MessageBubble extends StatelessWidget {
                               child: SelectableText(
                                 message.content,
                                 style: TextStyle(color: colorScheme.onPrimary),
+                                contextMenuBuilder:
+                                    _textSelectionContextMenuBuilder,
                               ),
                             ),
                           ],
@@ -776,10 +788,13 @@ class _MessageBubble extends StatelessWidget {
                       // Inline audio player for messages with real audio
                       // (agent intentionally produced voice via AudioReadyEvent).
                       if (message.audioId != null && !message.isStreaming)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: AudioPlayerWidget(
-                            fetchAudio: fetchMessageAudio,
+                        AdaptiveMediaContextMenu(
+                          actions: _ttsAudioActions(context),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: AudioPlayerWidget(
+                              fetchAudio: fetchMessageAudio,
+                            ),
                           ),
                         ),
                     ],
@@ -866,53 +881,58 @@ class _MessageBubble extends StatelessWidget {
             );
           }
           final thumbUrl = '$imageBaseUrl${att.url}?w=300';
-          return GestureDetector(
-            onTap: () => _showFullImage(context, att),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: CachedNetworkImage(
-                imageUrl: thumbUrl,
-                width: 150,
-                height: 150,
-                fit: BoxFit.cover,
-                httpHeaders: imageAuthToken != null
-                    ? {'Authorization': 'Bearer $imageAuthToken'}
-                    : const {},
-                placeholder: (_, _) => Container(
+          return AdaptiveMediaContextMenu(
+            actions: _imageContextMenuActions(context, att),
+            child: GestureDetector(
+              onTap: () => _showFullImage(context, att),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: CachedNetworkImage(
+                  imageUrl: thumbUrl,
                   width: 150,
                   height: 150,
-                  color: colorScheme.surfaceContainerLowest,
-                  child: const Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator.adaptive(strokeWidth: 2),
-                    ),
-                  ),
-                ),
-                errorWidget: (_, url, _) => GestureDetector(
-                  onTap: () {
-                    CachedNetworkImage.evictFromCache(url);
-                    // Trigger a rebuild to retry loading.
-                    (context as Element).markNeedsBuild();
-                  },
-                  child: Container(
+                  fit: BoxFit.cover,
+                  httpHeaders: imageAuthToken != null
+                      ? {'Authorization': 'Bearer $imageAuthToken'}
+                      : const {},
+                  placeholder: (_, _) => Container(
                     width: 150,
                     height: 150,
                     color: colorScheme.surfaceContainerLowest,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.refresh, color: colorScheme.outline),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Tap to retry',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: colorScheme.outline,
-                          ),
+                    child: const Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator.adaptive(
+                          strokeWidth: 2,
                         ),
-                      ],
+                      ),
+                    ),
+                  ),
+                  errorWidget: (_, url, _) => GestureDetector(
+                    onTap: () {
+                      CachedNetworkImage.evictFromCache(url);
+                      // Trigger a rebuild to retry loading.
+                      (context as Element).markNeedsBuild();
+                    },
+                    child: Container(
+                      width: 150,
+                      height: 150,
+                      color: colorScheme.surfaceContainerLowest,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.refresh, color: colorScheme.outline),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Tap to retry',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: colorScheme.outline,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -922,6 +942,269 @@ class _MessageBubble extends StatelessWidget {
         }).toList(),
       ),
     );
+  }
+
+  Widget _textSelectionContextMenuBuilder(
+    BuildContext context,
+    EditableTextState editableTextState,
+  ) {
+    final selection = editableTextState.textEditingValue.selection;
+    final selectedText = selection.isValid && !selection.isCollapsed
+        ? editableTextState.textEditingValue.text.substring(
+            selection.start,
+            selection.end,
+          )
+        : message.content;
+
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: [
+        ...editableTextState.contextMenuButtonItems,
+        ContextMenuButtonItem(
+          label: 'Share',
+          onPressed: () {
+            editableTextState.hideToolbar();
+            final box = context.findRenderObject() as RenderBox?;
+            final origin = box != null
+                ? box.localToGlobal(Offset.zero) & box.size
+                : null;
+            ShareService.instance.shareText(
+              selectedText,
+              sharePositionOrigin: origin,
+            );
+          },
+        ),
+        ContextMenuButtonItem(
+          label: 'Save As…',
+          onPressed: () {
+            editableTextState.hideToolbar();
+            final box = context.findRenderObject() as RenderBox?;
+            final origin = box != null
+                ? box.localToGlobal(Offset.zero) & box.size
+                : null;
+            ShareService.instance.saveText(
+              selectedText,
+              suggestedFilename:
+                  'assistant-message-${DateTime.now().toIso8601String().split('T').first}.md',
+              sharePositionOrigin: origin,
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  List<AdaptiveContextMenuAction> _imageContextMenuActions(
+    BuildContext context,
+    ChatAttachment attachment,
+  ) {
+    return [
+      AdaptiveContextMenuAction(
+        label: 'Save Image',
+        cupertinoIcon: CupertinoIcons.square_arrow_down,
+        materialIcon: Icons.save_alt,
+        onPressed: () => _saveAttachment(context, attachment),
+      ),
+      AdaptiveContextMenuAction(
+        label: 'Share',
+        cupertinoIcon: CupertinoIcons.share,
+        materialIcon: Icons.share,
+        onPressed: () => _shareAttachment(context, attachment),
+      ),
+      AdaptiveContextMenuAction(
+        label: 'Copy Image',
+        cupertinoIcon: CupertinoIcons.doc_on_clipboard,
+        materialIcon: Icons.copy,
+        onPressed: () => _copyAttachmentToClipboard(context, attachment),
+      ),
+    ];
+  }
+
+  List<AdaptiveContextMenuAction> _voiceMessageActions(
+    BuildContext context,
+    Uint8List audioBytes,
+    String mimeType,
+  ) {
+    final ext = mimeType.contains('mp4') ? 'mp4' : 'webm';
+    final filename =
+        'voice-message-${DateTime.now().toIso8601String().split('T').first}.$ext';
+    return [
+      AdaptiveContextMenuAction(
+        label: 'Save Audio',
+        cupertinoIcon: CupertinoIcons.square_arrow_down,
+        materialIcon: Icons.save_alt,
+        onPressed: () async {
+          final box = context.findRenderObject() as RenderBox?;
+          final origin = box != null
+              ? box.localToGlobal(Offset.zero) & box.size
+              : null;
+          await ShareService.instance.saveFile(
+            audioBytes,
+            filename: filename,
+            mimeType: mimeType,
+            sharePositionOrigin: origin,
+          );
+        },
+      ),
+      AdaptiveContextMenuAction(
+        label: 'Share',
+        cupertinoIcon: CupertinoIcons.share,
+        materialIcon: Icons.share,
+        onPressed: () async {
+          final box = context.findRenderObject() as RenderBox?;
+          final origin = box != null
+              ? box.localToGlobal(Offset.zero) & box.size
+              : null;
+          await ShareService.instance.shareFile(
+            audioBytes,
+            filename: filename,
+            mimeType: mimeType,
+            sharePositionOrigin: origin,
+          );
+        },
+      ),
+    ];
+  }
+
+  List<AdaptiveContextMenuAction> _ttsAudioActions(BuildContext context) {
+    return [
+      AdaptiveContextMenuAction(
+        label: 'Save Audio',
+        cupertinoIcon: CupertinoIcons.square_arrow_down,
+        materialIcon: Icons.save_alt,
+        onPressed: () async {
+          final box = context.findRenderObject() as RenderBox?;
+          final origin = box != null
+              ? box.localToGlobal(Offset.zero) & box.size
+              : null;
+          final audio = await fetchMessageAudio();
+          if (audio == null) return;
+          final ext = audio.mimeType.contains('mp4') ? 'mp4' : 'webm';
+          final filename =
+              'assistant-audio-${DateTime.now().toIso8601String().split('T').first}.$ext';
+          await ShareService.instance.saveFile(
+            audio.bytes,
+            filename: filename,
+            mimeType: audio.mimeType,
+            sharePositionOrigin: origin,
+          );
+        },
+      ),
+      AdaptiveContextMenuAction(
+        label: 'Share',
+        cupertinoIcon: CupertinoIcons.share,
+        materialIcon: Icons.share,
+        onPressed: () async {
+          final box = context.findRenderObject() as RenderBox?;
+          final origin = box != null
+              ? box.localToGlobal(Offset.zero) & box.size
+              : null;
+          final audio = await fetchMessageAudio();
+          if (audio == null) return;
+          final ext = audio.mimeType.contains('mp4') ? 'mp4' : 'webm';
+          final filename =
+              'assistant-audio-${DateTime.now().toIso8601String().split('T').first}.$ext';
+          await ShareService.instance.shareFile(
+            audio.bytes,
+            filename: filename,
+            mimeType: audio.mimeType,
+            sharePositionOrigin: origin,
+          );
+        },
+      ),
+    ];
+  }
+
+  Future<Uint8List?> _fetchAttachmentBytes(ChatAttachment attachment) async {
+    if (imageBaseUrl == null) return null;
+    final url = '$imageBaseUrl${attachment.url}';
+    try {
+      final headers = <String, String>{};
+      if (imageAuthToken != null) {
+        headers['Authorization'] = 'Bearer $imageAuthToken';
+      }
+      final response = await http.get(Uri.parse(url), headers: headers);
+      if (response.statusCode == 200) {
+        return response.bodyBytes;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveAttachment(
+    BuildContext context,
+    ChatAttachment attachment,
+  ) async {
+    final box = context.findRenderObject() as RenderBox?;
+    final origin = box != null
+        ? box.localToGlobal(Offset.zero) & box.size
+        : null;
+    final bytes = await _fetchAttachmentBytes(attachment);
+    if (bytes == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to download image')),
+        );
+      }
+      return;
+    }
+    await ShareService.instance.saveFile(
+      bytes,
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      sharePositionOrigin: origin,
+    );
+  }
+
+  Future<void> _shareAttachment(
+    BuildContext context,
+    ChatAttachment attachment,
+  ) async {
+    final box = context.findRenderObject() as RenderBox?;
+    final origin = box != null
+        ? box.localToGlobal(Offset.zero) & box.size
+        : null;
+    final bytes = await _fetchAttachmentBytes(attachment);
+    if (bytes == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to download image')),
+        );
+      }
+      return;
+    }
+    await ShareService.instance.shareFile(
+      bytes,
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      sharePositionOrigin: origin,
+    );
+  }
+
+  Future<void> _copyAttachmentToClipboard(
+    BuildContext context,
+    ChatAttachment attachment,
+  ) async {
+    final bytes = await _fetchAttachmentBytes(attachment);
+    if (bytes == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to download image')),
+        );
+      }
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: attachment.filename));
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Image copied'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
   }
 
   void _showFullImage(BuildContext context, ChatAttachment attachment) {
@@ -1064,6 +1347,53 @@ class _MetaActionRow extends StatelessWidget {
       );
     }
 
+    // Share: assistant messages with content (text selection toolbar
+    // handles sharing for user messages).
+    if (!isUser && message.content.isNotEmpty) {
+      actions.add(
+        _MetaActionButton(
+          key: const Key('share_action'),
+          icon: Icons.share_outlined,
+          label: 'Share',
+          color: mutedColor,
+          onTap: () {
+            final box = context.findRenderObject() as RenderBox?;
+            final origin = box != null
+                ? box.localToGlobal(Offset.zero) & box.size
+                : null;
+            ShareService.instance.shareText(
+              message.content,
+              sharePositionOrigin: origin,
+            );
+          },
+        ),
+      );
+    }
+
+    // Save: assistant messages with content.
+    if (!isUser && message.content.isNotEmpty) {
+      actions.add(
+        _MetaActionButton(
+          key: const Key('save_action'),
+          icon: Icons.save_alt_outlined,
+          label: 'Save',
+          color: mutedColor,
+          onTap: () {
+            final box = context.findRenderObject() as RenderBox?;
+            final origin = box != null
+                ? box.localToGlobal(Offset.zero) & box.size
+                : null;
+            ShareService.instance.saveText(
+              message.content,
+              suggestedFilename:
+                  'assistant-message-${DateTime.now().toIso8601String().split('T').first}.md',
+              sharePositionOrigin: origin,
+            );
+          },
+        ),
+      );
+    }
+
     // Retry: failed messages only.
     if (isFailed && onRetry != null) {
       actions.add(
@@ -1081,17 +1411,11 @@ class _MetaActionRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: Row(
-        mainAxisAlignment: isUser
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (int i = 0; i < actions.length; i++) ...[
-            if (i > 0) const SizedBox(width: 16),
-            actions[i],
-          ],
-        ],
+      child: Wrap(
+        alignment: isUser ? WrapAlignment.end : WrapAlignment.start,
+        spacing: 16,
+        runSpacing: 4,
+        children: actions,
       ),
     );
   }
