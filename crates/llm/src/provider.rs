@@ -7,6 +7,7 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
+use crate::stream_chunk::StreamChunk;
 use crate::tool_spec::ToolSpec;
 use crate::{ChatHistoryMessage, LlmResponse};
 
@@ -68,18 +69,21 @@ pub trait LlmProvider: Send + Sync {
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse>;
 
-    /// Like [`chat`] but streams final-answer tokens through `token_sink` as
-    /// they are generated.
+    /// Like [`chat`] but streams typed chunks through `chunk_sink` as they are
+    /// generated.
     ///
-    /// Tool-call steps are never streamed — only the tokens that form part of
-    /// a `FinalAnswer` are forwarded.  The method still returns the complete
-    /// [`LlmResponse`] once generation is finished.
+    /// [`StreamChunk::Text`] carries final-answer tokens visible to the user.
+    /// [`StreamChunk::Thinking`] carries internal reasoning tokens (when the
+    /// provider supports extended thinking).
+    ///
+    /// The method still returns the complete [`LlmResponse`] once generation
+    /// is finished.
     async fn chat_streaming(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse>;
 
     /// Compute a dense vector embedding for `text`.

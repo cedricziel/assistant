@@ -24,8 +24,8 @@ use tracing::{debug, warn};
 use assistant_core::LlmConfig;
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, RetryConfig, ToolCallItem, ToolSpec, ToolSupport, build_reqwest_client,
-    is_transient_error_message, with_retry,
+    LlmResponseMeta, RetryConfig, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
+    ToolSupport, build_reqwest_client, is_transient_error_message, with_retry,
 };
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
@@ -192,7 +192,11 @@ impl MoonshotProvider {
             let items = parse_tool_calls(tool_calls);
             if !items.is_empty() {
                 debug!(count = items.len(), "Moonshot: tool calls received");
-                return Ok(LlmResponse::ToolCalls(items, meta));
+                return Ok(LlmResponse::ToolCalls(ToolCallResponse {
+                    items,
+                    meta,
+                    thinking: None,
+                }));
             }
         }
 
@@ -207,7 +211,7 @@ impl MoonshotProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         debug!(model = %self.model, "Sending streaming request to Moonshot");
 
@@ -279,8 +283,8 @@ impl MoonshotProvider {
 
                 if let Some(ref content) = delta.content {
                     text_buf.push_str(content);
-                    if let Some(ref sink) = token_sink {
-                        let _ = sink.send(content.clone()).await;
+                    if let Some(ref sink) = chunk_sink {
+                        let _ = sink.send(StreamChunk::Text(content.clone())).await;
                     }
                 }
 
@@ -340,7 +344,11 @@ impl MoonshotProvider {
                 .collect();
             if !items.is_empty() {
                 debug!(count = items.len(), "Moonshot SSE: tool calls received");
-                return Ok(LlmResponse::ToolCalls(items, meta));
+                return Ok(LlmResponse::ToolCalls(ToolCallResponse {
+                    items,
+                    meta,
+                    thinking: None,
+                }));
             }
         }
 
@@ -469,7 +477,11 @@ impl MoonshotProvider {
                         count = regular_calls.len(),
                         "Moonshot: regular tool calls received alongside web search"
                     );
-                    return Ok(LlmResponse::ToolCalls(regular_calls, meta));
+                    return Ok(LlmResponse::ToolCalls(ToolCallResponse {
+                        items: regular_calls,
+                        meta,
+                        thinking: None,
+                    }));
                 }
 
                 if !web_search_calls.is_empty() {
@@ -543,7 +555,7 @@ impl LlmProvider for MoonshotProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         if self.web_search_enabled {
             // $web_search echo-back loop is not compatible with SSE streaming;
@@ -552,13 +564,13 @@ impl LlmProvider for MoonshotProvider {
                 .chat_with_web_search(system_prompt, history, tools)
                 .await?;
             if let LlmResponse::FinalAnswer(ref text, _) = result
-                && let Some(sink) = token_sink
+                && let Some(sink) = chunk_sink
             {
-                let _ = sink.send(text.clone()).await;
+                let _ = sink.send(StreamChunk::Text(text.clone())).await;
             }
             Ok(result)
         } else {
-            self.chat_sse(system_prompt, history, tools, token_sink)
+            self.chat_sse(system_prompt, history, tools, chunk_sink)
                 .await
         }
     }
@@ -1109,9 +1121,9 @@ mod tests {
         };
 
         match p.chat("You are helpful.", &[], &[spec]).await.unwrap() {
-            LlmResponse::ToolCalls(calls, _) => {
-                assert_eq!(calls.len(), 1);
-                assert_eq!(calls[0].name, "file-read");
+            LlmResponse::ToolCalls(resp) => {
+                assert_eq!(resp.items.len(), 1);
+                assert_eq!(resp.items[0].name, "file-read");
             }
             other => panic!("expected ToolCalls, got {other:?}"),
         }

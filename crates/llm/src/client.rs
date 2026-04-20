@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 use crate::provider::{Capabilities, LlmProvider, ToolSupport};
+use crate::stream_chunk::StreamChunk;
 use crate::tool_spec::ToolSpec;
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -104,11 +105,28 @@ pub struct LlmResponseMeta {
     pub response_id: Option<String>,
 }
 
+/// Structured payload for a tool-call response from the LLM.
+///
+/// Carries the tool calls themselves, response metadata, and any thinking
+/// that was produced alongside the tool calls (which would otherwise be
+/// discarded by providers that treat response types as mutually exclusive).
+#[derive(Debug, Clone)]
+pub struct ToolCallResponse {
+    /// The tool invocations requested by the model.
+    pub items: Vec<ToolCallItem>,
+    /// Response-level metadata (token counts, model, etc.).
+    pub meta: LlmResponseMeta,
+    /// Thinking/reasoning that preceded the tool calls.
+    /// `None` if no thinking was produced, or if thinking was already
+    /// streamed via `StreamChunk::Thinking` during the call.
+    pub thinking: Option<String>,
+}
+
 /// The outcome of a single `LlmClient::chat` invocation.
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
     /// The model wants to call one or more tools.
-    ToolCalls(Vec<ToolCallItem>, LlmResponseMeta),
+    ToolCalls(ToolCallResponse),
     /// The model has a definitive answer for the user.
     FinalAnswer(String, LlmResponseMeta),
     /// The model emitted only a reasoning step (no action yet).
@@ -119,7 +137,7 @@ impl LlmResponse {
     /// Access the response metadata regardless of variant.
     pub fn meta(&self) -> &LlmResponseMeta {
         match self {
-            LlmResponse::ToolCalls(_, m) => m,
+            LlmResponse::ToolCalls(resp) => &resp.meta,
             LlmResponse::FinalAnswer(_, m) => m,
             LlmResponse::Thinking(_, m) => m,
         }
@@ -196,15 +214,15 @@ impl LlmClient {
         self.chat_native(system_prompt, history, tools).await
     }
 
-    /// Like [`chat`] but streams final-answer tokens through `token_sink`.
+    /// Like [`chat`] but streams typed chunks through `chunk_sink`.
     pub async fn chat_streaming(
         &self,
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_native_streaming(system_prompt, history, tools, token_sink)
+        self.chat_native_streaming(system_prompt, history, tools, chunk_sink)
             .await
     }
 
@@ -298,7 +316,11 @@ impl LlmClient {
                 .collect();
             if !items.is_empty() {
                 debug!(count = items.len(), "Native tool calls received");
-                return Ok(LlmResponse::ToolCalls(items, meta));
+                return Ok(LlmResponse::ToolCalls(ToolCallResponse {
+                    items,
+                    meta,
+                    thinking: None,
+                }));
             }
         }
 
@@ -335,7 +357,7 @@ impl LlmClient {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         debug!(
             model = %self.config.model,
@@ -369,6 +391,7 @@ impl LlmClient {
         }
 
         let mut content = String::new();
+        let mut thinking_buf = String::new();
         let mut tool_calls_json: Option<Value> = None;
         let mut final_json: Option<Value> = None;
 
@@ -394,8 +417,22 @@ impl LlmClient {
                             .filter(|s| !s.is_empty())
                         {
                             content.push_str(token);
-                            if let Some(ref sink) = token_sink {
-                                let _ = sink.send(token.to_string()).await;
+                            if let Some(ref sink) = chunk_sink {
+                                let _ = sink.send(StreamChunk::Text(token.to_string())).await;
+                            }
+                        }
+
+                        // Thinking models (e.g. qwen3) emit reasoning in
+                        // `/message/thinking`. Stream as thinking chunks.
+                        if let Some(thinking) = json
+                            .pointer("/message/thinking")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                        {
+                            thinking_buf.push_str(thinking);
+                            if let Some(ref sink) = chunk_sink {
+                                let _ =
+                                    sink.send(StreamChunk::Thinking(thinking.to_string())).await;
                             }
                         }
 
@@ -425,8 +462,18 @@ impl LlmClient {
                 .filter(|s| !s.is_empty())
             {
                 content.push_str(token);
-                if let Some(ref sink) = token_sink {
-                    let _ = sink.send(token.to_string()).await;
+                if let Some(ref sink) = chunk_sink {
+                    let _ = sink.send(StreamChunk::Text(token.to_string())).await;
+                }
+            }
+            if let Some(thinking) = json
+                .pointer("/message/thinking")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                thinking_buf.push_str(thinking);
+                if let Some(ref sink) = chunk_sink {
+                    let _ = sink.send(StreamChunk::Thinking(thinking.to_string())).await;
                 }
             }
             if let Some(tc) = json.pointer("/message/tool_calls")
@@ -473,8 +520,26 @@ impl LlmClient {
                 .collect();
             if !items.is_empty() {
                 debug!(count = items.len(), "Native streaming: tool calls received");
-                return Ok(LlmResponse::ToolCalls(items, meta));
+                return Ok(LlmResponse::ToolCalls(ToolCallResponse {
+                    items,
+                    meta,
+                    thinking: if thinking_buf.trim().is_empty() {
+                        None
+                    } else {
+                        Some(thinking_buf.clone())
+                    },
+                }));
             }
+        }
+
+        // Thinking models may return empty content with non-empty thinking.
+        // Surface as a Thinking step so the orchestrator re-prompts for a
+        // visible reply.
+        if content.trim().is_empty() && !thinking_buf.trim().is_empty() {
+            debug!(
+                "Native streaming: empty content with non-empty thinking; surfacing as Thinking step"
+            );
+            return Ok(LlmResponse::Thinking(thinking_buf, meta));
         }
 
         Ok(LlmResponse::FinalAnswer(content, meta))
@@ -508,9 +573,9 @@ impl LlmProvider for LlmClient {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_native_streaming(system_prompt, history, tools, token_sink)
+        self.chat_native_streaming(system_prompt, history, tools, chunk_sink)
             .await
     }
 
@@ -704,12 +769,12 @@ mod tests {
         let client = make_client(&server.uri());
         let resp = client.chat("sys", &[], &[]).await.unwrap();
 
-        let LlmResponse::ToolCalls(items, _meta) = resp else {
+        let LlmResponse::ToolCalls(resp) = resp else {
             panic!("expected ToolCalls, got {resp:?}");
         };
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].name, "my-tool");
-        assert_eq!(items[0].params["key"], "val");
+        assert_eq!(resp.items.len(), 1);
+        assert_eq!(resp.items[0].name, "my-tool");
+        assert_eq!(resp.items[0].params["key"], "val");
     }
 
     #[tokio::test]
@@ -729,14 +794,14 @@ mod tests {
         let client = make_client(&server.uri());
         let resp = client.chat("sys", &[], &[]).await.unwrap();
 
-        let LlmResponse::ToolCalls(items, _meta) = resp else {
+        let LlmResponse::ToolCalls(resp) = resp else {
             panic!("expected ToolCalls, got {resp:?}");
         };
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].name, "tool-a");
-        assert_eq!(items[0].params["x"], 1);
-        assert_eq!(items[1].name, "tool-b");
-        assert_eq!(items[1].params["y"], 2);
+        assert_eq!(resp.items.len(), 2);
+        assert_eq!(resp.items[0].name, "tool-a");
+        assert_eq!(resp.items[0].params["x"], 1);
+        assert_eq!(resp.items[1].name, "tool-b");
+        assert_eq!(resp.items[1].params["y"], 2);
     }
 
     #[tokio::test]
@@ -774,11 +839,11 @@ mod tests {
         let client = make_client(&server.uri());
         let resp = client.chat("sys", &[], &[]).await.unwrap();
 
-        let LlmResponse::ToolCalls(items, _meta) = resp else {
+        let LlmResponse::ToolCalls(resp) = resp else {
             panic!("expected ToolCalls, got {resp:?}");
         };
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].name, "good-tool");
+        assert_eq!(resp.items.len(), 1);
+        assert_eq!(resp.items[0].name, "good-tool");
     }
 
     // ── build_json_messages tests (MultimodalUser) ───────────────────────────

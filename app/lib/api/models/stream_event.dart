@@ -297,6 +297,94 @@ class AgentErrorEvent extends StreamEvent {
   final String message;
 }
 
+/// An incremental text token produced by a running subagent.
+///
+/// Corresponds to `event:subagent_token` in the SSE stream.  The JSON body is
+/// `{"agent_id":"...","data":{"content":"..."}}`.
+class SubagentTokenEvent extends StreamEvent {
+  const SubagentTokenEvent({required this.agentId, required this.content});
+
+  final String agentId;
+  final String content;
+
+  factory SubagentTokenEvent.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? {};
+    return SubagentTokenEvent(
+      agentId: json['agent_id'] as String? ?? '',
+      content: data['content'] as String? ?? '',
+    );
+  }
+}
+
+/// Internal reasoning produced by a running subagent.
+///
+/// Corresponds to `event:subagent_thinking` in the SSE stream.  The JSON body
+/// is `{"agent_id":"...","data":{"content":"..."}}`.
+class SubagentThinkingEvent extends StreamEvent {
+  const SubagentThinkingEvent({required this.agentId, required this.content});
+
+  final String agentId;
+  final String content;
+
+  factory SubagentThinkingEvent.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? {};
+    return SubagentThinkingEvent(
+      agentId: json['agent_id'] as String? ?? '',
+      content: data['content'] as String? ?? '',
+    );
+  }
+}
+
+/// A tool execution completed within a running subagent.
+///
+/// Corresponds to `event:subagent_tool_result` in the SSE stream.  The JSON
+/// body is `{"agent_id":"...","data":{"tool_name":"...","status":"...","arguments":{...},"result":"..."}}`.
+class SubagentToolResultEvent extends StreamEvent {
+  const SubagentToolResultEvent({
+    required this.agentId,
+    required this.toolName,
+    required this.status,
+    this.arguments,
+    this.result,
+  });
+
+  final String agentId;
+  final String toolName;
+  final String status;
+  final Map<String, dynamic>? arguments;
+  final String? result;
+
+  factory SubagentToolResultEvent.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? {};
+    return SubagentToolResultEvent(
+      agentId: json['agent_id'] as String? ?? '',
+      toolName: data['tool_name'] as String? ?? '',
+      status: data['status'] as String? ?? 'ok',
+      arguments: data['arguments'] as Map<String, dynamic>?,
+      result: data['result'] as String?,
+    );
+  }
+}
+
+/// A status update from a running subagent.
+///
+/// Corresponds to `event:subagent_status` in the SSE stream.  The JSON body
+/// is `{"agent_id":"...","data":{"message":"..."}}`.
+class SubagentStatusEvent extends StreamEvent {
+  const SubagentStatusEvent({required this.agentId, required this.message});
+
+  final String agentId;
+  final String message;
+
+  factory SubagentStatusEvent.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? {};
+    return SubagentStatusEvent(
+      agentId: json['agent_id'] as String? ?? '',
+      message: data['message'] as String? ?? '',
+    );
+  }
+}
+
 /// The server has produced audio for the most recent assistant response.
 ///
 /// Corresponds to `event:audio_ready` in the SSE stream.  The JSON body is

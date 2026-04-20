@@ -30,8 +30,8 @@ use assistant_core::LlmConfig;
 use assistant_core::types::OpenAIUserLocation;
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, RetryConfig, ToolCallItem, ToolSpec, ToolSupport, build_reqwest_client,
-    is_transient_error_message, with_retry,
+    LlmResponseMeta, RetryConfig, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
+    ToolSupport, build_reqwest_client, is_transient_error_message, with_retry,
 };
 
 use crate::oauth::OAuthManager;
@@ -274,7 +274,7 @@ impl OpenAIProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         self.ensure_fresh_client().await?;
 
@@ -331,8 +331,8 @@ impl OpenAIProvider {
             match event {
                 ResponseStreamEvent::ResponseOutputTextDelta(delta) => {
                     text_buf.push_str(&delta.delta);
-                    if let Some(ref sink) = token_sink {
-                        let _ = sink.send(delta.delta).await;
+                    if let Some(ref sink) = chunk_sink {
+                        let _ = sink.send(StreamChunk::Text(delta.delta)).await;
                     }
                 }
                 ResponseStreamEvent::ResponseCompleted(completed) => {
@@ -391,9 +391,9 @@ impl LlmProvider for OpenAIProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_sse(system_prompt, history, tools, token_sink)
+        self.chat_sse(system_prompt, history, tools, chunk_sink)
             .await
     }
 
@@ -666,7 +666,11 @@ fn parse_response(response: Response) -> anyhow::Result<LlmResponse> {
             count = tool_calls.len(),
             "OpenAI Responses: tool calls received"
         );
-        return Ok(LlmResponse::ToolCalls(tool_calls, meta));
+        return Ok(LlmResponse::ToolCalls(ToolCallResponse {
+            items: tool_calls,
+            meta,
+            thinking: None,
+        }));
     }
 
     let content = text_parts.join("");

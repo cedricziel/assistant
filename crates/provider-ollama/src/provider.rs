@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use assistant_core::LlmConfig;
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, LlmClient, LlmClientConfig, LlmProvider, LlmResponse,
-    ToolSpec, ToolSupport,
+    StreamChunk, ToolSpec, ToolSupport,
 };
 
 // ── OllamaConfig ─────────────────────────────────────────────────────────────
@@ -118,10 +118,10 @@ impl LlmProvider for OllamaProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         self.inner
-            .chat_streaming(system_prompt, history, tools, token_sink)
+            .chat_streaming(system_prompt, history, tools, chunk_sink)
             .await
     }
 

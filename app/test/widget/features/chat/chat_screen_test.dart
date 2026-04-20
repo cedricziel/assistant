@@ -815,4 +815,80 @@ void main() {
       },
     );
   });
+
+  group('Chat screen — streaming dots gate', () {
+    testWidgets(
+      'tool call chips render during streaming even when content is empty',
+      (tester) async {
+        final res = await pumpChatScreen(tester);
+
+        final assistantMsg = ChatMessage(
+          id: 'assistant-streaming',
+          role: 'assistant',
+          content: '',
+          isStreaming: true,
+          toolCalls: [
+            ToolCallRecord(
+              toolName: 'web-search',
+              status: ToolCallStatus.pending,
+            ),
+          ],
+        );
+
+        res.notifier.push(
+          ChatState(
+            conversationId: 'c1',
+            messages: [assistantMsg],
+            isSending: true,
+          ),
+        );
+        await tester.pump();
+
+        // Tool call chip should be visible (not hidden behind dots).
+        expect(
+          find.text('web-search'),
+          findsOneWidget,
+          reason:
+              'Tool call chip must render during streaming even when content is empty',
+        );
+      },
+    );
+
+    testWidgets(
+      'dots shown when streaming with empty content and no tool calls',
+      (tester) async {
+        final res = await pumpChatScreen(tester);
+
+        final assistantMsg = ChatMessage(
+          id: 'assistant-streaming',
+          role: 'assistant',
+          content: '',
+          isStreaming: true,
+        );
+
+        res.notifier.push(
+          ChatState(
+            conversationId: 'c1',
+            messages: [assistantMsg],
+            isSending: true,
+          ),
+        );
+        await tester.pump();
+
+        // No tool call chip should appear.
+        expect(find.text('web-search'), findsNothing);
+
+        // The dots indicator should be present (it's a Row of animated dots
+        // inside a SizedBox with height 16).
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is SizedBox && w.height == 16 && w.width == 40,
+          ),
+          findsOneWidget,
+          reason:
+              'Dots indicator should show when no tool calls and no content',
+        );
+      },
+    );
+  });
 }

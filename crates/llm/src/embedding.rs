@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::provider::{Capabilities, LlmProvider};
+use crate::stream_chunk::StreamChunk;
 use crate::tool_spec::ToolSpec;
 use crate::{ChatHistoryMessage, LlmResponse};
 
@@ -85,10 +86,10 @@ impl LlmProvider for WithEmbeddingOverride {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         self.inner
-            .chat_streaming(system_prompt, history, tools, token_sink)
+            .chat_streaming(system_prompt, history, tools, chunk_sink)
             .await
     }
 
@@ -147,7 +148,7 @@ mod tests {
             _system_prompt: &str,
             _history: &[ChatHistoryMessage],
             _tools: &[ToolSpec],
-            _token_sink: Option<mpsc::Sender<String>>,
+            _chunk_sink: Option<mpsc::Sender<StreamChunk>>,
         ) -> anyhow::Result<LlmResponse> {
             Ok(LlmResponse::FinalAnswer(
                 "stub".to_string(),
@@ -205,7 +206,7 @@ mod tests {
             _system_prompt: &str,
             _history: &[ChatHistoryMessage],
             _tools: &[ToolSpec],
-            _token_sink: Option<mpsc::Sender<String>>,
+            _chunk_sink: Option<mpsc::Sender<StreamChunk>>,
         ) -> anyhow::Result<LlmResponse> {
             Ok(LlmResponse::FinalAnswer(
                 "chat-with-embed".to_string(),

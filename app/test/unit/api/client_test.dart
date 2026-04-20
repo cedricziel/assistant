@@ -320,6 +320,10 @@ void main() {
           case AudioReadyEvent():
           case TranscriptEvent():
           case RunStartedEvent():
+          case SubagentTokenEvent():
+          case SubagentThinkingEvent():
+          case SubagentToolResultEvent():
+          case SubagentStatusEvent():
             count++;
         }
       }
@@ -462,6 +466,80 @@ void main() {
       expect(events.length, equals(1));
       expect(events.first, isA<TokenEvent>());
       expect((events.first as TokenEvent).token, equals('Café'));
+    });
+
+    test('emits SubagentTokenEvent from subagent_token SSE event', () async {
+      final payload = jsonEncode({
+        'agent_id': 'research-1',
+        'data': {'content': 'hello'},
+      });
+      final sse = 'event:subagent_token\ndata:$payload\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<SubagentTokenEvent>());
+      final e = events.first as SubagentTokenEvent;
+      expect(e.agentId, equals('research-1'));
+      expect(e.content, equals('hello'));
+    });
+
+    test(
+      'emits SubagentThinkingEvent from subagent_thinking SSE event',
+      () async {
+        final payload = jsonEncode({
+          'agent_id': 'research-1',
+          'data': {'content': 'Let me think...'},
+        });
+        final sse = 'event:subagent_thinking\ndata:$payload\n\n';
+        final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+        expect(events.length, equals(1));
+        expect(events.first, isA<SubagentThinkingEvent>());
+        final e = events.first as SubagentThinkingEvent;
+        expect(e.agentId, equals('research-1'));
+        expect(e.content, equals('Let me think...'));
+      },
+    );
+
+    test(
+      'emits SubagentToolResultEvent from subagent_tool_result SSE event',
+      () async {
+        final payload = jsonEncode({
+          'agent_id': 'research-1',
+          'data': {
+            'tool_name': 'web-search',
+            'status': 'ok',
+            'arguments': {'query': 'rust async'},
+            'result': 'Found results',
+          },
+        });
+        final sse = 'event:subagent_tool_result\ndata:$payload\n\n';
+        final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+        expect(events.length, equals(1));
+        expect(events.first, isA<SubagentToolResultEvent>());
+        final e = events.first as SubagentToolResultEvent;
+        expect(e.agentId, equals('research-1'));
+        expect(e.toolName, equals('web-search'));
+        expect(e.status, equals('ok'));
+        expect(e.arguments, equals({'query': 'rust async'}));
+        expect(e.result, equals('Found results'));
+      },
+    );
+
+    test('emits SubagentStatusEvent from subagent_status SSE event', () async {
+      final payload = jsonEncode({
+        'agent_id': 'research-1',
+        'data': {'message': 'Calling tool: web-search'},
+      });
+      final sse = 'event:subagent_status\ndata:$payload\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<SubagentStatusEvent>());
+      final e = events.first as SubagentStatusEvent;
+      expect(e.agentId, equals('research-1'));
+      expect(e.message, equals('Calling tool: web-search'));
     });
   });
 }

@@ -1034,6 +1034,35 @@ pub async fn send_message(
                         .data(p.to_string());
                     ("subagent_completed", p, e)
                 }
+                OrchestratorEvent::SubagentEvent {
+                    ref agent_id,
+                    ref inner,
+                } => {
+                    let (event_name, inner_data) = match inner.as_ref() {
+                        OrchestratorEvent::Token(t) => {
+                            ("subagent_token", serde_json::json!({"content": t}))
+                        }
+                        OrchestratorEvent::Thinking(t) => {
+                            ("subagent_thinking", serde_json::json!({"content": t}))
+                        }
+                        OrchestratorEvent::Status(s) => {
+                            ("subagent_status", serde_json::json!({"message": s}))
+                        }
+                        OrchestratorEvent::ToolResult {
+                            tool_name,
+                            status,
+                            arguments,
+                            result,
+                        } => (
+                            "subagent_tool_result",
+                            serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result}),
+                        ),
+                        _ => ("subagent_event", serde_json::json!({})),
+                    };
+                    let p = serde_json::json!({"agent_id": agent_id, "data": inner_data});
+                    let e = Event::default().event(event_name).data(p.to_string());
+                    (event_name, p, e)
+                }
                 OrchestratorEvent::AudioReady { ref audio_id } => {
                     let p = serde_json::json!({"audio_id": audio_id, "auto_play": true});
                     let e = Event::default().event("audio_ready").data(p.to_string());
@@ -1633,6 +1662,30 @@ pub async fn send_voice_message(
                     Event::default()
                         .event("subagent_completed")
                         .data(data.to_string())
+                }
+                OrchestratorEvent::SubagentEvent { agent_id, inner } => {
+                    let (inner_type, inner_data) = match inner.as_ref() {
+                        OrchestratorEvent::Token(t) => ("token", serde_json::json!({"content": t})),
+                        OrchestratorEvent::Thinking(t) => {
+                            ("thinking", serde_json::json!({"content": t}))
+                        }
+                        OrchestratorEvent::Status(s) => {
+                            ("status", serde_json::json!({"message": s}))
+                        }
+                        OrchestratorEvent::ToolResult {
+                            tool_name,
+                            status,
+                            arguments,
+                            result,
+                        } => (
+                            "tool_result",
+                            serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result}),
+                        ),
+                        _ => ("unknown", serde_json::json!({})),
+                    };
+                    let event_type = format!("subagent_{inner_type}");
+                    let data = serde_json::json!({"agent_id": agent_id, "event_type": inner_type, "data": inner_data});
+                    Event::default().event(&event_type).data(data.to_string())
                 }
                 OrchestratorEvent::AudioReady { audio_id } => {
                     let data = serde_json::json!({

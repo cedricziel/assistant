@@ -78,6 +78,18 @@ pub enum OrchestratorEvent {
         summary: String,
     },
 
+    /// An inner event produced by a running subagent.
+    ///
+    /// Wraps any orchestrator event produced during a subagent's tool loop so
+    /// that consumers can render nested timelines (thinking, tool calls, tokens)
+    /// scoped to the subagent.
+    SubagentEvent {
+        /// Identifier of the subagent that produced this event.
+        agent_id: String,
+        /// The inner event (token, thinking, tool result, etc.).
+        inner: Box<OrchestratorEvent>,
+    },
+
     /// A `voice-response` tool call produced synthesised audio that clients
     /// should auto-play.
     ///
@@ -155,11 +167,45 @@ mod tests {
                 status: "ok".to_string(),
                 summary: "s".to_string(),
             },
+            OrchestratorEvent::SubagentEvent {
+                agent_id: "sub-1".to_string(),
+                inner: Box::new(OrchestratorEvent::Token("hello".to_string())),
+            },
         ];
         for event in &events {
             let cloned = event.clone();
             let debug = format!("{:?}", cloned);
             assert!(!debug.is_empty());
+        }
+    }
+
+    #[test]
+    fn subagent_event_wraps_inner_events() {
+        let event = OrchestratorEvent::SubagentEvent {
+            agent_id: "research-agent".to_string(),
+            inner: Box::new(OrchestratorEvent::ToolResult {
+                tool_name: "web-search".to_string(),
+                status: "ok".to_string(),
+                arguments: Some(serde_json::json!({"query": "rust async"})),
+                result: Some("Found results".to_string()),
+            }),
+        };
+        match event {
+            OrchestratorEvent::SubagentEvent { agent_id, inner } => {
+                assert_eq!(agent_id, "research-agent");
+                match *inner {
+                    OrchestratorEvent::ToolResult {
+                        ref tool_name,
+                        ref status,
+                        ..
+                    } => {
+                        assert_eq!(tool_name, "web-search");
+                        assert_eq!(status, "ok");
+                    }
+                    _ => panic!("expected ToolResult inner event"),
+                }
+            }
+            _ => panic!("expected SubagentEvent variant"),
         }
     }
 }

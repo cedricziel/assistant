@@ -12,7 +12,7 @@ use assistant_core::types::{
 };
 use assistant_llm::{
     Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, ToolCallItem, ToolSpec, ToolSupport,
+    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
 };
 
 // ── AnthropicConfig ───────────────────────────────────────────────────────────
@@ -388,9 +388,9 @@ impl LlmProvider for AnthropicProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
-        self.chat_sse(system_prompt, history, tools, token_sink)
+        self.chat_sse(system_prompt, history, tools, chunk_sink)
             .await
     }
 
@@ -478,7 +478,7 @@ impl AnthropicProvider {
         system_prompt: &str,
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
-        token_sink: Option<mpsc::Sender<String>>,
+        token_sink: Option<mpsc::Sender<StreamChunk>>,
     ) -> anyhow::Result<LlmResponse> {
         debug!(
             model = %self.config.model,
@@ -603,7 +603,17 @@ impl AnthropicProvider {
                 .collect();
             if !items.is_empty() {
                 debug!(count = items.len(), "Anthropic SSE: tool calls received");
-                return Ok(LlmResponse::ToolCalls(items, sse_meta));
+                return Ok(LlmResponse::ToolCalls(ToolCallResponse {
+                    items,
+                    meta: sse_meta,
+                    // Only carry thinking in batch if it wasn't already
+                    // streamed token-by-token via the chunk sink.
+                    thinking: if thinking_buf.is_empty() || token_sink.is_some() {
+                        None
+                    } else {
+                        Some(thinking_buf.clone())
+                    },
+                }));
             }
         }
 
@@ -705,7 +715,7 @@ async fn process_sse_event(
     tool_blocks: &mut Vec<ToolBlock>,
     current_block_idx: &mut Option<usize>,
     current_block_type: &mut String,
-    token_sink: &Option<mpsc::Sender<String>>,
+    token_sink: &Option<mpsc::Sender<StreamChunk>>,
     meta: &mut LlmResponseMeta,
 ) {
     match event_type {
@@ -759,7 +769,7 @@ async fn process_sse_event(
                     if let Some(text) = json.pointer("/delta/text").and_then(|v| v.as_str()) {
                         text_buf.push_str(text);
                         if let Some(sink) = token_sink {
-                            let _ = sink.send(text.to_string()).await;
+                            let _ = sink.send(StreamChunk::Text(text.to_string())).await;
                         }
                     }
                 }
@@ -767,6 +777,9 @@ async fn process_sse_event(
                     if let Some(thinking) = json.pointer("/delta/thinking").and_then(|v| v.as_str())
                     {
                         thinking_buf.push_str(thinking);
+                        if let Some(sink) = token_sink {
+                            let _ = sink.send(StreamChunk::Thinking(thinking.to_string())).await;
+                        }
                     }
                 }
                 "input_json_delta" => {
@@ -786,7 +799,7 @@ async fn process_sse_event(
                             if text.len() > already {
                                 let new_text = text[already..].to_string();
                                 tool_blocks[idx].text_chars_sent = text.len();
-                                let _ = sink.send(new_text).await;
+                                let _ = sink.send(StreamChunk::Text(new_text)).await;
                             }
                         }
                     }
@@ -867,7 +880,15 @@ fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<Ll
             count = tool_calls.len(),
             "Anthropic non-streaming: tool calls received"
         );
-        return Ok(LlmResponse::ToolCalls(tool_calls, meta));
+        return Ok(LlmResponse::ToolCalls(ToolCallResponse {
+            items: tool_calls,
+            meta,
+            thinking: if thinking_parts.is_empty() {
+                None
+            } else {
+                Some(thinking_parts.join(""))
+            },
+        }));
     }
     if !thinking_parts.is_empty() {
         return Ok(LlmResponse::Thinking(thinking_parts.join(""), meta));

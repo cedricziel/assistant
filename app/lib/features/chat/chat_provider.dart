@@ -325,6 +325,15 @@ class ChatMessage {
   /// Subagent completion summary for [TimelineEntryType.subagent] entries.
   String? subagentSummary;
 
+  /// Accumulated content tokens produced by a subagent.
+  String subagentContent = '';
+
+  /// Accumulated thinking text produced by a subagent.
+  String subagentThinking = '';
+
+  /// Tool calls executed by a subagent, in order.
+  List<ToolCallRecord> subagentToolCalls = [];
+
   /// Command name for [TimelineEntryType.command] entries (without `/`).
   final String? commandName;
 
@@ -632,6 +641,69 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       msgs[idx].subagentSummary = event.summary;
     }
     state = AsyncData(chatState.copyWith(messages: msgs));
+  }
+
+  /// Accumulate token content from a subagent into its timeline entry.
+  void _onSubagentTokenEvent(ChatState chatState, SubagentTokenEvent event) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final idx = msgs.indexWhere(
+      (m) =>
+          m.timelineType == TimelineEntryType.subagent &&
+          m.subagentId == event.agentId,
+    );
+    if (idx != -1) {
+      msgs[idx].subagentContent += event.content;
+    }
+    state = AsyncData(chatState.copyWith(messages: msgs));
+  }
+
+  /// Accumulate thinking content from a subagent into its timeline entry.
+  void _onSubagentThinkingEvent(
+    ChatState chatState,
+    SubagentThinkingEvent event,
+  ) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final idx = msgs.indexWhere(
+      (m) =>
+          m.timelineType == TimelineEntryType.subagent &&
+          m.subagentId == event.agentId,
+    );
+    if (idx != -1) {
+      msgs[idx].subagentThinking += event.content;
+    }
+    state = AsyncData(chatState.copyWith(messages: msgs));
+  }
+
+  /// Record a tool call result from a subagent into its timeline entry.
+  void _onSubagentToolResultEvent(
+    ChatState chatState,
+    SubagentToolResultEvent event,
+  ) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    final idx = msgs.indexWhere(
+      (m) =>
+          m.timelineType == TimelineEntryType.subagent &&
+          m.subagentId == event.agentId,
+    );
+    if (idx != -1) {
+      msgs[idx].subagentToolCalls.add(
+        ToolCallRecord(
+          toolName: event.toolName,
+          status: event.status == 'ok'
+              ? ToolCallStatus.ok
+              : ToolCallStatus.error,
+          arguments: event.arguments,
+          result: event.result,
+        ),
+      );
+    }
+    state = AsyncData(chatState.copyWith(messages: msgs));
+  }
+
+  /// Handle status updates from a subagent (currently just triggers rebuild).
+  void _onSubagentStatusEvent(ChatState chatState, SubagentStatusEvent event) {
+    // Status events from subagents don't need special handling yet;
+    // the UI will reflect them via the subagent timeline entry.
   }
 
   /// Run ID of the most recent (or current) orchestrator run.
@@ -1126,6 +1198,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           _onSubagentStartedEvent(chatState, event);
         } else if (event is SubagentCompletedEvent) {
           _onSubagentCompletedEvent(chatState, event);
+        } else if (event is SubagentTokenEvent) {
+          _onSubagentTokenEvent(chatState, event);
+        } else if (event is SubagentThinkingEvent) {
+          _onSubagentThinkingEvent(chatState, event);
+        } else if (event is SubagentToolResultEvent) {
+          _onSubagentToolResultEvent(chatState, event);
+        } else if (event is SubagentStatusEvent) {
+          _onSubagentStatusEvent(chatState, event);
         } else if (event is AudioReadyEvent) {
           // Store audioId on the streaming assistant message for auto-play.
           final msgs = List<ChatMessage>.from(chatState.messages);

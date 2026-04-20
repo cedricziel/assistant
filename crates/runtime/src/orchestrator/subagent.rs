@@ -9,13 +9,14 @@ use assistant_core::{
     AgentReport, AgentReportStatus, AgentSpawn, DEFAULT_MAX_AGENT_DEPTH, ExecutionContext,
     Interface, Message, SubagentRunner,
 };
-use assistant_llm::{ChatHistoryMessage, ChatRole, LlmResponse};
+use assistant_llm::{ChatHistoryMessage, ChatRole, LlmResponse, StreamChunk};
 use async_trait::async_trait;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,
     trace::{Span as _, TraceContextExt, Tracer as _},
 };
 use opentelemetry_semantic_conventions::attribute::ERROR_MESSAGE;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
@@ -96,18 +97,24 @@ impl SubagentRunner for Orchestrator {
             .agent_spawn_count
             .add(1, &[KeyValue::new("agent.id", parent_agent_id.clone())]);
 
-        // Emit SubagentStarted to the parent conversation's event sink.
-        if let Some(parent_conv_id) = spawn.parent_conversation_id {
-            let sinks = self.token_sinks.read().await;
-            if let Some(sink) = sinks.get(&parent_conv_id) {
-                let _ = sink
-                    .send(super::stream_event::OrchestratorEvent::SubagentStarted {
-                        agent_id: spawn.agent_id.clone(),
-                        task: spawn.task.clone(),
-                    })
-                    .await;
-            }
-        }
+        // Look up the parent conversation's event sink for forwarding inner events.
+        let parent_event_sink: Option<mpsc::Sender<super::stream_event::OrchestratorEvent>> =
+            if let Some(parent_conv_id) = spawn.parent_conversation_id {
+                let sinks = self.token_sinks.read().await;
+                let sink = sinks.get(&parent_conv_id).cloned();
+                // Emit SubagentStarted.
+                if let Some(ref s) = sink {
+                    let _ = s
+                        .send(super::stream_event::OrchestratorEvent::SubagentStarted {
+                            agent_id: spawn.agent_id.clone(),
+                            task: spawn.task.clone(),
+                        })
+                        .await;
+                }
+                sink
+            } else {
+                None
+            };
 
         // Register a cancellation token for this agent.
         let cancel_token = CancellationToken::new();
@@ -214,11 +221,39 @@ impl SubagentRunner for Orchestrator {
                     &tool_specs,
                 );
                 let llm_start = std::time::Instant::now();
-                let response = self
-                    .llm
-                    .chat(&system_prompt, &history, &tool_specs)
-                    .instrument(iteration_span.clone())
-                    .await;
+                let response = if let Some(ref parent_sink) = parent_event_sink {
+                    // Stream subagent LLM output, forwarding chunks as SubagentEvent.
+                    let (chunk_tx, mut chunk_rx) = mpsc::channel::<StreamChunk>(64);
+                    let parent_sink_clone = parent_sink.clone();
+                    let agent_id_clone = spawn.agent_id.clone();
+                    let forward_handle = tokio::spawn(async move {
+                        use super::stream_event::OrchestratorEvent;
+                        while let Some(chunk) = chunk_rx.recv().await {
+                            let inner = match chunk {
+                                StreamChunk::Text(t) => OrchestratorEvent::Token(t),
+                                StreamChunk::Thinking(t) => OrchestratorEvent::Thinking(t),
+                            };
+                            let _ = parent_sink_clone
+                                .send(OrchestratorEvent::SubagentEvent {
+                                    agent_id: agent_id_clone.clone(),
+                                    inner: Box::new(inner),
+                                })
+                                .await;
+                        }
+                    });
+                    let result = self
+                        .llm
+                        .chat_streaming(&system_prompt, &history, &tool_specs, Some(chunk_tx))
+                        .instrument(iteration_span.clone())
+                        .await;
+                    forward_handle.await.ok();
+                    result
+                } else {
+                    self.llm
+                        .chat(&system_prompt, &history, &tool_specs)
+                        .instrument(iteration_span.clone())
+                        .await
+                };
                 let llm_elapsed = llm_start.elapsed();
                 let response = match response {
                     Ok(r) => r,
@@ -315,7 +350,23 @@ impl SubagentRunner for Orchestrator {
                     }
 
                     // ── Tool calls ────────────────────────────────────────────
-                    LlmResponse::ToolCalls(tool_call_items, _meta) => {
+                    LlmResponse::ToolCalls(tool_call_resp) => {
+                        // Emit batch thinking from tool-call response.
+                        if let Some(ref thinking) = tool_call_resp.thinking
+                            && let Some(ref parent_sink) = parent_event_sink
+                        {
+                            let _ = parent_sink
+                                .send(super::stream_event::OrchestratorEvent::SubagentEvent {
+                                    agent_id: spawn.agent_id.clone(),
+                                    inner: Box::new(
+                                        super::stream_event::OrchestratorEvent::Thinking(
+                                            thinking.clone(),
+                                        ),
+                                    ),
+                                })
+                                .await;
+                        }
+                        let tool_call_items = tool_call_resp.items;
                         debug!(
                             count = tool_call_items.len(),
                             agent_id = %spawn.agent_id,
@@ -381,6 +432,30 @@ impl SubagentRunner for Orchestrator {
                             // the parent — pass scratch vectors.
                             let mut scratch_attachments = Vec::new();
                             let mut scratch_attachment_ids = Vec::new();
+
+                            // Create a child event sink that wraps events in SubagentEvent.
+                            let child_event_sink = if let Some(ref parent_sink) = parent_event_sink
+                            {
+                                let (child_tx, mut child_rx) =
+                                    mpsc::channel::<super::stream_event::OrchestratorEvent>(16);
+                                let parent_sink_clone = parent_sink.clone();
+                                let agent_id_clone = spawn.agent_id.clone();
+                                tokio::spawn(async move {
+                                    use super::stream_event::OrchestratorEvent;
+                                    while let Some(event) = child_rx.recv().await {
+                                        let _ = parent_sink_clone
+                                            .send(OrchestratorEvent::SubagentEvent {
+                                                agent_id: agent_id_clone.clone(),
+                                                inner: Box::new(event),
+                                            })
+                                            .await;
+                                    }
+                                });
+                                Some(child_tx)
+                            } else {
+                                None
+                            };
+
                             self.finalize_tool_result(
                                 &name,
                                 Some(&params),
@@ -393,7 +468,7 @@ impl SubagentRunner for Orchestrator {
                                 turn_index,
                                 &mut scratch_attachments,
                                 &mut scratch_attachment_ids,
-                                None,
+                                child_event_sink.as_ref(),
                             )
                             .await;
                         }
@@ -458,23 +533,20 @@ impl SubagentRunner for Orchestrator {
         };
 
         // Emit SubagentCompleted to the parent conversation's event sink.
-        if let Some(parent_conv_id) = spawn.parent_conversation_id {
-            let sinks = self.token_sinks.read().await;
-            if let Some(sink) = sinks.get(&parent_conv_id) {
-                let status_str = match report.status {
-                    AgentReportStatus::Completed => "ok",
-                    AgentReportStatus::Failed => "error",
-                    AgentReportStatus::Cancelled => "cancelled",
-                };
-                let summary = report.content.chars().take(120).collect::<String>();
-                let _ = sink
-                    .send(super::stream_event::OrchestratorEvent::SubagentCompleted {
-                        agent_id: spawn.agent_id.clone(),
-                        status: status_str.to_string(),
-                        summary,
-                    })
-                    .await;
-            }
+        if let Some(ref sink) = parent_event_sink {
+            let status_str = match report.status {
+                AgentReportStatus::Completed => "ok",
+                AgentReportStatus::Failed => "error",
+                AgentReportStatus::Cancelled => "cancelled",
+            };
+            let summary = report.content.chars().take(120).collect::<String>();
+            let _ = sink
+                .send(super::stream_event::OrchestratorEvent::SubagentCompleted {
+                    agent_id: spawn.agent_id.clone(),
+                    status: status_str.to_string(),
+                    summary,
+                })
+                .await;
         }
 
         // Clean up the cancellation token registry.

@@ -299,8 +299,9 @@ pub(crate) fn finish_llm_span(
             LlmResponse::FinalAnswer(text, _) => {
                 serde_json::json!([{"role": "assistant", "content": text}]).to_string()
             }
-            LlmResponse::ToolCalls(calls, _) => {
-                let items: Vec<serde_json::Value> = calls
+            LlmResponse::ToolCalls(resp) => {
+                let items: Vec<serde_json::Value> = resp
+                    .items
                     .iter()
                     .map(|c| {
                         serde_json::json!({
