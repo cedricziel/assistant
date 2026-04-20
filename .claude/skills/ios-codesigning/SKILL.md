@@ -73,6 +73,11 @@ API key. Either set the `APP_STORE_CONNECT_API_KEY_*` env vars, or pass
 `api_key_path:<path-to-json>` with a JSON file containing `key_id`, `issuer_id`,
 `key` (base64), `is_key_content_base64`, and `in_house` (false for standard accounts).
 
+**`in_house` is required.** If omitted from the JSON file, `sigh` (used internally by
+match) will crash with `Cannot determine if team is App Store or Enterprise`. Always
+set `"in_house": false` for standard Apple Developer accounts. The env var
+`SPACESHIP_CONNECT_API_IN_HOUSE=true` is the alternative for Enterprise accounts.
+
 ### Adding a new app extension or target
 
 When a new target (e.g. a share extension, widget, notification service) is added to
