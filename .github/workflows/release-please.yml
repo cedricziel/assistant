@@ -277,6 +277,10 @@ jobs:
           find "$APP/Contents/Frameworks" \( -name "*.framework" -o -name "*.dylib" \) 2>/dev/null | while read f; do
             codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
           done
+          # Sign app extensions (e.g. ShareExtension from super_clipboard plugin)
+          find "$APP/Contents/PlugIns" -name "*.appex" 2>/dev/null | while read appex; do
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$appex"
+          done
           codesign --force --sign "$IDENTITY" --options runtime --timestamp \
             --entitlements app/macos/Runner/Release.entitlements "$APP"
 
