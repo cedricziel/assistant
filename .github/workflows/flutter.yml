@@ -33,7 +33,7 @@ jobs:
 
   build-macos-bundle:
     name: Build macOS Bundle (no-codesign)
-    runs-on: macos-latest
+    runs-on: macos-26
     needs: analyze-and-test
     steps:
       - uses: actions/checkout@v6
