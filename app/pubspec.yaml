@@ -41,6 +41,7 @@ dependencies:
   desktop_drop: ^0.7.1
   super_clipboard: ^0.9.1
   connectivity_plus: ^7.1.1
+  share_plus: ^12.0.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
