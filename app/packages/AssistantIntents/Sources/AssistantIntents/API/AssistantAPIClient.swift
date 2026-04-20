@@ -7,8 +7,17 @@ import Foundation
 public final class AssistantAPIClient {
     public static let shared = AssistantAPIClient()
 
-    private let keychain = KeychainHelper()
+    private let keychain: KeychainHelper
     private let timeoutSeconds: TimeInterval = 25
+
+    public init() {
+        // Use shared Keychain access group so extensions can read credentials
+        // written by the main app.
+        self.keychain = KeychainHelper(
+            service: "com.cedricziel.assistant",
+            sharedAccessGroup: "\(KeychainHelper.teamPrefix)com.cedricziel.assistant.shared"
+        )
+    }
 
     // MARK: - Response types
 
@@ -62,6 +71,22 @@ public final class AssistantAPIClient {
             case workflowId = "workflow_id"
             case runId = "run_id"
             case status
+        }
+    }
+
+    public struct AttachmentResponse: Decodable {
+        public let id: String
+        public let filename: String
+        public let mimeType: String
+        public let sizeBytes: Int64
+        public let url: String
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case filename
+            case mimeType = "mime_type"
+            case sizeBytes = "size_bytes"
+            case url
         }
     }
 
@@ -133,6 +158,93 @@ public final class AssistantAPIClient {
         try await get(path: "/api/conversations")
     }
 
+    /// Creates a new conversation and returns its summary.
+    public func createConversation(title: String? = nil) async throws -> ConversationSummary {
+        var body: [String: Any] = [:]
+        if let title { body["title"] = title }
+        return try await post(path: "/api/conversations", body: body)
+    }
+
+    /// Sends a message to a conversation. The server responds with SSE but
+    /// this method fire-and-forgets — it validates the initial response status
+    /// and returns immediately.
+    public func sendMessage(
+        conversationId: String,
+        message: String,
+        attachmentIds: [String] = []
+    ) async throws {
+        var body: [String: Any] = ["message": message]
+        if !attachmentIds.isEmpty {
+            body["attachment_ids"] = attachmentIds
+        }
+        try await postIgnoringBody(
+            path: "/api/conversations/\(conversationId)/messages",
+            body: body
+        )
+    }
+
+    // MARK: - Attachments
+
+    /// Uploads a file as a multipart attachment to a conversation.
+    public func uploadAttachment(
+        conversationId: String,
+        fileData: Data,
+        filename: String,
+        mimeType: String
+    ) async throws -> AttachmentResponse {
+        let base = try baseURL()
+        let path = "/api/conversations/\(conversationId)/attachments"
+        guard let url = URL(string: "\(base)\(path)") else {
+            throw APIError.invalidURL
+        }
+
+        let boundary = UUID().uuidString
+        var request = makeRequest(url: url, method: "POST")
+        request.setValue(
+            "multipart/form-data; boundary=\(boundary)",
+            forHTTPHeaderField: "Content-Type"
+        )
+
+        var body = Data()
+        body.append("--\(boundary)\r\n")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
+        body.append("Content-Type: \(mimeType)\r\n\r\n")
+        body.append(fileData)
+        body.append("\r\n--\(boundary)--\r\n")
+        request.httpBody = body
+
+        let (data, response) = try await execute(request)
+        try validateResponse(response)
+        return try JSONDecoder().decode(AttachmentResponse.self, from: data)
+    }
+
+    /// Uploads a file from a URL as a streamed multipart attachment.
+    /// Suitable for large files within iOS share extension memory limits.
+    public func uploadAttachment(
+        conversationId: String,
+        fileURL: URL,
+        mimeType: String
+    ) async throws -> AttachmentResponse {
+        let fileData = try Data(contentsOf: fileURL)
+        let filename = fileURL.lastPathComponent
+        return try await uploadAttachment(
+            conversationId: conversationId,
+            fileData: fileData,
+            filename: filename,
+            mimeType: mimeType
+        )
+    }
+
+    // MARK: - Personas (active)
+
+    /// Switches the server's active persona.
+    public func switchPersona(id: String) async throws {
+        try await postIgnoringBody(
+            path: "/api/personas/active",
+            body: ["id": id]
+        )
+    }
+
     // MARK: - Internal HTTP helpers
 
     private func baseURL() throws -> String {
@@ -180,6 +292,20 @@ public final class AssistantAPIClient {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
+    private func postIgnoringBody(path: String, body: [String: Any]) async throws {
+        let base = try baseURL()
+        guard let url = URL(string: "\(base)\(path)") else {
+            throw APIError.invalidURL
+        }
+
+        var request = makeRequest(url: url, method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (_, response) = try await execute(request)
+        try validateResponse(response)
+    }
+
     private func execute(_ request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await URLSession.shared.data(for: request)
@@ -199,6 +325,16 @@ public final class AssistantAPIClient {
         }
         guard (200...299).contains(httpResponse.statusCode) else {
             throw APIError.serverError(httpResponse.statusCode)
+        }
+    }
+}
+
+// MARK: - Data helpers
+
+private extension Data {
+    mutating func append(_ string: String) {
+        if let data = string.data(using: .utf8) {
+            append(data)
         }
     }
 }

@@ -21,6 +21,11 @@
 
 		E10B971C2F94FAD600017AA7 /* AssistantIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E10B971B2F94FAD600017AA7 /* AssistantIntents */; };
 
+
+			E15E00102F9500AA00017B10 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15E00012F9500AA00017B01 /* ShareViewController.swift */; };
+			E15E00112F9500AA00017B11 /* AssistantIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E15E00142F9500AA00017B14 /* AssistantIntents */; };
+			E15E00132F9500AA00017B13 /* ShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = E15E00042F9500AA00017B04 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+			E15E00162F9500AA00017B16 /* SharedCredentialsChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15E00152F9500AA00017B15 /* SharedCredentialsChannel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -31,6 +36,14 @@
 			remoteGlobalIDString = 97C146ED1CF9000F007C117D;
 			remoteInfo = Runner;
 		};
+
+			E15E000E2F9500AA00017B0E /* PBXContainerItemProxy */ = {
+				isa = PBXContainerItemProxy;
+				containerPortal = 97C146E61CF9000F007C117D /* Project object */;
+				proxyType = 1;
+				remoteGlobalIDString = E15E00062F9500AA00017B06;
+				remoteInfo = ShareExtension;
+			};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -44,6 +57,18 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+
+			E15E00122F9500AA00017B12 /* Embed App Extensions */ = {
+				isa = PBXCopyFilesBuildPhase;
+				buildActionMask = 2147483647;
+				dstPath = "";
+				dstSubfolderSpec = 13;
+				files = (
+					E15E00132F9500AA00017B13 /* ShareExtension.appex in Embed App Extensions */,
+				);
+				name = "Embed App Extensions";
+				runOnlyForDeploymentPostprocessing = 0;
+			};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -75,6 +100,12 @@
 		EDF9668C1012FAED68DFB479 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		F0A4163A05F51012854E48B7 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
 		F388ABB91ECF644DE3719EED /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+
+			E15E00012F9500AA00017B01 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+			E15E00022F9500AA00017B02 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+			E15E00032F9500AA00017B03 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+			E15E00042F9500AA00017B04 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+			E15E00152F9500AA00017B15 /* SharedCredentialsChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedCredentialsChannel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +126,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+
+			E15E00082F9500AA00017B08 /* Frameworks */ = {
+				isa = PBXFrameworksBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					E15E00112F9500AA00017B11 /* AssistantIntents in Frameworks */,
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -177,6 +217,17 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+
+			E15E00052F9500AA00017B05 /* ShareExtension */ = {
+				isa = PBXGroup;
+				children = (
+					E15E00012F9500AA00017B01 /* ShareViewController.swift */,
+					E15E00022F9500AA00017B02 /* Info.plist */,
+					E15E00032F9500AA00017B03 /* ShareExtension.entitlements */,
+				);
+				path = ShareExtension;
+				sourceTree = "<group>";
+			};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -221,6 +272,27 @@
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
 			productType = "com.apple.product-type.application";
 		};
+
+			E15E00062F9500AA00017B06 /* ShareExtension */ = {
+				isa = PBXNativeTarget;
+				buildConfigurationList = E15E000D2F9500AA00017B0D /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+				buildPhases = (
+					E15E00072F9500AA00017B07 /* Sources */,
+					E15E00082F9500AA00017B08 /* Frameworks */,
+					E15E00092F9500AA00017B09 /* Resources */,
+				);
+				buildRules = (
+				);
+				dependencies = (
+				);
+				name = ShareExtension;
+				packageProductDependencies = (
+					E15E00142F9500AA00017B14 /* AssistantIntents */,
+				);
+				productName = ShareExtension;
+				productReference = E15E00042F9500AA00017B04 /* ShareExtension.appex */;
+				productType = "com.apple.product-type.app-extension";
+			};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -234,6 +306,9 @@
 					331C8080294A63A400263BE5 = {
 						CreatedOnToolsVersion = 14.0;
 						TestTargetID = 97C146ED1CF9000F007C117D;
+					};
+					E15E00062F9500AA00017B06 = {
+						CreatedOnToolsVersion = 15.0;
 					};
 					97C146ED1CF9000F007C117D = {
 						CreatedOnToolsVersion = 7.3.1;
@@ -282,6 +357,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+
+			E15E00092F9500AA00017B09 /* Resources */ = {
+				isa = PBXResourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -402,6 +485,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+
+			E15E00072F9500AA00017B07 /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					E15E00102F9500AA00017B10 /* ShareViewController.swift in Sources */,
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+			};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -410,6 +502,12 @@
 			target = 97C146ED1CF9000F007C117D /* Runner */;
 			targetProxy = 331C8085294A63A400263BE5 /* PBXContainerItemProxy */;
 		};
+
+			E15E000F2F9500AA00017B0F /* PBXTargetDependency */ = {
+				isa = PBXTargetDependency;
+				target = E15E00062F9500AA00017B06 /* ShareExtension */;
+				targetProxy = E15E000E2F9500AA00017B0E /* PBXContainerItemProxy */;
+			};
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
@@ -715,6 +813,77 @@
 			};
 			name = Release;
 		};
+
+			E15E000A2F9500AA00017B0A /* Debug */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+					DEVELOPMENT_TEAM = WPW3QSLZ2F;
+					GENERATE_INFOPLIST_FILE = NO;
+					INFOPLIST_FILE = ShareExtension/Info.plist;
+					LD_RUNPATH_SEARCH_PATHS = (
+						"$(inherited)",
+						"@executable_path/Frameworks",
+						"@executable_path/../../Frameworks",
+					);
+					MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+					PRODUCT_BUNDLE_IDENTIFIER = com.cedricziel.assistant.ios.ShareExtension;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+					SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = "1,2";
+				};
+				name = Debug;
+			};
+			E15E000B2F9500AA00017B0B /* Release */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+					DEVELOPMENT_TEAM = WPW3QSLZ2F;
+					GENERATE_INFOPLIST_FILE = NO;
+					INFOPLIST_FILE = ShareExtension/Info.plist;
+					LD_RUNPATH_SEARCH_PATHS = (
+						"$(inherited)",
+						"@executable_path/Frameworks",
+						"@executable_path/../../Frameworks",
+					);
+					MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+					PRODUCT_BUNDLE_IDENTIFIER = com.cedricziel.assistant.ios.ShareExtension;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SWIFT_OPTIMIZATION_LEVEL = "-O";
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = "1,2";
+				};
+				name = Release;
+			};
+			E15E000C2F9500AA00017B0C /* Profile */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+					DEVELOPMENT_TEAM = WPW3QSLZ2F;
+					GENERATE_INFOPLIST_FILE = NO;
+					INFOPLIST_FILE = ShareExtension/Info.plist;
+					LD_RUNPATH_SEARCH_PATHS = (
+						"$(inherited)",
+						"@executable_path/Frameworks",
+						"@executable_path/../../Frameworks",
+					);
+					MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+					PRODUCT_BUNDLE_IDENTIFIER = com.cedricziel.assistant.ios.ShareExtension;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SWIFT_OPTIMIZATION_LEVEL = "-O";
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = "1,2";
+				};
+				name = Profile;
+			};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -748,6 +917,17 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+
+			E15E000D2F9500AA00017B0D /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+				isa = XCConfigurationList;
+				buildConfigurations = (
+					E15E000A2F9500AA00017B0A /* Debug */,
+					E15E000B2F9500AA00017B0B /* Release */,
+					E15E000C2F9500AA00017B0C /* Profile */,
+				);
+				defaultConfigurationIsVisible = 0;
+				defaultConfigurationName = Release;
+			};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -762,6 +942,11 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = AssistantIntents;
 		};
+
+			E15E00142F9500AA00017B14 /* AssistantIntents */ = {
+				isa = XCSwiftPackageProductDependency;
+				productName = AssistantIntents;
+			};
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 97C146E61CF9000F007C117D /* Project object */;

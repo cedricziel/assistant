@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import AssistantIntents
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -12,5 +13,9 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+
+    if let controller = window?.rootViewController as? FlutterViewController {
+      SharedCredentialsChannel.register(with: controller.binaryMessenger)
+    }
   }
 }

@@ -36,49 +36,49 @@
 
 ## 5. Shared Swift package
 
-- [ ] 5.1 Create local Swift package at `app/packages/AssistantShared/` with `Package.swift`
-- [ ] 5.2 Move `KeychainHelper.swift` from `app/ios/Runner/Intents/` into the shared package, updating the access group to use the shared Keychain group
-- [ ] 5.3 Move `AssistantAPIClient.swift` into the shared package
-- [ ] 5.4 Add conversation listing method to `AssistantAPIClient`: `func listConversations() async throws -> [ConversationSummary]`
-- [ ] 5.5 Add persona listing method: `func listPersonas() async throws -> [PersonaSummary]`
-- [ ] 5.6 Add streaming multipart upload method: `func uploadAttachment(conversationId: String, fileURL: URL, mimeType: String) async throws -> AttachmentResponse`
-- [ ] 5.7 Add send message method: `func sendMessage(conversationId: String, text: String, attachmentIds: [String]) async throws`
-- [ ] 5.8 Add create conversation method: `func createConversation(title: String?) async throws -> ConversationResponse`
-- [ ] 5.9 Add switch persona method: `func switchPersona(personaId: String) async throws`
-- [ ] 5.10 Update Siri Intents target to link against the shared package instead of the local Swift files
-- [ ] 5.11 Verify Siri Intents still work with the shared package
+- [x] 5.1 `AssistantIntents` package already exists at `app/packages/AssistantIntents/` (created in #545)
+- [x] 5.2 `KeychainHelper.swift` already in shared package (moved in #545)
+- [x] 5.3 `AssistantAPIClient.swift` already in shared package (moved in #545)
+- [x] 5.4 `listConversations()` already implemented (added in #545)
+- [x] 5.5 `listPersonas()` already implemented (added in #545)
+- [x] 5.6 Add multipart upload method: `uploadAttachment(conversationId:fileData:filename:mimeType:)` and `uploadAttachment(conversationId:fileURL:mimeType:)`
+- [x] 5.7 Add send message method: `sendMessage(conversationId:message:attachmentIds:)`
+- [x] 5.8 Add create conversation method: `createConversation(title:)`
+- [x] 5.9 Add switch persona method: `switchPersona(id:)`
+- [x] 5.10 Siri Intents already use shared package (done in #545)
+- [x] 5.11 Siri Intents verified working (merged in #545)
 
 ## 6. Entitlements and Keychain migration
 
-- [ ] 6.1 Add App Group entitlement (`group.com.cedricziel.assistant`) to iOS main app entitlements (Debug and Release)
-- [ ] 6.2 Add shared Keychain access group (`$(AppIdentifierPrefix)com.cedricziel.assistant.shared`) to iOS main app entitlements
-- [ ] 6.3 Add matching entitlements to macOS main app entitlements (Debug and Release)
-- [ ] 6.4 Update `flutter_secure_storage` configuration in Dart to write credentials using the shared Keychain access group (`iOSOptions` with `groupId`)
-- [ ] 6.5 Implement Keychain migration in `context_repository.dart`: on startup, read from old scope, write to shared scope, delete old entries
-- [ ] 6.6 Write credentials to both old and new access groups during transition period for backwards compatibility with Siri Intents that may not yet use the shared package
+- [x] 6.1 Add App Group entitlement (`group.com.cedricziel.assistant`) to iOS main app entitlements (Debug and Release)
+- [x] 6.2 Add shared Keychain access group (`$(AppIdentifierPrefix)com.cedricziel.assistant.shared`) to iOS main app entitlements
+- [x] 6.3 Add matching entitlements to macOS main app entitlements (Debug and Release)
+- [x] 6.4 Add method channel (`SharedCredentialsChannel`) to write credentials to shared Keychain group from native Swift code, called from `syncSiriCredentials()`
+- [x] 6.5 Update `syncSiriCredentials()` in `context_repository.dart` to write to both default scope and shared group via platform channel
+- [x] 6.6 `KeychainHelper` reads from shared group first, falls back to default scope for backward compatibility
 - [ ] 6.7 Add unit test for migration logic
 
 ## 7. iOS share extension target
 
-- [ ] 7.1 Add share extension target to `app/ios/Runner.xcodeproj` with bundle ID `$(PRODUCT_BUNDLE_IDENTIFIER).ShareExtension`
-- [ ] 7.2 Configure share extension `Info.plist` with `NSExtension` key: `NSExtensionPointIdentifier: com.apple.share-services`, supported UTIs for URLs, images, PDFs, text files
-- [ ] 7.3 Add App Group and shared Keychain entitlements to the share extension target
-- [ ] 7.4 Link the shared `AssistantShared` Swift package to the share extension target
-- [ ] 7.5 Create `ShareViewController.swift` — the extension entry point that hosts the SwiftUI view
-- [ ] 7.6 Create `ShareExtensionView.swift` — SwiftUI view with file preview, conversation picker, persona selector, message field, and Send/Cancel buttons
-- [ ] 7.7 Implement `NSItemProvider` content extraction: detect URL vs file, extract file data and MIME type, handle HEIC-to-PNG conversion
-- [ ] 7.8 Implement the send flow: create conversation (if new) → switch persona (if different) → upload attachment → send message → dismiss
-- [ ] 7.9 Add progress indicator during upload and error handling with user-facing messages
-- [ ] 7.10 Handle no-credentials state: show setup prompt, disable Send button
+- [x] 7.1 Add share extension target to `app/ios/Runner.xcodeproj` with bundle ID `com.cedricziel.assistant.ios.ShareExtension`
+- [x] 7.2 Configure share extension `Info.plist` with `NSExtension` key: `NSExtensionPointIdentifier: com.apple.share-services`, supported UTIs for URLs, images, files, text
+- [x] 7.3 Add App Group and shared Keychain entitlements to the share extension target
+- [x] 7.4 Link the `AssistantIntents` Swift package to the share extension target
+- [x] 7.5 Create `ShareViewController.swift` — the extension entry point that hosts the SwiftUI view
+- [x] 7.6 Create `ShareExtensionView.swift` in shared package — SwiftUI view with file preview, conversation picker, persona selector, message field, and Send/Cancel buttons
+- [x] 7.7 Implement `NSItemProvider` content extraction: detect URL vs file, extract file data and MIME type, handle HEIC-to-PNG conversion
+- [x] 7.8 Implement the send flow: create conversation (if new) → switch persona (if different) → upload attachment → send message → dismiss
+- [x] 7.9 Add progress indicator during upload and error handling with user-facing messages
+- [x] 7.10 Handle no-credentials state: show setup prompt, disable Send button
 
 ## 8. macOS share extension target
 
-- [ ] 8.1 Add share extension target to `app/macos/Runner.xcodeproj` with bundle ID `$(PRODUCT_BUNDLE_IDENTIFIER).ShareExtension`
-- [ ] 8.2 Configure share extension `Info.plist` with `NSExtension` for macOS share services and supported UTIs
-- [ ] 8.3 Add App Group and shared Keychain entitlements to the macOS share extension target
-- [ ] 8.4 Link the shared `AssistantShared` Swift package to the macOS share extension target
-- [ ] 8.5 Reuse `ShareExtensionView.swift` from iOS (shared SwiftUI view with platform-adaptive layout)
-- [ ] 8.6 Create macOS-specific `ShareViewController.swift` entry point (NSViewController-based for macOS share extensions)
+- [x] 8.1 Add share extension target to `app/macos/Runner.xcodeproj` with bundle ID `com.cedricziel.assistant.macos.ShareExtension`
+- [x] 8.2 Configure share extension `Info.plist` with `NSExtension` for macOS share services and supported UTIs
+- [x] 8.3 Add App Group and shared Keychain entitlements to the macOS share extension target
+- [x] 8.4 Link the `AssistantIntents` Swift package to the macOS share extension target
+- [x] 8.5 Reuse `ShareExtensionView.swift` from shared package (SwiftUI view with platform-adaptive layout)
+- [x] 8.6 Create macOS-specific `ShareViewController.swift` entry point (NSViewController-based for macOS share extensions)
 - [ ] 8.7 Verify share extension appears in macOS share menu and functions correctly
 
 ## 9. Integration testing and polish

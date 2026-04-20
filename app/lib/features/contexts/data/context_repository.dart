@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/context_model.dart';
+import 'shared_credentials_channel.dart';
 
 const _kContextsKey = 'assistant_contexts';
 const _kActiveContextIdKey = 'assistant_active_context_id';
@@ -191,12 +192,20 @@ class ContextRepository {
   /// Keychain keys so native Swift App Intent code can access them without
   /// the Flutter engine running.
   ///
+  /// Credentials are written to both the app's default Keychain scope (for
+  /// Siri/Shortcuts backward compatibility) and the shared Keychain access
+  /// group (for the share extension and other app extensions).
+  ///
   /// Call this whenever the active context changes or credentials are updated.
   Future<void> syncSiriCredentials() async {
     final activeId = getActiveContextId();
     if (activeId == null) {
       await _secureStorage.delete(key: _kSiriServerUrl);
       await _secureStorage.delete(key: _kSiriAuthToken);
+      await SharedCredentialsChannel.syncCredentials(
+        serverUrl: null,
+        authToken: null,
+      );
       return;
     }
 
@@ -205,9 +214,14 @@ class ContextRepository {
     if (active == null) {
       await _secureStorage.delete(key: _kSiriServerUrl);
       await _secureStorage.delete(key: _kSiriAuthToken);
+      await SharedCredentialsChannel.syncCredentials(
+        serverUrl: null,
+        authToken: null,
+      );
       return;
     }
 
+    // Write to default scope (Siri/Shortcuts backward compat).
     await _secureStorage.write(key: _kSiriServerUrl, value: active.serverUrl);
     if (active.authToken != null && active.authToken!.isNotEmpty) {
       await _secureStorage.write(
@@ -215,8 +229,13 @@ class ContextRepository {
         value: active.authToken!,
       );
     }
-    // When authToken is null it may be a transient read error — preserve the
-    // existing Keychain value rather than deleting it.
+
+    // Write to shared Keychain group (share extension access).
+    // Fire-and-forget: don't block the save flow on platform channel response.
+    SharedCredentialsChannel.syncCredentials(
+      serverUrl: active.serverUrl,
+      authToken: active.authToken,
+    );
   }
 
   // -- Internal helpers -----------------------------------------------------
