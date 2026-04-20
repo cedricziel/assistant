@@ -1425,11 +1425,23 @@ async fn main() -> Result<()> {
         Duration::from_secs(60),
     );
 
-    // 7a. Start the memory indexer background task.
+    // 7a. Register the periodic skill improvement scheduled task when learning is enabled.
+    if bs.config.learning.enabled
+        && let Err(e) = assistant_runtime::skill_improver::register_improvement_task(
+            &bs.storage,
+            &selected_persona,
+            &bs.config.learning,
+        )
+        .await
+    {
+        warn!(error = %e, "Failed to register skill improvement task");
+    }
+
+    // 7b. Start the memory indexer background task.
     let _memory_indexer =
         spawn_memory_indexer(&bs.config.memory, bs.storage.clone(), bs.llm.clone());
 
-    // 7b. Build transcription provider (shared across interfaces).
+    // 7c. Build transcription provider (shared across interfaces).
     let transcription_language = bs
         .config
         .transcription

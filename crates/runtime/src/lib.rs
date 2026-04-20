@@ -12,6 +12,8 @@ pub mod metrics;
 pub mod orchestrator;
 pub(crate) mod otel_spans;
 pub mod scheduler;
+pub mod skill_improver;
+pub(crate) mod skill_learner;
 pub mod telemetry;
 pub mod webhook_dispatch;
 

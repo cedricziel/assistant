@@ -40,9 +40,9 @@ pub use tool::{Attachment, ToolHandler, ToolOutput};
 pub use types::{
     AgentConfig, AssistantConfig, BusConfig, BusKind, ChannelType, CompactionConfig,
     DEFAULT_MAX_AGENT_DEPTH, EmbeddingConfig, EmbeddingProviderKind, ExecutionContext,
-    IcebergConfig, Interface, LlmConfig, LlmProviderKind, MatrixConfig, MattermostConfig,
-    McpConfig, McpServerEntry, McpTransportConfig, McpTrustLevel, MemoryConfig, Message,
-    MessageRole, MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, NextcloudConfig,
+    IcebergConfig, Interface, LearningConfig, LlmConfig, LlmProviderKind, MatrixConfig,
+    MattermostConfig, McpConfig, McpServerEntry, McpTransportConfig, McpTrustLevel, MemoryConfig,
+    Message, MessageRole, MirrorConfig, MoonshotOptions, MoonshotWebSearchOptions, NextcloudConfig,
     NotificationsConfig, ObservabilityConfig, OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation,
     OpenAIWebSearchOptions, OtelExporter, PartitionGranularity, SignalConfig, SkillsConfig,
     SlackConfig, SlackListenMode, StorageConfig, TranscriptionConfig, TranscriptionProviderKind,

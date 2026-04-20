@@ -90,6 +90,13 @@ pub(crate) mod test_utils {
         .execute(&pool)
         .await
         .unwrap();
+        // 036 — add active_skill column to distributed_traces
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/036_learning_active_skill.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
 
         pool
     }

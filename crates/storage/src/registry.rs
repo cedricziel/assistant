@@ -292,6 +292,20 @@ impl SkillRegistry {
         Ok(())
     }
 
+    /// Update only the body of an existing skill, preserving its description.
+    ///
+    /// This is a convenience wrapper around [`update_user_skill`] used by
+    /// the automated skill improvement cycle.
+    pub async fn update_skill_body(&self, name: &str, new_body: &str) -> Result<()> {
+        let existing = self
+            .get(name)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Skill '{}' not found", name))?;
+
+        self.update_user_skill(name, &existing.description, new_body)
+            .await
+    }
+
     /// Delete a user or installed skill from disk and the registry.
     ///
     /// Removes the in-memory entry and SQLite row first, then attempts to

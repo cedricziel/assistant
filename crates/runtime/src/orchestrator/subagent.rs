@@ -410,6 +410,7 @@ impl SubagentRunner for Orchestrator {
                                 &name,
                                 &params,
                                 &agent_cx,
+                                None, // subagent tools don't inherit active_skill
                             );
 
                             let params_map = value_to_params_map(&params);
