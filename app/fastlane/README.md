@@ -72,6 +72,43 @@ export MATCH_GIT_URL=...
 export MATCH_PASSWORD=...
 ```
 
+## Updating Provisioning Profiles
+
+When a new capability is added to an app target's entitlements (e.g. App Groups,
+Push Notifications, iCloud), the provisioning profile stored in the match repository
+must be regenerated to include that capability. Without this, CI will fail with
+`Provisioning profile doesn't include the <capability> capability`.
+
+### Steps
+
+1. **Enable the capability** on the App ID in the
+   [Apple Developer Portal](https://developer.apple.com/account/resources/identifiers/list).
+   For example, for the ShareExtension:
+   - Open `com.cedricziel.assistant.ios.ShareExtension`
+   - Enable **App Groups** and add `group.com.cedricziel.assistant`
+
+2. **Export credentials** locally:
+
+   ```sh
+   export MATCH_GIT_URL=...
+   export MATCH_PASSWORD=...
+   export APP_STORE_CONNECT_API_KEY_KEY_ID=...
+   export APP_STORE_CONNECT_API_KEY_ISSUER_ID=...
+   export APP_STORE_CONNECT_API_KEY_KEY=...   # base64-encoded .p8 content
+   export APP_STORE_CONNECT_API_KEY_IS_BASE64=true
+   ```
+
+3. **Run the refresh lane** from the `app/` directory:
+
+   ```sh
+   cd app
+   bundle exec fastlane ios refresh_profiles
+   ```
+
+   This force-regenerates all App Store provisioning profiles for every bundle ID
+   listed in the `Matchfile` and pushes the updated profiles to the match
+   certificate repository. CI will pick up the new profiles on the next run.
+
 ## macOS Distribution
 
 macOS App Store distribution is intentionally **not automated** in this setup. The app requires a network server, subprocess management, and broad filesystem access — capabilities that conflict with the App Store sandbox (`com.apple.security.app-sandbox`). The macOS app is distributed outside the App Store.

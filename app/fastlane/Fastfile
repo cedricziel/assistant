@@ -74,6 +74,23 @@ platform :ios do
     gym
   end
 
+  # Regenerate all App Store provisioning profiles and push the updated profiles
+  # to the match certificate repository.  Run this locally whenever an App ID's
+  # capabilities change (e.g. enabling App Groups, Push Notifications, etc.) so
+  # that CI picks up profiles that include the new entitlements.
+  #
+  # Prerequisites:
+  #   1. Enable the capability on the App ID in the Apple Developer Portal.
+  #   2. Export the required env vars (see app/fastlane/README.md).
+  #   3. Run: bundle exec fastlane ios refresh_profiles
+  lane :refresh_profiles do
+    match(
+      type: "appstore",
+      force: true,
+      readonly: false
+    )
+  end
+
   lane :beta do
     build_ios
 
