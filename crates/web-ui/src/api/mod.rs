@@ -3351,7 +3351,8 @@ mod tests {
         let conv_store = ConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = conv_store.create_conversation(None).await.unwrap();
 
-        let (content_type, body) = multipart_body("file", "test.txt", "text/plain", b"hello");
+        let (content_type, body) =
+            multipart_body("file", "test.exe", "application/x-msdownload", b"MZ");
 
         let app = app(state);
         let req = Request::builder()

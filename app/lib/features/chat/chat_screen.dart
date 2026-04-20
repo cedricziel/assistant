@@ -795,6 +795,41 @@ class _MessageBubble extends StatelessWidget {
         spacing: 6,
         runSpacing: 6,
         children: message.attachments.map((att) {
+          // Non-image attachments: render as file tile with icon.
+          if (!isImageMimeType(att.mimeType)) {
+            return Container(
+              width: 150,
+              height: 150,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    iconForMime(att.mimeType),
+                    color: colorScheme.outline,
+                    size: 32,
+                  ),
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      att.filename,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: colorScheme.outline,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
           // Without a base URL the relative path cannot be resolved.
           if (imageBaseUrl == null) {
             return Container(
@@ -1429,17 +1464,6 @@ class _InputRowState extends State<_InputRow> {
     }
   }
 
-  static IconData _iconForMime(String mime) {
-    return switch (mime) {
-      'application/pdf' => Icons.picture_as_pdf,
-      'text/markdown' => Icons.description,
-      'text/csv' => Icons.table_chart,
-      'application/json' => Icons.data_object,
-      'text/plain' => Icons.text_snippet,
-      _ => Icons.insert_drive_file,
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
@@ -1512,7 +1536,7 @@ class _InputRowState extends State<_InputRow> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Icon(
-                                      _iconForMime(attachment.mimeType),
+                                      iconForMime(attachment.mimeType),
                                       size: 28,
                                       color: colorScheme.onSurfaceVariant,
                                     ),

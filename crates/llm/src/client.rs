@@ -884,8 +884,15 @@ mod tests {
             ],
         }];
         let msgs = build_json_messages("", &history, true);
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["content"], "summarize this");
+        assert_eq!(
+            msgs.len(),
+            1,
+            "document blocks should still produce one user message"
+        );
+        assert_eq!(
+            msgs[0]["content"], "summarize this",
+            "document blocks should be skipped while preserving text content"
+        );
         assert!(
             msgs[0].get("images").is_none(),
             "document blocks should not produce images"

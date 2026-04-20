@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/material.dart';
+
 /// Maps a file extension to a MIME type.
 ///
 /// Returns `'application/octet-stream'` for unrecognised extensions.
@@ -38,6 +40,18 @@ bool isSupportedMimeType(String mime) => supportedMimeTypes.contains(mime);
 
 /// Returns `true` if the MIME type is an image type (for thumbnail display).
 bool isImageMimeType(String mime) => mime.startsWith('image/');
+
+/// Returns an appropriate icon for the given MIME type.
+IconData iconForMime(String mime) {
+  return switch (mime) {
+    'application/pdf' => Icons.picture_as_pdf,
+    'text/markdown' => Icons.description,
+    'text/csv' => Icons.table_chart,
+    'application/json' => Icons.data_object,
+    'text/plain' => Icons.text_snippet,
+    _ => Icons.insert_drive_file,
+  };
+}
 
 /// Returns `true` if [ext] is a format that the server does not accept and
 /// must be converted client-side (e.g. HEIC from iOS cameras).

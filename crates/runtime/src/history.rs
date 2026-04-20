@@ -4,15 +4,14 @@
 //! [`ChatHistoryMessage`] format the LLM expects, repairing structural issues
 //! (orphaned messages, missing tool results), and error recovery.
 
-use assistant_core::{Message, MessageRole};
-use assistant_llm::{ChatHistoryMessage, ChatRole};
-use assistant_storage::conversations::ConversationStore;
+use std::collections::HashMap;
+
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use std::collections::HashMap;
-
-use assistant_llm::ContentBlock;
+use assistant_core::{Message, MessageRole};
+use assistant_llm::{ChatHistoryMessage, ChatRole, ContentBlock};
+use assistant_storage::conversations::ConversationStore;
 
 /// Pre-loaded attachment content blocks keyed by message ID.
 ///

@@ -1407,14 +1407,38 @@ fn attachment_to_content_block(
     }
 
     if is_text_mime_type(&meta.mime_type) {
-        let text = String::from_utf8_lossy(bytes);
+        const MAX_INLINE_TEXT_BYTES: usize = 256 * 1024;
+        let truncated = bytes.len() > MAX_INLINE_TEXT_BYTES;
+        let inline_bytes = if truncated {
+            &bytes[..MAX_INLINE_TEXT_BYTES]
+        } else {
+            bytes
+        };
+        let text = String::from_utf8_lossy(inline_bytes);
+        let suffix = if truncated {
+            format!(
+                "\n--- truncated: showing first {} of {} bytes ---",
+                MAX_INLINE_TEXT_BYTES,
+                bytes.len()
+            )
+        } else {
+            String::new()
+        };
         return ContentBlock::Text(format!(
-            "--- file: {} ---\n{}\n--- end file ---",
-            meta.filename, text
+            "--- file: {} ---\n{}{}\n--- end file ---",
+            meta.filename, text, suffix
         ));
     }
 
     if meta.mime_type == "application/pdf" {
+        if provider != "anthropic" {
+            return ContentBlock::Text(format!(
+                "--- file: {} (application/pdf, {} bytes) ---\n\
+                 PDF content not available: native PDF support requires the Anthropic provider.\n\
+                 --- end file ---",
+                meta.filename, meta.size_bytes
+            ));
+        }
         let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
         return ContentBlock::Document {
             media_type: meta.mime_type.clone(),
