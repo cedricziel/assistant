@@ -176,7 +176,7 @@ jobs:
       matrix:
         include:
           - os: macos
-            runner: macos-latest
+            runner: macos-26
             flutter_target: macos
             archive_suffix: macos-arm64
 
