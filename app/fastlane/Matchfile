@@ -14,7 +14,7 @@ storage_mode("git")
 
 type("appstore")
 
-app_identifier(["com.cedricziel.assistant.ios"])
+app_identifier(["com.cedricziel.assistant.ios", "com.cedricziel.assistant.ios.ShareExtension"])
 
 platform("ios")
 
