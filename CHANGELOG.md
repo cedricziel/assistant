@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.125](https://github.com/cedricziel/assistant/compare/v0.1.124...v0.1.125) (2026-04-20)
+
+
+### Bug Fixes
+
+* **app:** remove dart:io Platform crash on web, add error screen ([#555](https://github.com/cedricziel/assistant/issues/555)) ([43a8358](https://github.com/cedricziel/assistant/commit/43a83585ba334f061ed39a9325abbb265e0457a1))
+* **release:** include openapi.json in release-please version bumps ([#557](https://github.com/cedricziel/assistant/issues/557)) ([e47a3bf](https://github.com/cedricziel/assistant/commit/e47a3bf374ccd5fff98a4b05bb64ee6ea5c4b480))
+
 ## [0.1.124](https://github.com/cedricziel/assistant/compare/v0.1.123...v0.1.124) (2026-04-19)
 
 
