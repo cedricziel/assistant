@@ -14,9 +14,10 @@ import AssistantIntents
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
 
-    let registrar = engineBridge.pluginRegistry.registrar(
+    if let registrar = engineBridge.pluginRegistry.registrar(
       forPlugin: "SharedCredentialsChannel"
-    )
-    SharedCredentialsChannel.register(with: registrar.messenger())
+    ) {
+      SharedCredentialsChannel.register(with: registrar.messenger())
+    }
   }
 }
