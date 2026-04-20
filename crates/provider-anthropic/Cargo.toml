@@ -1,6 +1,6 @@
 [package]
 name = "assistant-provider-anthropic"
-version = "0.1.124"
+version = "0.1.125"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
