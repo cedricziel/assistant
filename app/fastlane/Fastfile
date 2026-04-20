@@ -49,6 +49,15 @@ platform :ios do
       targets: ["Runner"]
     )
 
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "ios/Runner.xcodeproj",
+      team_id: "WPW3QSLZ2F",
+      code_sign_identity: "iPhone Distribution",
+      profile_name: ENV["sigh_com.cedricziel.assistant.ios.ShareExtension_appstore_profile-name"] || "match AppStore com.cedricziel.assistant.ios.ShareExtension",
+      targets: ["ShareExtension"]
+    )
+
     # Set build number from CI environment (or local fallback).
     build_number = ENV["BUILD_NUMBER"] || number_of_commits.to_s
     increment_build_number(
