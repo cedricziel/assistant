@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.128](https://github.com/cedricziel/assistant/compare/v0.1.127...v0.1.128) (2026-04-20)
+
+
+### Features
+
+* **app:** adaptive streaming timeline widgets ([#568](https://github.com/cedricziel/assistant/issues/568)) ([fc01bf8](https://github.com/cedricziel/assistant/commit/fc01bf8003032af7db59eb92199e415547a1c0c6))
+* **app:** add connectivity_plus for network awareness ([#562](https://github.com/cedricziel/assistant/issues/562)) ([be5c72a](https://github.com/cedricziel/assistant/commit/be5c72add9aeb3b0d7982836e329a05d7cd6e517))
+* **app:** add outward sharing and save-as for messages, images, and audio ([#565](https://github.com/cedricziel/assistant/issues/565)) ([575c607](https://github.com/cedricziel/assistant/commit/575c607eaa02e951bdc1df46e167c9524efeb8cb))
+* **runtime:** autonomous skill learning and self-improvement ([#571](https://github.com/cedricziel/assistant/issues/571)) ([a275be0](https://github.com/cedricziel/assistant/commit/a275be05c6009232d170478cf3eac9a78ec0246a))
+* **runtime:** stream thinking, tool calls, and subagent events to clients ([#567](https://github.com/cedricziel/assistant/issues/567)) ([e01091e](https://github.com/cedricziel/assistant/commit/e01091eddf2a2ec36380c0072d56497bc4e2ba69))
+* **web-ui,app:** throttle thinking persistence and handle cancelled subagents ([#570](https://github.com/cedricziel/assistant/issues/570)) ([0c9e0f2](https://github.com/cedricziel/assistant/commit/0c9e0f273d433ebf5b05de2547f08a27f8faf735))
+
+
+### Bug Fixes
+
+* **app:** update macOS code signing and add missing connectivity_plus pod ([#569](https://github.com/cedricziel/assistant/issues/569)) ([82f82e5](https://github.com/cedricziel/assistant/commit/82f82e51578143605fae03cdd2e448e9e253c2c8))
+* **release:** add ShareExtension provisioning profile to match ([#564](https://github.com/cedricziel/assistant/issues/564)) ([0580c64](https://github.com/cedricziel/assistant/commit/0580c64432dd4c6c51da9c3ad333db3d11d66b20))
+* **release:** bump macOS deployment target to 26.0 ([#566](https://github.com/cedricziel/assistant/issues/566)) ([c585fa5](https://github.com/cedricziel/assistant/commit/c585fa57879cc3fdcf0cf1a3c0ff3e3e55a1501c))
+
 ## [0.1.127](https://github.com/cedricziel/assistant/compare/v0.1.126...v0.1.127) (2026-04-20)
 
 
