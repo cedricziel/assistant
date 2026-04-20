@@ -95,13 +95,13 @@
 
 ## Phase 10: Polish & Edge Cases
 
-- [ ] **10.1** Throttle thinking delta persistence in durable event store (batch every 500ms or 20 tokens into one row)
-- [ ] **10.2** Verify reconnection (`GET /api/runs/{id}/events?since=N`) replays subagent events correctly and reconstructs entry states
-- [ ] **10.3** Verify `subagent_completed` event correctly finalizes nested timeline entry (stops spinners, triggers auto-collapse)
-- [ ] **10.4** Handle cancelled subagents gracefully (close child sink, mark timeline entry as cancelled with amber status)
+- [x] **10.1** Throttle thinking delta persistence in durable event store (batch every 500ms or 20 tokens into one row)
+- [x] **10.2** Verify reconnection (`GET /api/runs/{id}/events?since=N`) replays subagent events correctly and reconstructs entry states
+- [x] **10.3** Verify `subagent_completed` event correctly finalizes nested timeline entry (stops spinners, triggers auto-collapse)
+- [x] **10.4** Handle cancelled subagents gracefully (close child sink, mark timeline entry as cancelled with amber status)
 - [x] **10.5** Ensure `AnimatedSize` transitions don't cause jank during rapid state changes — profile with Flutter DevTools
 - [x] **10.6** Accessibility: ensure collapsed entries are announced with their summary by screen readers; auto-expanding does not steal VoiceOver/TalkBack focus
 - [x] **10.7** Respect `MediaQuery.disableAnimations` — skip auto-collapse delay and AnimatedSize when reduced motion is enabled (instant transitions)
-- [ ] **10.8** Update `openapi.json` with new SSE event type documentation
+- [x] **10.8** Update `openapi.json` with new SSE event type documentation
 - [x] **10.9** Run `make lint && make format && make test` — all green
 - [x] **10.10** Run `make lint-flutter && make test-flutter` — all green
