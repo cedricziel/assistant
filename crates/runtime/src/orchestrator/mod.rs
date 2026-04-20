@@ -217,6 +217,11 @@ pub struct Orchestrator {
     /// `voice-response` tool.  When present, synthesised audio is appended
     /// to `TurnResult::attachments` so channel adapters can deliver it.
     pub(crate) audio_store: Option<Arc<AudioStore>>,
+    /// The skill loaded via `load-skill` in the current turn (for tracing).
+    /// Reset at the start of each turn.
+    pub(crate) active_skill: tokio::sync::RwLock<Option<String>>,
+    /// Learning configuration for autonomous skill creation and improvement.
+    pub(crate) learning_config: assistant_core::LearningConfig,
 }
 
 impl Orchestrator {
@@ -251,6 +256,8 @@ impl Orchestrator {
             submit_timeout_secs: 10_800,
             adapter_registry: crate::AdapterRegistry::new(),
             audio_store: None,
+            active_skill: tokio::sync::RwLock::new(None),
+            learning_config: config.learning.clone(),
         }
     }
 
@@ -474,6 +481,9 @@ impl Orchestrator {
         token_sink: Option<mpsc::Sender<OrchestratorEvent>>,
         attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
+        // Clear active skill at turn boundary so stale skill context doesn't leak.
+        *self.active_skill.write().await = None;
+
         self.metrics
             .record_turn(&self.agent_id, None, &format!("{interface:?}"));
         info!("Starting turn with extension tools");
@@ -699,6 +709,8 @@ impl Orchestrator {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
                         let turn_index = base_turn + iteration as i64 + 1;
+                        let active_skill_guard = self.active_skill.read().await;
+                        let active_skill_ref = active_skill_guard.as_deref();
                         let mut otel_span = crate::otel_spans::start_tool_span(
                             conversation_id,
                             iteration,
@@ -707,7 +719,9 @@ impl Orchestrator {
                             &name,
                             &params,
                             &turn_cx,
+                            active_skill_ref,
                         );
+                        drop(active_skill_guard);
 
                         if name == "end_turn" {
                             let outcome = Self::handle_end_turn(
@@ -865,6 +879,9 @@ impl Orchestrator {
         trace_cx: Option<&OtelContext>,
         attachment_ids: Vec<Uuid>,
     ) -> Result<TurnResult> {
+        // Clear active skill at turn boundary so stale skill context doesn't leak.
+        *self.active_skill.write().await = None;
+
         let streaming = token_sink.is_some();
         self.metrics
             .record_turn(&self.agent_id, None, &format!("{interface:?}"));
@@ -898,6 +915,8 @@ impl Orchestrator {
         // 6. Tool-calling loop.
         let mut turn_attachments: Vec<Attachment> = Vec::new();
         let mut turn_attachment_ids: Vec<Uuid> = Vec::new();
+        let mut turn_tool_count: usize = 0;
+        let turn_had_errors = false; // TODO: track via tool dispatch error signals
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
@@ -1040,6 +1059,26 @@ impl Orchestrator {
                         Arc::clone(&self.storage),
                         Arc::clone(&self.llm),
                     );
+
+                    // Spawn post-turn skill evaluation (fire-and-forget).
+                    if self.learning_config.enabled && self.learning_config.auto_create_skills {
+                        let active_skill = self.active_skill.read().await.clone();
+                        crate::skill_learner::spawn_post_turn_eval(
+                            crate::skill_learner::TurnContext {
+                                conversation_id,
+                                agent_id: self.agent_id.clone(),
+                                tool_count: turn_tool_count,
+                                had_errors: turn_had_errors,
+                                active_skill,
+                                history: history.clone(),
+                            },
+                            self.learning_config.clone(),
+                            Arc::clone(&self.storage),
+                            Arc::clone(&self.registry),
+                            Arc::clone(&self.llm),
+                        );
+                    }
+
                     return Ok(TurnResult {
                         answer: text,
                         attachments: turn_attachments,
@@ -1079,6 +1118,8 @@ impl Orchestrator {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
                         let turn_index = base_turn + iteration as i64 + 1;
+                        let active_skill_guard = self.active_skill.read().await;
+                        let active_skill_ref = active_skill_guard.as_deref();
                         let mut otel_span = crate::otel_spans::start_tool_span(
                             conversation_id,
                             iteration,
@@ -1087,7 +1128,9 @@ impl Orchestrator {
                             &name,
                             &params,
                             &turn_cx,
+                            active_skill_ref,
                         );
+                        drop(active_skill_guard);
 
                         let outcome = self
                             .dispatch_global_tool(
@@ -1109,6 +1152,7 @@ impl Orchestrator {
                         if matches!(outcome, DispatchOutcome::Denied) {
                             continue;
                         }
+                        turn_tool_count += 1;
                     }
                 }
 

@@ -14,6 +14,8 @@ pub struct SkillRefinement {
     pub rationale: String,
     pub status: RefinementStatus,
     pub review_note: Option<String>,
+    /// The skill body before this refinement was applied (for revert-on-regression).
+    pub previous_skill_md: Option<String>,
     pub created_at: DateTime<Utc>,
     pub reviewed_at: Option<DateTime<Utc>>,
 }
@@ -23,6 +25,10 @@ pub enum RefinementStatus {
     Pending,
     Accepted,
     Rejected,
+    /// Auto-applied refinement confirmed as non-regressing after the revert window.
+    Confirmed,
+    /// Auto-applied refinement reverted due to regression detected after apply.
+    Reverted,
 }
 
 impl RefinementStatus {
@@ -31,6 +37,8 @@ impl RefinementStatus {
             RefinementStatus::Pending => "pending",
             RefinementStatus::Accepted => "accepted",
             RefinementStatus::Rejected => "rejected",
+            RefinementStatus::Confirmed => "confirmed",
+            RefinementStatus::Reverted => "reverted",
         }
     }
 }
@@ -45,6 +53,8 @@ fn parse_status(s: &str) -> RefinementStatus {
     match s {
         "accepted" => RefinementStatus::Accepted,
         "rejected" => RefinementStatus::Rejected,
+        "confirmed" => RefinementStatus::Confirmed,
+        "reverted" => RefinementStatus::Reverted,
         _ => RefinementStatus::Pending,
     }
 }
@@ -90,7 +100,7 @@ impl RefinementsStore {
     pub async fn list_by_status(&self, status: &RefinementStatus) -> Result<Vec<SkillRefinement>> {
         let rows = sqlx::query(
             "SELECT id, target_skill, proposed_skill_md, rationale, status, \
-                    review_note, created_at, reviewed_at \
+                    review_note, previous_skill_md, created_at, reviewed_at \
              FROM skill_refinements \
              WHERE status = ?1 \
              ORDER BY created_at ASC",
@@ -110,6 +120,7 @@ impl RefinementsStore {
                     rationale: r.get("rationale"),
                     status: parse_status(&status_str),
                     review_note: r.get("review_note"),
+                    previous_skill_md: r.get("previous_skill_md"),
                     created_at: r.get("created_at"),
                     reviewed_at: r.get("reviewed_at"),
                 })
@@ -130,6 +141,54 @@ impl RefinementsStore {
         )
         .bind(status)
         .bind(note)
+        .bind(now)
+        .bind(&id_str)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Insert a refinement with the previous skill body stored for rollback.
+    pub async fn insert_with_previous(
+        &self,
+        target_skill: &str,
+        proposed_skill_md: &str,
+        rationale: &str,
+        previous_skill_md: &str,
+    ) -> Result<Uuid> {
+        let id = Uuid::new_v4();
+        let id_str = id.to_string();
+        let now = Utc::now();
+
+        sqlx::query(
+            "INSERT INTO skill_refinements \
+                (id, target_skill, proposed_skill_md, rationale, status, previous_skill_md, created_at) \
+             VALUES (?1, ?2, ?3, ?4, 'accepted', ?5, ?6)",
+        )
+        .bind(&id_str)
+        .bind(target_skill)
+        .bind(proposed_skill_md)
+        .bind(rationale)
+        .bind(previous_skill_md)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(id)
+    }
+
+    /// Update the status of a refinement (used by revert/confirm logic).
+    pub async fn set_status(&self, id: Uuid, status: &RefinementStatus) -> Result<()> {
+        let id_str = id.to_string();
+        let now = Utc::now();
+
+        sqlx::query(
+            "UPDATE skill_refinements \
+             SET status = ?1, reviewed_at = ?2 \
+             WHERE id = ?3",
+        )
+        .bind(status.as_str())
         .bind(now)
         .bind(&id_str)
         .execute(&self.pool)

@@ -104,6 +104,10 @@ impl SqliteSpanExporter {
             .get("tool_name")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        let active_skill = attrs
+            .get("active_skill")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let tool_status = attrs
             .get("tool_status")
             .and_then(|v| v.as_str())
@@ -135,9 +139,9 @@ impl SqliteSpanExporter {
         sqlx::query(
             "INSERT INTO distributed_traces \
                 (span_id, trace_id, parent_span_id, name, service_name, conversation_id, turn, tool_name, \
-                 tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, \
+                 active_skill, tool_status, tool_observation, tool_error, duration_ms, start_time, end_time, \
                   attributes, input_tokens, output_tokens) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18) \
              ON CONFLICT(span_id) DO NOTHING",
         )
         .bind(span.span_context.span_id().to_string())
@@ -148,6 +152,7 @@ impl SqliteSpanExporter {
         .bind(conversation_id)
         .bind(turn)
         .bind(tool_name)
+        .bind(active_skill)
         .bind(tool_status)
         .bind(observation)
         .bind(error)
@@ -463,5 +468,28 @@ mod tests {
                 .unwrap();
         let conversation_id_str = conversation_id.to_string();
         assert_eq!(stored.as_deref(), Some(conversation_id_str.as_str()));
+    }
+
+    #[tokio::test]
+    async fn test_export_persists_active_skill() {
+        let pool = crate::test_utils::test_pool().await;
+        let exporter = SqliteSpanExporter::new(pool.clone());
+
+        let mut span = make_span("execute_tool bash", Some("bash"), Status::Ok);
+        span.attributes
+            .push(KeyValue::new("active_skill", "code-review"));
+
+        exporter.export(vec![span]).await.unwrap();
+
+        let active_skill: Option<String> =
+            sqlx::query_scalar("SELECT active_skill FROM distributed_traces LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            active_skill.as_deref(),
+            Some("code-review"),
+            "active_skill column should be populated from span attribute"
+        );
     }
 }

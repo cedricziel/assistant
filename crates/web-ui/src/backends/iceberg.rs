@@ -22,7 +22,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use assistant_core::IcebergConfig;
-use assistant_storage::{LogStats, RecordedLog, RecordedSpan, TraceFilter, TraceSummary};
+use assistant_storage::{
+    LogStats, RecordedLog, RecordedSpan, SkillStatsProvider, TraceFilter, TraceStats, TraceSummary,
+};
 
 use super::{LogBackend, TraceBackend};
 
@@ -557,5 +559,99 @@ impl LogBackend for IcebergLogBackend {
         let mut v: Vec<String> = targets.into_iter().collect();
         v.sort();
         Ok(v)
+    }
+}
+
+// -- SkillStatsProvider for Iceberg spans ------------------------------------
+
+#[async_trait]
+impl SkillStatsProvider for IcebergTraceBackend {
+    async fn stats_for_active_skill(&self, skill_name: &str, window: i64) -> Result<TraceStats> {
+        let batches = self.load_all_batches();
+
+        // Collect matching rows sorted by start_time desc, limited to `window`.
+        struct Row {
+            tool_status: Option<String>,
+            duration_ms: Option<i64>,
+            input_tokens: Option<i64>,
+            output_tokens: Option<i64>,
+            tool_error: Option<String>,
+            start_us: i64,
+        }
+
+        let mut rows: Vec<Row> = Vec::new();
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                if str_col(batch, "active_skill", i) != Some(skill_name) {
+                    continue;
+                }
+                let start_us = ts_col(batch, "start_time", i)
+                    .map(|dt| dt.timestamp_micros())
+                    .unwrap_or(0);
+                rows.push(Row {
+                    tool_status: str_col(batch, "tool_status", i).map(str::to_string),
+                    duration_ms: i64_col(batch, "duration_ms", i),
+                    input_tokens: i64_col(batch, "input_tokens", i),
+                    output_tokens: i64_col(batch, "output_tokens", i),
+                    tool_error: {
+                        // Extract tool_error from the attributes JSON blob.
+                        str_col(batch, "attributes", i).and_then(|json_str| {
+                            serde_json::from_str::<Value>(json_str)
+                                .ok()
+                                .and_then(|v| v.get("tool_error")?.as_str().map(str::to_string))
+                        })
+                    },
+                    start_us,
+                });
+            }
+        }
+
+        // Sort descending by time, take window.
+        rows.sort_by_key(|r| std::cmp::Reverse(r.start_us));
+        rows.truncate(window as usize);
+
+        let total = rows.len() as i64;
+        let mut success_count = 0i64;
+        let mut error_count = 0i64;
+        let mut total_duration = 0.0f64;
+        let mut total_input_tokens = 0i64;
+        let mut total_output_tokens = 0i64;
+        let mut error_counts: HashMap<String, usize> = HashMap::new();
+
+        for row in &rows {
+            if row.tool_status.as_deref() == Some("error") {
+                error_count += 1;
+                if let Some(ref err) = row.tool_error {
+                    *error_counts.entry(err.clone()).or_default() += 1;
+                }
+            } else {
+                success_count += 1;
+            }
+            total_duration += row.duration_ms.unwrap_or(0) as f64;
+            total_input_tokens += row.input_tokens.unwrap_or(0);
+            total_output_tokens += row.output_tokens.unwrap_or(0);
+        }
+
+        let avg_duration_ms = if total > 0 {
+            total_duration / total as f64
+        } else {
+            0.0
+        };
+
+        let mut common_errors: Vec<(String, usize)> = error_counts.into_iter().collect();
+        common_errors.sort_by_key(|e| std::cmp::Reverse(e.1));
+        let common_errors: Vec<String> =
+            common_errors.into_iter().take(5).map(|(e, _)| e).collect();
+
+        Ok(TraceStats {
+            skill_name: skill_name.to_string(),
+            total,
+            success_count,
+            error_count,
+            avg_duration_ms,
+            total_input_tokens,
+            total_output_tokens,
+            common_errors,
+        })
     }
 }

@@ -258,6 +258,19 @@ trace_enabled = true
 # es = "aura-2-lucia-es"               # Spanish  (default)
 # fr = "aura-2-chloe-fr"              # French   (default)
 
+# ── Autonomous Learning ───────────────────────────────────────────────────────
+# The agent creates skills from complex tasks and periodically improves them.
+[learning]
+enabled = true                          # master switch (default: true)
+auto_create_skills = true               # generate skills from novel tasks
+auto_apply_refinements = true           # apply improvements without /review
+min_tool_calls_for_skill = 3            # minimum tool calls to consider skill creation
+min_executions_for_analysis = 10        # minimum traces before self-analysis
+improvement_cron = "0 */6 * * *"        # run improvement cycle every 6 hours
+error_rate_threshold = 0.2              # trigger improvement above 20% error rate
+revert_window = 5                       # executions to evaluate after refinement
+revert_regression_threshold = 0.1       # revert if error rate increases by >10pp
+
 [signal]
 # Signal interface settings — requires a running signal-cli-rest-api daemon.
 # See: https://github.com/bbernhard/signal-cli-rest-api

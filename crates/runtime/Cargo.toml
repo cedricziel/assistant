@@ -45,3 +45,4 @@ image = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

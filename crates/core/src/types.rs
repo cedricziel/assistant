@@ -152,6 +152,9 @@ pub struct AssistantConfig {
     pub memory: MemoryConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
+    /// Autonomous learning configuration (`[learning]` section).
+    #[serde(default)]
+    pub learning: LearningConfig,
     #[serde(default)]
     pub agent: AgentConfig,
     /// Signal messenger interface configuration (optional).
@@ -1128,6 +1131,76 @@ impl Default for CompactionConfig {
             reserve_floor_tokens: default_compaction_reserve_floor(),
             soft_threshold_tokens: default_compaction_soft_threshold(),
             keep_recent_turns: default_keep_recent_turns(),
+        }
+    }
+}
+
+/// Autonomous learning configuration (`[learning]` section).
+///
+/// Controls skill-scoped tracing, autonomous skill creation from completed
+/// tasks, and periodic self-improvement of existing skills.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningConfig {
+    /// Master switch for all learning features (default: false).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Automatically create new skills from novel, complex tasks (default: true).
+    #[serde(default = "default_true")]
+    pub auto_create_skills: bool,
+    /// Automatically apply skill refinements without `/review` (default: true).
+    #[serde(default = "default_true")]
+    pub auto_apply_refinements: bool,
+    /// Minimum tool calls in a turn before considering skill creation (default: 3).
+    #[serde(default = "default_min_tool_calls")]
+    pub min_tool_calls_for_skill: usize,
+    /// Minimum traced executions before a skill is eligible for self-analysis (default: 10).
+    #[serde(default = "default_min_executions")]
+    pub min_executions_for_analysis: i64,
+    /// Cron expression for the periodic improvement task (default: every 6 hours).
+    #[serde(default = "default_improvement_cron")]
+    pub improvement_cron: String,
+    /// Error rate above which a skill is considered underperforming (default: 0.2).
+    #[serde(default = "default_error_rate_threshold")]
+    pub error_rate_threshold: f64,
+    /// Number of executions after applying a refinement before evaluating regression (default: 5).
+    #[serde(default = "default_revert_window")]
+    pub revert_window: i64,
+    /// Error rate increase (absolute) that triggers a revert (default: 0.1).
+    #[serde(default = "default_revert_regression_threshold")]
+    pub revert_regression_threshold: f64,
+}
+
+fn default_min_tool_calls() -> usize {
+    3
+}
+fn default_min_executions() -> i64 {
+    10
+}
+fn default_improvement_cron() -> String {
+    "0 */6 * * *".to_string()
+}
+fn default_error_rate_threshold() -> f64 {
+    0.2
+}
+fn default_revert_window() -> i64 {
+    5
+}
+fn default_revert_regression_threshold() -> f64 {
+    0.1
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_create_skills: true,
+            auto_apply_refinements: true,
+            min_tool_calls_for_skill: default_min_tool_calls(),
+            min_executions_for_analysis: default_min_executions(),
+            improvement_cron: default_improvement_cron(),
+            error_rate_threshold: default_error_rate_threshold(),
+            revert_window: default_revert_window(),
+            revert_regression_threshold: default_revert_regression_threshold(),
         }
     }
 }

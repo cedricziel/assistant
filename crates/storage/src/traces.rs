@@ -505,6 +505,86 @@ impl TraceStore {
     }
 }
 
+/// Trait for querying skill-scoped execution statistics from trace storage.
+///
+/// Implementations exist for both SQLite (`TraceStore`) and Iceberg backends.
+#[async_trait::async_trait]
+pub trait SkillStatsProvider: Send + Sync {
+    /// Return aggregate stats for spans tagged with `active_skill = skill_name`
+    /// over the most recent `window` executions.
+    async fn stats_for_active_skill(&self, skill_name: &str, window: i64) -> Result<TraceStats>;
+}
+
+#[async_trait::async_trait]
+impl SkillStatsProvider for TraceStore {
+    async fn stats_for_active_skill(&self, skill_name: &str, window: i64) -> Result<TraceStats> {
+        let agg_row = sqlx::query(
+            "WITH recent AS ( \
+                SELECT tool_status, duration_ms, input_tokens, output_tokens \
+                FROM distributed_traces \
+                WHERE active_skill = ?1 \
+                ORDER BY start_time DESC \
+                LIMIT ?2 \
+            ) \
+            SELECT \
+                COUNT(*)                                           AS total, \
+                SUM(CASE WHEN tool_status = 'error' THEN 0 ELSE 1 END) AS success_count, \
+                SUM(CASE WHEN tool_status = 'error' THEN 1 ELSE 0 END) AS error_count, \
+                COALESCE(AVG(CAST(duration_ms AS REAL)), 0.0)      AS avg_duration_ms, \
+                COALESCE(SUM(input_tokens), 0)                     AS total_input_tokens, \
+                COALESCE(SUM(output_tokens), 0)                    AS total_output_tokens \
+            FROM recent",
+        )
+        .bind(skill_name)
+        .bind(window)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let total: i64 = agg_row.try_get("total").unwrap_or(0);
+        let success_count: i64 = agg_row.try_get("success_count").unwrap_or(0);
+        let error_count: i64 = agg_row.try_get("error_count").unwrap_or(0);
+        let avg_duration_ms: f64 = agg_row.try_get("avg_duration_ms").unwrap_or(0.0);
+        let total_input_tokens: i64 = agg_row.try_get("total_input_tokens").unwrap_or(0);
+        let total_output_tokens: i64 = agg_row.try_get("total_output_tokens").unwrap_or(0);
+
+        let err_rows = sqlx::query(
+            "WITH recent AS ( \
+                SELECT tool_error \
+                FROM distributed_traces \
+                WHERE active_skill = ?1 \
+                  AND tool_error IS NOT NULL \
+                ORDER BY start_time DESC \
+                LIMIT ?2 \
+            ) \
+            SELECT tool_error AS error \
+            FROM recent \
+            GROUP BY tool_error \
+            ORDER BY COUNT(*) DESC \
+            LIMIT 5",
+        )
+        .bind(skill_name)
+        .bind(window)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let common_errors: Vec<String> = err_rows
+            .into_iter()
+            .filter_map(|r| r.try_get::<Option<String>, _>("error").ok().flatten())
+            .collect();
+
+        Ok(TraceStats {
+            skill_name: skill_name.to_string(),
+            total,
+            success_count,
+            error_count,
+            avg_duration_ms,
+            total_input_tokens,
+            total_output_tokens,
+            common_errors,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1101,5 +1181,107 @@ mod tests {
             "interface filter should return only Slack traces"
         );
         assert_eq!(slack_only[0].interface.as_deref(), Some("Slack"));
+    }
+
+    /// Helper that inserts a span with an active_skill tag.
+    async fn insert_span_with_skill(
+        pool: &SqlitePool,
+        conversation_id: Uuid,
+        tool_name: &str,
+        active_skill: &str,
+        status: &str,
+        error: Option<&str>,
+        duration_ms: i64,
+    ) {
+        let span_id = Uuid::new_v4().to_string();
+        let trace_id = Uuid::new_v4().to_string();
+        let start = Utc::now();
+        let end = start + chrono::Duration::milliseconds(duration_ms.max(0));
+        let attrs = json!({
+            "conversation_id": conversation_id.to_string(),
+            "tool_name": tool_name,
+            "tool_status": status,
+            "active_skill": active_skill,
+        });
+
+        sqlx::query(
+            "INSERT INTO distributed_traces \
+                (span_id, trace_id, parent_span_id, name, conversation_id, turn, tool_name, \
+                 active_skill, tool_status, tool_observation, tool_error, duration_ms, \
+                 start_time, end_time, attributes) \
+             VALUES (?1, ?2, NULL, 'tool_execution', ?3, 0, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, ?11)",
+        )
+        .bind(span_id)
+        .bind(trace_id)
+        .bind(conversation_id.to_string())
+        .bind(tool_name)
+        .bind(active_skill)
+        .bind(status)
+        .bind(error)
+        .bind(duration_ms)
+        .bind(start)
+        .bind(end)
+        .bind(attrs.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_stats_for_active_skill() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let conv_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO conversations (id, title) VALUES (?1, ?2)")
+            .bind(conv_id.to_string())
+            .bind("test")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+
+        let store = storage.trace_store();
+
+        // Insert spans for the "code-review" skill using different tools.
+        insert_span_with_skill(
+            &storage.pool,
+            conv_id,
+            "bash",
+            "code-review",
+            "ok",
+            None,
+            100,
+        )
+        .await;
+        insert_span_with_skill(
+            &storage.pool,
+            conv_id,
+            "file-read",
+            "code-review",
+            "ok",
+            None,
+            50,
+        )
+        .await;
+        insert_span_with_skill(
+            &storage.pool,
+            conv_id,
+            "bash",
+            "code-review",
+            "error",
+            Some("exit 1"),
+            200,
+        )
+        .await;
+
+        // Insert a span for a different skill — should not be counted.
+        insert_span_with_skill(&storage.pool, conv_id, "bash", "deploy", "ok", None, 10).await;
+
+        let stats = store
+            .stats_for_active_skill("code-review", 100)
+            .await
+            .unwrap();
+        assert_eq!(stats.total, 3, "should count only code-review spans");
+        assert_eq!(stats.success_count, 2);
+        assert_eq!(stats.error_count, 1);
+        assert!(!stats.common_errors.is_empty());
     }
 }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
 use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
-use assistant_storage::{SkillRegistry, StorageLayer};
+use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
@@ -18,6 +18,7 @@ pub struct SelfAnalyzeHandler {
     storage: Arc<StorageLayer>,
     llm: Arc<dyn LlmProvider>,
     registry: Arc<SkillRegistry>,
+    stats_provider: Arc<dyn SkillStatsProvider>,
 }
 
 impl SelfAnalyzeHandler {
@@ -25,11 +26,13 @@ impl SelfAnalyzeHandler {
         storage: Arc<StorageLayer>,
         llm: Arc<dyn LlmProvider>,
         registry: Arc<SkillRegistry>,
+        stats_provider: Arc<dyn SkillStatsProvider>,
     ) -> Self {
         Self {
             storage,
             llm,
             registry,
+            stats_provider,
         }
     }
 }
@@ -80,10 +83,12 @@ impl ToolHandler for SelfAnalyzeHandler {
 
         let window: i64 = params.get("window").and_then(|v| v.as_i64()).unwrap_or(50);
 
-        let trace_store = self.storage.trace_store();
-
-        // Fetch aggregate stats
-        let stats = match trace_store.stats_for_skill(&skill_name, window).await {
+        // Fetch aggregate stats via the SkillStatsProvider (supports SQLite and Iceberg).
+        let stats = match self
+            .stats_provider
+            .stats_for_active_skill(&skill_name, window)
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 return Ok(ToolOutput::error(format!(

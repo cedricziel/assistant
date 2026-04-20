@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use anyhow::Result;
 use assistant_core::{AssistantConfig, ExecutionContext, SubagentRunner, ToolHandler, ToolOutput};
 use assistant_llm::{LlmProvider, ToolSpec};
-use assistant_storage::{SkillRegistry, StorageLayer};
+use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use tracing::warn;
 
 pub struct ToolExecutor {
@@ -21,11 +21,29 @@ impl ToolExecutor {
         registry: Arc<SkillRegistry>,
         config: Arc<AssistantConfig>,
     ) -> Self {
+        // Default: use SQLite trace store as the stats provider.
+        let stats_provider: Arc<dyn SkillStatsProvider> = Arc::new(storage.trace_store());
         let executor = Self {
             storage: storage.clone(),
             tool_handlers: RwLock::new(HashMap::new()),
         };
-        executor.register_builtins(llm, registry, config);
+        executor.register_builtins(llm, registry, config, stats_provider);
+        executor
+    }
+
+    /// Create a `ToolExecutor` with a custom `SkillStatsProvider` (e.g. Iceberg backend).
+    pub fn with_stats_provider(
+        storage: Arc<StorageLayer>,
+        llm: Arc<dyn LlmProvider>,
+        registry: Arc<SkillRegistry>,
+        config: Arc<AssistantConfig>,
+        stats_provider: Arc<dyn SkillStatsProvider>,
+    ) -> Self {
+        let executor = Self {
+            storage: storage.clone(),
+            tool_handlers: RwLock::new(HashMap::new()),
+        };
+        executor.register_builtins(llm, registry, config, stats_provider);
         executor
     }
 
@@ -34,6 +52,7 @@ impl ToolExecutor {
         llm: Arc<dyn LlmProvider>,
         registry: Arc<SkillRegistry>,
         config: Arc<AssistantConfig>,
+        stats_provider: Arc<dyn SkillStatsProvider>,
     ) {
         use crate::builtins::*;
         let storage = self.storage.clone();
@@ -57,7 +76,12 @@ impl ToolExecutor {
             // Skills / meta
             Arc::new(ListSkillsHandler::new(registry.clone())),
             Arc::new(LoadSkillHandler::new(registry.clone())),
-            Arc::new(SelfAnalyzeHandler::new(storage.clone(), llm, registry)),
+            Arc::new(SelfAnalyzeHandler::new(
+                storage.clone(),
+                llm,
+                registry,
+                stats_provider,
+            )),
             Arc::new(ScheduleTaskHandler::new(storage.clone())),
             Arc::new(CancelTaskHandler::new(storage.clone())),
             Arc::new(ListTasksHandler::new(storage.clone())),

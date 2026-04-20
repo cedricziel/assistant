@@ -166,6 +166,7 @@ impl Extractor for HeaderExtractor<'_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn start_tool_span(
     conversation_id: Uuid,
     iteration: usize,
@@ -174,6 +175,7 @@ pub(crate) fn start_tool_span(
     tool_name: &str,
     params: &serde_json::Value,
     parent_cx: &OtelContext,
+    active_skill: Option<&str>,
 ) -> opentelemetry::global::BoxedSpan {
     let tracer = global::tracer("assistant.orchestrator");
     let span_name = format!("execute_tool {tool_name}");
@@ -194,6 +196,9 @@ pub(crate) fn start_tool_span(
     let params_json =
         serde_json::to_string(params).unwrap_or_else(|_| "<unserializable>".to_string());
     span.set_attribute(KeyValue::new("tool_params", params_json));
+    if let Some(skill) = active_skill {
+        span.set_attribute(KeyValue::new("active_skill", skill.to_string()));
+    }
     span
 }
 
@@ -392,4 +397,126 @@ pub(crate) fn serialize_history_for_span(history: &[ChatHistoryMessage]) -> Stri
         })
         .collect();
     serde_json::Value::Array(items).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry_sdk::trace::{SdkTracerProvider, SpanExporter};
+
+    /// A minimal in-memory exporter that collects exported spans.
+    #[derive(Debug, Clone, Default)]
+    struct CollectingExporter {
+        spans: std::sync::Arc<std::sync::Mutex<Vec<opentelemetry_sdk::trace::SpanData>>>,
+    }
+
+    impl SpanExporter for CollectingExporter {
+        async fn export(
+            &self,
+            batch: Vec<opentelemetry_sdk::trace::SpanData>,
+        ) -> opentelemetry_sdk::error::OTelSdkResult {
+            self.spans.lock().unwrap().extend(batch);
+            Ok(())
+        }
+    }
+
+    /// Verify that `start_tool_span` sets the `active_skill` attribute when provided.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_start_tool_span_sets_active_skill() {
+        let exporter = CollectingExporter::default();
+        let spans = exporter.spans.clone();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter)
+            .build();
+        // start_tool_span uses global::tracer(), so we must set the global provider.
+        let _prev = opentelemetry::global::set_tracer_provider(provider.clone());
+
+        let conversation_id = Uuid::new_v4();
+        let params = serde_json::json!({"name": "my-skill"});
+        let parent_cx = OtelContext::current();
+
+        let mut span = start_tool_span(
+            conversation_id,
+            0,
+            1,
+            &Interface::Cli,
+            "load-skill",
+            &params,
+            &parent_cx,
+            Some("my-skill"),
+        );
+        span.end();
+
+        let _ = provider.force_flush();
+
+        let collected = spans.lock().unwrap();
+        let tool_span = collected
+            .iter()
+            .find(|s| s.name.contains("execute_tool"))
+            .expect("should have an execute_tool span");
+
+        let attrs: HashMap<&str, &str> = tool_span
+            .attributes
+            .iter()
+            .filter_map(|kv| {
+                if let Value::String(ref s) = kv.value {
+                    Some((kv.key.as_str(), s.as_str()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(
+            attrs.get("active_skill"),
+            Some(&"my-skill"),
+            "active_skill attribute should be set"
+        );
+        assert_eq!(attrs.get("tool_name"), Some(&"load-skill"));
+    }
+
+    /// Verify that `start_tool_span` does NOT set `active_skill` when None.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_start_tool_span_no_active_skill() {
+        let exporter = CollectingExporter::default();
+        let spans = exporter.spans.clone();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter)
+            .build();
+        let _prev = opentelemetry::global::set_tracer_provider(provider.clone());
+
+        let conversation_id = Uuid::new_v4();
+        let params = serde_json::json!({"query": "hello"});
+        let parent_cx = OtelContext::current();
+
+        let mut span = start_tool_span(
+            conversation_id,
+            0,
+            1,
+            &Interface::Cli,
+            "web-search",
+            &params,
+            &parent_cx,
+            None,
+        );
+        span.end();
+
+        let _ = provider.force_flush();
+
+        let collected = spans.lock().unwrap();
+        let tool_span = collected
+            .iter()
+            .find(|s| s.name.contains("execute_tool"))
+            .expect("should have an execute_tool span");
+
+        let has_active_skill = tool_span
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "active_skill");
+
+        assert!(
+            !has_active_skill,
+            "active_skill attribute should not be present when None"
+        );
+    }
 }

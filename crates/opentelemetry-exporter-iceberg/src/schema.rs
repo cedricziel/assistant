@@ -42,6 +42,8 @@ pub fn spans_schema() -> Result<Schema> {
                 Type::Primitive(PrimitiveType::String),
             )
             .into(),
+            NestedField::optional(16, "active_skill", Type::Primitive(PrimitiveType::String))
+                .into(),
         ])
         .build()
         .map_err(|e| anyhow::anyhow!("failed to build spans schema: {e}"))
@@ -246,6 +248,7 @@ mod tests {
             Arc::new(Int64Array::from(vec![None::<i64>])),
             Arc::new(StringArray::from(vec![None::<&str>])),
             Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec![None::<&str>])), // active_skill
         ];
 
         RecordBatch::try_new(arrow, cols).expect("RecordBatch with '+00:00' timezone must succeed");

@@ -225,6 +225,7 @@ fn spans_to_record_batch(
     let mut output_tokens_vals: Vec<Option<i64>> = Vec::with_capacity(spans.len());
     let mut attributes_vals: Vec<Option<String>> = Vec::with_capacity(spans.len());
     let mut resource_attrs_vals: Vec<Option<String>> = Vec::with_capacity(spans.len());
+    let mut active_skill_vals: Vec<Option<String>> = Vec::with_capacity(spans.len());
 
     for span in spans {
         // Extract numeric token counts directly from OTel Value before stringifying.
@@ -293,6 +294,10 @@ fn spans_to_record_batch(
             .get("tool_status")
             .and_then(|v| v.as_str())
             .map(str::to_string);
+        let active_skill = attrs_json_map
+            .get("active_skill")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         let attrs_json = serde_json::to_string(&attrs_json_map).ok();
 
         trace_ids.push(span.span_context.trace_id().to_string());
@@ -310,6 +315,7 @@ fn spans_to_record_batch(
         output_tokens_vals.push(output_tokens);
         attributes_vals.push(attrs_json);
         resource_attrs_vals.push(resource_attributes.map(str::to_string));
+        active_skill_vals.push(active_skill);
     }
 
     let schema_ref = Arc::new(schema.clone());
@@ -329,6 +335,7 @@ fn spans_to_record_batch(
         Arc::new(Int64Array::from(output_tokens_vals)),
         Arc::new(StringArray::from(attributes_vals)),
         Arc::new(StringArray::from(resource_attrs_vals)),
+        Arc::new(StringArray::from(active_skill_vals)),
     ];
 
     RecordBatch::try_new(schema_ref, columns)

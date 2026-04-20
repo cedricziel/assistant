@@ -124,6 +124,14 @@ impl Orchestrator {
 
         let mut tool_status = "ok";
 
+        // Track the active skill when load-skill is called successfully.
+        if tool_name == "load-skill"
+            && let Some(args) = tool_arguments
+            && let Some(name) = args.get("name").and_then(|v| v.as_str())
+        {
+            *self.active_skill.write().await = Some(name.to_string());
+        }
+
         // For the voice-response tool we need to extract the audio_id before
         // consuming the output below.
         let voice_audio_id: Option<String> = if tool_name == "voice-response" {

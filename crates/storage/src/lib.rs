@@ -42,7 +42,9 @@ pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
 pub use scheduled_tasks::{ScheduledTask, ScheduledTaskStore};
 pub use slack_threads::SlackActiveThreadStore;
-pub use traces::{RecordedSpan, TraceFilter, TraceStats, TraceStore, TraceSummary};
+pub use traces::{
+    RecordedSpan, SkillStatsProvider, TraceFilter, TraceStats, TraceStore, TraceSummary,
+};
 pub use webhooks::{WebhookRecord, WebhookStore};
 pub use workflows::{
     WorkflowEdge, WorkflowEdgeCondition, WorkflowExecutionLimits, WorkflowGraph, WorkflowNode,
@@ -378,6 +380,14 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "035_command_events",
             include_str!("../../../migrations/035_command_events.sql"),
+        ),
+        (
+            "036_learning_active_skill",
+            include_str!("../../../migrations/036_learning_active_skill.sql"),
+        ),
+        (
+            "037_learning_refinement_revert",
+            include_str!("../../../migrations/037_learning_refinement_revert.sql"),
         ),
     ];
 
