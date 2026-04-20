@@ -98,10 +98,14 @@ impl SubagentRunner for Orchestrator {
             .add(1, &[KeyValue::new("agent.id", parent_agent_id.clone())]);
 
         // Look up the parent conversation's event sink for forwarding inner events.
+        // Clone the sender and drop the lock before awaiting send to avoid holding
+        // the read guard across an await point (backpressure could block other writers).
         let parent_event_sink: Option<mpsc::Sender<super::stream_event::OrchestratorEvent>> =
             if let Some(parent_conv_id) = spawn.parent_conversation_id {
-                let sinks = self.token_sinks.read().await;
-                let sink = sinks.get(&parent_conv_id).cloned();
+                let sink = {
+                    let sinks = self.token_sinks.read().await;
+                    sinks.get(&parent_conv_id).cloned()
+                };
                 // Emit SubagentStarted.
                 if let Some(ref s) = sink {
                     let _ = s

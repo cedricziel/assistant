@@ -23,13 +23,21 @@ mod tests {
     #[test]
     fn text_chunk_stores_content() {
         let chunk = StreamChunk::Text("hello".to_string());
-        assert_eq!(chunk, StreamChunk::Text("hello".to_string()));
+        assert_eq!(
+            chunk,
+            StreamChunk::Text("hello".to_string()),
+            "Text chunk should preserve content"
+        );
     }
 
     #[test]
     fn thinking_chunk_stores_content() {
         let chunk = StreamChunk::Thinking("let me consider".to_string());
-        assert_eq!(chunk, StreamChunk::Thinking("let me consider".to_string()));
+        assert_eq!(
+            chunk,
+            StreamChunk::Thinking("let me consider".to_string()),
+            "Thinking chunk should preserve content"
+        );
     }
 
     #[test]

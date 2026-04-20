@@ -316,10 +316,15 @@ impl LlmClient {
                 .collect();
             if !items.is_empty() {
                 debug!(count = items.len(), "Native tool calls received");
+                let thinking = json
+                    .pointer("/message/thinking")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .map(String::from);
                 return Ok(LlmResponse::ToolCalls(ToolCallResponse {
                     items,
                     meta,
-                    thinking: None,
+                    thinking,
                 }));
             }
         }
@@ -523,7 +528,7 @@ impl LlmClient {
                 return Ok(LlmResponse::ToolCalls(ToolCallResponse {
                     items,
                     meta,
-                    thinking: if thinking_buf.trim().is_empty() {
+                    thinking: if chunk_sink.is_some() || thinking_buf.trim().is_empty() {
                         None
                     } else {
                         Some(thinking_buf.clone())

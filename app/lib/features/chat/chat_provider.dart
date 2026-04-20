@@ -689,9 +689,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       msgs[idx].subagentToolCalls.add(
         ToolCallRecord(
           toolName: event.toolName,
-          status: event.status == 'ok'
-              ? ToolCallStatus.ok
-              : ToolCallStatus.error,
+          status: _parseToolStatus(event.status),
           arguments: event.arguments,
           result: event.result,
         ),

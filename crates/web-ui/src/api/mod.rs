@@ -1057,7 +1057,10 @@ pub async fn send_message(
                             "subagent_tool_result",
                             serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result}),
                         ),
-                        _ => ("subagent_event", serde_json::json!({})),
+                        other => (
+                            "subagent_event",
+                            serde_json::json!({"type": format!("{other:?}")}),
+                        ),
                     };
                     let p = serde_json::json!({"agent_id": agent_id, "data": inner_data});
                     let e = Event::default().event(event_name).data(p.to_string());
@@ -1773,7 +1776,7 @@ pub async fn send_voice_message(
                             "tool_result",
                             serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result}),
                         ),
-                        _ => ("unknown", serde_json::json!({})),
+                        other => ("event", serde_json::json!({"type": format!("{other:?}")})),
                     };
                     let event_type = format!("subagent_{inner_type}");
                     let data = serde_json::json!({"agent_id": agent_id, "event_type": inner_type, "data": inner_data});
