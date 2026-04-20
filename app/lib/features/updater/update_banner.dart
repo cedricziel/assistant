@@ -1,6 +1,5 @@
-import 'dart:io';
-
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,8 +16,8 @@ class UpdateBannerWrapper extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Self-update is not supported on iOS - skip banner entirely
-    if (Platform.isIOS) return child;
+    // Self-update is not supported on web or iOS — skip banner entirely.
+    if (kIsWeb || defaultTargetPlatform == TargetPlatform.iOS) return child;
 
     final updateAsync = ref.watch(updateCheckProvider);
 

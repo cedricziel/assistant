@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
@@ -1418,13 +1417,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Returns `true` if [error] looks like a transient connection failure
   /// (iOS backgrounding, network blip) rather than a permanent server error.
   static bool _isTransientError(Object error) {
-    if (error is HttpException) return true;
     if (error is DioException &&
         error.type == DioExceptionType.connectionError) {
       return true;
     }
     final msg = error.toString();
-    return msg.contains('Connection closed') ||
+    return msg.contains('HttpException') ||
+        msg.contains('Connection closed') ||
         msg.contains('Connection reset') ||
         msg.contains('SocketException');
   }
