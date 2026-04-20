@@ -275,7 +275,7 @@ mod tests {
             _system: &str,
             _history: &[assistant_llm::ChatHistoryMessage],
             _tools: &[assistant_llm::ToolSpec],
-            _sink: Option<tokio::sync::mpsc::Sender<String>>,
+            _sink: Option<tokio::sync::mpsc::Sender<assistant_llm::StreamChunk>>,
         ) -> anyhow::Result<assistant_llm::LlmResponse> {
             anyhow::bail!("not implemented")
         }

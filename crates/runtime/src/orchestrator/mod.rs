@@ -578,17 +578,23 @@ impl Orchestrator {
             );
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
-                // Adapt OrchestratorEvent sink → String sink expected by chat_streaming.
-                let (str_tx, mut str_rx) = mpsc::channel::<String>(64);
+                // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
+                let (chunk_tx, mut chunk_rx) = mpsc::channel::<assistant_llm::StreamChunk>(64);
                 let oe_sink_clone = oe_sink.clone();
                 let forward_handle = tokio::spawn(async move {
-                    while let Some(t) = str_rx.recv().await {
-                        let _ = oe_sink_clone.send(OrchestratorEvent::Token(t)).await;
+                    while let Some(chunk) = chunk_rx.recv().await {
+                        let event = match chunk {
+                            assistant_llm::StreamChunk::Text(t) => OrchestratorEvent::Token(t),
+                            assistant_llm::StreamChunk::Thinking(t) => {
+                                OrchestratorEvent::Thinking(t)
+                            }
+                        };
+                        let _ = oe_sink_clone.send(event).await;
                     }
                 });
                 let result = self
                     .llm
-                    .chat_streaming(&system_prompt, &history, &all_specs, Some(str_tx))
+                    .chat_streaming(&system_prompt, &history, &all_specs, Some(chunk_tx))
                     .await;
                 // Wait for the forwarding task to drain any buffered tokens before
                 // continuing — ensures callers see all Token events after this await.
@@ -662,7 +668,16 @@ impl Orchestrator {
                     }
                 }
 
-                LlmResponse::ToolCalls(tool_call_items, _meta) => {
+                LlmResponse::ToolCalls(tool_call_resp) => {
+                    // Emit batch thinking (non-streaming path) before tool processing.
+                    if let Some(ref thinking) = tool_call_resp.thinking
+                        && let Some(ref sink) = token_sink
+                    {
+                        let _ = sink
+                            .send(OrchestratorEvent::Thinking(thinking.clone()))
+                            .await;
+                    }
+                    let tool_call_items = tool_call_resp.items;
                     info!(
                         count = tool_call_items.len(),
                         iteration, "LLM requested tool execution(s)"
@@ -924,17 +939,23 @@ impl Orchestrator {
             );
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
-                // Adapt OrchestratorEvent sink → String sink expected by chat_streaming.
-                let (str_tx, mut str_rx) = mpsc::channel::<String>(64);
+                // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
+                let (chunk_tx, mut chunk_rx) = mpsc::channel::<assistant_llm::StreamChunk>(64);
                 let oe_sink_clone = oe_sink.clone();
                 let forward_handle = tokio::spawn(async move {
-                    while let Some(t) = str_rx.recv().await {
-                        let _ = oe_sink_clone.send(OrchestratorEvent::Token(t)).await;
+                    while let Some(chunk) = chunk_rx.recv().await {
+                        let event = match chunk {
+                            assistant_llm::StreamChunk::Text(t) => OrchestratorEvent::Token(t),
+                            assistant_llm::StreamChunk::Thinking(t) => {
+                                OrchestratorEvent::Thinking(t)
+                            }
+                        };
+                        let _ = oe_sink_clone.send(event).await;
                     }
                 });
                 let result = self
                     .llm
-                    .chat_streaming(&system_prompt, &history, &tool_specs, Some(str_tx))
+                    .chat_streaming(&system_prompt, &history, &tool_specs, Some(chunk_tx))
                     .instrument(iteration_span.clone())
                     .await;
                 // Wait for the forwarding task to drain any buffered tokens before
@@ -1027,7 +1048,16 @@ impl Orchestrator {
                     });
                 }
 
-                LlmResponse::ToolCalls(tool_call_items, _meta) => {
+                LlmResponse::ToolCalls(tool_call_resp) => {
+                    // Emit batch thinking before tool processing.
+                    if let Some(ref thinking) = tool_call_resp.thinking
+                        && let Some(ref sink) = token_sink
+                    {
+                        let _ = sink
+                            .send(OrchestratorEvent::Thinking(thinking.clone()))
+                            .await;
+                    }
+                    let tool_call_items = tool_call_resp.items;
                     info!(
                         count = tool_call_items.len(),
                         iteration, "LLM requested tool execution(s)"

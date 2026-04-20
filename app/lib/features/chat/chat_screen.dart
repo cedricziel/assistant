@@ -663,7 +663,11 @@ class _MessageBubble extends StatelessWidget {
                   ? Border.all(color: colorScheme.error, width: 1.5)
                   : null,
             ),
-            child: message.isStreaming && message.content.isEmpty
+            child:
+                message.isStreaming &&
+                    message.content.isEmpty &&
+                    message.toolCalls.isEmpty &&
+                    message.tokenStream == null
                 ? _streamingDotsIndicator()
                 : isUser
                 ? Column(

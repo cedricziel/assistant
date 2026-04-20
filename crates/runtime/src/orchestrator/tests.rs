@@ -2825,3 +2825,204 @@ async fn audio_store_none_by_default() {
         "audio_store should be None by default"
     );
 }
+
+// ── Thinking event streaming tests ──────────────────────────────────────────
+
+/// When the LLM returns a `Thinking` response during a streaming turn,
+/// the orchestrator must emit an `OrchestratorEvent::Thinking` event
+/// followed by the final answer tokens.
+#[tokio::test]
+async fn run_turn_streaming_emits_thinking_event() {
+    let server = MockServer::start().await;
+
+    // First call: thinking response (empty content, thinking field set).
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_thinking("Let me reason about this")),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    // Second call: final answer.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(ollama_streaming_body(&["The", " answer"])),
+        )
+        .mount(&server)
+        .await;
+
+    let (orch, _) = build(&server.uri()).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<super::OrchestratorEvent>(64);
+
+    orch.run_turn_with_tools_streaming(
+        "think first then answer",
+        Uuid::new_v4(),
+        Interface::Slack,
+        vec![],
+        None,
+        vec![],
+        tx,
+        vec![],
+    )
+    .await
+    .unwrap();
+
+    // Collect all events.
+    let mut events = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        events.push(event);
+    }
+
+    // Must contain a Thinking event.
+    let has_thinking = events.iter().any(|e| {
+        matches!(e, super::OrchestratorEvent::Thinking(content) if content.contains("Let me reason"))
+    });
+    assert!(
+        has_thinking,
+        "Expected OrchestratorEvent::Thinking but got: {:?}",
+        events
+    );
+
+    // Must also contain Token events from the final answer.
+    let mut token_text = String::new();
+    for event in &events {
+        if let super::OrchestratorEvent::Token(t) = event {
+            token_text.push_str(t);
+        }
+    }
+    assert_eq!(
+        token_text, "The answer",
+        "Token events should contain the final answer text"
+    );
+}
+
+/// Ollama response with both tool calls and thinking.
+fn ollama_tool_calls_with_thinking(names: &[&str], thought: &str) -> Value {
+    let tc: Vec<Value> = names
+        .iter()
+        .map(|n| json!({ "function": { "name": n, "arguments": {} } }))
+        .collect();
+    json!({
+        "model": "test",
+        "message": { "role": "assistant", "content": "", "tool_calls": tc, "thinking": thought },
+        "done": true
+    })
+}
+
+#[tokio::test]
+async fn run_turn_streaming_emits_thinking_before_tool_calls() {
+    let server = MockServer::start().await;
+
+    // First call: tool call with batch thinking (non-streaming, so thinking
+    // is carried in ToolCallResponse.thinking).
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls_with_thinking(
+                &["end_turn"],
+                "I should end",
+            )),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    // Second call: final answer after tool loop ends.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("Done")))
+        .mount(&server)
+        .await;
+
+    let (orch, _) = build(&server.uri()).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<super::OrchestratorEvent>(64);
+
+    orch.run_turn_with_tools_streaming(
+        "do something",
+        Uuid::new_v4(),
+        Interface::Slack,
+        vec![],
+        None,
+        vec![],
+        tx,
+        vec![],
+    )
+    .await
+    .unwrap();
+
+    // Collect all events.
+    let mut events = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        events.push(event);
+    }
+
+    // Must contain a Thinking event with the batch thinking content.
+    let thinking_idx = events.iter().position(|e| {
+        matches!(e, super::OrchestratorEvent::Thinking(content) if content.contains("I should end"))
+    });
+    assert!(
+        thinking_idx.is_some(),
+        "Expected OrchestratorEvent::Thinking before tool calls, got: {:?}",
+        events
+    );
+}
+
+#[tokio::test]
+async fn subagent_forwards_inner_events_to_parent_sink() {
+    let server = MockServer::start().await;
+
+    // The subagent's LLM returns a final answer directly.
+    mount_answer(&server, "subagent done").await;
+
+    let (orch, _storage) = build(&server.uri()).await;
+
+    // Register a parent event sink keyed by a fake parent conversation_id.
+    let parent_conv_id = Uuid::new_v4();
+    let (parent_tx, mut parent_rx) = tokio::sync::mpsc::channel::<super::OrchestratorEvent>(128);
+    orch.register_token_sink(parent_conv_id, parent_tx).await;
+
+    let spawn = AgentSpawn {
+        agent_id: "streaming-sub".into(),
+        task: "Say hello".into(),
+        system_prompt: None,
+        model: None,
+        allowed_tools: vec![],
+        persona_bound: false,
+        parent_conversation_id: Some(parent_conv_id),
+        parent_agent_id: None,
+    };
+
+    let report = orch.run_subagent(spawn, 0).await.unwrap();
+    assert_eq!(report.status, AgentReportStatus::Completed);
+
+    // Collect all events from the parent sink.
+    let mut events = Vec::new();
+    while let Ok(event) = parent_rx.try_recv() {
+        events.push(event);
+    }
+
+    // Must contain SubagentStarted.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            super::OrchestratorEvent::SubagentStarted { agent_id, .. }
+            if agent_id == "streaming-sub"
+        )),
+        "Expected SubagentStarted event, got: {:?}",
+        events
+    );
+
+    // Must contain SubagentCompleted.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            super::OrchestratorEvent::SubagentCompleted { agent_id, status, .. }
+            if agent_id == "streaming-sub" && status == "ok"
+        )),
+        "Expected SubagentCompleted event, got: {:?}",
+        events
+    );
+}

@@ -36,8 +36,11 @@ use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::{
     AttachmentMetaResponse, ConversationDetail, ConversationSummary, CreateConversationRequest,
     MessageSummary, QuickMessageRequest, QuickMessageResponse,
-    SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, StreamRunEventsQuery,
-    ToolCallSummary, UpdateConversationRequest,
+    SendMessageRequest as ApiSendMessageRequest, ServerCapabilities, SseStatusEvent,
+    SseSubagentCompletedEvent, SseSubagentStartedEvent, SseSubagentStatusEvent,
+    SseSubagentThinkingEvent, SseSubagentTokenEvent, SseSubagentToolResultEvent, SseThinkingEvent,
+    SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery, ToolCallSummary,
+    UpdateConversationRequest,
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
     analytics::{
         AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
@@ -309,6 +312,17 @@ pub struct ApiErrorResponse {
             VapidKeyResponse,
             SubscribeRequest,
             UnsubscribeRequest,
+            // SSE event payload schemas
+            SseTokenEvent,
+            SseThinkingEvent,
+            SseStatusEvent,
+            SseToolResultEvent,
+            SseSubagentStartedEvent,
+            SseSubagentCompletedEvent,
+            SseSubagentTokenEvent,
+            SseSubagentThinkingEvent,
+            SseSubagentToolResultEvent,
+            SseSubagentStatusEvent,
             // Common error response
             ApiErrorResponse,
         )

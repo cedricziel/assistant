@@ -1034,6 +1034,38 @@ pub async fn send_message(
                         .data(p.to_string());
                     ("subagent_completed", p, e)
                 }
+                OrchestratorEvent::SubagentEvent {
+                    ref agent_id,
+                    ref inner,
+                } => {
+                    let (event_name, inner_data) = match inner.as_ref() {
+                        OrchestratorEvent::Token(t) => {
+                            ("subagent_token", serde_json::json!({"content": t}))
+                        }
+                        OrchestratorEvent::Thinking(t) => {
+                            ("subagent_thinking", serde_json::json!({"content": t}))
+                        }
+                        OrchestratorEvent::Status(s) => {
+                            ("subagent_status", serde_json::json!({"message": s}))
+                        }
+                        OrchestratorEvent::ToolResult {
+                            tool_name,
+                            status,
+                            arguments,
+                            result,
+                        } => (
+                            "subagent_tool_result",
+                            serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result}),
+                        ),
+                        other => (
+                            "subagent_event",
+                            serde_json::json!({"type": format!("{other:?}")}),
+                        ),
+                    };
+                    let p = serde_json::json!({"agent_id": agent_id, "data": inner_data});
+                    let e = Event::default().event(event_name).data(p.to_string());
+                    (event_name, p, e)
+                }
                 OrchestratorEvent::AudioReady { ref audio_id } => {
                     let p = serde_json::json!({"audio_id": audio_id, "auto_play": true});
                     let e = Event::default().event("audio_ready").data(p.to_string());
@@ -1129,6 +1161,98 @@ pub async fn send_message(
 pub struct StreamRunEventsQuery {
     /// Replay from this sequence number (inclusive). Defaults to 0.
     pub since: Option<i64>,
+}
+
+// -- SSE event payload schemas ------------------------------------------------
+
+/// SSE `token` event — a text chunk from the assistant's response.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseTokenEvent {
+    /// The text content of this token chunk.
+    pub content: String,
+}
+
+/// SSE `thinking` event — a thinking/reasoning token from the model.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseThinkingEvent {
+    /// The thinking text content.
+    pub content: String,
+}
+
+/// SSE `status` event — a status message (e.g. "Calling tool X").
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseStatusEvent {
+    /// Human-readable status message.
+    pub message: String,
+}
+
+/// SSE `tool_result` event — result of a tool invocation.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseToolResultEvent {
+    /// Name of the tool that was called.
+    pub tool_name: String,
+    /// Whether the tool call succeeded or failed.
+    pub status: String,
+    /// The arguments passed to the tool (JSON string).
+    pub arguments: Option<String>,
+    /// The tool's output or error message.
+    pub result: Option<String>,
+}
+
+/// SSE `subagent_started` event — a subagent has been spawned.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseSubagentStartedEvent {
+    /// Unique identifier of the subagent.
+    pub agent_id: String,
+    /// The task description given to the subagent.
+    pub task: String,
+}
+
+/// SSE `subagent_completed` event — a subagent has finished.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseSubagentCompletedEvent {
+    /// Unique identifier of the subagent.
+    pub agent_id: String,
+    /// Completion status (e.g. "success", "error").
+    pub status: String,
+    /// Summary of the subagent's work.
+    pub summary: Option<String>,
+}
+
+/// SSE `subagent_token` event — a text token from a subagent's response.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseSubagentTokenEvent {
+    /// The subagent that produced this token.
+    pub agent_id: String,
+    /// Inner event payload.
+    pub data: SseTokenEvent,
+}
+
+/// SSE `subagent_thinking` event — a thinking token from a subagent.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseSubagentThinkingEvent {
+    /// The subagent that produced this thinking token.
+    pub agent_id: String,
+    /// Inner event payload.
+    pub data: SseThinkingEvent,
+}
+
+/// SSE `subagent_tool_result` event — a tool result from a subagent.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseSubagentToolResultEvent {
+    /// The subagent that executed the tool.
+    pub agent_id: String,
+    /// Inner event payload.
+    pub data: SseToolResultEvent,
+}
+
+/// SSE `subagent_status` event — a status update from a subagent.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseSubagentStatusEvent {
+    /// The subagent that emitted this status.
+    pub agent_id: String,
+    /// Inner event payload.
+    pub data: SseStatusEvent,
 }
 
 /// `GET /api/conversations/{id}/runs/{run_id}/events/stream`
@@ -1633,6 +1757,30 @@ pub async fn send_voice_message(
                     Event::default()
                         .event("subagent_completed")
                         .data(data.to_string())
+                }
+                OrchestratorEvent::SubagentEvent { agent_id, inner } => {
+                    let (inner_type, inner_data) = match inner.as_ref() {
+                        OrchestratorEvent::Token(t) => ("token", serde_json::json!({"content": t})),
+                        OrchestratorEvent::Thinking(t) => {
+                            ("thinking", serde_json::json!({"content": t}))
+                        }
+                        OrchestratorEvent::Status(s) => {
+                            ("status", serde_json::json!({"message": s}))
+                        }
+                        OrchestratorEvent::ToolResult {
+                            tool_name,
+                            status,
+                            arguments,
+                            result,
+                        } => (
+                            "tool_result",
+                            serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result}),
+                        ),
+                        other => ("event", serde_json::json!({"type": format!("{other:?}")})),
+                    };
+                    let event_type = format!("subagent_{inner_type}");
+                    let data = serde_json::json!({"agent_id": agent_id, "event_type": inner_type, "data": inner_data});
+                    Event::default().event(&event_type).data(data.to_string())
                 }
                 OrchestratorEvent::AudioReady { audio_id } => {
                     let data = serde_json::json!({

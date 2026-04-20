@@ -205,8 +205,8 @@ impl ToolHandler for SelfAnalyzeHandler {
         let proposed_skill_md = match self.llm.chat(system_prompt, &sub_history, &[]).await {
             Ok(LlmResponse::FinalAnswer(text, _meta)) => text,
             Ok(LlmResponse::Thinking(text, _meta)) => text,
-            Ok(LlmResponse::ToolCalls(calls, _meta)) => {
-                let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+            Ok(LlmResponse::ToolCalls(resp)) => {
+                let names: Vec<&str> = resp.items.iter().map(|c| c.name.as_str()).collect();
                 warn!(
                     skill = %skill_name,
                     tools = %names.join(", "),
