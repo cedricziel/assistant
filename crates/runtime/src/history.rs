@@ -4,22 +4,21 @@
 //! [`ChatHistoryMessage`] format the LLM expects, repairing structural issues
 //! (orphaned messages, missing tool results), and error recovery.
 
-use assistant_core::{Message, MessageRole};
-use assistant_llm::{ChatHistoryMessage, ChatRole};
-use assistant_storage::conversations::ConversationStore;
+use std::collections::HashMap;
+
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use std::collections::HashMap;
+use assistant_core::{Message, MessageRole};
+use assistant_llm::{ChatHistoryMessage, ChatRole, ContentBlock};
+use assistant_storage::conversations::ConversationStore;
 
-use assistant_llm::ContentBlock;
-
-/// Pre-loaded attachment data keyed by message ID.
+/// Pre-loaded attachment content blocks keyed by message ID.
 ///
-/// Each entry is `(mime_type, base64_data)`.  Built by callers that load
-/// bytes from the [`AttachmentStore`] and base64-encode them before
-/// replaying history.
-pub(crate) type AttachmentMap = HashMap<Uuid, Vec<(String, String)>>;
+/// Built by callers that load bytes from the [`AttachmentStore`] and convert
+/// them into the appropriate [`ContentBlock`] variant (Image, Document, or
+/// Text) before replaying history.
+pub(crate) type AttachmentMap = HashMap<Uuid, Vec<ContentBlock>>;
 
 /// Convert a sequence of persisted [`Message`] records into
 /// [`ChatHistoryMessage`] values suitable for sending to the LLM.
@@ -39,12 +38,7 @@ pub(crate) fn messages_to_chat_history(
                     && !atts.is_empty()
                 {
                     let mut blocks = vec![ContentBlock::Text(m.content)];
-                    for (mime_type, data) in atts {
-                        blocks.push(ContentBlock::Image {
-                            media_type: mime_type.clone(),
-                            data: data.clone(),
-                        });
-                    }
+                    blocks.extend(atts.iter().cloned());
                     return Some(ChatHistoryMessage::MultimodalUser { content: blocks });
                 }
                 Some(ChatHistoryMessage::Text {
@@ -251,7 +245,10 @@ mod tests {
         let mut map = AttachmentMap::new();
         map.insert(
             msg_id,
-            vec![("image/png".to_string(), "base64data".to_string())],
+            vec![ContentBlock::Image {
+                media_type: "image/png".to_string(),
+                data: "base64data".to_string(),
+            }],
         );
 
         let history = messages_to_chat_history(msgs, &map);
@@ -266,6 +263,57 @@ mod tests {
                     ContentBlock::Image { media_type, data }
                     if media_type == "image/png" && data == "base64data"
                 ));
+            }
+            other => panic!("expected MultimodalUser, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn history_with_document_attachment_produces_multimodal_user() {
+        let msg_id = Uuid::new_v4();
+        let msgs = vec![make_user_msg(msg_id, "summarize this")];
+
+        let mut map = AttachmentMap::new();
+        map.insert(
+            msg_id,
+            vec![ContentBlock::Document {
+                media_type: "application/pdf".to_string(),
+                data: "JVBERi0=".to_string(),
+            }],
+        );
+
+        let history = messages_to_chat_history(msgs, &map);
+        match &history[0] {
+            ChatHistoryMessage::MultimodalUser { content } => {
+                assert_eq!(content.len(), 2, "text + document");
+                assert!(matches!(
+                    &content[1],
+                    ContentBlock::Document { media_type, .. }
+                    if media_type == "application/pdf"
+                ));
+            }
+            other => panic!("expected MultimodalUser, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn history_with_text_attachment_produces_multimodal_user() {
+        let msg_id = Uuid::new_v4();
+        let msgs = vec![make_user_msg(msg_id, "check this")];
+
+        let mut map = AttachmentMap::new();
+        map.insert(
+            msg_id,
+            vec![ContentBlock::Text(
+                "--- file: notes.md ---\n# Notes\n--- end file ---".to_string(),
+            )],
+        );
+
+        let history = messages_to_chat_history(msgs, &map);
+        match &history[0] {
+            ChatHistoryMessage::MultimodalUser { content } => {
+                assert_eq!(content.len(), 2, "text + inlined file");
+                assert!(matches!(&content[1], ContentBlock::Text(t) if t.contains("notes.md")));
             }
             other => panic!("expected MultimodalUser, got {:?}", other),
         }

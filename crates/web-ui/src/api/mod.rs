@@ -326,7 +326,7 @@ pub fn api_router() -> Router<ApiState> {
         .route("/quick-message", post(quick_message))
         .route(
             "/conversations/{id}/attachments",
-            post(upload_attachment).layer(DefaultBodyLimit::max(12 * 1024 * 1024)), // 12 MB
+            post(upload_attachment).layer(DefaultBodyLimit::max(27 * 1024 * 1024)), // 27 MB
         )
         .route("/attachments/{id}", get(serve_attachment))
         .route(
@@ -3351,7 +3351,8 @@ mod tests {
         let conv_store = ConversationStore::for_agent(storage.pool.clone(), "default");
         let conv = conv_store.create_conversation(None).await.unwrap();
 
-        let (content_type, body) = multipart_body("file", "test.txt", "text/plain", b"hello");
+        let (content_type, body) =
+            multipart_body("file", "test.exe", "application/x-msdownload", b"MZ");
 
         let app = app(state);
         let req = Request::builder()

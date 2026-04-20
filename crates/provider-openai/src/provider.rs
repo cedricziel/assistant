@@ -469,19 +469,26 @@ fn build_input_items(history: &[ChatHistoryMessage]) -> Vec<InputItem> {
             ChatHistoryMessage::MultimodalUser { content } => {
                 let parts: Vec<InputContent> = content
                     .iter()
-                    .map(|block| match block {
+                    .filter_map(|block| match block {
                         ContentBlock::Text(text) => {
-                            InputContent::InputText(InputTextContent { text: text.clone() })
+                            Some(InputContent::InputText(InputTextContent {
+                                text: text.clone(),
+                            }))
                         }
                         ContentBlock::Image { media_type, data } => {
                             let data_uri = format!("data:{media_type};base64,{data}");
-                            InputContent::InputImage(
+                            Some(InputContent::InputImage(
                                 async_openai::types::responses::InputImageContent {
                                     detail: async_openai::types::responses::ImageDetail::Auto,
                                     file_id: None,
                                     image_url: Some(data_uri),
                                 },
-                            )
+                            ))
+                        }
+                        ContentBlock::Document { .. } => {
+                            // OpenAI does not support native document blocks.
+                            // The orchestrator should have converted these to Text.
+                            None
                         }
                     })
                     .collect();

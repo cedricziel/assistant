@@ -225,7 +225,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _pickImages() async {
     final result = await FilePicker.pickFiles(
-      type: FileType.image,
+      type: FileType.custom,
+      allowedExtensions: [
+        'png',
+        'jpg',
+        'jpeg',
+        'gif',
+        'webp',
+        'heic',
+        'heif',
+        'pdf',
+        'txt',
+        'md',
+        'csv',
+        'json',
+      ],
       allowMultiple: true,
       withData: true,
     );
@@ -233,14 +247,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final notifier = ref.read(pendingAttachmentsProvider.notifier);
     for (final file in result.files) {
       if (file.bytes != null) {
-        final (bytes, filename, mime) = await normalizeImage(
-          file.bytes!,
-          file.name,
-          file.extension,
-        );
-        notifier.add(
-          PendingAttachment(bytes: bytes, filename: filename, mimeType: mime),
-        );
+        final mime = mimeFromExtension(file.extension);
+        if (isImageMimeType(mime) || mime == 'image/heic') {
+          // Image files may need HEIC→PNG conversion.
+          final (bytes, filename, normalizedMime) = await normalizeImage(
+            file.bytes!,
+            file.name,
+            file.extension,
+          );
+          notifier.add(
+            PendingAttachment(
+              bytes: bytes,
+              filename: filename,
+              mimeType: normalizedMime,
+            ),
+          );
+        } else {
+          // Non-image files: add directly.
+          notifier.add(
+            PendingAttachment(
+              bytes: file.bytes!,
+              filename: file.name,
+              mimeType: mime,
+            ),
+          );
+        }
       }
     }
   }
@@ -365,7 +396,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
               ),
 
-            // Chat area with drop target for image attachments.
+            // Chat area with drop target for file attachments.
             Expanded(
               child: DropTarget(
                 onDragDone: (details) {
@@ -376,7 +407,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     file.readAsBytes().then((bytes) {
                       final ext = file.name.split('.').last;
                       final mime = mimeFromExtension(ext);
-                      if (mime.startsWith('image/')) {
+                      if (isSupportedMimeType(mime)) {
                         notifier.add(
                           PendingAttachment(
                             bytes: bytes,
@@ -764,6 +795,41 @@ class _MessageBubble extends StatelessWidget {
         spacing: 6,
         runSpacing: 6,
         children: message.attachments.map((att) {
+          // Non-image attachments: render as file tile with icon.
+          if (!isImageMimeType(att.mimeType)) {
+            return Container(
+              width: 150,
+              height: 150,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    iconForMime(att.mimeType),
+                    color: colorScheme.outline,
+                    size: 32,
+                  ),
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      att.filename,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: colorScheme.outline,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
           // Without a base URL the relative path cannot be resolved.
           if (imageBaseUrl == null) {
             return Container(
@@ -1455,12 +1521,41 @@ class _InputRowState extends State<_InputRow> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.memory(
-                          attachment.bytes,
-                          width: 64,
-                          height: 64,
-                          fit: BoxFit.cover,
-                        ),
+                        child: isImageMimeType(attachment.mimeType)
+                            ? Image.memory(
+                                attachment.bytes,
+                                width: 64,
+                                height: 64,
+                                fit: BoxFit.cover,
+                              )
+                            : Container(
+                                width: 64,
+                                height: 64,
+                                color: colorScheme.surfaceContainerHighest,
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      iconForMime(attachment.mimeType),
+                                      size: 28,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      attachment.filename.length > 8
+                                          ? '${attachment.filename.substring(0, 8)}…'
+                                          : attachment.filename,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
                       ),
                       Positioned(
                         top: -4,

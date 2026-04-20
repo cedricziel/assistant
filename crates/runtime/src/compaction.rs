@@ -48,8 +48,26 @@ pub fn should_compact(input_tokens: u64, cfg: &CompactionConfig) -> bool {
 /// heuristic.  This is used as a pre-call fallback when the provider has not
 /// yet returned token metadata.
 pub fn estimate_tokens(history: &[ChatHistoryMessage]) -> u64 {
-    let chars: usize = history.iter().map(|m| message_text(m).len()).sum();
+    let chars: usize = history.iter().map(message_estimated_chars).sum();
     (chars / 4) as u64
+}
+
+/// Estimate character count for a message, including binary payload sizes for
+/// image/document blocks that `message_text` would skip.
+fn message_estimated_chars(msg: &ChatHistoryMessage) -> usize {
+    match msg {
+        ChatHistoryMessage::Text { content, .. } => content.len(),
+        ChatHistoryMessage::MultimodalUser { content } => content
+            .iter()
+            .map(|b| match b {
+                ContentBlock::Text(t) => t.len(),
+                ContentBlock::Image { data, .. } | ContentBlock::Document { data, .. } => {
+                    data.len()
+                }
+            })
+            .sum(),
+        _ => message_text(msg).len(),
+    }
 }
 
 /// Find the message index at which to split history so that the tail contains
@@ -96,7 +114,7 @@ fn message_text(msg: &ChatHistoryMessage) -> String {
             .iter()
             .filter_map(|b| match b {
                 ContentBlock::Text(t) => Some(t.as_str()),
-                ContentBlock::Image { .. } => None,
+                ContentBlock::Image { .. } | ContentBlock::Document { .. } => None,
             })
             .collect::<Vec<_>>()
             .join(" "),
@@ -240,7 +258,7 @@ fn chat_history_to_message(
                 .iter()
                 .filter_map(|b| match b {
                     ContentBlock::Text(t) => Some(t.as_str()),
-                    ContentBlock::Image { .. } => None,
+                    ContentBlock::Image { .. } | ContentBlock::Document { .. } => None,
                 })
                 .collect::<Vec<_>>()
                 .join(" ");

@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    Attachment, ExecutionContext, Interface, MemoryLoader, Message, MessageBus, ToolHandler,
-    context::agent_base_dir, is_resizable_mime_type, strip_html_comments,
+    Attachment, AttachmentMeta, ExecutionContext, Interface, MemoryLoader, Message, MessageBus,
+    ToolHandler, context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type,
+    is_text_mime_type, strip_html_comments,
 };
 use assistant_llm::{
     ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, ToolSpec,
@@ -1126,10 +1127,12 @@ impl Orchestrator {
 
     // ── Attachment helpers ─────────────────────────────────────────────────────
 
-    /// Build a map of `message_id → [(mime_type, base64_data)]` for all
-    /// attachments in a conversation that are linked to a message and have a
-    /// resizable MIME type (i.e. images).  Used to replay images in chat
-    /// history so the LLM can reference them.
+    /// Build a map of `message_id → [ContentBlock]` for all attachments in a
+    /// conversation that are linked to a message.  Used to replay attachments
+    /// in chat history so the LLM can reference previously-sent content.
+    ///
+    /// Images are resized and encoded as `ContentBlock::Image`.  PDFs become
+    /// `ContentBlock::Document`.  Text files are inlined as `ContentBlock::Text`.
     async fn build_attachment_map(
         &self,
         conversation_id: Uuid,
@@ -1143,16 +1146,14 @@ impl Orchestrator {
                 Some(id) => id,
                 None => continue,
             };
-            if !is_resizable_mime_type(&meta.mime_type) {
+            if !is_supported_mime_type(&meta.mime_type) {
                 continue;
             }
             match store.load_bytes(meta.id).await {
                 Ok(bytes) => {
-                    let encoded =
-                        resize_and_encode(&bytes, &meta.mime_type, self.llm.provider_name());
-                    map.entry(msg_id)
-                        .or_default()
-                        .push((meta.mime_type.clone(), encoded));
+                    let block =
+                        attachment_to_content_block(&meta, &bytes, self.llm.provider_name());
+                    map.entry(msg_id).or_default().push(block);
                 }
                 Err(e) => {
                     warn!(
@@ -1222,7 +1223,7 @@ impl Orchestrator {
         let mut history = crate::history::messages_to_chat_history(prior, &att_map);
         crate::history::sanitize_history(&mut history);
 
-        // Load stored attachments by ID and convert to ContentBlock::Image.
+        // Load stored attachments by ID and convert to the appropriate ContentBlock.
         let mut all_attachments = attachments;
         if !attachment_ids.is_empty() {
             let store = self.storage.attachment_store();
@@ -1230,23 +1231,9 @@ impl Orchestrator {
                 match store.load_bytes(att_id).await {
                     Ok(bytes) => {
                         let meta = store.get_meta(att_id).await?;
-                        if is_resizable_mime_type(&meta.mime_type) {
-                            let encoded = resize_and_encode(
-                                &bytes,
-                                &meta.mime_type,
-                                self.llm.provider_name(),
-                            );
-                            all_attachments.push(ContentBlock::Image {
-                                media_type: meta.mime_type.clone(),
-                                data: encoded,
-                            });
-                        } else {
-                            debug!(
-                                attachment_id = %att_id,
-                                mime_type = %meta.mime_type,
-                                "Skipping non-image attachment for LLM history"
-                            );
-                        }
+                        let block =
+                            attachment_to_content_block(&meta, &bytes, self.llm.provider_name());
+                        all_attachments.push(block);
                     }
                     Err(e) => {
                         warn!(
@@ -1395,4 +1382,73 @@ fn resize_and_encode(raw: &[u8], mime_type: &str, provider: &str) -> String {
 
     // Fallback: return original bytes encoded.
     base64::engine::general_purpose::STANDARD.encode(raw)
+}
+
+/// Convert an attachment's bytes into the appropriate [`ContentBlock`] based
+/// on its MIME type.
+///
+/// - **Images** → `ContentBlock::Image` (resized + base64 encoded)
+/// - **PDF** → `ContentBlock::Document` (base64 encoded, no resize)
+/// - **Text files** (plain, markdown, CSV, JSON) → `ContentBlock::Text`
+///   (UTF-8 decoded, wrapped with filename delimiters)
+fn attachment_to_content_block(
+    meta: &AttachmentMeta,
+    bytes: &[u8],
+    provider: &str,
+) -> ContentBlock {
+    use base64::Engine as _;
+
+    if is_resizable_mime_type(&meta.mime_type) {
+        let encoded = resize_and_encode(bytes, &meta.mime_type, provider);
+        return ContentBlock::Image {
+            media_type: meta.mime_type.clone(),
+            data: encoded,
+        };
+    }
+
+    if is_text_mime_type(&meta.mime_type) {
+        const MAX_INLINE_TEXT_BYTES: usize = 256 * 1024;
+        let truncated = bytes.len() > MAX_INLINE_TEXT_BYTES;
+        let inline_bytes = if truncated {
+            &bytes[..MAX_INLINE_TEXT_BYTES]
+        } else {
+            bytes
+        };
+        let text = String::from_utf8_lossy(inline_bytes);
+        let suffix = if truncated {
+            format!(
+                "\n--- truncated: showing first {} of {} bytes ---",
+                MAX_INLINE_TEXT_BYTES,
+                bytes.len()
+            )
+        } else {
+            String::new()
+        };
+        return ContentBlock::Text(format!(
+            "--- file: {} ---\n{}{}\n--- end file ---",
+            meta.filename, text, suffix
+        ));
+    }
+
+    if meta.mime_type == "application/pdf" {
+        if provider != "anthropic" {
+            return ContentBlock::Text(format!(
+                "--- file: {} (application/pdf, {} bytes) ---\n\
+                 PDF content not available: native PDF support requires the Anthropic provider.\n\
+                 --- end file ---",
+                meta.filename, meta.size_bytes
+            ));
+        }
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        return ContentBlock::Document {
+            media_type: meta.mime_type.clone(),
+            data: encoded,
+        };
+    }
+
+    // Unsupported type — include a placeholder so the LLM knows a file was attached.
+    ContentBlock::Text(format!(
+        "--- file: {} ({}, {} bytes) ---",
+        meta.filename, meta.mime_type, meta.size_bytes
+    ))
 }

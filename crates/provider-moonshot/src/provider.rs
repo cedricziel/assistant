@@ -642,15 +642,16 @@ fn build_chat_messages(
             ChatHistoryMessage::MultimodalUser { content } => {
                 let parts_json: Vec<Value> = content
                     .iter()
-                    .map(|block| match block {
-                        ContentBlock::Text(text) => json!({"type": "text", "text": text}),
+                    .filter_map(|block| match block {
+                        ContentBlock::Text(text) => Some(json!({"type": "text", "text": text})),
                         ContentBlock::Image { media_type, data } => {
                             let data_uri = format!("data:{media_type};base64,{data}");
-                            json!({
+                            Some(json!({
                                 "type": "image_url",
                                 "image_url": { "url": data_uri }
-                            })
+                            }))
                         }
+                        ContentBlock::Document { .. } => None,
                     })
                     .collect();
 
@@ -803,12 +804,13 @@ fn build_raw_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Ve
             ChatHistoryMessage::MultimodalUser { content } => {
                 let parts: Vec<Value> = content
                     .iter()
-                    .map(|block| match block {
-                        ContentBlock::Text(text) => json!({"type": "text", "text": text}),
+                    .filter_map(|block| match block {
+                        ContentBlock::Text(text) => Some(json!({"type": "text", "text": text})),
                         ContentBlock::Image { media_type, data } => {
                             let data_uri = format!("data:{media_type};base64,{data}");
-                            json!({"type": "image_url", "image_url": {"url": data_uri}})
+                            Some(json!({"type": "image_url", "image_url": {"url": data_uri}}))
                         }
+                        ContentBlock::Document { .. } => None,
                     })
                     .collect();
                 messages.push(json!({"role": "user", "content": parts}));
