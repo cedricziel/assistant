@@ -270,11 +270,10 @@ class ApiClient {
 /// Parses a raw SSE byte stream into [StreamEvent]s.
 ///
 /// Accepts [Stream<List<int>>] or [Stream<Uint8List>] (both are [List<int>]).
-/// Uses [utf8.decode] via [Stream.map] instead of [utf8.decoder] to avoid a
-/// runtime type error on iOS where [Utf8Decoder] is not accepted as a
-/// [StreamTransformer<Uint8List, String>].
+/// Uses [utf8.decoder.bind] for correct handling of multi-byte characters
+/// that may be split across chunk boundaries.
 Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
-  final lines = byteStream.map(utf8.decode).transform(const LineSplitter());
+  final lines = utf8.decoder.bind(byteStream).transform(const LineSplitter());
 
   String? eventType;
   String? dataLine;
@@ -369,7 +368,7 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
 Stream<ConversationListEvent> parseConversationSseByteStream(
   Stream<List<int>> byteStream,
 ) async* {
-  final lines = byteStream.map(utf8.decode).transform(const LineSplitter());
+  final lines = utf8.decoder.bind(byteStream).transform(const LineSplitter());
 
   String? eventType;
   String? dataLine;

@@ -393,6 +393,20 @@ pub struct StreamConversationsQuery {
     pub agent_id: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/conversations/stream",
+    tag = "conversations",
+    params(
+        ("agent_id" = Option<String>, Query, description = "Filter events to a single agent. If omitted, events for all agents are streamed."),
+    ),
+    responses(
+        (status = 200, description = "SSE event stream. Events: `snapshot` (full list), `upserted` (single ConversationSummary), `deleted` ({conversation_id})", content_type = "text/event-stream"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Failed to fetch conversations"),
+    ),
+    security(("bearer_token" = []))
+)]
 /// `GET /api/conversations/stream` — SSE stream of conversation list changes.
 ///
 /// Sends an initial `snapshot` event with the full conversation list, then

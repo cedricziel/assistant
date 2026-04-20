@@ -18,6 +18,7 @@ Method | HTTP request | Description
 [**listConversations**](ConversationsApi.md#listconversations) | **GET** /api/conversations | &#x60;GET /api/conversations&#x60; — list all conversations, newest first.
 [**sendMessage**](ConversationsApi.md#sendmessage) | **POST** /api/conversations/{id}/messages | &#x60;POST /api/conversations/{id}/messages&#x60; — send a message and stream the response.
 [**sendVoiceMessage**](ConversationsApi.md#sendvoicemessage) | **POST** /api/conversations/{id}/voice | &#x60;POST /api/conversations/{id}/voice&#x60; — upload audio, transcribe it, run through the orchestrator, and stream the response as SSE.
+[**streamConversations**](ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [**streamRunEvents**](ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [**updateConversation**](ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
 
@@ -386,6 +387,48 @@ void (empty response body)
 ### HTTP request headers
 
  - **Content-Type**: multipart/form-data
+ - **Accept**: text/event-stream
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **streamConversations**
+> streamConversations(agentId)
+
+`GET /api/conversations/stream` — SSE stream of conversation list changes.
+
+Sends an initial `snapshot` event with the full conversation list, then pushes `upserted` and `deleted` delta events as conversations change.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getConversationsApi();
+final String agentId = agentId_example; // String | Filter events to a single agent. If omitted, events for all agents are streamed.
+
+try {
+    api.streamConversations(agentId);
+} on DioException catch (e) {
+    print('Exception when calling ConversationsApi->streamConversations: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agentId** | **String**| Filter events to a single agent. If omitted, events for all agents are streamed. | [optional] 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[bearer_token](../README.md#bearer_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: text/event-stream
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

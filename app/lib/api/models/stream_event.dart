@@ -47,7 +47,11 @@ class ConversationDeletedEvent extends ConversationListEvent {
   final String conversationId;
 
   factory ConversationDeletedEvent.fromJson(Map<String, dynamic> json) {
-    return ConversationDeletedEvent(json['conversation_id'] as String? ?? '');
+    final conversationId = json['conversation_id'] as String?;
+    if (conversationId == null || conversationId.isEmpty) {
+      throw const FormatException('conversation_id is required');
+    }
+    return ConversationDeletedEvent(conversationId);
   }
 }
 
@@ -66,15 +70,15 @@ class ConversationListEntry {
   final DateTime updatedAt;
 
   factory ConversationListEntry.fromJson(Map<String, dynamic> json) {
+    final id = json['id'] as String?;
+    if (id == null || id.isEmpty) {
+      throw const FormatException('id is required');
+    }
     return ConversationListEntry(
-      id: json['id'] as String? ?? '',
+      id: id,
       title: json['title'] as String? ?? 'Untitled',
-      createdAt: DateTime.parse(
-        json['created_at'] as String? ?? DateTime.now().toIso8601String(),
-      ),
-      updatedAt: DateTime.parse(
-        json['updated_at'] as String? ?? DateTime.now().toIso8601String(),
-      ),
+      createdAt: DateTime.parse(json['created_at'] as String),
+      updatedAt: DateTime.parse(json['updated_at'] as String),
     );
   }
 }

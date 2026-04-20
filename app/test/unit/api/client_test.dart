@@ -422,5 +422,46 @@ void main() {
       ).toList();
       expect(events, isEmpty);
     });
+
+    test('handles chunked multibyte conversation titles', () async {
+      final payload = jsonEncode({
+        'id': 'c4',
+        'title': 'Café',
+        'created_at': '2026-01-01T00:00:00Z',
+        'updated_at': '2026-01-01T00:00:00Z',
+      });
+      final bytes = utf8.encode('event: upserted\ndata: $payload\n\n');
+      // Split inside the multi-byte "é" (0xC3 0xA9).
+      final split = bytes.indexOf(0xC3) + 1;
+      expect(split, greaterThan(0));
+
+      Stream<List<int>> chunked() async* {
+        yield bytes.sublist(0, split);
+        yield bytes.sublist(split);
+      }
+
+      final events = await parseConversationSseByteStream(chunked()).toList();
+      expect(events.length, equals(1));
+      final upserted = events.first as ConversationUpsertedEvent;
+      expect(upserted.conversation.title, equals('Café'));
+    });
+  });
+
+  group('parseSseByteStream UTF-8 chunking', () {
+    test('handles multibyte characters split across chunks', () async {
+      final bytes = utf8.encode('event:token\ndata:Café\n\n');
+      final split = bytes.indexOf(0xC3) + 1;
+      expect(split, greaterThan(0));
+
+      Stream<List<int>> chunked() async* {
+        yield bytes.sublist(0, split);
+        yield bytes.sublist(split);
+      }
+
+      final events = await parseSseByteStream(chunked()).toList();
+      expect(events.length, equals(1));
+      expect(events.first, isA<TokenEvent>());
+      expect((events.first as TokenEvent).token, equals('Café'));
+    });
   });
 }

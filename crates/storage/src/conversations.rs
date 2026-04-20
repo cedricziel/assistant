@@ -582,7 +582,10 @@ mod tests {
 
         let conv = store.create_conversation(Some("Hello")).await.unwrap();
 
-        let event = rx.recv().await.expect("should receive event");
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
         match event {
             ConversationEvent::Upserted(record) => {
                 assert_eq!(
@@ -610,7 +613,10 @@ mod tests {
 
         store.delete_conversation(conv.id).await.unwrap();
 
-        let event = rx.recv().await.expect("should receive event");
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
         match event {
             ConversationEvent::Deleted {
                 conversation_id,
@@ -637,10 +643,16 @@ mod tests {
         let mut rx = broadcaster.subscribe();
         store.update_title(conv.id, "New").await.unwrap();
 
-        let event = rx.recv().await.expect("should receive event");
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
         match event {
             ConversationEvent::Upserted(record) => {
-                assert_eq!(record.id, conv.id);
+                assert_eq!(
+                    record.id, conv.id,
+                    "updated event should carry conversation id"
+                );
                 assert_eq!(
                     record.title.as_deref(),
                     Some("New"),
@@ -668,7 +680,10 @@ mod tests {
         msg.turn = 1;
         store.save_message(&msg).await.unwrap();
 
-        let event = rx.recv().await.expect("should receive event");
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timed out waiting for conversation event")
+            .expect("should receive event");
         match event {
             ConversationEvent::Upserted(record) => {
                 assert_eq!(record.id, conv.id, "should emit for the conversation");

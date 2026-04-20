@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.1.123"
+    "version": "0.1.124"
   },
   "servers": [
     {
@@ -18,7 +18,9 @@
   "paths": {
     "/.well-known/agent.json": {
       "get": {
-        "tags": ["agent-card"],
+        "tags": [
+          "agent-card"
+        ],
         "summary": "`GET /.well-known/agent.json` -- Returns the public agent card.",
         "operationId": "get_agent_card_well_known",
         "responses": {
@@ -41,7 +43,9 @@
     },
     "/agent/authenticatedExtendedCard": {
       "get": {
-        "tags": ["agent-card"],
+        "tags": [
+          "agent-card"
+        ],
         "summary": "`GET /agent/authenticatedExtendedCard` -- Returns the extended agent card\n(same as public for now).",
         "operationId": "get_extended_agent_card",
         "responses": {
@@ -68,7 +72,9 @@
     },
     "/api/agents": {
       "get": {
-        "tags": ["agents"],
+        "tags": [
+          "agents"
+        ],
         "summary": "`GET /api/agents` — list all registered agents.",
         "operationId": "list_agents",
         "responses": {
@@ -96,7 +102,9 @@
         ]
       },
       "post": {
-        "tags": ["agents"],
+        "tags": [
+          "agents"
+        ],
         "summary": "`POST /api/agents` — register a new agent.",
         "operationId": "register_agent",
         "requestBody": {
@@ -139,7 +147,9 @@
     },
     "/api/agents/{id}": {
       "get": {
-        "tags": ["agents"],
+        "tags": [
+          "agents"
+        ],
         "summary": "`GET /api/agents/{id}` — get an agent by ID.",
         "operationId": "get_agent",
         "parameters": [
@@ -178,7 +188,9 @@
         ]
       },
       "put": {
-        "tags": ["agents"],
+        "tags": [
+          "agents"
+        ],
         "summary": "`PUT /api/agents/{id}` — update an agent's card.",
         "operationId": "update_agent",
         "parameters": [
@@ -230,7 +242,9 @@
         ]
       },
       "delete": {
-        "tags": ["agents"],
+        "tags": [
+          "agents"
+        ],
         "summary": "`DELETE /api/agents/{id}` — remove a registered agent.",
         "operationId": "delete_agent",
         "parameters": [
@@ -264,7 +278,9 @@
     },
     "/api/agents/{id}/set-default": {
       "post": {
-        "tags": ["agents"],
+        "tags": [
+          "agents"
+        ],
         "summary": "`POST /api/agents/{id}/set-default` — set an agent as the default.",
         "operationId": "set_default_agent",
         "parameters": [
@@ -305,7 +321,9 @@
     },
     "/api/analytics": {
       "get": {
-        "tags": ["analytics"],
+        "tags": [
+          "analytics"
+        ],
         "summary": "`GET /api/analytics` — get aggregated usage analytics for a time window.",
         "operationId": "get_analytics",
         "parameters": [
@@ -315,7 +333,10 @@
             "description": "Window in hours. Valid values: 1, 6, 24, 72, 168. Defaults to 24.",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64"
             }
           }
@@ -347,7 +368,9 @@
     },
     "/api/attachments/{id}": {
       "get": {
-        "tags": ["attachments"],
+        "tags": [
+          "attachments"
+        ],
         "summary": "`GET /api/attachments/{id}` — serve an attachment, optionally resized.",
         "description": "Supports `w` and `h` query params for on-demand image resizing. Resized\nvariants are cached on disk. Responds with `ETag` and `Cache-Control`\nheaders; returns `304 Not Modified` when `If-None-Match` matches.",
         "operationId": "serve_attachment",
@@ -368,7 +391,10 @@
             "description": "Desired width in pixels (preserves aspect ratio).",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int32",
               "minimum": 0
             }
@@ -379,7 +405,10 @@
             "description": "Desired height in pixels (preserves aspect ratio).",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int32",
               "minimum": 0
             }
@@ -414,7 +443,9 @@
     },
     "/api/audio/{id}": {
       "get": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`GET /api/audio/{id}` — serve a synthesized audio blob from the in-memory store.",
         "operationId": "get_audio",
         "parameters": [
@@ -455,7 +486,9 @@
     },
     "/api/capabilities": {
       "get": {
-        "tags": ["capabilities"],
+        "tags": [
+          "capabilities"
+        ],
         "summary": "`GET /api/capabilities` — return server capability flags.",
         "operationId": "get_capabilities",
         "responses": {
@@ -482,7 +515,9 @@
     },
     "/api/commands": {
       "get": {
-        "tags": ["commands"],
+        "tags": [
+          "commands"
+        ],
         "summary": "`GET /api/commands` — list all registered commands.",
         "operationId": "list_commands",
         "responses": {
@@ -509,7 +544,9 @@
     },
     "/api/conversations": {
       "get": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`GET /api/conversations` — list all conversations, newest first.",
         "operationId": "list_conversations",
         "responses": {
@@ -537,7 +574,9 @@
         ]
       },
       "post": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`POST /api/conversations` — create a new conversation.",
         "operationId": "create_conversation",
         "requestBody": {
@@ -577,9 +616,11 @@
     },
     "/api/conversations/stream": {
       "get": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`GET /api/conversations/stream` — SSE stream of conversation list changes.",
-        "description": "Sends an initial `snapshot` event with the full conversation list, then pushes `upserted` and `deleted` delta events as conversations change. Use `agent_id` query parameter to filter events to a single agent.",
+        "description": "Sends an initial `snapshot` event with the full conversation list, then\npushes `upserted` and `deleted` delta events as conversations change.",
         "operationId": "stream_conversations",
         "parameters": [
           {
@@ -596,12 +637,14 @@
           "200": {
             "description": "SSE event stream. Events: `snapshot` (full list), `upserted` (single ConversationSummary), `deleted` ({conversation_id})",
             "content": {
-              "text/event-stream": {
-                "schema": {
-                  "type": "string"
-                }
-              }
+              "text/event-stream": {}
             }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Failed to fetch conversations"
           }
         },
         "security": [
@@ -613,7 +656,9 @@
     },
     "/api/conversations/{id}": {
       "get": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`GET /api/conversations/{id}` — get a conversation and its message history.",
         "operationId": "get_conversation",
         "parameters": [
@@ -656,7 +701,9 @@
         ]
       },
       "delete": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`DELETE /api/conversations/{id}` — delete a conversation and all its messages.",
         "operationId": "delete_conversation",
         "parameters": [
@@ -692,7 +739,9 @@
         ]
       },
       "patch": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`PATCH /api/conversations/{id}` — update a conversation's title.",
         "operationId": "update_conversation",
         "parameters": [
@@ -750,7 +799,9 @@
     },
     "/api/conversations/{id}/attachments": {
       "post": {
-        "tags": ["attachments"],
+        "tags": [
+          "attachments"
+        ],
         "summary": "`POST /api/conversations/{id}/attachments` — upload an image attachment.",
         "description": "Accepts a `multipart/form-data` body with a single `file` field.\nReturns `201 Created` with the attachment metadata on success.",
         "operationId": "upload_attachment",
@@ -772,7 +823,9 @@
               "schema": {
                 "type": "object",
                 "description": "Multipart form for image attachment upload.",
-                "required": ["file"],
+                "required": [
+                  "file"
+                ],
                 "properties": {
                   "file": {
                     "type": "string",
@@ -815,7 +868,9 @@
     },
     "/api/conversations/{id}/command": {
       "post": {
-        "tags": ["commands"],
+        "tags": [
+          "commands"
+        ],
         "summary": "`POST /api/conversations/{id}/command` — execute a slash command.",
         "operationId": "execute_command",
         "parameters": [
@@ -864,7 +919,9 @@
     },
     "/api/conversations/{id}/events": {
       "get": {
-        "tags": ["commands"],
+        "tags": [
+          "commands"
+        ],
         "summary": "`GET /api/conversations/{id}/events` — list command events for the timeline.",
         "operationId": "list_conversation_events",
         "parameters": [
@@ -906,7 +963,9 @@
     },
     "/api/conversations/{id}/messages": {
       "post": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`POST /api/conversations/{id}/messages` — send a message and stream the response.",
         "description": "The response is a `text/event-stream` (SSE) with two event types:\n- `event: token` — incremental assistant token (data is plain text)\n- `event: done`  — final JSON object: `{\"role\":\"assistant\",\"content\":\"...\"}`",
         "operationId": "send_message",
@@ -958,7 +1017,9 @@
     },
     "/api/conversations/{id}/runs/{run_id}/events/stream": {
       "get": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`GET /api/conversations/{id}/runs/{run_id}/events/stream`",
         "description": "Replays stored events from `?since` (default 0), then tails live events\nif the run is still active.  Closes automatically when the `done` or\n`error` event is reached.\n\nReturns:\n- `404` if no events exist for `run_id` (run never started or unknown)\n- `410` if the run existed but all events have been pruned (TTL elapsed)",
         "operationId": "stream_run_events",
@@ -1015,7 +1076,9 @@
     },
     "/api/conversations/{id}/voice": {
       "post": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`POST /api/conversations/{id}/voice` — upload audio, transcribe it, run\nthrough the orchestrator, and stream the response as SSE.",
         "operationId": "send_voice_message",
         "parameters": [
@@ -1036,7 +1099,9 @@
               "schema": {
                 "type": "object",
                 "description": "Multipart form body for `POST /api/conversations/{id}/voice`.",
-                "required": ["audio"],
+                "required": [
+                  "audio"
+                ],
                 "properties": {
                   "audio": {
                     "type": "array",
@@ -1080,7 +1145,9 @@
     },
     "/api/logs": {
       "get": {
-        "tags": ["logs"],
+        "tags": [
+          "logs"
+        ],
         "summary": "`GET /api/logs` — list recent log entries, newest first.",
         "operationId": "list_logs",
         "parameters": [
@@ -1089,7 +1156,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64"
             }
           },
@@ -1098,7 +1168,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64"
             }
           },
@@ -1107,7 +1180,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
@@ -1115,7 +1191,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
@@ -1123,7 +1202,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "date-time"
             }
           },
@@ -1132,7 +1214,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "date-time"
             }
           },
@@ -1141,7 +1226,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
@@ -1149,7 +1237,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -1180,7 +1271,9 @@
     },
     "/api/messages/{id}/audio": {
       "get": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant\nmessage and return it as `audio/mpeg`.",
         "operationId": "get_message_audio",
         "parameters": [
@@ -1224,7 +1317,9 @@
     },
     "/api/personas": {
       "get": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`GET /api/personas` — list all personas defined on the server.",
         "operationId": "list_personas",
         "responses": {
@@ -1252,7 +1347,9 @@
         ]
       },
       "post": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`POST /api/personas` — create a new persona.",
         "operationId": "create_persona",
         "requestBody": {
@@ -1295,7 +1392,9 @@
     },
     "/api/personas/active": {
       "post": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`POST /api/personas/active` — switch the active persona for the session.",
         "operationId": "set_active_persona",
         "requestBody": {
@@ -1335,7 +1434,9 @@
     },
     "/api/personas/{id}": {
       "get": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`GET /api/personas/{id}` — get full persona detail.",
         "operationId": "get_persona",
         "parameters": [
@@ -1379,7 +1480,9 @@
     },
     "/api/personas/{id}/files/{filename}": {
       "get": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`GET /api/personas/{id}/files/{filename}` — read a persona file slot.",
         "operationId": "get_persona_file",
         "parameters": [
@@ -1430,7 +1533,9 @@
         ]
       },
       "put": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`PUT /api/personas/{id}/files/{filename}` — write a persona file slot.",
         "operationId": "put_persona_file",
         "parameters": [
@@ -1496,7 +1601,9 @@
     },
     "/api/personas/{id}/skill-access": {
       "get": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`GET /api/personas/{id}/skill-access` — get skill access config.",
         "operationId": "get_skill_access",
         "parameters": [
@@ -1538,7 +1645,9 @@
         ]
       },
       "patch": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`PATCH /api/personas/{id}/skill-access` — set skill access mode.",
         "operationId": "patch_skill_access_mode",
         "parameters": [
@@ -1592,7 +1701,9 @@
     },
     "/api/personas/{id}/skill-access/skills": {
       "post": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`POST /api/personas/{id}/skill-access/skills` — add a skill to the access list.",
         "operationId": "add_skill_access",
         "parameters": [
@@ -1646,7 +1757,9 @@
     },
     "/api/personas/{id}/skill-access/skills/{skill_name}": {
       "delete": {
-        "tags": ["personas"],
+        "tags": [
+          "personas"
+        ],
         "summary": "`DELETE /api/personas/{id}/skill-access/skills/{skill_name}` — remove a skill from the access list.",
         "operationId": "delete_skill_access",
         "parameters": [
@@ -1692,7 +1805,9 @@
     },
     "/api/personas/{persona_id}/skills": {
       "get": {
-        "tags": ["skills"],
+        "tags": [
+          "skills"
+        ],
         "summary": "`GET /api/personas/{persona_id}/skills` — list skills for a persona.",
         "operationId": "list_persona_skills",
         "parameters": [
@@ -1736,7 +1851,9 @@
     },
     "/api/push/subscribe": {
       "post": {
-        "tags": ["web-push"],
+        "tags": [
+          "web-push"
+        ],
         "summary": "`POST /api/push/subscribe`",
         "description": "Upsert a browser push subscription (endpoint + key material).  Returns\n`201 Created` on success.",
         "operationId": "subscribe",
@@ -1768,7 +1885,9 @@
         ]
       },
       "delete": {
-        "tags": ["web-push"],
+        "tags": [
+          "web-push"
+        ],
         "summary": "`DELETE /api/push/subscribe`",
         "description": "Remove a push subscription by its endpoint URL.  Returns `204 No Content`\nwhether or not the subscription existed.",
         "operationId": "unsubscribe",
@@ -1802,7 +1921,9 @@
     },
     "/api/push/vapid-public-key": {
       "get": {
-        "tags": ["web-push"],
+        "tags": [
+          "web-push"
+        ],
         "summary": "`GET /api/push/vapid-public-key`",
         "description": "Returns the server's VAPID public key as a base64url-encoded string.\nThe Flutter PWA uses this as the `applicationServerKey` argument to\n`PushManager.subscribe()`.",
         "operationId": "vapid_public_key",
@@ -1830,7 +1951,9 @@
     },
     "/api/quick-message": {
       "post": {
-        "tags": ["conversations"],
+        "tags": [
+          "conversations"
+        ],
         "summary": "`POST /api/quick-message` — create a new conversation, send a message, and\nreturn the complete assistant response as a synchronous JSON reply.",
         "description": "This endpoint is designed for machine clients (Apple Shortcuts, Siri App\nIntents, curl, webhooks) that need a single request/response round-trip.",
         "operationId": "create_quick_message",
@@ -1874,7 +1997,9 @@
     },
     "/api/skills": {
       "get": {
-        "tags": ["skills"],
+        "tags": [
+          "skills"
+        ],
         "summary": "`GET /api/skills` — list all skills.",
         "operationId": "list_skills",
         "responses": {
@@ -1902,7 +2027,9 @@
         ]
       },
       "post": {
-        "tags": ["skills"],
+        "tags": [
+          "skills"
+        ],
         "summary": "`POST /api/skills` — create a new user skill.",
         "operationId": "create_skill",
         "requestBody": {
@@ -1942,7 +2069,9 @@
     },
     "/api/skills/{name}": {
       "get": {
-        "tags": ["skills"],
+        "tags": [
+          "skills"
+        ],
         "summary": "`GET /api/skills/{name}` — get a skill by name.",
         "operationId": "get_skill",
         "parameters": [
@@ -1981,7 +2110,9 @@
         ]
       },
       "put": {
-        "tags": ["skills"],
+        "tags": [
+          "skills"
+        ],
         "summary": "`PUT /api/skills/{name}` — update a user skill.",
         "operationId": "update_skill",
         "parameters": [
@@ -2033,7 +2164,9 @@
         ]
       },
       "delete": {
-        "tags": ["skills"],
+        "tags": [
+          "skills"
+        ],
         "summary": "`DELETE /api/skills/{name}` — delete a user skill.",
         "operationId": "delete_skill",
         "parameters": [
@@ -2067,7 +2200,9 @@
     },
     "/api/traces": {
       "get": {
-        "tags": ["traces"],
+        "tags": [
+          "traces"
+        ],
         "summary": "`GET /api/traces` — list recent traces, newest first.",
         "operationId": "list_traces",
         "parameters": [
@@ -2076,7 +2211,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64"
             }
           },
@@ -2085,7 +2223,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int64"
             }
           },
@@ -2094,7 +2235,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "date-time"
             }
           },
@@ -2103,7 +2247,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "date-time"
             }
           },
@@ -2112,7 +2259,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
@@ -2120,7 +2270,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
@@ -2128,7 +2281,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -2159,7 +2315,9 @@
     },
     "/api/traces/{trace_id}": {
       "get": {
-        "tags": ["traces"],
+        "tags": [
+          "traces"
+        ],
         "summary": "`GET /api/traces/{trace_id}` — get a single trace with span breakdown.",
         "operationId": "get_trace",
         "parameters": [
@@ -2200,7 +2358,9 @@
     },
     "/api/webhooks": {
       "get": {
-        "tags": ["webhooks"],
+        "tags": [
+          "webhooks"
+        ],
         "summary": "`GET /api/webhooks` — list all webhooks.",
         "operationId": "list_webhooks",
         "responses": {
@@ -2228,7 +2388,9 @@
         ]
       },
       "post": {
-        "tags": ["webhooks"],
+        "tags": [
+          "webhooks"
+        ],
         "summary": "`POST /api/webhooks` — create a new webhook.",
         "operationId": "create_webhook",
         "requestBody": {
@@ -2271,7 +2433,9 @@
     },
     "/api/webhooks/{id}": {
       "get": {
-        "tags": ["webhooks"],
+        "tags": [
+          "webhooks"
+        ],
         "summary": "`GET /api/webhooks/{id}` — get a webhook by ID.",
         "operationId": "get_webhook",
         "parameters": [
@@ -2310,7 +2474,9 @@
         ]
       },
       "delete": {
-        "tags": ["webhooks"],
+        "tags": [
+          "webhooks"
+        ],
         "summary": "`DELETE /api/webhooks/{id}` — delete a webhook.",
         "operationId": "delete_webhook",
         "parameters": [
@@ -2342,7 +2508,9 @@
         ]
       },
       "patch": {
-        "tags": ["webhooks"],
+        "tags": [
+          "webhooks"
+        ],
         "summary": "`PATCH /api/webhooks/{id}` — update a webhook.",
         "operationId": "update_webhook",
         "parameters": [
@@ -2396,7 +2564,9 @@
     },
     "/api/webhooks/{id}/rotate-secret": {
       "post": {
-        "tags": ["webhooks"],
+        "tags": [
+          "webhooks"
+        ],
         "summary": "`POST /api/webhooks/{id}/rotate-secret` — regenerate a webhook's signing secret.",
         "operationId": "rotate_secret",
         "parameters": [
@@ -2437,7 +2607,9 @@
     },
     "/api/webhooks/{id}/toggle": {
       "post": {
-        "tags": ["webhooks"],
+        "tags": [
+          "webhooks"
+        ],
         "summary": "`POST /api/webhooks/{id}/toggle` — toggle a webhook's active state.",
         "operationId": "toggle_webhook",
         "parameters": [
@@ -2478,7 +2650,9 @@
     },
     "/api/webhooks/{id}/verify": {
       "post": {
-        "tags": ["webhooks"],
+        "tags": [
+          "webhooks"
+        ],
         "summary": "`POST /api/webhooks/{id}/verify` — send a signed test payload to the webhook URL.",
         "description": "Always returns HTTP 200; the `success` field in the body indicates whether\nthe remote endpoint responded with a 2xx status.",
         "operationId": "verify_webhook",
@@ -2520,7 +2694,9 @@
     },
     "/api/workflows": {
       "get": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`GET /api/workflows` — list all workflows.",
         "operationId": "list_workflows",
         "responses": {
@@ -2548,7 +2724,9 @@
         ]
       },
       "post": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`POST /api/workflows` — create a new workflow.",
         "operationId": "create_workflow",
         "requestBody": {
@@ -2588,7 +2766,9 @@
     },
     "/api/workflows/{id}": {
       "get": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`GET /api/workflows/{id}` — fetch a workflow.",
         "operationId": "get_workflow",
         "parameters": [
@@ -2630,7 +2810,9 @@
         ]
       },
       "put": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`PUT /api/workflows/{id}` — update a workflow.",
         "operationId": "update_workflow",
         "parameters": [
@@ -2682,7 +2864,9 @@
         ]
       },
       "delete": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`DELETE /api/workflows/{id}` — delete a workflow.",
         "operationId": "delete_workflow",
         "parameters": [
@@ -2719,7 +2903,9 @@
     },
     "/api/workflows/{id}/activate": {
       "post": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`POST /api/workflows/{id}/activate` — activate a workflow.",
         "operationId": "activate_workflow",
         "parameters": [
@@ -2763,7 +2949,9 @@
     },
     "/api/workflows/{id}/deactivate": {
       "post": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`POST /api/workflows/{id}/deactivate` — deactivate a workflow.",
         "operationId": "deactivate_workflow",
         "parameters": [
@@ -2807,7 +2995,9 @@
     },
     "/api/workflows/{id}/runs": {
       "get": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`GET /api/workflows/{id}/runs` — list recent runs (up to 50).",
         "operationId": "list_workflow_runs",
         "parameters": [
@@ -2854,7 +3044,9 @@
     },
     "/api/workflows/{id}/runs/{run_id}": {
       "get": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`GET /api/workflows/{id}/runs/{run_id}` — workflow run detail with steps.",
         "operationId": "get_workflow_run",
         "parameters": [
@@ -2907,7 +3099,9 @@
     },
     "/api/workflows/{id}/test-run": {
       "post": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`POST /api/workflows/{id}/test-run` — queue a manual test run.",
         "operationId": "test_run_workflow",
         "parameters": [
@@ -2951,7 +3145,9 @@
     },
     "/api/workflows/{id}/webhook-secrets": {
       "get": {
-        "tags": ["workflows"],
+        "tags": [
+          "workflows"
+        ],
         "summary": "`GET /api/workflows/{id}/webhook-secrets` — reveal webhook URL and token.",
         "operationId": "get_workflow_webhook_secrets",
         "parameters": [
@@ -2995,7 +3191,9 @@
     },
     "/message/send": {
       "post": {
-        "tags": ["messages"],
+        "tags": [
+          "messages"
+        ],
         "summary": "`POST /message/send` -- Sends a message to the agent (unary).",
         "description": "Creates a task, records the user message, transitions to Working, produces\nan agent reply, and returns the final task state.",
         "operationId": "a2a_send_message",
@@ -3036,7 +3234,9 @@
     },
     "/message/stream": {
       "post": {
-        "tags": ["messages"],
+        "tags": [
+          "messages"
+        ],
         "summary": "`POST /message/stream` -- Sends a message with streaming response (SSE).",
         "operationId": "a2a_send_message_streaming",
         "requestBody": {
@@ -3076,7 +3276,9 @@
     },
     "/tasks": {
       "get": {
-        "tags": ["tasks"],
+        "tags": [
+          "tasks"
+        ],
         "summary": "`GET /tasks` -- Lists tasks matching optional filters.",
         "operationId": "list_tasks",
         "parameters": [
@@ -3086,7 +3288,10 @@
             "description": "Tenant ID.",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
@@ -3095,7 +3300,10 @@
             "description": "Filter tasks by context ID.",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
@@ -3120,7 +3328,10 @@
             "description": "Max number of tasks to return (1..=100, default 50).",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int32"
             }
           },
@@ -3130,7 +3341,10 @@
             "description": "Page token from a previous `ListTasks` call.",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
@@ -3139,7 +3353,10 @@
             "description": "Max number of messages to include in each task's history.",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int32"
             }
           },
@@ -3149,7 +3366,10 @@
             "description": "Filter tasks with status updated after this timestamp.",
             "required": false,
             "schema": {
-              "type": ["string", "null"],
+              "type": [
+                "string",
+                "null"
+              ],
               "format": "date-time"
             }
           },
@@ -3159,7 +3379,10 @@
             "description": "Whether to include artifacts in returned tasks.",
             "required": false,
             "schema": {
-              "type": ["boolean", "null"]
+              "type": [
+                "boolean",
+                "null"
+              ]
             }
           }
         ],
@@ -3187,7 +3410,9 @@
     },
     "/tasks/{id}": {
       "get": {
-        "tags": ["tasks"],
+        "tags": [
+          "tasks"
+        ],
         "summary": "`GET /tasks/:id` -- Gets the latest state of a task.",
         "operationId": "get_task",
         "parameters": [
@@ -3206,7 +3431,10 @@
             "description": "Max number of recent messages to include in history.",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int32"
             }
           },
@@ -3216,7 +3444,10 @@
             "description": "Optional tenant ID.",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -3254,7 +3485,9 @@
     },
     "/tasks/{id}/cancel": {
       "post": {
-        "tags": ["tasks"],
+        "tags": [
+          "tasks"
+        ],
         "summary": "`POST /tasks/:id/cancel` -- Cancels a task.",
         "operationId": "cancel_task",
         "parameters": [
@@ -3313,7 +3546,9 @@
     },
     "/tasks/{id}/subscribe": {
       "get": {
-        "tags": ["tasks"],
+        "tags": [
+          "tasks"
+        ],
         "summary": "`GET /tasks/:id/subscribe` -- Subscribes to task updates (SSE).",
         "operationId": "subscribe_to_task",
         "parameters": [
@@ -3371,7 +3606,9 @@
     },
     "/tasks/{task_id}/pushNotificationConfigs": {
       "get": {
-        "tags": ["push-notifications"],
+        "tags": [
+          "push-notifications"
+        ],
         "summary": "`GET /tasks/:task_id/pushNotificationConfigs`",
         "operationId": "list_push_notification_configs",
         "parameters": [
@@ -3389,7 +3626,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "format": "int32"
             }
           },
@@ -3398,7 +3638,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -3424,7 +3667,9 @@
         ]
       },
       "post": {
-        "tags": ["push-notifications"],
+        "tags": [
+          "push-notifications"
+        ],
         "summary": "`POST /tasks/:task_id/pushNotificationConfigs`",
         "operationId": "create_push_notification_config",
         "parameters": [
@@ -3482,7 +3727,9 @@
     },
     "/tasks/{task_id}/pushNotificationConfigs/{config_id}": {
       "get": {
-        "tags": ["push-notifications"],
+        "tags": [
+          "push-notifications"
+        ],
         "summary": "`GET /tasks/:task_id/pushNotificationConfigs/:config_id`",
         "operationId": "get_push_notification_config",
         "parameters": [
@@ -3537,7 +3784,9 @@
         ]
       },
       "delete": {
-        "tags": ["push-notifications"],
+        "tags": [
+          "push-notifications"
+        ],
         "summary": "`DELETE /tasks/:task_id/pushNotificationConfigs/:config_id`",
         "operationId": "delete_push_notification_config",
         "parameters": [
@@ -3591,7 +3840,9 @@
       "AddSkillAccessRequest": {
         "type": "object",
         "description": "Body for `POST /api/personas/{id}/skill-access/skills`.",
-        "required": ["skill_name"],
+        "required": [
+          "skill_name"
+        ],
         "properties": {
           "skill_name": {
             "type": "string"
@@ -3603,7 +3854,10 @@
         "description": "Defines optional capabilities supported by an agent.",
         "properties": {
           "extendedAgentCard": {
-            "type": ["boolean", "null"],
+            "type": [
+              "boolean",
+              "null"
+            ],
             "description": "Indicates if the agent supports providing an extended agent card."
           },
           "extensions": {
@@ -3614,11 +3868,17 @@
             "description": "Protocol extensions supported by the agent."
           },
           "pushNotifications": {
-            "type": ["boolean", "null"],
+            "type": [
+              "boolean",
+              "null"
+            ],
             "description": "Indicates if the agent supports push notifications."
           },
           "streaming": {
-            "type": ["boolean", "null"],
+            "type": [
+              "boolean",
+              "null"
+            ],
             "description": "Indicates if the agent supports streaming responses."
           }
         }
@@ -3660,11 +3920,17 @@
             "description": "A human-readable description of the agent's purpose."
           },
           "documentationUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A URL providing additional documentation about the agent."
           },
           "iconUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A URL to an icon for the agent."
           },
           "name": {
@@ -3729,10 +3995,16 @@
       "AgentCardSignature": {
         "type": "object",
         "description": "Represents a JWS signature of an AgentCard (RFC 7515).",
-        "required": ["protected", "signature"],
+        "required": [
+          "protected",
+          "signature"
+        ],
         "properties": {
           "header": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "The unprotected JWS header values.",
             "additionalProperties": true
           },
@@ -3749,7 +4021,11 @@
       "AgentDetail": {
         "type": "object",
         "description": "Full agent detail, including the serialized agent card.",
-        "required": ["id", "is_default", "card"],
+        "required": [
+          "id",
+          "is_default",
+          "card"
+        ],
         "properties": {
           "card": {
             "description": "Full AgentCard serialized as JSON."
@@ -3765,14 +4041,22 @@
       "AgentExtension": {
         "type": "object",
         "description": "A declaration of a protocol extension supported by an Agent.",
-        "required": ["uri"],
+        "required": [
+          "uri"
+        ],
         "properties": {
           "description": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A human-readable description of how this agent uses the extension."
           },
           "params": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Extension-specific configuration parameters.",
             "additionalProperties": true
           },
@@ -3789,7 +4073,11 @@
       "AgentInterface": {
         "type": "object",
         "description": "Declares a combination of a target URL, transport, and protocol version for\ninteracting with the agent.",
-        "required": ["url", "protocolBinding", "protocolVersion"],
+        "required": [
+          "url",
+          "protocolBinding",
+          "protocolVersion"
+        ],
         "properties": {
           "protocolBinding": {
             "type": "string",
@@ -3800,7 +4088,10 @@
             "description": "The version of the A2A protocol this interface exposes (e.g., \"1.0\")."
           },
           "tenant": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Tenant ID to be used in the request when calling the agent."
           },
           "url": {
@@ -3812,7 +4103,10 @@
       "AgentProvider": {
         "type": "object",
         "description": "Represents the service provider of an agent.",
-        "required": ["url", "organization"],
+        "required": [
+          "url",
+          "organization"
+        ],
         "properties": {
           "organization": {
             "type": "string",
@@ -3827,7 +4121,12 @@
       "AgentSkill": {
         "type": "object",
         "description": "Represents a distinct capability or function that an agent can perform.",
-        "required": ["id", "name", "description", "tags"],
+        "required": [
+          "id",
+          "name",
+          "description",
+          "tags"
+        ],
         "properties": {
           "description": {
             "type": "string",
@@ -3998,7 +4297,10 @@
       "ApiErrorResponse": {
         "type": "object",
         "description": "API error response body returned for 4xx and 5xx errors.",
-        "required": ["code", "message"],
+        "required": [
+          "code",
+          "message"
+        ],
         "properties": {
           "code": {
             "type": "integer",
@@ -4014,10 +4316,16 @@
       "ApiKeySecurityScheme": {
         "type": "object",
         "description": "Defines a security scheme using an API key.",
-        "required": ["location", "name"],
+        "required": [
+          "location",
+          "name"
+        ],
         "properties": {
           "description": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "An optional description for the security scheme."
           },
           "location": {
@@ -4033,7 +4341,9 @@
       "ApiSendMessageRequest": {
         "type": "object",
         "description": "Body for `POST /api/conversations/{id}/messages`.",
-        "required": ["message"],
+        "required": [
+          "message"
+        ],
         "properties": {
           "attachment_ids": {
             "type": "array",
@@ -4052,14 +4362,20 @@
       "Artifact": {
         "type": "object",
         "description": "Artifacts represent task outputs.",
-        "required": ["artifactId", "parts"],
+        "required": [
+          "artifactId",
+          "parts"
+        ],
         "properties": {
           "artifactId": {
             "type": "string",
             "description": "Unique identifier (UUID) for the artifact, unique within a task."
           },
           "description": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A human-readable description of the artifact."
           },
           "extensions": {
@@ -4070,12 +4386,18 @@
             "description": "The URIs of extensions present or contributing to this artifact."
           },
           "metadata": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Metadata included with the artifact.",
             "additionalProperties": true
           },
           "name": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A human-readable name for the artifact."
           },
           "parts": {
@@ -4127,10 +4449,15 @@
       "AuthenticationInfo": {
         "type": "object",
         "description": "Defines authentication details, used for push notifications.",
-        "required": ["scheme"],
+        "required": [
+          "scheme"
+        ],
         "properties": {
           "credentials": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Credentials. Format depends on the scheme."
           },
           "scheme": {
@@ -4142,7 +4469,11 @@
       "AuthorizationCodeOAuthFlow": {
         "type": "object",
         "description": "OAuth 2.0 Authorization Code flow configuration.",
-        "required": ["authorizationUrl", "tokenUrl", "scopes"],
+        "required": [
+          "authorizationUrl",
+          "tokenUrl",
+          "scopes"
+        ],
         "properties": {
           "authorizationUrl": {
             "type": "string",
@@ -4153,7 +4484,10 @@
             "description": "Indicates if PKCE (RFC 7636) is required."
           },
           "refreshUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The URL for obtaining refresh tokens."
           },
           "scopes": {
@@ -4175,19 +4509,27 @@
       "CancelTaskRequest": {
         "type": "object",
         "description": "Request for the `CancelTask` method.",
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "properties": {
           "id": {
             "type": "string",
             "description": "The resource ID of the task to cancel."
           },
           "metadata": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Additional context or parameters.",
             "additionalProperties": true
           },
           "tenant": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Optional tenant ID."
           }
         }
@@ -4195,10 +4537,16 @@
       "ClientCredentialsOAuthFlow": {
         "type": "object",
         "description": "OAuth 2.0 Client Credentials flow configuration.",
-        "required": ["tokenUrl", "scopes"],
+        "required": [
+          "tokenUrl",
+          "scopes"
+        ],
         "properties": {
           "refreshUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The URL for obtaining refresh tokens."
           },
           "scopes": {
@@ -4220,10 +4568,16 @@
       "CommandArgResponse": {
         "type": "object",
         "description": "A command argument definition for the autocomplete UI.",
-        "required": ["name", "required"],
+        "required": [
+          "name",
+          "required"
+        ],
         "properties": {
           "completions_endpoint": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Optional API endpoint that returns completions for this argument."
           },
           "name": {
@@ -4239,7 +4593,12 @@
       "CommandDefResponse": {
         "type": "object",
         "description": "A command definition for the autocomplete UI.",
-        "required": ["name", "description", "category", "args"],
+        "required": [
+          "name",
+          "description",
+          "category",
+          "args"
+        ],
         "properties": {
           "args": {
             "type": "array",
@@ -4265,10 +4624,18 @@
       "CommandEventResponse": {
         "type": "object",
         "description": "Response body for a command event.",
-        "required": ["id", "event_type", "command", "created_at"],
+        "required": [
+          "id",
+          "event_type",
+          "command",
+          "created_at"
+        ],
         "properties": {
           "ack_text": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Acknowledgement text returned by the command."
           },
           "command": {
@@ -4297,7 +4664,13 @@
       "ConversationDetail": {
         "type": "object",
         "description": "A conversation with its full message history.",
-        "required": ["id", "title", "created_at", "updated_at", "messages"],
+        "required": [
+          "id",
+          "title",
+          "created_at",
+          "updated_at",
+          "messages"
+        ],
         "properties": {
           "created_at": {
             "type": "string",
@@ -4325,7 +4698,12 @@
       "ConversationSummary": {
         "type": "object",
         "description": "A conversation summary (no messages).",
-        "required": ["id", "title", "created_at", "updated_at"],
+        "required": [
+          "id",
+          "title",
+          "created_at",
+          "updated_at"
+        ],
         "properties": {
           "created_at": {
             "type": "string",
@@ -4349,7 +4727,10 @@
         "description": "Body for `POST /api/conversations`.",
         "properties": {
           "title": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Optional title for the new conversation."
           }
         }
@@ -4357,7 +4738,10 @@
       "CreatePersonaRequest": {
         "type": "object",
         "description": "Body for `POST /api/personas`.",
-        "required": ["id", "name"],
+        "required": [
+          "id",
+          "name"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -4370,7 +4754,11 @@
       "CreateSkillRequest": {
         "type": "object",
         "description": "Body for `POST /api/skills`.",
-        "required": ["name", "description", "body"],
+        "required": [
+          "name",
+          "description",
+          "body"
+        ],
         "properties": {
           "body": {
             "type": "string"
@@ -4386,7 +4774,10 @@
       "CreateTaskPushNotificationConfigRequest": {
         "type": "object",
         "description": "Request for the `CreateTaskPushNotificationConfig` method.",
-        "required": ["taskId", "config"],
+        "required": [
+          "taskId",
+          "config"
+        ],
         "properties": {
           "config": {
             "$ref": "#/components/schemas/PushNotificationConfig",
@@ -4397,7 +4788,10 @@
             "description": "The parent task resource ID."
           },
           "tenant": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Optional tenant ID."
           }
         }
@@ -4405,10 +4799,17 @@
       "CreateWebhookRequest": {
         "type": "object",
         "description": "Body for `POST /api/webhooks`.",
-        "required": ["name", "url", "event_types"],
+        "required": [
+          "name",
+          "url",
+          "event_types"
+        ],
         "properties": {
           "active": {
-            "type": ["boolean", "null"],
+            "type": [
+              "boolean",
+              "null"
+            ],
             "description": "Defaults to `true` when omitted."
           },
           "event_types": {
@@ -4428,14 +4829,21 @@
       "DeviceCodeOAuthFlow": {
         "type": "object",
         "description": "OAuth 2.0 Device Code flow configuration (RFC 8628).",
-        "required": ["deviceAuthorizationUrl", "tokenUrl", "scopes"],
+        "required": [
+          "deviceAuthorizationUrl",
+          "tokenUrl",
+          "scopes"
+        ],
         "properties": {
           "deviceAuthorizationUrl": {
             "type": "string",
             "description": "The device authorization endpoint URL."
           },
           "refreshUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The URL for obtaining refresh tokens."
           },
           "scopes": {
@@ -4457,7 +4865,9 @@
       "ExecuteCommandRequest": {
         "type": "object",
         "description": "Request body for `POST /api/conversations/{id}/command`.",
-        "required": ["command"],
+        "required": [
+          "command"
+        ],
         "properties": {
           "args": {
             "type": "array",
@@ -4475,14 +4885,22 @@
       "HttpAuthSecurityScheme": {
         "type": "object",
         "description": "Defines a security scheme using HTTP authentication.",
-        "required": ["scheme"],
+        "required": [
+          "scheme"
+        ],
         "properties": {
           "bearerFormat": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A hint for how the bearer token is formatted (e.g., \"JWT\")."
           },
           "description": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "An optional description for the security scheme."
           },
           "scheme": {
@@ -4496,11 +4914,17 @@
         "description": "Deprecated: Use Authorization Code + PKCE instead.",
         "properties": {
           "authorizationUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The authorization URL."
           },
           "refreshUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The URL for obtaining refresh tokens."
           },
           "scopes": {
@@ -4518,7 +4942,9 @@
       "ListTaskPushNotificationConfigsResponse": {
         "type": "object",
         "description": "Response for the `ListTaskPushNotificationConfigs` method.",
-        "required": ["configs"],
+        "required": [
+          "configs"
+        ],
         "properties": {
           "configs": {
             "type": "array",
@@ -4528,7 +4954,10 @@
             "description": "The list of push notification configurations."
           },
           "nextPageToken": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A token to retrieve the next page of results."
           }
         }
@@ -4536,7 +4965,12 @@
       "ListTasksResponse": {
         "type": "object",
         "description": "Response for the `ListTasks` method.",
-        "required": ["tasks", "nextPageToken", "pageSize", "totalSize"],
+        "required": [
+          "tasks",
+          "nextPageToken",
+          "pageSize",
+          "totalSize"
+        ],
         "properties": {
           "nextPageToken": {
             "type": "string",
@@ -4574,7 +5008,10 @@
         ],
         "properties": {
           "conversation_id": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "fields": {},
           "id": {
@@ -4594,17 +5031,27 @@
             "format": "date-time"
           },
           "trace_id": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
       "Message": {
         "type": "object",
         "description": "`Message` is one unit of communication between client and server.",
-        "required": ["messageId", "role", "parts"],
+        "required": [
+          "messageId",
+          "role",
+          "parts"
+        ],
         "properties": {
           "contextId": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The context id of the message."
           },
           "extensions": {
@@ -4619,7 +5066,10 @@
             "description": "Unique identifier (UUID) of the message, created by the message creator."
           },
           "metadata": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Any metadata to provide along with the message.",
             "additionalProperties": true
           },
@@ -4642,7 +5092,10 @@
             "description": "Identifies the sender of the message."
           },
           "taskId": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The task id of the message."
           }
         }
@@ -4681,11 +5134,17 @@
             "type": "string"
           },
           "skill_name": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Name of the tool or skill that produced this result (present when\n`role == \"tool\"`)."
           },
           "tool_calls": {
-            "type": ["array", "null"],
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "$ref": "#/components/schemas/ToolCallSummary"
             },
@@ -4738,7 +5197,10 @@
         "description": "Defines a security scheme using mTLS authentication.",
         "properties": {
           "description": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "An optional description for the security scheme."
           }
         }
@@ -4746,10 +5208,15 @@
       "OAuth2SecurityScheme": {
         "type": "object",
         "description": "Defines a security scheme using OAuth 2.0.",
-        "required": ["flows"],
+        "required": [
+          "flows"
+        ],
         "properties": {
           "description": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "An optional description for the security scheme."
           },
           "flows": {
@@ -4757,7 +5224,10 @@
             "description": "Configuration for the supported OAuth 2.0 flows."
           },
           "oauth2MetadataUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "URL to the OAuth2 authorization server metadata (RFC 8414)."
           }
         }
@@ -4826,10 +5296,15 @@
       "OpenIdConnectSecurityScheme": {
         "type": "object",
         "description": "Defines a security scheme using OpenID Connect.",
-        "required": ["openIdConnectUrl"],
+        "required": [
+          "openIdConnectUrl"
+        ],
         "properties": {
           "description": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "An optional description for the security scheme."
           },
           "openIdConnectUrl": {
@@ -4847,28 +5322,46 @@
             "description": "Arbitrary structured data as a JSON value."
           },
           "filename": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "An optional filename for the file."
           },
           "mediaType": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The MIME type of the part content."
           },
           "metadata": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Metadata associated with this part.",
             "additionalProperties": true
           },
           "raw": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Raw byte content of a file, base64-encoded in JSON."
           },
           "text": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The string content of a text part."
           },
           "url": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A URL pointing to the file's content."
           }
         }
@@ -4878,7 +5371,10 @@
         "description": "Deprecated: Use Authorization Code + PKCE or Device Code.",
         "properties": {
           "refreshUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The URL for obtaining refresh tokens."
           },
           "scopes": {
@@ -4892,7 +5388,10 @@
             }
           },
           "tokenUrl": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The token URL."
           }
         }
@@ -4932,7 +5431,10 @@
             "type": "string"
           },
           "turn_timeout_secs": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "minimum": 0
           },
@@ -4944,7 +5446,10 @@
       "PersonaFileContent": {
         "type": "object",
         "description": "Content of a persona file slot.",
-        "required": ["filename", "content"],
+        "required": [
+          "filename",
+          "content"
+        ],
         "properties": {
           "content": {
             "type": "string"
@@ -4957,7 +5462,12 @@
       "PersonaFileSlot": {
         "type": "object",
         "description": "A single persona file slot.",
-        "required": ["filename", "display_name", "description", "exists"],
+        "required": [
+          "filename",
+          "display_name",
+          "description",
+          "exists"
+        ],
         "properties": {
           "description": {
             "type": "string"
@@ -4976,7 +5486,10 @@
       "PersonaSkillAccess": {
         "type": "object",
         "description": "Skill access configuration for a persona.",
-        "required": ["mode", "skills"],
+        "required": [
+          "mode",
+          "skills"
+        ],
         "properties": {
           "mode": {
             "type": "string"
@@ -4992,7 +5505,12 @@
       "PersonaSummary": {
         "type": "object",
         "description": "A persona summary returned by the API.",
-        "required": ["id", "name", "description", "is_default"],
+        "required": [
+          "id",
+          "name",
+          "description",
+          "is_default"
+        ],
         "properties": {
           "description": {
             "type": "string"
@@ -5011,7 +5529,9 @@
       "PushNotificationConfig": {
         "type": "object",
         "description": "Configuration for setting up push notifications for task updates.",
-        "required": ["url"],
+        "required": [
+          "url"
+        ],
         "properties": {
           "authentication": {
             "oneOf": [
@@ -5025,11 +5545,17 @@
             ]
           },
           "id": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A unique identifier (UUID) for this push notification configuration."
           },
           "token": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A token unique for this task or session."
           },
           "url": {
@@ -5041,7 +5567,9 @@
       "QuickMessageRequest": {
         "type": "object",
         "description": "Body for `POST /api/quick-message`.",
-        "required": ["message"],
+        "required": [
+          "message"
+        ],
         "properties": {
           "context": {
             "type": [
@@ -5066,7 +5594,10 @@
       "QuickMessageResponse": {
         "type": "object",
         "description": "Response for `POST /api/quick-message`.",
-        "required": ["conversation_id", "answer"],
+        "required": [
+          "conversation_id",
+          "answer"
+        ],
         "properties": {
           "answer": {
             "type": "string",
@@ -5078,7 +5609,10 @@
             "description": "The ID of the newly created conversation."
           },
           "message_id": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
             "description": "The ID of the persisted assistant message, if available."
           }
@@ -5087,13 +5621,18 @@
       "RegisterAgentRequest": {
         "type": "object",
         "description": "Body for `POST /api/agents`.",
-        "required": ["card"],
+        "required": [
+          "card"
+        ],
         "properties": {
           "card": {
             "description": "Full AgentCard JSON."
           },
           "set_default": {
-            "type": ["boolean", "null"],
+            "type": [
+              "boolean",
+              "null"
+            ],
             "description": "If `true`, make this agent the default after registration."
           }
         }
@@ -5101,12 +5640,18 @@
       "Role": {
         "type": "string",
         "description": "Defines the sender of a message in A2A protocol communication.",
-        "enum": ["ROLE_UNSPECIFIED", "ROLE_USER", "ROLE_AGENT"]
+        "enum": [
+          "ROLE_UNSPECIFIED",
+          "ROLE_USER",
+          "ROLE_AGENT"
+        ]
       },
       "RotateSecretResponse": {
         "type": "object",
         "description": "Response after rotating a webhook secret.",
-        "required": ["secret"],
+        "required": [
+          "secret"
+        ],
         "properties": {
           "secret": {
             "type": "string"
@@ -5206,7 +5751,10 @@
             "description": "If true, wait until the task reaches a terminal or interrupted state."
           },
           "historyLength": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
             "description": "Max number of recent messages to include in the response."
           },
@@ -5226,7 +5774,9 @@
       "SendMessageRequest": {
         "type": "object",
         "description": "Request for the `SendMessage` and `SendStreamingMessage` methods.",
-        "required": ["message"],
+        "required": [
+          "message"
+        ],
         "properties": {
           "configuration": {
             "oneOf": [
@@ -5244,12 +5794,18 @@
             "description": "The message to send to the agent."
           },
           "metadata": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Additional context or parameters.",
             "additionalProperties": true
           },
           "tenant": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Optional tenant ID."
           }
         }
@@ -5285,7 +5841,10 @@
       "ServerCapabilities": {
         "type": "object",
         "description": "Server capability flags.",
-        "required": ["voice_send", "voice_receive"],
+        "required": [
+          "voice_send",
+          "voice_receive"
+        ],
         "properties": {
           "voice_receive": {
             "type": "boolean",
@@ -5300,7 +5859,9 @@
       "SetActivePersonaRequest": {
         "type": "object",
         "description": "Body for `POST /api/personas/active`.",
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -5310,7 +5871,9 @@
       "SetSkillAccessModeRequest": {
         "type": "object",
         "description": "Body for `PATCH /api/personas/{id}/skill-access`.",
-        "required": ["mode"],
+        "required": [
+          "mode"
+        ],
         "properties": {
           "mode": {
             "type": "string",
@@ -5321,7 +5884,13 @@
       "SkillDetail": {
         "type": "object",
         "description": "Full skill detail returned by the API.",
-        "required": ["name", "description", "body", "source", "is_builtin"],
+        "required": [
+          "name",
+          "description",
+          "body",
+          "source",
+          "is_builtin"
+        ],
         "properties": {
           "body": {
             "type": "string"
@@ -5343,7 +5912,11 @@
       "SkillEntryResponse": {
         "type": "object",
         "description": "A skill entry returned by the API.",
-        "required": ["name", "description", "enabled"],
+        "required": [
+          "name",
+          "description",
+          "enabled"
+        ],
         "properties": {
           "description": {
             "type": "string"
@@ -5438,7 +6011,10 @@
         "type": "object",
         "properties": {
           "since": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "description": "Replay from this sequence number (inclusive). Defaults to 0."
           }
@@ -5460,7 +6036,11 @@
       "SubscribeRequest": {
         "type": "object",
         "description": "Browser push subscription key material.",
-        "required": ["endpoint", "p256dh", "auth"],
+        "required": [
+          "endpoint",
+          "p256dh",
+          "auth"
+        ],
         "properties": {
           "auth": {
             "type": "string",
@@ -5479,7 +6059,11 @@
       "Task": {
         "type": "object",
         "description": "`Task` is the core unit of action for A2A. It has a current status and when\nresults are created they are stored in artifacts. Multi-turn interactions\nare stored in history.",
-        "required": ["id", "contextId", "status"],
+        "required": [
+          "id",
+          "contextId",
+          "status"
+        ],
         "properties": {
           "artifacts": {
             "type": "array",
@@ -5504,7 +6088,10 @@
             "description": "Unique identifier (UUID) for the task, generated by the server."
           },
           "metadata": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Custom metadata about the task.",
             "additionalProperties": true
           },
@@ -5517,7 +6104,11 @@
       "TaskArtifactUpdateEvent": {
         "type": "object",
         "description": "A task delta where an artifact has been generated.",
-        "required": ["taskId", "contextId", "artifact"],
+        "required": [
+          "taskId",
+          "contextId",
+          "artifact"
+        ],
         "properties": {
           "append": {
             "type": "boolean",
@@ -5536,7 +6127,10 @@
             "description": "If true, this is the final chunk of the artifact."
           },
           "metadata": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Metadata associated with the artifact update.",
             "additionalProperties": true
           },
@@ -5549,7 +6143,10 @@
       "TaskPushNotificationConfig": {
         "type": "object",
         "description": "A container associating a push notification configuration with a specific\ntask.",
-        "required": ["taskId", "pushNotificationConfig"],
+        "required": [
+          "taskId",
+          "pushNotificationConfig"
+        ],
         "properties": {
           "pushNotificationConfig": {
             "$ref": "#/components/schemas/PushNotificationConfig",
@@ -5560,7 +6157,10 @@
             "description": "The ID of the task this configuration is associated with."
           },
           "tenant": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Tenant ID."
           }
         }
@@ -5583,7 +6183,9 @@
       "TaskStatus": {
         "type": "object",
         "description": "A container for the status of a task.",
-        "required": ["state"],
+        "required": [
+          "state"
+        ],
         "properties": {
           "message": {
             "oneOf": [
@@ -5601,7 +6203,10 @@
             "description": "The current state of this task."
           },
           "timestamp": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time",
             "description": "ISO 8601 timestamp when the status was recorded."
           }
@@ -5610,14 +6215,21 @@
       "TaskStatusUpdateEvent": {
         "type": "object",
         "description": "An event sent by the agent to notify the client of a change in a task's\nstatus.",
-        "required": ["taskId", "contextId", "status"],
+        "required": [
+          "taskId",
+          "contextId",
+          "status"
+        ],
         "properties": {
           "contextId": {
             "type": "string",
             "description": "The ID of the context that the task belongs to."
           },
           "metadata": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "description": "Metadata associated with the task update.",
             "additionalProperties": true
           },
@@ -5634,7 +6246,10 @@
       "TimeSeriesResponse": {
         "type": "object",
         "description": "A single point in a time series.",
-        "required": ["bucket", "value"],
+        "required": [
+          "bucket",
+          "value"
+        ],
         "properties": {
           "bucket": {
             "type": "string"
@@ -5648,7 +6263,10 @@
       "ToolCallSummary": {
         "type": "object",
         "description": "Summary of a single tool invocation within an assistant message.",
-        "required": ["name", "status"],
+        "required": [
+          "name",
+          "status"
+        ],
         "properties": {
           "arguments": {
             "description": "The JSON arguments passed to the tool."
@@ -5658,7 +6276,10 @@
             "description": "The tool that was called."
           },
           "result": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The tool's output, truncated to a reasonable display length."
           },
           "status": {
@@ -5670,7 +6291,11 @@
       "ToolUsageResponse": {
         "type": "object",
         "description": "Tool invocation statistics.",
-        "required": ["tool_name", "invocations", "avg_duration_s"],
+        "required": [
+          "tool_name",
+          "invocations",
+          "avg_duration_s"
+        ],
         "properties": {
           "avg_duration_s": {
             "type": "number",
@@ -5730,7 +6355,10 @@
         ],
         "properties": {
           "conversation_id": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "duration_ms": {
             "type": "integer",
@@ -5740,7 +6368,10 @@
             "type": "string"
           },
           "skill_name": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "start_time": {
             "type": "string",
@@ -5757,7 +6388,9 @@
       "UnsubscribeRequest": {
         "type": "object",
         "description": "Endpoint URL of the subscription to remove.",
-        "required": ["endpoint"],
+        "required": [
+          "endpoint"
+        ],
         "properties": {
           "endpoint": {
             "type": "string",
@@ -5768,7 +6401,9 @@
       "UpdateAgentRequest": {
         "type": "object",
         "description": "Body for `PUT /api/agents/{id}`.",
-        "required": ["card"],
+        "required": [
+          "card"
+        ],
         "properties": {
           "card": {
             "description": "Updated full AgentCard JSON."
@@ -5778,7 +6413,9 @@
       "UpdateConversationRequest": {
         "type": "object",
         "description": "Body for `PATCH /api/conversations/{id}`.",
-        "required": ["title"],
+        "required": [
+          "title"
+        ],
         "properties": {
           "title": {
             "type": "string",
@@ -5789,7 +6426,10 @@
       "UpdateSkillRequest": {
         "type": "object",
         "description": "Body for `PUT /api/skills/{name}`.",
-        "required": ["description", "body"],
+        "required": [
+          "description",
+          "body"
+        ],
         "properties": {
           "body": {
             "type": "string"
@@ -5804,26 +6444,40 @@
         "description": "Body for `PATCH /api/webhooks/{id}`.",
         "properties": {
           "active": {
-            "type": ["boolean", "null"]
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "event_types": {
-            "type": ["array", "null"],
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string"
             }
           },
           "name": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "url": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
       "VapidKeyResponse": {
         "type": "object",
         "description": "VAPID public key returned to the client.",
-        "required": ["public_key"],
+        "required": [
+          "public_key"
+        ],
         "properties": {
           "public_key": {
             "type": "string",
@@ -5834,7 +6488,10 @@
       "VerifyWebhookResponse": {
         "type": "object",
         "description": "Response after attempting webhook verification.",
-        "required": ["success", "detail"],
+        "required": [
+          "success",
+          "detail"
+        ],
         "properties": {
           "detail": {
             "type": "string"
@@ -5888,7 +6545,10 @@
             "type": "string"
           },
           "verified_at": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           }
         }
@@ -5935,7 +6595,10 @@
       "WorkflowRunDetail": {
         "type": "object",
         "description": "Workflow run detail including all steps.",
-        "required": ["run", "steps"],
+        "required": [
+          "run",
+          "steps"
+        ],
         "properties": {
           "run": {
             "$ref": "#/components/schemas/WorkflowRunSummary"
@@ -5992,7 +6655,13 @@
       "WorkflowRunStep": {
         "type": "object",
         "description": "Single step within a workflow run.",
-        "required": ["id", "step_index", "node_id", "node_kind", "occurred_at"],
+        "required": [
+          "id",
+          "step_index",
+          "node_id",
+          "node_kind",
+          "occurred_at"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -6004,7 +6673,10 @@
             "type": "string"
           },
           "note": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "occurred_at": {
             "type": "string",
@@ -6030,10 +6702,16 @@
         ],
         "properties": {
           "error_message": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "finished_at": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "id": {
@@ -6125,7 +6803,10 @@
       "WorkflowUpsertRequest": {
         "type": "object",
         "description": "Body for `POST /api/workflows` and `PUT /api/workflows/{id}`.",
-        "required": ["name", "graph"],
+        "required": [
+          "name",
+          "graph"
+        ],
         "properties": {
           "active": {
             "type": "boolean"
@@ -6144,7 +6825,10 @@
       "WorkflowWebhookSecrets": {
         "type": "object",
         "description": "Webhook URL and token for a workflow trigger.",
-        "required": ["webhook_url", "webhook_token"],
+        "required": [
+          "webhook_url",
+          "webhook_token"
+        ],
         "properties": {
           "webhook_token": {
             "type": "string"
@@ -6157,7 +6841,9 @@
       "WritePersonaFileRequest": {
         "type": "object",
         "description": "Body for `PUT /api/personas/{id}/files/{filename}`.",
-        "required": ["content"],
+        "required": [
+          "content"
+        ],
         "properties": {
           "content": {
             "type": "string"

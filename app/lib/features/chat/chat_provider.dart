@@ -52,7 +52,10 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   @override
   Future<ConversationListState> build() async {
     final api = ref.watch(apiClientProvider);
-    if (api == null) return const ConversationListState();
+    if (api == null) {
+      _resetStream();
+      return const ConversationListState();
+    }
 
     _subscribe(api);
 
@@ -67,8 +70,16 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     return const ConversationListState(isLoading: true);
   }
 
-  void _subscribe(ApiClient api) {
+  void _resetStream() {
     _subscription?.cancel();
+    _subscription = null;
+    _debounceTimer?.cancel();
+    _debounceTimer = null;
+    _pendingUpserts.clear();
+  }
+
+  void _subscribe(ApiClient api) {
+    _resetStream();
     _subscription = api.streamConversations().listen(
       _onEvent,
       onError: (Object e) {
