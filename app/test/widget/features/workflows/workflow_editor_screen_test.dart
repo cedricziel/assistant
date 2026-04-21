@@ -90,6 +90,25 @@ void main() {
     });
   });
 
+  group('EditorNode.toJson', () {
+    test('includes position in output', () {
+      final node = EditorNode(
+        id: 'n1',
+        kind: 'action',
+        config: {'type': 'http_request', 'url': 'https://example.com'},
+        position: const Offset(100.5, 250.0),
+      );
+      final json = node.toJson();
+
+      expect(json['id'], 'n1');
+      expect(json['kind'], 'action');
+      expect(json['config'], isA<Map>());
+      expect(json['position'], isA<Map>());
+      expect(json['position']['x'], 100.5);
+      expect(json['position']['y'], 250.0);
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Widget tests
 
@@ -286,9 +305,42 @@ void main() {
       );
     });
 
-    testWidgets('delete node in mobile view removes card from list', (
-      tester,
-    ) async {
+    testWidgets(
+      'delete node in mobile view shows confirmation then removes card',
+      (tester) async {
+        tester.view.physicalSize = const Size(400, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildScreen());
+        await tester.pump();
+
+        expect(find.text('Manual Trigger'), findsOneWidget);
+
+        // Tap delete on the trigger card — opens confirmation dialog.
+        await tester.tap(find.byIcon(Icons.delete_outline).first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Delete node?'),
+          findsOneWidget,
+          reason: 'confirmation dialog should appear',
+        );
+
+        // Confirm deletion.
+        await tester.tap(find.text('Delete'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Manual Trigger'),
+          findsNothing,
+          reason: 'card should be removed after confirming delete',
+        );
+      },
+    );
+
+    testWidgets('canceling delete keeps the node in list', (tester) async {
       tester.view.physicalSize = const Size(400, 844);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -299,14 +351,18 @@ void main() {
 
       expect(find.text('Manual Trigger'), findsOneWidget);
 
-      // Tap delete on the trigger card
+      // Tap delete on the trigger card.
       await tester.tap(find.byIcon(Icons.delete_outline).first);
+      await tester.pumpAndSettle();
+
+      // Cancel the confirmation dialog.
+      await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
       expect(
         find.text('Manual Trigger'),
-        findsNothing,
-        reason: 'card should be removed after delete',
+        findsOneWidget,
+        reason: 'card should remain after canceling delete',
       );
     });
   });

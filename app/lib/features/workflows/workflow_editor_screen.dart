@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../shared/platform/adaptive_dialog.dart';
 import 'workflows_provider.dart';
 
 // ---------------------------------------------------------------------------
@@ -107,7 +108,12 @@ class EditorNode {
     }
   }
 
-  Map<String, dynamic> toJson() => {'id': id, 'kind': kind, 'config': config};
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'kind': kind,
+    'config': config,
+    'position': {'x': position.dx, 'y': position.dy},
+  };
 }
 
 class EditorEdge {
@@ -317,11 +323,7 @@ class _EdgePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_EdgePainter old) =>
-      old.nodes != nodes ||
-      old.edges != edges ||
-      old.pendingFrom != pendingFrom ||
-      old.pendingEnd != pendingEnd;
+  bool shouldRepaint(_EdgePainter old) => true;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,19 +404,28 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
       _maxSteps = (execRaw['max_steps'] as int?) ?? 200;
       _maxVisitsPerNode = (execRaw['max_visits_per_node'] as int?) ?? 25;
 
-      // Lay nodes out in a vertical cascade since we have no stored positions
-      double x = (_kCanvasW / 2) - (_kNodeW / 2);
-      double y = 150;
+      // Restore stored positions if available, otherwise cascade vertically
+      double fallbackX = (_kCanvasW / 2) - (_kNodeW / 2);
+      double fallbackY = 150;
       _nodes = nodesRaw.asMap().entries.map((entry) {
         final raw = entry.value as Map;
-        final node = EditorNode(
+        final posRaw = raw['position'] as Map?;
+        final Offset pos;
+        if (posRaw != null) {
+          pos = Offset(
+            (posRaw['x'] as num).toDouble(),
+            (posRaw['y'] as num).toDouble(),
+          );
+        } else {
+          pos = Offset(fallbackX, fallbackY);
+          fallbackY += _kNodeH + 60;
+        }
+        return EditorNode(
           id: raw['id'] as String,
           kind: raw['kind'] as String,
           config: Map<String, dynamic>.from(raw['config'] as Map? ?? {}),
-          position: Offset(x, y),
+          position: pos,
         );
-        y += _kNodeH + 60;
-        return node;
       }).toList();
 
       _edges = edgesRaw.map((raw) {
@@ -604,7 +615,15 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
     }
   }
 
-  void _deleteNode(String nodeId) {
+  Future<void> _deleteNode(String nodeId) async {
+    final confirmed = await showAdaptiveConfirmDialog(
+      context: context,
+      title: 'Delete node?',
+      content: 'This will also remove all edges connected to this node.',
+      confirmLabel: 'Delete',
+      isDestructive: true,
+    );
+    if (!confirmed || !mounted) return;
     setState(() {
       _nodes.removeWhere((n) => n.id == nodeId);
       _edges.removeWhere((e) => e.from == nodeId || e.to == nodeId);
@@ -645,6 +664,47 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
     if (widget.isEdit) {
       final detailAsync = ref.watch(workflowDetailProvider(widget.workflowId!));
       detailAsync.whenData(_populateFromDetail);
+
+      // Show loading/error until data is available
+      if (!_loaded) {
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Edit Workflow'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => context.go('/workflows/${widget.workflowId}'),
+            ),
+          ),
+          body: detailAsync.when(
+            loading: () =>
+                const Center(child: CircularProgressIndicator.adaptive()),
+            error: (err, _) => Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error,
+                    size: 48,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(err.toString(), textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => ref
+                        .read(
+                          workflowDetailProvider(widget.workflowId!).notifier,
+                        )
+                        .refresh(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+            data: (_) => const SizedBox.shrink(),
+          ),
+        );
+      }
     }
 
     return LayoutBuilder(
@@ -962,22 +1022,15 @@ class _MobileWorkflowEditor extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            color: Colors.orange.shade50,
+            color: Colors.orange.withAlpha(20),
             child: Row(
               children: [
-                Icon(
-                  Icons.info_outline,
-                  size: 16,
-                  color: Colors.orange.shade800,
-                ),
+                const Icon(Icons.info_outline, size: 16, color: Colors.orange),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Complex graph — edit branching on a wider screen',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.orange.shade800,
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.orange),
                   ),
                 ),
               ],

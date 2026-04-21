@@ -1,5 +1,6 @@
 import 'package:assistant_api/assistant_api.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -17,6 +18,31 @@ class WorkflowDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
+  WorkflowWebhookSecrets? _webhookSecrets;
+  bool _webhookSecretsFetched = false;
+
+  /// Detects whether the workflow graph includes a webhook trigger node.
+  bool _hasWebhookTrigger(WorkflowDetail detail) {
+    final graphRaw = detail.graph?.value;
+    if (graphRaw is! Map) return false;
+    final nodes = graphRaw['nodes'] as List? ?? [];
+    return nodes.any((n) {
+      if (n is! Map) return false;
+      final config = n['config'] as Map? ?? {};
+      return config['type'] == 'webhook';
+    });
+  }
+
+  Future<void> _fetchWebhookSecrets() async {
+    if (_webhookSecretsFetched) return;
+    _webhookSecretsFetched = true;
+    final notifier = ref.read(
+      workflowDetailProvider(widget.workflowId).notifier,
+    );
+    final secrets = await notifier.fetchWebhookSecrets();
+    if (mounted) setState(() => _webhookSecrets = secrets);
+  }
+
   Future<void> _confirmDelete() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -79,6 +105,36 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
     ref.read(workflowDetailProvider(widget.workflowId).notifier).refresh();
   }
 
+  Future<void> _testRun() async {
+    final notifier = ref.read(
+      workflowDetailProvider(widget.workflowId).notifier,
+    );
+    final (preview, error) = await notifier.testRun();
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Test run failed: $error'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Test run started: ${preview!.message}'),
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'View',
+          onPressed: () => context.go(
+            '/workflows/${widget.workflowId}/runs/${preview.runId}',
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(workflowDetailProvider(widget.workflowId));
@@ -91,6 +147,11 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
           onPressed: () => context.go('/workflows'),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.play_arrow),
+            tooltip: 'Test run',
+            onPressed: _testRun,
+          ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Edit workflow',
@@ -121,12 +182,19 @@ class _WorkflowDetailScreenState extends ConsumerState<WorkflowDetailScreen> {
               .read(workflowDetailProvider(widget.workflowId).notifier)
               .refresh(),
         ),
-        data: (state) => _WorkflowDetailBody(
-          workflowId: widget.workflowId,
-          detail: state.detail,
-          runs: state.runs,
-          onToggleActive: () => _toggleActive(state.detail.active),
-        ),
+        data: (state) {
+          // Fetch webhook secrets lazily when we know it's a webhook workflow.
+          if (_hasWebhookTrigger(state.detail)) {
+            _fetchWebhookSecrets();
+          }
+          return _WorkflowDetailBody(
+            workflowId: widget.workflowId,
+            detail: state.detail,
+            runs: state.runs,
+            onToggleActive: () => _toggleActive(state.detail.active),
+            webhookSecrets: _webhookSecrets,
+          );
+        },
       ),
     );
   }
@@ -138,12 +206,14 @@ class _WorkflowDetailBody extends StatelessWidget {
     required this.detail,
     required this.runs,
     required this.onToggleActive,
+    this.webhookSecrets,
   });
 
   final String workflowId;
   final WorkflowDetail detail;
   final List<WorkflowRunSummary> runs;
   final VoidCallback onToggleActive;
+  final WorkflowWebhookSecrets? webhookSecrets;
 
   @override
   Widget build(BuildContext context) {
@@ -175,13 +245,13 @@ class _WorkflowDetailBody extends StatelessWidget {
                         ),
                         decoration: BoxDecoration(
                           color: detail.active
-                              ? Colors.green.shade50
-                              : Colors.grey.shade100,
+                              ? Colors.green.withAlpha(20)
+                              : Colors.grey.withAlpha(20),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: detail.active
-                                ? Colors.green.shade300
-                                : Colors.grey.shade400,
+                                ? Colors.green.withAlpha(60)
+                                : Colors.grey.withAlpha(60),
                           ),
                         ),
                         child: Row(
@@ -192,9 +262,7 @@ class _WorkflowDetailBody extends StatelessWidget {
                                   ? Icons.pause_circle_outline
                                   : Icons.play_circle_outline,
                               size: 12,
-                              color: detail.active
-                                  ? Colors.green.shade700
-                                  : Colors.grey.shade600,
+                              color: detail.active ? Colors.green : Colors.grey,
                             ),
                             const SizedBox(width: 4),
                             Text(
@@ -203,8 +271,8 @@ class _WorkflowDetailBody extends StatelessWidget {
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                                 color: detail.active
-                                    ? Colors.green.shade700
-                                    : Colors.grey.shade600,
+                                    ? Colors.green
+                                    : Colors.grey,
                               ),
                             ),
                           ],
@@ -228,6 +296,12 @@ class _WorkflowDetailBody extends StatelessWidget {
         ),
 
         const SizedBox(height: 16),
+
+        // Webhook secrets card (shown only for webhook-triggered workflows).
+        if (webhookSecrets != null) ...[
+          _WebhookSecretsCard(secrets: webhookSecrets!),
+          const SizedBox(height: 16),
+        ],
 
         // Recent runs.
         Text('Recent Runs', style: Theme.of(context).textTheme.titleMedium),
@@ -291,10 +365,10 @@ class _RunTile extends StatelessWidget {
               ? Icons.error_outline
               : Icons.hourglass_empty,
           color: isSuccess
-              ? Colors.green.shade600
+              ? Colors.green
               : isError
               ? colorScheme.error
-              : Colors.orange.shade600,
+              : Colors.orange,
         ),
         title: Text(
           'Run ${run.id.length > 8 ? run.id.substring(0, 8) : run.id}…',
@@ -308,17 +382,17 @@ class _RunTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
             color: isSuccess
-                ? Colors.green.shade50
+                ? Colors.green.withAlpha(20)
                 : isError
                 ? colorScheme.errorContainer
-                : Colors.orange.shade50,
+                : Colors.orange.withAlpha(20),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isSuccess
-                  ? Colors.green.shade300
+                  ? Colors.green.withAlpha(60)
                   : isError
                   ? colorScheme.error
-                  : Colors.orange.shade300,
+                  : Colors.orange.withAlpha(60),
             ),
           ),
           child: Text(
@@ -327,14 +401,153 @@ class _RunTile extends StatelessWidget {
               fontSize: 10,
               fontWeight: FontWeight.w600,
               color: isSuccess
-                  ? Colors.green.shade700
+                  ? Colors.green
                   : isError
                   ? colorScheme.error
-                  : Colors.orange.shade700,
+                  : Colors.orange,
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _WebhookSecretsCard extends StatefulWidget {
+  const _WebhookSecretsCard({required this.secrets});
+
+  final WorkflowWebhookSecrets secrets;
+
+  @override
+  State<_WebhookSecretsCard> createState() => _WebhookSecretsCardState();
+}
+
+class _WebhookSecretsCardState extends State<_WebhookSecretsCard> {
+  bool _tokenVisible = false;
+
+  void _copy(String value, String label) {
+    Clipboard.setData(ClipboardData(text: value));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$label copied to clipboard'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.webhook, color: Colors.blue, size: 20),
+                const SizedBox(width: 8),
+                Text('Webhook', style: theme.textTheme.titleSmall),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // URL
+            _CopyableField(
+              label: 'URL',
+              value: widget.secrets.webhookUrl,
+              onCopy: () => _copy(widget.secrets.webhookUrl, 'URL'),
+            ),
+            const SizedBox(height: 8),
+            // Token
+            Row(
+              children: [
+                SizedBox(
+                  width: 48,
+                  child: Text(
+                    'Token',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    _tokenVisible ? widget.secrets.webhookToken : '\u2022' * 16,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    _tokenVisible ? Icons.visibility_off : Icons.visibility,
+                    size: 16,
+                  ),
+                  onPressed: () =>
+                      setState(() => _tokenVisible = !_tokenVisible),
+                  tooltip: _tokenVisible ? 'Hide' : 'Show',
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.copy, size: 16),
+                  onPressed: () => _copy(widget.secrets.webhookToken, 'Token'),
+                  tooltip: 'Copy token',
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CopyableField extends StatelessWidget {
+  const _CopyableField({
+    required this.label,
+    required this.value,
+    required this.onCopy,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 48,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.copy, size: 16),
+          onPressed: onCopy,
+          tooltip: 'Copy $label',
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
     );
   }
 }

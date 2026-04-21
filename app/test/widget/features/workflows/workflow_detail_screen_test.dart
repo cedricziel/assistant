@@ -1,4 +1,5 @@
 import 'package:assistant_api/assistant_api.dart';
+import 'package:built_value/json_object.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,7 @@ void main() {
     Widget buildUnderTest({
       required WorkflowDetailState detailState,
       _FakeWorkflowsNotifier? workflowsNotifier,
+      _FakeWorkflowDetailNotifier? detailNotifier,
     }) {
       final fake = workflowsNotifier ?? _FakeWorkflowsNotifier();
       final router = GoRouter(
@@ -28,13 +30,19 @@ void main() {
             path: '/workflows/wf-1/edit',
             builder: (_, _) => const Scaffold(body: Text('edit screen')),
           ),
+          GoRoute(
+            path: '/workflows/wf-1/runs/:runId',
+            builder: (_, state) =>
+                Scaffold(body: Text('run ${state.pathParameters['runId']}')),
+          ),
         ],
       );
 
       return ProviderScope(
         overrides: [
           workflowDetailProvider.overrideWith2(
-            (arg) => _FakeWorkflowDetailNotifier(arg, detailState),
+            (arg) =>
+                detailNotifier ?? _FakeWorkflowDetailNotifier(arg, detailState),
           ),
           workflowsProvider.overrideWith(() => fake),
         ],
@@ -200,6 +208,124 @@ void main() {
 
       expect(find.textContaining('Toggle failed'), findsOneWidget);
     });
+
+    // -------------------------------------------------------------------------
+    // Test run
+
+    testWidgets('test run success shows snackbar with message', (tester) async {
+      final preview = WorkflowRunPreview(
+        (b) => b
+          ..runId = 'run-42'
+          ..workflowId = 'wf-1'
+          ..status = 'running'
+          ..message = 'Test run started'
+          ..maxSteps = 50
+          ..maxVisitsPerNode = 3
+          ..startedAt = DateTime(2024, 1, 1),
+      );
+      final detailNotifier = _FakeWorkflowDetailNotifier(
+        'wf-1',
+        _activeState(),
+        testRunResult: (preview, null),
+      );
+      await tester.pumpWidget(
+        buildUnderTest(
+          detailState: _activeState(),
+          detailNotifier: detailNotifier,
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byIcon(Icons.play_arrow));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Test run started'),
+        findsOneWidget,
+        reason: 'success snackbar should show preview message',
+      );
+    });
+
+    testWidgets('test run failure shows error snackbar', (tester) async {
+      final detailNotifier = _FakeWorkflowDetailNotifier(
+        'wf-1',
+        _activeState(),
+        testRunResult: (null, 'Connection refused'),
+      );
+      await tester.pumpWidget(
+        buildUnderTest(
+          detailState: _activeState(),
+          detailNotifier: detailNotifier,
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byIcon(Icons.play_arrow));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Connection refused'),
+        findsOneWidget,
+        reason: 'error snackbar should show failure message',
+      );
+    });
+
+    // -------------------------------------------------------------------------
+    // Webhook secrets
+
+    testWidgets('webhook trigger workflow shows webhook secrets card', (
+      tester,
+    ) async {
+      final secrets = WorkflowWebhookSecrets(
+        (b) => b
+          ..webhookUrl = 'https://example.com/hook/wf-1'
+          ..webhookToken = 'secret-token-abc',
+      );
+      final detailNotifier = _FakeWorkflowDetailNotifier(
+        'wf-1',
+        _webhookState(),
+        webhookSecrets: secrets,
+      );
+      await tester.pumpWidget(
+        buildUnderTest(
+          detailState: _webhookState(),
+          detailNotifier: detailNotifier,
+        ),
+      );
+      await tester.pump();
+      // Allow the lazy fetch to complete.
+      await tester.pump();
+
+      expect(
+        find.text('Webhook'),
+        findsOneWidget,
+        reason: 'webhook secrets card header should appear',
+      );
+      expect(
+        find.text('https://example.com/hook/wf-1'),
+        findsOneWidget,
+        reason: 'webhook URL should be displayed',
+      );
+      // Token should be obscured by default.
+      expect(
+        find.text('secret-token-abc'),
+        findsNothing,
+        reason: 'token should be hidden by default',
+      );
+    });
+
+    testWidgets('non-webhook workflow does not show webhook card', (
+      tester,
+    ) async {
+      await tester.pumpWidget(buildUnderTest(detailState: _activeState()));
+      await tester.pump();
+
+      expect(
+        find.text('Webhook'),
+        findsNothing,
+        reason: 'webhook card should not appear for non-webhook workflows',
+      );
+    });
   });
 }
 
@@ -232,19 +358,56 @@ WorkflowDetailState _inactiveState() => WorkflowDetailState(
   runs: const [],
 );
 
+WorkflowDetailState _webhookState() => WorkflowDetailState(
+  detail: WorkflowDetail(
+    (b) => b
+      ..id = 'wf-1'
+      ..name = 'Webhook Workflow'
+      ..description = 'A webhook-triggered workflow'
+      ..active = true
+      ..createdAt = DateTime(2024, 1, 1)
+      ..updatedAt = DateTime(2024, 1, 1)
+      ..graph = JsonObject({
+        'nodes': [
+          {
+            'id': 'trigger-1',
+            'kind': 'trigger',
+            'config': {'type': 'webhook'},
+          },
+        ],
+        'edges': [],
+      }),
+  ),
+  runs: const [],
+);
+
 // ---------------------------------------------------------------------------
 // Fake notifiers
 
 class _FakeWorkflowDetailNotifier extends WorkflowDetailNotifier {
-  _FakeWorkflowDetailNotifier(super.workflowId, this._state);
+  _FakeWorkflowDetailNotifier(
+    super.workflowId,
+    this._state, {
+    this.testRunResult,
+    this.webhookSecrets,
+  });
 
   final WorkflowDetailState _state;
+  final (WorkflowRunPreview?, String?)? testRunResult;
+  final WorkflowWebhookSecrets? webhookSecrets;
 
   @override
   Future<WorkflowDetailState> build() async => _state;
 
   @override
   Future<void> refresh() async {}
+
+  @override
+  Future<(WorkflowRunPreview?, String?)> testRun() async =>
+      testRunResult ?? (null, 'Not configured');
+
+  @override
+  Future<WorkflowWebhookSecrets?> fetchWebhookSecrets() async => webhookSecrets;
 }
 
 class _FakeWorkflowsNotifier extends WorkflowsNotifier {
