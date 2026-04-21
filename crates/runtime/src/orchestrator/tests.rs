@@ -1454,6 +1454,86 @@ fn sanitize_history_combined_orphaned_tools_and_trailing_user() {
     ));
 }
 
+#[test]
+fn sanitize_history_orphaned_tool_result_dropped() {
+    // Simulates: a system-injected tool result (e.g. skill-learner) appears
+    // at the start of history with no preceding AssistantToolCalls.
+    let mut history = vec![
+        ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "hello".into(),
+        },
+        ChatHistoryMessage::ToolResult {
+            name: "skill-learner".into(),
+            content: "Auto-created skill 'foo'".into(),
+        },
+        ChatHistoryMessage::Text {
+            role: ChatRole::Assistant,
+            content: "hi".into(),
+        },
+    ];
+    crate::history::sanitize_history(&mut history);
+    // The orphaned ToolResult should be dropped
+    assert_eq!(history.len(), 2);
+    assert!(matches!(
+        &history[0],
+        ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &history[1],
+        ChatHistoryMessage::Text {
+            role: ChatRole::Assistant,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn sanitize_history_tool_result_after_matched_calls_dropped() {
+    // Extra ToolResult beyond what the tool calls declared should be dropped.
+    let mut history = vec![
+        ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+            name: "my-tool".into(),
+            params: serde_json::json!({}),
+            id: Some("call_1".into()),
+        }]),
+        ChatHistoryMessage::ToolResult {
+            name: "my-tool".into(),
+            content: "result".into(),
+        },
+        // Spurious extra result with no matching call
+        ChatHistoryMessage::ToolResult {
+            name: "skill-learner".into(),
+            content: "injected".into(),
+        },
+        ChatHistoryMessage::Text {
+            role: ChatRole::Assistant,
+            content: "done".into(),
+        },
+    ];
+    crate::history::sanitize_history(&mut history);
+    // The extra ToolResult should be dropped
+    assert_eq!(history.len(), 3);
+    assert!(matches!(
+        &history[0],
+        ChatHistoryMessage::AssistantToolCalls(_)
+    ));
+    assert!(matches!(
+        &history[1],
+        ChatHistoryMessage::ToolResult { name, .. } if name == "my-tool"
+    ));
+    assert!(matches!(
+        &history[2],
+        ChatHistoryMessage::Text {
+            role: ChatRole::Assistant,
+            ..
+        }
+    ));
+}
+
 // ── Bus integration tests ────────────────────────────────────────────────
 
 #[test]

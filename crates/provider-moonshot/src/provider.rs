@@ -698,7 +698,6 @@ fn build_chat_messages(
             }
 
             ChatHistoryMessage::AssistantToolCalls(calls) => {
-                pending_ids.clear();
                 let tc_enums: Vec<ChatCompletionMessageToolCalls> = calls
                     .iter()
                     .enumerate()
@@ -729,6 +728,7 @@ fn build_chat_messages(
                 let tool_call_id = if let Some(idx) = pos {
                     pending_ids.remove(idx).1
                 } else {
+                    warn!(tool = %name, "no pending tool-call ID for tool result, using fallback");
                     format!("call_unknown_{name}")
                 };
 
@@ -829,7 +829,6 @@ fn build_raw_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Ve
             }
 
             ChatHistoryMessage::AssistantToolCalls(calls) => {
-                pending_ids.clear();
                 let tool_calls: Vec<Value> = calls
                     .iter()
                     .enumerate()
@@ -856,6 +855,7 @@ fn build_raw_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Ve
                 let tool_call_id = if let Some(idx) = pos {
                     pending_ids.remove(idx).1
                 } else {
+                    warn!(tool = %name, "no pending tool-call ID for tool result, using fallback");
                     format!("call_unknown_{name}")
                 };
                 messages.push(json!({
@@ -927,6 +927,89 @@ mod tests {
         assert!(pending.is_empty());
     }
 
+    /// Two rounds of tool calls – the second `AssistantToolCalls` must not
+    /// lose the IDs established in the first round.
+    #[test]
+    fn build_chat_messages_multi_turn_tool_calls() {
+        let history = vec![
+            // Round 1
+            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+                name: "tool-a".to_string(),
+                params: json!({}),
+                id: Some("call_r1".to_string()),
+            }]),
+            ChatHistoryMessage::ToolResult {
+                name: "tool-a".to_string(),
+                content: "result-a".to_string(),
+            },
+            // Intermediate assistant text
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "thinking...".to_string(),
+            },
+            // Round 2
+            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+                name: "tool-b".to_string(),
+                params: json!({}),
+                id: Some("call_r2".to_string()),
+            }]),
+            ChatHistoryMessage::ToolResult {
+                name: "tool-b".to_string(),
+                content: "result-b".to_string(),
+            },
+        ];
+        let (msgs, pending) = build_chat_messages("sys", &history);
+        // system + 5 history entries
+        assert_eq!(msgs.len(), 6);
+        assert!(pending.is_empty(), "all tool results should be consumed");
+    }
+
+    /// When a `ToolResult` arrives after a *subsequent* `AssistantToolCalls`,
+    /// its ID must still be resolvable (regression for `pending_ids.clear()`).
+    #[test]
+    fn build_chat_messages_late_tool_result_preserves_id() {
+        // Simulate a history where a tool result for round-1 appears after
+        // round-2's tool calls (unusual ordering, but must not lose the ID).
+        let history = vec![
+            ChatHistoryMessage::AssistantToolCalls(vec![
+                ToolCallItem {
+                    name: "tool-a".to_string(),
+                    params: json!({}),
+                    id: Some("call_a".to_string()),
+                },
+                ToolCallItem {
+                    name: "tool-b".to_string(),
+                    params: json!({}),
+                    id: Some("call_b".to_string()),
+                },
+            ]),
+            // Only tool-a gets a result before the next assistant turn
+            ChatHistoryMessage::ToolResult {
+                name: "tool-a".to_string(),
+                content: "result-a".to_string(),
+            },
+            // Second round of tool calls
+            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+                name: "tool-c".to_string(),
+                params: json!({}),
+                id: Some("call_c".to_string()),
+            }]),
+            // Late result for tool-b from round 1
+            ChatHistoryMessage::ToolResult {
+                name: "tool-b".to_string(),
+                content: "result-b".to_string(),
+            },
+            ChatHistoryMessage::ToolResult {
+                name: "tool-c".to_string(),
+                content: "result-c".to_string(),
+            },
+        ];
+        let (msgs, pending) = build_chat_messages("", &history);
+        // 5 history entries, no system message (empty prompt)
+        assert_eq!(msgs.len(), 5);
+        assert!(pending.is_empty(), "all tool results should be consumed");
+    }
+
     // ── Raw-HTTP message builder tests ────────────────────────────────────
 
     #[test]
@@ -970,6 +1053,53 @@ mod tests {
         let msgs = build_raw_messages("", &history);
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[1]["tool_call_id"], "call_123");
+    }
+
+    /// Raw-HTTP: late tool result after a second `AssistantToolCalls` must
+    /// still carry the correct `tool_call_id`.
+    #[test]
+    fn build_raw_messages_late_tool_result_preserves_id() {
+        let history = vec![
+            ChatHistoryMessage::AssistantToolCalls(vec![
+                ToolCallItem {
+                    name: "tool-a".to_string(),
+                    params: json!({}),
+                    id: Some("call_a".to_string()),
+                },
+                ToolCallItem {
+                    name: "tool-b".to_string(),
+                    params: json!({}),
+                    id: Some("call_b".to_string()),
+                },
+            ]),
+            ChatHistoryMessage::ToolResult {
+                name: "tool-a".to_string(),
+                content: "result-a".to_string(),
+            },
+            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
+                name: "tool-c".to_string(),
+                params: json!({}),
+                id: Some("call_c".to_string()),
+            }]),
+            // Late result for tool-b from round 1
+            ChatHistoryMessage::ToolResult {
+                name: "tool-b".to_string(),
+                content: "result-b".to_string(),
+            },
+            ChatHistoryMessage::ToolResult {
+                name: "tool-c".to_string(),
+                content: "result-c".to_string(),
+            },
+        ];
+        let msgs = build_raw_messages("", &history);
+        // 5 history entries, no system message (empty prompt)
+        assert_eq!(msgs.len(), 5);
+        // tool-b result must carry its original ID, not a fallback
+        assert_eq!(
+            msgs[3]["tool_call_id"], "call_b",
+            "tool-b must keep its original call ID"
+        );
+        assert_eq!(msgs[4]["tool_call_id"], "call_c");
     }
 
     // ── Capabilities ──────────────────────────────────────────────────────
