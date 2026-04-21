@@ -46,3 +46,4 @@ app.*.map.json
 
 # Fastlane / Bundler
 vendor/bundle/
+fastlane/report.xml
