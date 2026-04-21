@@ -236,46 +236,58 @@ class _WorkflowDetailBody extends StatelessWidget {
                       ),
                     ),
                     // Active toggle chip
-                    GestureDetector(
-                      onTap: onToggleActive,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: detail.active
-                              ? Colors.green.withAlpha(20)
-                              : Colors.grey.withAlpha(20),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: detail.active
-                                ? Colors.green.withAlpha(60)
-                                : Colors.grey.withAlpha(60),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: onToggleActive,
+                        borderRadius: BorderRadius.circular(12),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            minHeight: 36,
+                            minWidth: 48,
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              detail.active
-                                  ? Icons.pause_circle_outline
-                                  : Icons.play_circle_outline,
-                              size: 12,
-                              color: detail.active ? Colors.green : Colors.grey,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              detail.active ? 'Active' : 'Inactive',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
+                            decoration: BoxDecoration(
+                              color: detail.active
+                                  ? Colors.green.withAlpha(20)
+                                  : Colors.grey.withAlpha(20),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
                                 color: detail.active
-                                    ? Colors.green
-                                    : Colors.grey,
+                                    ? Colors.green.withAlpha(60)
+                                    : Colors.grey.withAlpha(60),
                               ),
                             ),
-                          ],
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  detail.active
+                                      ? Icons.pause_circle_outline
+                                      : Icons.play_circle_outline,
+                                  size: 14,
+                                  color: detail.active
+                                      ? Colors.green
+                                      : Colors.grey,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  detail.active ? 'Active' : 'Inactive',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: detail.active
+                                        ? Colors.green
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -492,13 +504,11 @@ class _WebhookSecretsCardState extends State<_WebhookSecretsCard> {
                   onPressed: () =>
                       setState(() => _tokenVisible = !_tokenVisible),
                   tooltip: _tokenVisible ? 'Hide' : 'Show',
-                  visualDensity: VisualDensity.compact,
                 ),
                 IconButton(
                   icon: const Icon(Icons.copy, size: 16),
                   onPressed: () => _copy(widget.secrets.webhookToken, 'Token'),
                   tooltip: 'Copy token',
-                  visualDensity: VisualDensity.compact,
                 ),
               ],
             ),
@@ -545,7 +555,6 @@ class _CopyableField extends StatelessWidget {
           icon: const Icon(Icons.copy, size: 16),
           onPressed: onCopy,
           tooltip: 'Copy $label',
-          visualDensity: VisualDensity.compact,
         ),
       ],
     );

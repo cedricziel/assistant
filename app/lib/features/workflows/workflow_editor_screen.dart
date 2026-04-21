@@ -468,6 +468,17 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
       return;
     }
 
+    // Block saving complex branching graphs from mobile layout — mobile uses
+    // a linear edge chain which would silently destroy branching edges.
+    if (_isMobileLayout && isComplexDag(_nodes, _edges)) {
+      setState(
+        () => _error =
+            'This workflow has a complex graph that cannot be saved from mobile layout. '
+            'Use a wider screen to preserve branching edges.',
+      );
+      return;
+    }
+
     setState(() {
       _submitting = true;
       _error = null;
@@ -780,8 +791,6 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
                       IconButton(
                         icon: const Icon(Icons.close, size: 14),
                         onPressed: () => setState(() => _error = null),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
                       ),
                     ],
                   ),
@@ -1132,7 +1141,6 @@ class _MobileNodeCard extends StatelessWidget {
               icon: Icon(Icons.edit_outlined, size: 20, color: color),
               onPressed: onEdit,
               tooltip: 'Edit',
-              visualDensity: VisualDensity.compact,
             ),
             IconButton(
               icon: Icon(
@@ -1142,14 +1150,16 @@ class _MobileNodeCard extends StatelessWidget {
               ),
               onPressed: onDelete,
               tooltip: 'Delete',
-              visualDensity: VisualDensity.compact,
             ),
             ReorderableDelayedDragStartListener(
               index: index,
-              child: Icon(
-                Icons.drag_handle,
-                size: 24,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Icon(
+                  Icons.drag_handle,
+                  size: 24,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ],
@@ -1226,21 +1236,28 @@ class _EdgeDeleteHandle extends StatelessWidget {
   Widget build(BuildContext context) {
     final mid = _midpoint();
     return Positioned(
-      left: mid.dx - 10,
-      top: mid.dy - 10,
+      left: mid.dx - 18,
+      top: mid.dy - 18,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onDelete,
-        child: Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.error,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.close,
-            size: 12,
-            color: Theme.of(context).colorScheme.surface,
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Center(
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.error,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.close,
+                size: 12,
+                color: Theme.of(context).colorScheme.surface,
+              ),
+            ),
           ),
         ),
       ),
@@ -1351,27 +1368,34 @@ class _NodeWidget extends StatelessWidget {
               if (!isConnecting) ...[
                 // Edit button (top-right)
                 Positioned(
-                  top: -8,
-                  right: 24,
+                  top: -15,
+                  right: 17,
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: onEdit,
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withValues(alpha: 0.3),
-                            blurRadius: 4,
+                    child: SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: Center(
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: color.withValues(alpha: 0.3),
+                                blurRadius: 4,
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.edit,
-                        size: 12,
-                        color: Theme.of(context).colorScheme.surface,
+                          child: Icon(
+                            Icons.edit,
+                            size: 12,
+                            color: Theme.of(context).colorScheme.surface,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1379,29 +1403,36 @@ class _NodeWidget extends StatelessWidget {
 
                 // Delete button (top-right, offset)
                 Positioned(
-                  top: -8,
-                  right: -2,
+                  top: -15,
+                  right: -9,
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: onDelete,
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.error,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.error.withValues(alpha: 0.3),
-                            blurRadius: 4,
+                    child: SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: Center(
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.error,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.error.withValues(alpha: 0.3),
+                                blurRadius: 4,
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.close,
-                        size: 12,
-                        color: Theme.of(context).colorScheme.surface,
+                          child: Icon(
+                            Icons.close,
+                            size: 12,
+                            color: Theme.of(context).colorScheme.surface,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1409,27 +1440,34 @@ class _NodeWidget extends StatelessWidget {
 
                 // Connect button (bottom-center)
                 Positioned(
-                  bottom: -10,
-                  left: _kNodeW / 2 - 11,
+                  bottom: -17,
+                  left: _kNodeW / 2 - 18,
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: onStartConnect,
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withValues(alpha: 0.3),
-                            blurRadius: 4,
+                    child: SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: Center(
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: color.withValues(alpha: 0.3),
+                                blurRadius: 4,
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.arrow_downward,
-                        size: 12,
-                        color: Theme.of(context).colorScheme.surface,
+                          child: Icon(
+                            Icons.arrow_downward,
+                            size: 12,
+                            color: Theme.of(context).colorScheme.surface,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1642,7 +1680,6 @@ class _PaletteItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      dense: true,
       leading: Icon(icon, size: 20),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(subtitle, style: const TextStyle(fontSize: 11)),

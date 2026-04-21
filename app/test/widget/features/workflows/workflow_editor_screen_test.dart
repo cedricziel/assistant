@@ -241,7 +241,8 @@ void main() {
       'editing http_request node URL via config sheet keeps card in list',
       (tester) async {
         // 500px: still mobile layout (<600) but wide enough for the config sheet.
-        tester.view.physicalSize = const Size(500, 844);
+        // Use 1000px height to ensure both cards are on-screen with default-density buttons.
+        tester.view.physicalSize = const Size(500, 1000);
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
