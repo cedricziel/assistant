@@ -1,7 +1,7 @@
 name: assistant_app
 description: A new Flutter project.
 publish_to: none
-version: 0.1.130
+version: 0.1.131
 environment:
   sdk: ^3.11.4
 dependencies:
@@ -55,8 +55,8 @@ flutter_launcher_icons:
   web:
     generate: true
     image_path: macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png
-    background_color: "#080C1A"
-    theme_color: "#080C1A"
+    background_color: '#080C1A'
+    theme_color: '#080C1A'
 flutter:
   uses-material-design: true
   assets:
