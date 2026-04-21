@@ -180,6 +180,34 @@ class WorkflowDetailNotifier extends AsyncNotifier<WorkflowDetailState> {
     state = const AsyncLoading();
     state = await AsyncValue.guard(_fetch);
   }
+
+  /// Triggers a test run. Returns (preview, null) on success or (null, error).
+  Future<(WorkflowRunPreview?, String?)> testRun() async {
+    final client = _apiClient(ref);
+    if (client == null) return (null, 'Not connected');
+    try {
+      final res = await client.workflows.testRunWorkflow(id: _workflowId);
+      await refresh();
+      return (res.data, null);
+    } catch (e) {
+      return (null, e.toString());
+    }
+  }
+
+  /// Fetches webhook secrets. Returns null on failure or if not a webhook
+  /// workflow.
+  Future<WorkflowWebhookSecrets?> fetchWebhookSecrets() async {
+    final client = _apiClient(ref);
+    if (client == null) return null;
+    try {
+      final res = await client.workflows.getWorkflowWebhookSecrets(
+        id: _workflowId,
+      );
+      return res.data;
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// Family provider for [WorkflowDetailNotifier].
@@ -231,7 +259,7 @@ class WorkflowRunDetailNotifier extends AsyncNotifier<WorkflowRunDetailState> {
 
   Future<void> refresh() async {
     state = const AsyncLoading();
-    state = AsyncData(await _fetch());
+    state = await AsyncValue.guard(_fetch);
   }
 }
 

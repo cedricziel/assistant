@@ -108,11 +108,13 @@ class _WorkflowRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: workflow.active
-            ? Colors.green.shade50
+            ? Colors.green.withAlpha(20)
             : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: workflow.active ? Colors.green.shade300 : Colors.grey.shade400,
+          color: workflow.active
+              ? Colors.green.withAlpha(60)
+              : Colors.grey.withAlpha(60),
         ),
       ),
       child: Text(
@@ -120,7 +122,7 @@ class _WorkflowRow extends StatelessWidget {
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: workflow.active ? Colors.green.shade700 : Colors.grey.shade600,
+          color: workflow.active ? Colors.green : Colors.grey,
         ),
       ),
     );
@@ -128,12 +130,12 @@ class _WorkflowRow extends StatelessWidget {
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: workflow.active
-            ? Colors.green.shade100
-            : Colors.grey.shade200,
+            ? Colors.green.withAlpha(30)
+            : Colors.grey.withAlpha(30),
         child: Icon(
           Icons.account_tree_outlined,
           size: 20,
-          color: workflow.active ? Colors.green.shade700 : Colors.grey.shade500,
+          color: workflow.active ? Colors.green : Colors.grey,
         ),
       ),
       title: Row(

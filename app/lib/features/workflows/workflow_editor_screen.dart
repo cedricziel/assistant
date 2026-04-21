@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../shared/platform/adaptive_dialog.dart';
+import '../personas/personas_provider.dart';
 import 'workflows_provider.dart';
 
 // ---------------------------------------------------------------------------
@@ -107,7 +109,14 @@ class EditorNode {
     }
   }
 
-  Map<String, dynamic> toJson() => {'id': id, 'kind': kind, 'config': config};
+  bool get disabled => config['disabled'] == true;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'kind': kind,
+    'config': config,
+    'position': {'x': position.dx, 'y': position.dy},
+  };
 }
 
 class EditorEdge {
@@ -317,11 +326,7 @@ class _EdgePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_EdgePainter old) =>
-      old.nodes != nodes ||
-      old.edges != edges ||
-      old.pendingFrom != pendingFrom ||
-      old.pendingEnd != pendingEnd;
+  bool shouldRepaint(_EdgePainter old) => true;
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +349,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
   final _uuid = const Uuid();
   final _nameController = TextEditingController();
   final _descController = TextEditingController();
+  final _canvasController = TransformationController();
 
   List<EditorNode> _nodes = [];
   List<EditorEdge> _edges = [];
@@ -358,13 +364,21 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
   bool _submitting = false;
   String? _error;
   bool _loaded = false;
+  bool _dirty = false;
+  bool _initialViewportSet = false;
 
   // Tracks which layout branch is active; set during build by LayoutBuilder.
   bool _isMobileLayout = false;
 
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
+
   @override
   void initState() {
     super.initState();
+    _nameController.addListener(_markDirty);
+    _descController.addListener(_markDirty);
     if (!widget.isEdit) {
       // Pre-populate with a manual trigger to get started
       _nodes = [
@@ -382,7 +396,130 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
   void dispose() {
     _nameController.dispose();
     _descController.dispose();
+    _canvasController.dispose();
     super.dispose();
+  }
+
+  /// Returns the bounding rect around all nodes (in canvas coords).
+  Rect _nodeBounds() {
+    if (_nodes.isEmpty) return Rect.zero;
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final n in _nodes) {
+      if (n.position.dx < minX) minX = n.position.dx;
+      if (n.position.dy < minY) minY = n.position.dy;
+      if (n.position.dx + _kNodeW > maxX) maxX = n.position.dx + _kNodeW;
+      if (n.position.dy + _kNodeH > maxY) maxY = n.position.dy + _kNodeH;
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  /// Pans and scales so all nodes fit in the viewport with padding.
+  void _fitToView(Size viewportSize) {
+    if (_nodes.isEmpty) return;
+    final bounds = _nodeBounds();
+    const padding = 80.0;
+    final padded = bounds.inflate(padding);
+    final scaleX = viewportSize.width / padded.width;
+    final scaleY = viewportSize.height / padded.height;
+    final scale = math.min(scaleX, scaleY).clamp(0.4, 2.5);
+    final tx =
+        (viewportSize.width - padded.width * scale) / 2 - padded.left * scale;
+    final ty =
+        (viewportSize.height - padded.height * scale) / 2 - padded.top * scale;
+    _canvasController.value = Matrix4.identity()
+      ..setTranslationRaw(tx, ty, 0)
+      ..scaleByDouble(scale, scale, 1.0, 1.0);
+  }
+
+  /// Auto-layout: arrange nodes top-down using topological order.
+  void _autoLayout() {
+    if (_nodes.isEmpty) return;
+    // Build adjacency from edges.
+    final order = <String>[];
+    final visited = <String>{};
+    final adj = <String, List<String>>{};
+    for (final e in _edges) {
+      adj.putIfAbsent(e.from, () => []).add(e.to);
+    }
+
+    void visit(String id) {
+      if (visited.contains(id)) return;
+      visited.add(id);
+      for (final child in adj[id] ?? []) {
+        visit(child);
+      }
+      order.insert(0, id);
+    }
+
+    // Start from triggers, then any remaining.
+    for (final n in _nodes.where((n) => n.kind == 'trigger')) {
+      visit(n.id);
+    }
+    for (final n in _nodes) {
+      visit(n.id);
+    }
+
+    // Assign positions: center horizontally, cascade vertically.
+    const startY = 150.0;
+    const spacingY = _kNodeH + 80;
+
+    // Assign depth per node for multi-column layout.
+    final depth = <String, int>{};
+    for (final id in order) {
+      var d = 0;
+      // Find max depth of parents + 1.
+      for (final e in _edges.where((e) => e.to == id)) {
+        final pd = depth[e.from] ?? 0;
+        if (pd + 1 > d) d = pd + 1;
+      }
+      depth[id] = d;
+    }
+
+    // Group by depth.
+    final byDepth = <int, List<String>>{};
+    for (final entry in depth.entries) {
+      byDepth.putIfAbsent(entry.value, () => []).add(entry.key);
+    }
+
+    setState(() {
+      for (final entry in byDepth.entries) {
+        final d = entry.key;
+        final ids = entry.value;
+        final totalW = ids.length * _kNodeW + (ids.length - 1) * 40;
+        var x = (_kCanvasW - totalW) / 2;
+        for (final id in ids) {
+          final idx = _nodes.indexWhere((n) => n.id == id);
+          if (idx >= 0) {
+            _nodes[idx].position = Offset(x, startY + d * spacingY);
+          }
+          x += _kNodeW + 40;
+        }
+      }
+      _dirty = true;
+    });
+  }
+
+  Future<bool> _maybeDiscardChanges() async {
+    if (!_dirty) return true;
+    final discard = await showAdaptiveConfirmDialog(
+      context: context,
+      title: 'Discard changes?',
+      content: 'You have unsaved changes that will be lost.',
+      confirmLabel: 'Discard',
+      isDestructive: true,
+    );
+    return discard;
+  }
+
+  Future<void> _navigateBack() async {
+    if (!await _maybeDiscardChanges()) return;
+    if (!mounted) return;
+    if (widget.isEdit) {
+      context.go('/workflows/${widget.workflowId}');
+    } else {
+      context.go('/workflows');
+    }
   }
 
   void _populateFromDetail(WorkflowDetailState state) {
@@ -402,19 +539,28 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
       _maxSteps = (execRaw['max_steps'] as int?) ?? 200;
       _maxVisitsPerNode = (execRaw['max_visits_per_node'] as int?) ?? 25;
 
-      // Lay nodes out in a vertical cascade since we have no stored positions
-      double x = (_kCanvasW / 2) - (_kNodeW / 2);
-      double y = 150;
+      // Restore stored positions if available, otherwise cascade vertically
+      double fallbackX = (_kCanvasW / 2) - (_kNodeW / 2);
+      double fallbackY = 150;
       _nodes = nodesRaw.asMap().entries.map((entry) {
         final raw = entry.value as Map;
-        final node = EditorNode(
+        final posRaw = raw['position'] as Map?;
+        final Offset pos;
+        if (posRaw != null) {
+          pos = Offset(
+            (posRaw['x'] as num).toDouble(),
+            (posRaw['y'] as num).toDouble(),
+          );
+        } else {
+          pos = Offset(fallbackX, fallbackY);
+          fallbackY += _kNodeH + 60;
+        }
+        return EditorNode(
           id: raw['id'] as String,
           kind: raw['kind'] as String,
           config: Map<String, dynamic>.from(raw['config'] as Map? ?? {}),
-          position: Offset(x, y),
+          position: pos,
         );
-        y += _kNodeH + 60;
-        return node;
       }).toList();
 
       _edges = edgesRaw.map((raw) {
@@ -426,6 +572,8 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
         );
       }).toList();
     }
+    // Loading from server is not a user edit — reset dirty flag.
+    _dirty = false;
   }
 
   Map<String, dynamic> _buildGraph() {
@@ -454,6 +602,17 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
     final validationError = _validateGraph();
     if (validationError != null) {
       setState(() => _error = validationError);
+      return;
+    }
+
+    // Block saving complex branching graphs from mobile layout — mobile uses
+    // a linear edge chain which would silently destroy branching edges.
+    if (_isMobileLayout && isComplexDag(_nodes, _edges)) {
+      setState(
+        () => _error =
+            'This workflow has a complex graph that cannot be saved from mobile layout. '
+            'Use a wider screen to preserve branching edges.',
+      );
       return;
     }
 
@@ -496,6 +655,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
       return;
     }
 
+    _dirty = false; // Prevent discard prompt on navigation.
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(widget.isEdit ? 'Workflow updated' : 'Workflow created'),
@@ -562,6 +722,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
       );
       _connectingFrom = null;
       _pendingEdgeEnd = null;
+      _dirty = true;
     });
   }
 
@@ -586,34 +747,51 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
       ),
     );
     if (result != null) {
-      setState(() => _nodes.add(result));
+      setState(() {
+        _nodes.add(result);
+        _dirty = true;
+      });
     }
   }
 
   Future<void> _editNode(EditorNode node) async {
+    final personas = ref.read(personasProvider).value?.personas ?? [];
+    final personaNames = personas.map((p) => (p.id, p.name)).toList();
     final updated = await showModalBottomSheet<EditorNode>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => _NodeConfigSheet(node: node),
+      builder: (ctx) =>
+          _NodeConfigSheet(node: node, personaNames: personaNames),
     );
     if (updated != null) {
       setState(() {
         final idx = _nodes.indexWhere((n) => n.id == node.id);
         if (idx >= 0) _nodes[idx] = updated;
+        _dirty = true;
       });
     }
   }
 
-  void _deleteNode(String nodeId) {
+  Future<void> _deleteNode(String nodeId) async {
+    final confirmed = await showAdaptiveConfirmDialog(
+      context: context,
+      title: 'Delete node?',
+      content: 'This will also remove all edges connected to this node.',
+      confirmLabel: 'Delete',
+      isDestructive: true,
+    );
+    if (!confirmed || !mounted) return;
     setState(() {
       _nodes.removeWhere((n) => n.id == nodeId);
       _edges.removeWhere((e) => e.from == nodeId || e.to == nodeId);
+      _dirty = true;
     });
   }
 
   void _deleteEdge(EditorEdge edge) {
     setState(() {
       _edges.remove(edge);
+      _dirty = true;
     });
   }
 
@@ -632,6 +810,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
             _active = active;
             _maxSteps = maxSteps;
             _maxVisitsPerNode = maxVisitsPerNode;
+            _dirty = true;
           });
           Navigator.of(ctx).pop();
         },
@@ -645,6 +824,47 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
     if (widget.isEdit) {
       final detailAsync = ref.watch(workflowDetailProvider(widget.workflowId!));
       detailAsync.whenData(_populateFromDetail);
+
+      // Show loading/error until data is available
+      if (!_loaded) {
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Edit Workflow'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => context.go('/workflows/${widget.workflowId}'),
+            ),
+          ),
+          body: detailAsync.when(
+            loading: () =>
+                const Center(child: CircularProgressIndicator.adaptive()),
+            error: (err, _) => Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error,
+                    size: 48,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(err.toString(), textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => ref
+                        .read(
+                          workflowDetailProvider(widget.workflowId!).notifier,
+                        )
+                        .refresh(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+            data: (_) => const SizedBox.shrink(),
+          ),
+        );
+      }
     }
 
     return LayoutBuilder(
@@ -652,131 +872,184 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
         _isMobileLayout = outerConstraints.maxWidth < 600;
         final theme = Theme.of(context);
 
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(widget.isEdit ? 'Edit Workflow' : 'New Workflow'),
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back),
-              onPressed: () => widget.isEdit
-                  ? context.go('/workflows/${widget.workflowId}')
-                  : context.go('/workflows'),
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.settings_outlined),
-                tooltip: 'Workflow settings',
-                onPressed: _showSettings,
+        // Center canvas on nodes once after first layout.
+        if (!_initialViewportSet && !_isMobileLayout && _nodes.isNotEmpty) {
+          _initialViewportSet = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _fitToView(
+              Size(outerConstraints.maxWidth, outerConstraints.maxHeight),
+            );
+          });
+        }
+
+        return PopScope(
+          canPop: !_dirty,
+          onPopInvokedWithResult: (didPop, _) async {
+            if (didPop) return;
+            await _navigateBack();
+          },
+          child: Scaffold(
+            appBar: AppBar(
+              title: Text(widget.isEdit ? 'Edit Workflow' : 'New Workflow'),
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: _navigateBack,
               ),
-              if (_submitting)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator.adaptive(strokeWidth: 2),
-                  ),
-                )
-              else
-                TextButton(
-                  onPressed: _save,
-                  child: Text(
-                    widget.isEdit ? 'Save' : 'Create',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.primary,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.settings_outlined),
+                  tooltip: 'Workflow settings',
+                  onPressed: _showSettings,
+                ),
+                if (_submitting)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+                    ),
+                  )
+                else
+                  TextButton(
+                    onPressed: _save,
+                    child: Text(
+                      widget.isEdit ? 'Save' : 'Create',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.primary,
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
-          body: Column(
-            children: [
-              // Error banner (shared between both layouts)
-              if (_error != null)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  color: theme.colorScheme.errorContainer,
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        size: 16,
-                        color: theme.colorScheme.onErrorContainer,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _error!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.onErrorContainer,
+              ],
+            ),
+            body: Column(
+              children: [
+                // Error banner (shared between both layouts)
+                if (_error != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    color: theme.colorScheme.errorContainer,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 16,
+                          color: theme.colorScheme.onErrorContainer,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _error!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.colorScheme.onErrorContainer,
+                            ),
                           ),
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 14),
-                        onPressed: () => setState(() => _error = null),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                    ],
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 14),
+                          onPressed: () => setState(() => _error = null),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
 
-              // Layout branch
-              Expanded(
-                child: _isMobileLayout
-                    ? _MobileWorkflowEditor(
-                        nodes: _nodes,
-                        edges: _edges,
-                        onNodesChanged: (nodes) =>
-                            setState(() => _nodes = nodes),
-                        onAddNode: _addNode,
-                        onEditNode: _editNode,
-                        onDeleteNode: _deleteNode,
-                      )
-                    : _DesktopCanvasEditor(
-                        nodes: _nodes,
-                        edges: _edges,
-                        connectingFrom: _connectingFrom,
-                        pendingEdgeEnd: _pendingEdgeEnd,
-                        onDragNode: (node, delta) {
-                          setState(() {
-                            node.position = Offset(
-                              (node.position.dx + delta.dx).clamp(
-                                0,
-                                _kCanvasW - _kNodeW,
-                              ),
-                              (node.position.dy + delta.dy).clamp(
-                                0,
-                                _kCanvasH - _kNodeH,
+                // Layout branch
+                Expanded(
+                  child: _isMobileLayout
+                      ? _MobileWorkflowEditor(
+                          nodes: _nodes,
+                          edges: _edges,
+                          onNodesChanged: (nodes) => setState(() {
+                            _nodes = nodes;
+                            _dirty = true;
+                          }),
+                          onAddNode: _addNode,
+                          onEditNode: _editNode,
+                          onDeleteNode: _deleteNode,
+                        )
+                      : _DesktopCanvasEditor(
+                          canvasController: _canvasController,
+                          nodes: _nodes,
+                          edges: _edges,
+                          connectingFrom: _connectingFrom,
+                          pendingEdgeEnd: _pendingEdgeEnd,
+                          onDragNode: (node, delta) {
+                            setState(() {
+                              node.position = Offset(
+                                (node.position.dx + delta.dx).clamp(
+                                  0,
+                                  _kCanvasW - _kNodeW,
+                                ),
+                                (node.position.dy + delta.dy).clamp(
+                                  0,
+                                  _kCanvasH - _kNodeH,
+                                ),
+                              );
+                              _dirty = true;
+                            });
+                          },
+                          onEditNode: _editNode,
+                          onDeleteNode: _deleteNode,
+                          onStartConnect: _startConnecting,
+                          onCompleteEdge: _completeEdge,
+                          onCancelConnecting: _cancelConnecting,
+                          onUpdatePendingEdge: (offset) =>
+                              setState(() => _pendingEdgeEnd = offset),
+                          onDeleteEdge: _deleteEdge,
+                        ),
+                ),
+              ],
+            ),
+            floatingActionButton: _isMobileLayout
+                ? null
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FloatingActionButton.small(
+                        heroTag: 'fit',
+                        onPressed: () => _fitToView(
+                          Size(
+                            outerConstraints.maxWidth,
+                            outerConstraints.maxHeight,
+                          ),
+                        ),
+                        tooltip: 'Fit to view',
+                        child: const Icon(Icons.fit_screen),
+                      ),
+                      const SizedBox(height: 8),
+                      FloatingActionButton.small(
+                        heroTag: 'layout',
+                        onPressed: () {
+                          _autoLayout();
+                          // Re-fit after layout so nodes are visible.
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            _fitToView(
+                              Size(
+                                outerConstraints.maxWidth,
+                                outerConstraints.maxHeight,
                               ),
                             );
                           });
                         },
-                        onEditNode: _editNode,
-                        onDeleteNode: _deleteNode,
-                        onStartConnect: _startConnecting,
-                        onCompleteEdge: _completeEdge,
-                        onCancelConnecting: _cancelConnecting,
-                        onUpdatePendingEdge: (offset) =>
-                            setState(() => _pendingEdgeEnd = offset),
-                        onDeleteEdge: _deleteEdge,
+                        tooltip: 'Auto-layout',
+                        child: const Icon(Icons.account_tree),
                       ),
-              ),
-            ],
+                      const SizedBox(height: 8),
+                      FloatingActionButton(
+                        heroTag: 'add',
+                        onPressed: _addNode,
+                        tooltip: 'Add node',
+                        child: const Icon(Icons.add),
+                      ),
+                    ],
+                  ),
           ),
-          floatingActionButton: _isMobileLayout
-              ? null
-              : FloatingActionButton(
-                  onPressed: _addNode,
-                  tooltip: 'Add node',
-                  child: const Icon(Icons.add),
-                ),
         );
       },
     );
@@ -788,6 +1061,7 @@ class _WorkflowEditorScreenState extends ConsumerState<WorkflowEditorScreen> {
 
 class _DesktopCanvasEditor extends StatelessWidget {
   const _DesktopCanvasEditor({
+    required this.canvasController,
     required this.nodes,
     required this.edges,
     required this.connectingFrom,
@@ -802,6 +1076,7 @@ class _DesktopCanvasEditor extends StatelessWidget {
     required this.onDeleteEdge,
   });
 
+  final TransformationController canvasController;
   final List<EditorNode> nodes;
   final List<EditorEdge> edges;
   final String? connectingFrom;
@@ -856,6 +1131,7 @@ class _DesktopCanvasEditor extends StatelessWidget {
         // Canvas
         Expanded(
           child: InteractiveViewer(
+            transformationController: canvasController,
             constrained: false,
             boundaryMargin: const EdgeInsets.all(100),
             minScale: 0.4,
@@ -962,22 +1238,15 @@ class _MobileWorkflowEditor extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            color: Colors.orange.shade50,
+            color: Colors.orange.withAlpha(20),
             child: Row(
               children: [
-                Icon(
-                  Icons.info_outline,
-                  size: 16,
-                  color: Colors.orange.shade800,
-                ),
+                const Icon(Icons.info_outline, size: 16, color: Colors.orange),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Complex graph — edit branching on a wider screen',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.orange.shade800,
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.orange),
                   ),
                 ),
               ],
@@ -1046,60 +1315,89 @@ class _MobileNodeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = node.color;
+    final isDisabled = node.disabled;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: color.withValues(alpha: 0.4), width: 1.5),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(node.icon, color: color, size: 20),
+    return Opacity(
+      opacity: isDisabled ? 0.5 : 1.0,
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: color.withValues(alpha: 0.4), width: 1.5),
         ),
-        title: Text(
-          node.label,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: color.withValues(alpha: 0.9),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 4,
           ),
-        ),
-        subtitle: Text(node.kind, style: const TextStyle(fontSize: 11)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(Icons.edit_outlined, size: 20, color: color),
-              onPressed: onEdit,
-              tooltip: 'Edit',
-              visualDensity: VisualDensity.compact,
+          leading: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
             ),
-            IconButton(
-              icon: Icon(
-                Icons.delete_outline,
-                size: 20,
-                color: Theme.of(context).colorScheme.error,
+            child: Icon(node.icon, color: color, size: 20),
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  node.label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: color.withValues(alpha: 0.9),
+                  ),
+                ),
               ),
-              onPressed: onDelete,
-              tooltip: 'Delete',
-              visualDensity: VisualDensity.compact,
-            ),
-            ReorderableDelayedDragStartListener(
-              index: index,
-              child: Icon(
-                Icons.drag_handle,
-                size: 24,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              if (isDisabled)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'Disabled',
+                    style: TextStyle(fontSize: 10, color: Colors.grey),
+                  ),
+                ),
+            ],
+          ),
+          subtitle: Text(node.kind, style: const TextStyle(fontSize: 11)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(Icons.edit_outlined, size: 20, color: color),
+                onPressed: onEdit,
+                tooltip: 'Edit',
               ),
-            ),
-          ],
+              IconButton(
+                icon: Icon(
+                  Icons.delete_outline,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                onPressed: onDelete,
+                tooltip: 'Delete',
+              ),
+              ReorderableDelayedDragStartListener(
+                index: index,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Icon(
+                    Icons.drag_handle,
+                    size: 24,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1173,21 +1471,28 @@ class _EdgeDeleteHandle extends StatelessWidget {
   Widget build(BuildContext context) {
     final mid = _midpoint();
     return Positioned(
-      left: mid.dx - 10,
-      top: mid.dy - 10,
+      left: mid.dx - 18,
+      top: mid.dy - 18,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onDelete,
-        child: Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.error,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.close,
-            size: 12,
-            color: Theme.of(context).colorScheme.surface,
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Center(
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.error,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.close,
+                size: 12,
+                color: Theme.of(context).colorScheme.surface,
+              ),
+            ),
           ),
         ),
       ),
@@ -1227,162 +1532,186 @@ class _NodeWidget extends StatelessWidget {
     return Positioned(
       left: node.position.dx,
       top: node.position.dy,
-      child: GestureDetector(
-        onPanUpdate: (details) => onDrag(details.delta),
-        onTap: onTap,
-        child: SizedBox(
-          width: _kNodeW,
-          height: _kNodeH,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // Main card
-              Material(
-                elevation: isConnectingFrom ? 6 : 2,
-                borderRadius: BorderRadius.circular(12),
-                color: isConnecting && !isConnectingFrom
-                    ? Theme.of(context).colorScheme.surface
-                    : color.withValues(alpha: 0.08),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isConnectingFrom
-                          ? color
-                          : color.withValues(alpha: 0.4),
-                      width: isConnectingFrom ? 2.5 : 1.5,
+      child: Opacity(
+        opacity: node.disabled ? 0.45 : 1.0,
+        child: GestureDetector(
+          onPanUpdate: (details) => onDrag(details.delta),
+          onTap: onTap,
+          child: SizedBox(
+            width: _kNodeW,
+            height: _kNodeH,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Main card
+                Material(
+                  elevation: isConnectingFrom ? 6 : 2,
+                  borderRadius: BorderRadius.circular(12),
+                  color: isConnecting && !isConnectingFrom
+                      ? Theme.of(context).colorScheme.surface
+                      : color.withValues(alpha: 0.08),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isConnectingFrom
+                            ? color
+                            : color.withValues(alpha: 0.4),
+                        width: isConnectingFrom ? 2.5 : 1.5,
+                      ),
                     ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(node.icon, size: 16, color: color),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                node.label,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: color.withValues(alpha: 0.9),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(node.icon, size: 16, color: color),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  node.label,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: color.withValues(alpha: 0.9),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            node.id.length > 8
+                                ? node.id.substring(0, 8)
+                                : node.id,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                             ),
-                          ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Action buttons (shown when NOT in connecting mode)
+                if (!isConnecting) ...[
+                  // Edit button (top-right)
+                  Positioned(
+                    top: -15,
+                    right: 17,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onEdit,
+                      child: SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: Center(
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: color.withValues(alpha: 0.3),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              Icons.edit,
+                              size: 12,
+                              color: Theme.of(context).colorScheme.surface,
+                            ),
+                          ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          node.id.length > 8
-                              ? node.id.substring(0, 8)
-                              : node.id,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontFamily: 'monospace',
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+
+                  // Delete button (top-right, offset)
+                  Positioned(
+                    top: -15,
+                    right: -9,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onDelete,
+                      child: SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: Center(
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.error,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.error.withValues(alpha: 0.3),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              Icons.close,
+                              size: 12,
+                              color: Theme.of(context).colorScheme.surface,
+                            ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
 
-              // Action buttons (shown when NOT in connecting mode)
-              if (!isConnecting) ...[
-                // Edit button (top-right)
-                Positioned(
-                  top: -8,
-                  right: 24,
-                  child: GestureDetector(
-                    onTap: onEdit,
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withValues(alpha: 0.3),
-                            blurRadius: 4,
+                  // Connect button (bottom-center)
+                  Positioned(
+                    bottom: -17,
+                    left: _kNodeW / 2 - 18,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onStartConnect,
+                      child: SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: Center(
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: color.withValues(alpha: 0.3),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              Icons.arrow_downward,
+                              size: 12,
+                              color: Theme.of(context).colorScheme.surface,
+                            ),
                           ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.edit,
-                        size: 12,
-                        color: Theme.of(context).colorScheme.surface,
+                        ),
                       ),
                     ),
                   ),
-                ),
-
-                // Delete button (top-right, offset)
-                Positioned(
-                  top: -8,
-                  right: -2,
-                  child: GestureDetector(
-                    onTap: onDelete,
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.error,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.error.withValues(alpha: 0.3),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.close,
-                        size: 12,
-                        color: Theme.of(context).colorScheme.surface,
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Connect button (bottom-center)
-                Positioned(
-                  bottom: -10,
-                  left: _kNodeW / 2 - 11,
-                  child: GestureDetector(
-                    onTap: onStartConnect,
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withValues(alpha: 0.3),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.arrow_downward,
-                        size: 12,
-                        color: Theme.of(context).colorScheme.surface,
-                      ),
-                    ),
-                  ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -1589,7 +1918,6 @@ class _PaletteItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      dense: true,
       leading: Icon(icon, size: 20),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(subtitle, style: const TextStyle(fontSize: 11)),
@@ -1603,9 +1931,12 @@ class _PaletteItem extends StatelessWidget {
 // Node config bottom sheet
 
 class _NodeConfigSheet extends StatefulWidget {
-  const _NodeConfigSheet({required this.node});
+  const _NodeConfigSheet({required this.node, this.personaNames = const []});
 
   final EditorNode node;
+
+  /// List of (id, name) pairs for persona selection on assistant_turn nodes.
+  final List<(String, String)> personaNames;
 
   @override
   State<_NodeConfigSheet> createState() => _NodeConfigSheetState();
@@ -1619,6 +1950,8 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
   late TextEditingController _urlCtrl;
   late TextEditingController _keyCtrl;
   String _method = 'GET';
+  String? _personaId;
+  bool _disabled = false;
 
   @override
   void initState() {
@@ -1632,6 +1965,8 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
     _urlCtrl = TextEditingController(text: _config['url'] as String? ?? '');
     _keyCtrl = TextEditingController(text: _config['key'] as String? ?? '');
     _method = _config['method'] as String? ?? 'GET';
+    _personaId = _config['persona_id'] as String?;
+    _disabled = _config['disabled'] == true;
   }
 
   @override
@@ -1655,6 +1990,11 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
         break;
       case 'assistant_turn':
         _config['prompt'] = _promptCtrl.text;
+        if (_personaId != null) {
+          _config['persona_id'] = _personaId;
+        } else {
+          _config.remove('persona_id');
+        }
         break;
       case 'http_request':
         _config['url'] = _urlCtrl.text.trim();
@@ -1663,6 +2003,12 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
       case 'has_trigger_payload_key':
         _config['key'] = _keyCtrl.text.trim();
         break;
+    }
+
+    if (_disabled) {
+      _config['disabled'] = true;
+    } else {
+      _config.remove('disabled');
     }
 
     final updated = widget.node.copyWith(config: _config);
@@ -1696,7 +2042,17 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
+          SwitchListTile.adaptive(
+            title: const Text('Enabled'),
+            subtitle: _disabled
+                ? const Text('This node will be skipped during execution')
+                : null,
+            value: !_disabled,
+            onChanged: (v) => setState(() => _disabled = !v),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          ),
+          const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: _buildConfigFields(nodeType),
@@ -1759,16 +2115,43 @@ class _NodeConfigSheetState extends State<_NodeConfigSheet> {
         );
 
       case 'assistant_turn':
-        return TextField(
-          controller: _promptCtrl,
-          minLines: 4,
-          maxLines: null,
-          decoration: const InputDecoration(
-            labelText: 'Prompt',
-            hintText: 'Enter the assistant prompt…',
-            border: OutlineInputBorder(),
-            alignLabelWithHint: true,
-          ),
+        return Column(
+          children: [
+            if (widget.personaNames.isNotEmpty) ...[
+              DropdownButtonFormField<String?>(
+                initialValue: _personaId,
+                decoration: const InputDecoration(
+                  labelText: 'Persona',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Default'),
+                  ),
+                  ...widget.personaNames.map(
+                    (p) => DropdownMenuItem<String?>(
+                      value: p.$1,
+                      child: Text(p.$2),
+                    ),
+                  ),
+                ],
+                onChanged: (v) => setState(() => _personaId = v),
+              ),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+              controller: _promptCtrl,
+              minLines: 4,
+              maxLines: null,
+              decoration: const InputDecoration(
+                labelText: 'Prompt',
+                hintText: 'Enter the assistant prompt…',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+            ),
+          ],
         );
 
       case 'http_request':

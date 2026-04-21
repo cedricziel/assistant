@@ -81,22 +81,22 @@ class _RunDetailBody extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     final statusColor = isSuccess
-        ? Colors.green.shade600
+        ? Colors.green
         : isError
         ? colorScheme.error
-        : Colors.orange.shade600;
+        : Colors.orange;
 
     final statusBg = isSuccess
-        ? Colors.green.shade50
+        ? Colors.green.withAlpha(20)
         : isError
         ? colorScheme.errorContainer
-        : Colors.orange.shade50;
+        : Colors.orange.withAlpha(20);
 
     final statusBorder = isSuccess
-        ? Colors.green.shade300
+        ? Colors.green.withAlpha(60)
         : isError
         ? colorScheme.error
-        : Colors.orange.shade300;
+        : Colors.orange.withAlpha(60);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -250,13 +250,13 @@ class _StepTileState extends State<_StepTile> {
   Color _kindColor(String kind) {
     switch (kind) {
       case 'trigger':
-        return Colors.blue.shade600;
+        return Colors.blue;
       case 'action':
-        return Colors.green.shade600;
+        return Colors.green;
       case 'condition':
-        return Colors.orange.shade600;
+        return Colors.orange;
       default:
-        return Colors.grey.shade600;
+        return Colors.grey;
     }
   }
 

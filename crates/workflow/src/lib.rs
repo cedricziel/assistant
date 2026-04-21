@@ -522,6 +522,27 @@ async fn execute_node(
     step_index: i64,
     action_executors: &[Arc<dyn WorkflowActionExecutor>],
 ) -> Result<String> {
+    // Skip disabled nodes — record a skipped step and return the primary
+    // outcome so downstream nodes still execute.
+    if node.config.get("disabled").and_then(|v| v.as_bool()) == Some(true) {
+        let outcome = match node.kind {
+            WorkflowNodeKind::Trigger => "trigger",
+            WorkflowNodeKind::Action => "success",
+            WorkflowNodeKind::Condition => "true",
+        };
+        store
+            .append_run_step(
+                run.id,
+                step_index,
+                node.id.as_str(),
+                "skipped",
+                Some("node disabled"),
+                None,
+            )
+            .await?;
+        return Ok(outcome.to_string());
+    }
+
     match node.kind {
         WorkflowNodeKind::Trigger => Ok("trigger".to_string()),
         WorkflowNodeKind::Condition => {
@@ -707,5 +728,200 @@ mod tests {
         assert_eq!(run.status, "max_visits_exceeded");
         let steps = store.list_run_steps(run_id, 100).await.expect("steps");
         assert!(!steps.is_empty());
+    }
+
+    /// A disabled action node should be skipped (recorded as "skipped") and
+    /// still route downstream via its primary outcome ("success").
+    #[tokio::test]
+    async fn disabled_node_is_skipped_during_execution() {
+        let graph = WorkflowGraph {
+            version: 1,
+            nodes: vec![
+                WorkflowNode {
+                    id: "t1".to_string(),
+                    kind: WorkflowNodeKind::Trigger,
+                    config: serde_json::json!({"type": "manual"}),
+                },
+                WorkflowNode {
+                    id: "a1".to_string(),
+                    kind: WorkflowNodeKind::Action,
+                    config: serde_json::json!({"type": "http_request", "url": "https://example.com", "disabled": true}),
+                },
+                WorkflowNode {
+                    id: "c1".to_string(),
+                    kind: WorkflowNodeKind::Condition,
+                    config: serde_json::json!({"type": "always_true"}),
+                },
+            ],
+            edges: vec![
+                WorkflowEdge {
+                    from: "t1".to_string(),
+                    to: "a1".to_string(),
+                    on: Some("trigger".to_string()),
+                    condition: None,
+                },
+                WorkflowEdge {
+                    from: "a1".to_string(),
+                    to: "c1".to_string(),
+                    on: Some("success".to_string()),
+                    condition: None,
+                },
+            ],
+            execution: WorkflowExecutionLimits {
+                max_steps: 50,
+                max_visits_per_node: 3,
+            },
+        };
+
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .expect("in-memory storage");
+        let store = storage.workflow_store();
+        let workflow_id = store
+            .create("disabled-test", "", &graph, true)
+            .await
+            .expect("create workflow");
+        let run_id = store
+            .create_run(
+                workflow_id,
+                WorkflowTriggerKind::Manual,
+                &serde_json::json!({}),
+            )
+            .await
+            .expect("create run");
+
+        process_pending_runs(&storage, &[])
+            .await
+            .expect("runner process");
+
+        let runs = store.list_runs(workflow_id, 5).await.expect("list runs");
+        let run = runs
+            .into_iter()
+            .find(|r| r.id == run_id)
+            .expect("run present");
+        assert_eq!(
+            run.status, "completed",
+            "run should complete even with a disabled node"
+        );
+
+        let steps = store.list_run_steps(run_id, 100).await.expect("steps");
+
+        // Disabled action node should have a "skipped" step.
+        let skipped = steps
+            .iter()
+            .find(|s| s.node_id == "a1" && s.node_kind == "skipped");
+        assert!(
+            skipped.is_some(),
+            "disabled action node should produce a skipped step"
+        );
+        assert_eq!(
+            skipped.unwrap().note.as_deref(),
+            Some("node disabled"),
+            "skipped step note should explain why"
+        );
+
+        // Downstream condition node should still have been reached.
+        let condition_step = steps.iter().find(|s| s.node_id == "c1");
+        assert!(
+            condition_step.is_some(),
+            "downstream condition should execute after disabled node"
+        );
+    }
+
+    /// A disabled condition node should return "true" as its primary outcome.
+    #[tokio::test]
+    async fn disabled_condition_routes_via_true_branch() {
+        let graph = WorkflowGraph {
+            version: 1,
+            nodes: vec![
+                WorkflowNode {
+                    id: "t1".to_string(),
+                    kind: WorkflowNodeKind::Trigger,
+                    config: serde_json::json!({"type": "manual"}),
+                },
+                WorkflowNode {
+                    id: "c1".to_string(),
+                    kind: WorkflowNodeKind::Condition,
+                    config: serde_json::json!({"type": "always_false", "disabled": true}),
+                },
+                WorkflowNode {
+                    id: "a_true".to_string(),
+                    kind: WorkflowNodeKind::Action,
+                    config: serde_json::json!({"type": "http_request", "url": "https://true.example.com"}),
+                },
+                WorkflowNode {
+                    id: "a_false".to_string(),
+                    kind: WorkflowNodeKind::Action,
+                    config: serde_json::json!({"type": "http_request", "url": "https://false.example.com"}),
+                },
+            ],
+            edges: vec![
+                WorkflowEdge {
+                    from: "t1".to_string(),
+                    to: "c1".to_string(),
+                    on: Some("trigger".to_string()),
+                    condition: None,
+                },
+                WorkflowEdge {
+                    from: "c1".to_string(),
+                    to: "a_true".to_string(),
+                    on: Some("true".to_string()),
+                    condition: None,
+                },
+                WorkflowEdge {
+                    from: "c1".to_string(),
+                    to: "a_false".to_string(),
+                    on: Some("false".to_string()),
+                    condition: None,
+                },
+            ],
+            execution: WorkflowExecutionLimits {
+                max_steps: 50,
+                max_visits_per_node: 3,
+            },
+        };
+
+        let storage = assistant_storage::StorageLayer::new_in_memory()
+            .await
+            .expect("in-memory storage");
+        let store = storage.workflow_store();
+        let workflow_id = store
+            .create("disabled-condition", "", &graph, true)
+            .await
+            .expect("create workflow");
+        let run_id = store
+            .create_run(
+                workflow_id,
+                WorkflowTriggerKind::Manual,
+                &serde_json::json!({}),
+            )
+            .await
+            .expect("create run");
+
+        process_pending_runs(&storage, &[])
+            .await
+            .expect("runner process");
+
+        let runs = store.list_runs(workflow_id, 5).await.expect("list runs");
+        let run = runs
+            .into_iter()
+            .find(|r| r.id == run_id)
+            .expect("run present");
+        assert_eq!(run.status, "completed");
+
+        let steps = store.list_run_steps(run_id, 100).await.expect("steps");
+
+        // The condition was disabled (always_false) but should route via "true"
+        // because disabled nodes use the primary outcome.
+        let true_branch = steps.iter().any(|s| s.node_id == "a_true");
+        let false_branch = steps.iter().any(|s| s.node_id == "a_false");
+        assert!(
+            true_branch,
+            "disabled always_false condition should route via true branch"
+        );
+        assert!(
+            !false_branch,
+            "false branch should NOT be reached when condition is disabled"
+        );
     }
 }

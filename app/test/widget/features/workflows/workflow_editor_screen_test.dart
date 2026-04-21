@@ -90,6 +90,57 @@ void main() {
     });
   });
 
+  group('EditorNode.toJson', () {
+    test('includes position in output', () {
+      final node = EditorNode(
+        id: 'n1',
+        kind: 'action',
+        config: {'type': 'http_request', 'url': 'https://example.com'},
+        position: const Offset(100.5, 250.0),
+      );
+      final json = node.toJson();
+
+      expect(json['id'], 'n1');
+      expect(json['kind'], 'action');
+      expect(json['config'], isA<Map>());
+      expect(json['position'], isA<Map>());
+      expect(json['position']['x'], 100.5);
+      expect(json['position']['y'], 250.0);
+    });
+  });
+
+  group('EditorNode.disabled', () {
+    test('returns true when config has disabled=true', () {
+      final node = EditorNode(
+        id: 'n1',
+        kind: 'action',
+        config: {'type': 'http_request', 'disabled': true},
+        position: Offset.zero,
+      );
+      expect(node.disabled, isTrue);
+    });
+
+    test('returns false when disabled key is absent', () {
+      final node = EditorNode(
+        id: 'n1',
+        kind: 'action',
+        config: {'type': 'http_request'},
+        position: Offset.zero,
+      );
+      expect(node.disabled, isFalse);
+    });
+
+    test('returns false when disabled is explicitly false', () {
+      final node = EditorNode(
+        id: 'n1',
+        kind: 'action',
+        config: {'type': 'http_request', 'disabled': false},
+        position: Offset.zero,
+      );
+      expect(node.disabled, isFalse);
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Widget tests
 
@@ -222,7 +273,8 @@ void main() {
       'editing http_request node URL via config sheet keeps card in list',
       (tester) async {
         // 500px: still mobile layout (<600) but wide enough for the config sheet.
-        tester.view.physicalSize = const Size(500, 844);
+        // Use 1000px height to ensure both cards are on-screen with default-density buttons.
+        tester.view.physicalSize = const Size(500, 1000);
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
@@ -269,8 +321,8 @@ void main() {
 
       expect(find.byType(InteractiveViewer), findsOneWidget);
 
-      // Tap the FloatingActionButton to open the node palette.
-      await tester.tap(find.byType(FloatingActionButton));
+      // Tap the "Add node" FloatingActionButton to open the node palette.
+      await tester.tap(find.byTooltip('Add node'));
       await tester.pumpAndSettle();
 
       // The section header is uppercased by _PaletteSection; items are title-cased.
@@ -286,9 +338,42 @@ void main() {
       );
     });
 
-    testWidgets('delete node in mobile view removes card from list', (
-      tester,
-    ) async {
+    testWidgets(
+      'delete node in mobile view shows confirmation then removes card',
+      (tester) async {
+        tester.view.physicalSize = const Size(400, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildScreen());
+        await tester.pump();
+
+        expect(find.text('Manual Trigger'), findsOneWidget);
+
+        // Tap delete on the trigger card — opens confirmation dialog.
+        await tester.tap(find.byIcon(Icons.delete_outline).first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Delete node?'),
+          findsOneWidget,
+          reason: 'confirmation dialog should appear',
+        );
+
+        // Confirm deletion.
+        await tester.tap(find.text('Delete'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Manual Trigger'),
+          findsNothing,
+          reason: 'card should be removed after confirming delete',
+        );
+      },
+    );
+
+    testWidgets('canceling delete keeps the node in list', (tester) async {
       tester.view.physicalSize = const Size(400, 844);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -299,14 +384,172 @@ void main() {
 
       expect(find.text('Manual Trigger'), findsOneWidget);
 
-      // Tap delete on the trigger card
+      // Tap delete on the trigger card.
       await tester.tap(find.byIcon(Icons.delete_outline).first);
+      await tester.pumpAndSettle();
+
+      // Cancel the confirmation dialog.
+      await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
       expect(
         find.text('Manual Trigger'),
+        findsOneWidget,
+        reason: 'card should remain after canceling delete',
+      );
+    });
+
+    testWidgets(
+      'desktop view shows fit-to-view, auto-layout, and add node FABs',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildScreen());
+        await tester.pump();
+
+        expect(
+          find.byTooltip('Fit to view'),
+          findsOneWidget,
+          reason: 'fit-to-view FAB should be present on desktop',
+        );
+        expect(
+          find.byTooltip('Auto-layout'),
+          findsOneWidget,
+          reason: 'auto-layout FAB should be present on desktop',
+        );
+        expect(
+          find.byTooltip('Add node'),
+          findsOneWidget,
+          reason: 'add node FAB should be present on desktop',
+        );
+      },
+    );
+
+    testWidgets('mobile view does not show desktop FABs', (tester) async {
+      tester.view.physicalSize = const Size(400, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(buildScreen());
+      await tester.pump();
+
+      expect(
+        find.byTooltip('Fit to view'),
         findsNothing,
-        reason: 'card should be removed after delete',
+        reason: 'fit-to-view FAB should not appear on mobile',
+      );
+      expect(
+        find.byTooltip('Auto-layout'),
+        findsNothing,
+        reason: 'auto-layout FAB should not appear on mobile',
+      );
+      expect(
+        find.byTooltip('Add node'),
+        findsNothing,
+        reason: 'add node FAB should not appear on mobile',
+      );
+    });
+
+    testWidgets('config sheet shows Enabled toggle for trigger node', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(500, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(buildScreen());
+      await tester.pump();
+
+      // Open config sheet on the trigger card.
+      await tester.tap(find.byIcon(Icons.edit_outlined).first);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Enabled'),
+        findsOneWidget,
+        reason: 'config sheet should show an Enabled toggle',
+      );
+      expect(
+        find.byType(SwitchListTile),
+        findsOneWidget,
+        reason: 'SwitchListTile should be present for the toggle',
+      );
+    });
+
+    testWidgets(
+      'disabling a node via config sheet shows Disabled chip on card',
+      (tester) async {
+        tester.view.physicalSize = const Size(500, 1000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildScreen());
+        await tester.pump();
+
+        // No "Disabled" chip before toggling.
+        expect(
+          find.text('Disabled'),
+          findsNothing,
+          reason: 'Disabled chip should not appear initially',
+        );
+
+        // Open config sheet on the trigger card.
+        await tester.tap(find.byIcon(Icons.edit_outlined).first);
+        await tester.pumpAndSettle();
+
+        // Toggle the Enabled switch off.
+        await tester.tap(find.byType(SwitchListTile));
+        await tester.pumpAndSettle();
+
+        // Apply the config change.
+        await tester.tap(find.text('Apply'));
+        await tester.pumpAndSettle();
+
+        // The card should now show a "Disabled" chip.
+        expect(
+          find.text('Disabled'),
+          findsOneWidget,
+          reason: 'card should show Disabled chip after toggling off',
+        );
+      },
+    );
+
+    testWidgets('disabling a node shows skip subtitle in config sheet', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(500, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(buildScreen());
+      await tester.pump();
+
+      // Open config sheet on the trigger card.
+      await tester.tap(find.byIcon(Icons.edit_outlined).first);
+      await tester.pumpAndSettle();
+
+      // Subtitle should not be shown while enabled.
+      expect(
+        find.text('This node will be skipped during execution'),
+        findsNothing,
+        reason: 'skip subtitle should be hidden while enabled',
+      );
+
+      // Toggle the Enabled switch off.
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('This node will be skipped during execution'),
+        findsOneWidget,
+        reason: 'skip subtitle should appear when disabled',
       );
     });
   });
