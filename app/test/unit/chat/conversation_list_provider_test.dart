@@ -303,6 +303,30 @@ void main() {
       expect(state.conversations, isEmpty);
     });
 
+    test('surfaces auth-specific message on ApiAuthException', () async {
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+
+      await container.read(conversationListProvider.future);
+
+      controller.addError(const ApiAuthException());
+      await Future<void>.delayed(Duration.zero);
+
+      final state = container.read(conversationListProvider).value!;
+      expect(state.error, isNotNull);
+      expect(
+        state.error,
+        contains('Authentication failed'),
+        reason: 'ApiAuthException should produce a clear auth error message',
+      );
+      expect(state.conversations, isEmpty);
+    });
+
     // -----------------------------------------------------------------------
     // REGRESSION: race condition — null → non-null rebuild
     // -----------------------------------------------------------------------
