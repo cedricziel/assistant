@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.132](https://github.com/cedricziel/assistant/compare/v0.1.131...v0.1.132) (2026-04-21)
+
+
+### Features
+
+* **workflows:** workflow editor UX improvements and node disable ([#592](https://github.com/cedricziel/assistant/issues/592)) ([2de6289](https://github.com/cedricziel/assistant/commit/2de62893c989354dfaf38729be63f6d7638a97a0))
+
+
+### Bug Fixes
+
+* **app:** retain chat input focus after sending and improve cursor visibility ([#593](https://github.com/cedricziel/assistant/issues/593)) ([06b6572](https://github.com/cedricziel/assistant/commit/06b657213ef6b301d42ef004620e5c2a5f024b2d))
+* **ci:** disable code signing for ShareExtension in macOS CI build ([#588](https://github.com/cedricziel/assistant/issues/588)) ([47be819](https://github.com/cedricziel/assistant/commit/47be819c72e2bc9a9078b2141f912df8e0b7dc17))
+* **integration-tests:** speed up smoke tests on CPU-only CI runners ([#589](https://github.com/cedricziel/assistant/issues/589)) ([e037b71](https://github.com/cedricziel/assistant/commit/e037b71092fccbc9554e21f02d075078847f28fa))
+
 ## [0.1.131](https://github.com/cedricziel/assistant/compare/v0.1.130...v0.1.131) (2026-04-21)
 
 
