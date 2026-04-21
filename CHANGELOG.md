@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.131](https://github.com/cedricziel/assistant/compare/v0.1.130...v0.1.131) (2026-04-21)
+
+
+### Features
+
+* **app:** add Cmd+N / Ctrl+N shortcut to create new chat ([#587](https://github.com/cedricziel/assistant/issues/587)) ([90877f2](https://github.com/cedricziel/assistant/commit/90877f2ee6335d3404e3ff4dfed9f4f704823f8e))
+* **app:** add collapsible sidebar on wide screens ([#585](https://github.com/cedricziel/assistant/issues/585)) ([53ccd78](https://github.com/cedricziel/assistant/commit/53ccd7860398a9eae49cd48739b815232abbcc6d))
+* **runtime:** enable skill learning for subagent turns ([#582](https://github.com/cedricziel/assistant/issues/582)) ([53a2471](https://github.com/cedricziel/assistant/commit/53a2471f148eea9a6feb02c738fb61e8a65633aa))
+
+
+### Bug Fixes
+
+* **flutter:** surface clear error on 401 in conversation stream ([#584](https://github.com/cedricziel/assistant/issues/584)) ([446f002](https://github.com/cedricziel/assistant/commit/446f0022cc334c6c7a28d37be386e056249a7ae2))
+* **runtime:** prevent orphaned tool results from breaking Moonshot API ([#586](https://github.com/cedricziel/assistant/issues/586)) ([3b5661a](https://github.com/cedricziel/assistant/commit/3b5661a6eeb179f55bf1bd05e5768ae13aabea0b))
+
 ## [0.1.130](https://github.com/cedricziel/assistant/compare/v0.1.129...v0.1.130) (2026-04-21)
 
 
