@@ -176,6 +176,10 @@ impl SubagentRunner for Orchestrator {
             warn!(agent_id = %spawn.agent_id, %e, "Failed to persist agent record");
         }
 
+        // Track tool usage for post-turn skill learning.
+        let mut subagent_tool_count: usize = 0;
+        let mut subagent_had_errors = false;
+
         // Tool-calling loop (same structure as run_turn, but with restricted context).
         let report = 'outer: {
             for iteration in 0..self.max_iterations {
@@ -346,6 +350,26 @@ impl SubagentRunner for Orchestrator {
                         ));
                         span.end();
 
+                        // Spawn post-turn skill evaluation for this subagent (fire-and-forget).
+                        // Subagents don't inherit active_skill from the parent, so the
+                        // heuristic gate evaluates them as standalone turns.
+                        if self.learning_config.enabled && self.learning_config.auto_create_skills {
+                            crate::skill_learner::spawn_post_turn_eval(
+                                crate::skill_learner::TurnContext {
+                                    conversation_id,
+                                    agent_id: spawn.agent_id.clone(),
+                                    tool_count: subagent_tool_count,
+                                    had_errors: subagent_had_errors,
+                                    active_skill: None,
+                                    history: history.clone(),
+                                },
+                                self.learning_config.clone(),
+                                std::sync::Arc::clone(&self.storage),
+                                std::sync::Arc::clone(&self.registry),
+                                std::sync::Arc::clone(&self.llm),
+                            );
+                        }
+
                         break 'outer AgentReport {
                             status: AgentReportStatus::Completed,
                             content: text,
@@ -433,6 +457,10 @@ impl SubagentRunner for Orchestrator {
                                 .await;
                             let elapsed = start.elapsed();
 
+                            if exec_result.is_err() {
+                                subagent_had_errors = true;
+                            }
+
                             // Subagent does not surface attachments to
                             // the parent — pass scratch vectors.
                             let mut scratch_attachments = Vec::new();
@@ -476,6 +504,8 @@ impl SubagentRunner for Orchestrator {
                                 child_event_sink.as_ref(),
                             )
                             .await;
+
+                            subagent_tool_count += 1;
                         }
                     }
 
