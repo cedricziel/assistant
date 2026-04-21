@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.130](https://github.com/cedricziel/assistant/compare/v0.1.129...v0.1.130) (2026-04-21)
+
+
+### Bug Fixes
+
+* **ci:** move macOS signing and notarization into fastlane ([#580](https://github.com/cedricziel/assistant/issues/580)) ([26187eb](https://github.com/cedricziel/assistant/commit/26187ebd5d63edd9c1dc51f810db8dc6ec09bf40))
+
 ## [0.1.129](https://github.com/cedricziel/assistant/compare/v0.1.128...v0.1.129) (2026-04-21)
 
 
