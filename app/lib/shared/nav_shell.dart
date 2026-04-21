@@ -2,10 +2,12 @@ import 'package:cupertino_sidebar/cupertino_sidebar.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../api/connectivity_provider.dart';
+import '../features/chat/chat_provider.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/notifications/agent_event_listener.dart';
 import '../features/pwa/pwa_provider.dart';
@@ -165,10 +167,32 @@ bool _isOverflowRouteActive(String currentPath) {
 /// When the PWA install prompt is available (web only), an "Install App"
 /// button is shown: in the [NavigationRail] trailing area on wide screens,
 /// and as a banner above the [NavigationBar] on narrow screens.
-class NavShell extends ConsumerWidget {
+class NavShell extends ConsumerStatefulWidget {
   const NavShell({super.key, required this.child});
 
   final Widget child;
+
+  @override
+  ConsumerState<NavShell> createState() => _NavShellState();
+}
+
+class _NavShellState extends ConsumerState<NavShell> {
+  bool _creatingChat = false;
+
+  Future<void> _createNewChat() async {
+    if (_creatingChat) return;
+    _creatingChat = true;
+    try {
+      final id = await ref
+          .read(conversationListProvider.notifier)
+          .createConversation();
+      if (id != null && mounted) {
+        context.go('/chat/$id');
+      }
+    } finally {
+      _creatingChat = false;
+    }
+  }
 
   /// Index for the mobile [NavigationBar].
   ///
@@ -328,7 +352,8 @@ class NavShell extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final child = widget.child;
     final width = MediaQuery.of(context).size.width;
     final isWide = width >= _kNavRailBreakpoint;
 
@@ -337,6 +362,40 @@ class NavShell extends ConsumerWidget {
     // True when on iOS Safari and not yet installed as a PWA.
     final isSafariInstallable = ref.watch(safariInstallProvider);
 
+    // Platform-aware Cmd+N / Ctrl+N shortcut for creating a new chat.
+    final useMeta =
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    final newChatShortcuts = CallbackShortcuts(
+      bindings: {
+        SingleActivator(
+          LogicalKeyboardKey.keyN,
+          meta: useMeta,
+          control: !useMeta,
+        ): _createNewChat,
+      },
+      child: Focus(
+        autofocus: true,
+        child: _buildBody(
+          context,
+          child,
+          isWide,
+          isInstallable,
+          isSafariInstallable,
+        ),
+      ),
+    );
+
+    return newChatShortcuts;
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    Widget child,
+    bool isWide,
+    bool isInstallable,
+    bool isSafariInstallable,
+  ) {
     // Apple touch: CupertinoTabBar (compact) or sidebar (wide).
     if (isAppleTouch) {
       if (isWide) {

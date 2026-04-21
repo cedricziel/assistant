@@ -100,12 +100,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.didUpdateWidget(old);
     if (old.conversationId != widget.conversationId) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadConversation();
+        _loadConversation(focusInput: true);
       });
     }
   }
 
-  void _loadConversation() {
+  void _loadConversation({bool focusInput = false}) {
     final id = widget.conversationId;
     if (id != null) {
       ref.read(chatProvider.notifier).loadConversation(id);
@@ -113,6 +113,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ref.read(chatProvider.notifier).clearConversation();
     }
     _scrollToBottom();
+    if (focusInput) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _inputFocus.requestFocus();
+      });
+    }
   }
 
   /// Retry loading the conversation once the API client becomes available.
