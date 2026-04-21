@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.129](https://github.com/cedricziel/assistant/compare/v0.1.128...v0.1.129) (2026-04-21)
+
+
+### Bug Fixes
+
+* **ci:** add fastlane match provisioning for macOS desktop build ([#578](https://github.com/cedricziel/assistant/issues/578)) ([f85372b](https://github.com/cedricziel/assistant/commit/f85372b59a6d0232aacf5d60436cecd1556d25eb))
+
 ## [0.1.128](https://github.com/cedricziel/assistant/compare/v0.1.127...v0.1.128) (2026-04-20)
 
 
