@@ -1,3 +1,4 @@
+import 'package:cupertino_sidebar/cupertino_sidebar.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,24 @@ import 'platform/platform.dart';
 
 /// Breakpoint above which the navigation rail is shown instead of bottom nav.
 const double _kNavRailBreakpoint = 768;
+
+/// Sidebar widths for the Material collapsible sidebar.
+const double _kSidebarExpandedWidth = 240.0;
+const double _kSidebarCollapsedWidth = 72.0;
+const Duration _kSidebarAnimDuration = Duration(milliseconds: 200);
+
+/// Whether the navigation sidebar is collapsed to icon-only mode on wide screens.
+class SidebarCollapsedNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void toggle() => state = !state;
+}
+
+final sidebarCollapsedProvider =
+    NotifierProvider<SidebarCollapsedNotifier, bool>(
+      SidebarCollapsedNotifier.new,
+    );
 
 /// Navigation destination model.
 class _NavDest {
@@ -118,6 +137,15 @@ final List<_NavDest> _iosTabDestinations = [
   _primaryDestinations[2], // Workflows
 ];
 
+/// Flat list of all destinations shown in the Apple sidebar, in the order
+/// CupertinoSidebar assigns indices: primary, then overflow (inside the
+/// SidebarSection), then settings.
+final List<_NavDest> _appleSidebarDestinations = [
+  ..._iosTabDestinations,
+  ..._overflowDestinations,
+  _settingsDestination,
+];
+
 /// Returns true when [currentPath] belongs to any overflow destination.
 bool _isOverflowRouteActive(String currentPath) {
   return _overflowDestinations.any((d) => currentPath.startsWith(d.path));
@@ -160,22 +188,32 @@ class NavShell extends ConsumerWidget {
     return 0;
   }
 
-  /// Index for the desktop [NavigationRail].
+  /// Index for the Apple [CupertinoSidebar].
   ///
-  /// Primary destinations: 0–3. Divider sentinel: 4 (disabled, not selectable).
-  /// Overflow destinations: 5–9.
-  int _railSelectedIndex(BuildContext context) {
+  /// Maps the current route to the flat [_appleSidebarDestinations] list.
+  int _appleSidebarSelectedIndex(BuildContext context) {
+    final location = GoRouterState.of(context).uri.toString();
+    for (var i = 0; i < _appleSidebarDestinations.length; i++) {
+      if (location.startsWith(_appleSidebarDestinations[i].path)) return i;
+    }
+    return 0;
+  }
+
+  /// Index for the Material collapsible sidebar.
+  ///
+  /// Maps to the flat list: primary destinations then overflow destinations.
+  /// Settings and Contexts are in the trailing section, not indexed.
+  int _materialSidebarSelectedIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
     for (var i = 0; i < _primaryDestinations.length; i++) {
       if (location.startsWith(_primaryDestinations[i].path)) return i;
     }
     for (var i = 0; i < _overflowDestinations.length; i++) {
       if (location.startsWith(_overflowDestinations[i].path)) {
-        // +1 to skip the divider sentinel at index _primaryDestinations.length
-        return _primaryDestinations.length + 1 + i;
+        return _primaryDestinations.length + i;
       }
     }
-    return 0;
+    return -1; // No match — settings/contexts are in trailing.
   }
 
   /// Shows the "More" bottom sheet listing all overflow destinations.
@@ -302,51 +340,71 @@ class NavShell extends ConsumerWidget {
     // Apple touch: CupertinoTabBar (compact) or sidebar (wide).
     if (isAppleTouch) {
       if (isWide) {
-        final location = GoRouterState.of(context).uri.toString();
+        final collapsed = ref.watch(sidebarCollapsedProvider);
+        final appleSelected = _appleSidebarSelectedIndex(context);
         return Scaffold(
           body: SafeArea(
-            child: Row(
+            child: Stack(
               children: [
-                SizedBox(
-                  width: 240,
-                  child: ListView(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    children: [
-                      for (final d in _iosTabDestinations)
-                        _AppleSidebarItem(
-                          icon: d.icon,
-                          selectedIcon: d.selectedIcon,
-                          label: d.label,
-                          selected: location.startsWith(d.path),
-                          onTap: () => context.go(d.path),
-                        ),
-                      const Divider(height: 16, indent: 16, endIndent: 16),
-                      for (final d in _overflowDestinations)
-                        _AppleSidebarItem(
-                          icon: d.icon,
-                          selectedIcon: d.selectedIcon,
-                          label: d.label,
-                          selected: location.startsWith(d.path),
-                          onTap: () => context.go(d.path),
-                        ),
-                      const Divider(height: 16, indent: 16, endIndent: 16),
-                      _AppleSidebarItem(
-                        icon: _settingsDestination.icon,
-                        selectedIcon: _settingsDestination.selectedIcon,
-                        label: _settingsDestination.label,
-                        selected: location.startsWith(
-                          _settingsDestination.path,
-                        ),
-                        onTap: () => context.go(_settingsDestination.path),
+                Row(
+                  children: [
+                    CupertinoSidebarCollapsible(
+                      isExpanded: !collapsed,
+                      child: CupertinoSidebar(
+                        selectedIndex: appleSelected,
+                        onDestinationSelected: (i) {
+                          final dest = _appleSidebarDestinations[i];
+                          context.go(dest.path);
+                        },
+                        children: [
+                          // Primary destinations
+                          for (final d in _iosTabDestinations)
+                            SidebarDestination(
+                              icon: Icon(d.icon),
+                              label: Text(d.label),
+                            ),
+                          // Overflow section
+                          SidebarSection(
+                            label: const Text('More'),
+                            children: [
+                              for (final d in _overflowDestinations)
+                                SidebarDestination(
+                                  icon: Icon(d.icon),
+                                  label: Text(d.label),
+                                ),
+                            ],
+                          ),
+                          // Settings
+                          SidebarDestination(
+                            icon: Icon(_settingsDestination.icon),
+                            label: Text(_settingsDestination.label),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    Expanded(
+                      child: AgentEventListener(
+                        child: _OfflineBanner(
+                          child: UpdateBannerWrapper(child: child),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const VerticalDivider(width: 1, thickness: 1),
-                Expanded(
-                  child: AgentEventListener(
-                    child: _OfflineBanner(
-                      child: UpdateBannerWrapper(child: child),
+                // Toggle button overlaid at top-leading corner.
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: CupertinoButton(
+                      padding: EdgeInsets.zero,
+                      onPressed: () =>
+                          ref.read(sidebarCollapsedProvider.notifier).toggle(),
+                      child: Icon(
+                        CupertinoIcons.sidebar_left,
+                        semanticLabel: collapsed
+                            ? 'Expand sidebar'
+                            : 'Collapse sidebar',
+                      ),
                     ),
                   ),
                 ),
@@ -389,96 +447,154 @@ class NavShell extends ConsumerWidget {
     }
 
     if (isWide) {
-      final selected = _railSelectedIndex(context);
+      final collapsed = ref.watch(sidebarCollapsedProvider);
+      final location = GoRouterState.of(context).uri.toString();
+      final selected = _materialSidebarSelectedIndex(context);
+
       return Scaffold(
         body: SafeArea(
           child: Row(
             children: [
-              // The rail sidebar is a Column: the NavigationRail scrolls in
-              // the Expanded area; the trailing section is pinned outside the
-              // scroll so it stays visible regardless of how many destinations
-              // are above it.
-              Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: IntrinsicHeight(
-                        child: NavigationRail(
-                          selectedIndex: selected,
-                          labelType: NavigationRailLabelType.all,
-                          destinations: [
-                            // Primary destinations
-                            ..._primaryDestinations.map(
-                              (d) => NavigationRailDestination(
-                                icon: Icon(d.icon),
-                                selectedIcon: Icon(d.selectedIcon),
-                                label: Text(d.label),
-                              ),
+              // Collapsible sidebar: expanded shows icon + label list tiles,
+              // collapsed shows a narrow icon-only rail.
+              AnimatedContainer(
+                duration: _kSidebarAnimDuration,
+                curve: Curves.easeInOut,
+                width: collapsed
+                    ? _kSidebarCollapsedWidth
+                    : _kSidebarExpandedWidth,
+                clipBehavior: Clip.hardEdge,
+                decoration: const BoxDecoration(),
+                // OverflowBox bypasses parent constraints so ListTile
+                // always receives the target width, not an intermediate
+                // animation value. The AnimatedContainer clips the overflow.
+                child: OverflowBox(
+                  maxWidth: collapsed
+                      ? _kSidebarCollapsedWidth
+                      : _kSidebarExpandedWidth,
+                  minWidth: collapsed
+                      ? _kSidebarCollapsedWidth
+                      : _kSidebarExpandedWidth,
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    children: [
+                      // Toggle button row
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Align(
+                          alignment: collapsed
+                              ? Alignment.center
+                              : Alignment.centerRight,
+                          child: IconButton(
+                            icon: Icon(
+                              collapsed ? Icons.menu : Icons.menu_open,
                             ),
-                            // Divider sentinel — non-interactive
-                            const NavigationRailDestination(
-                              disabled: true,
-                              icon: Padding(
-                                padding: EdgeInsets.symmetric(vertical: 4),
-                                child: Divider(thickness: 1),
+                            tooltip: collapsed
+                                ? 'Expand sidebar'
+                                : 'Collapse sidebar',
+                            onPressed: () => ref
+                                .read(sidebarCollapsedProvider.notifier)
+                                .toggle(),
+                          ),
+                        ),
+                      ),
+                      // Scrollable navigation items
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            children: [
+                              for (
+                                var i = 0;
+                                i < _primaryDestinations.length;
+                                i++
+                              )
+                                _MaterialSidebarItem(
+                                  icon: _primaryDestinations[i].icon,
+                                  selectedIcon:
+                                      _primaryDestinations[i].selectedIcon,
+                                  label: _primaryDestinations[i].label,
+                                  selected: selected == i,
+                                  collapsed: collapsed,
+                                  onTap: () =>
+                                      context.go(_primaryDestinations[i].path),
+                                ),
+                              Padding(
+                                padding: collapsed
+                                    ? const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 4,
+                                      )
+                                    : const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 4,
+                                      ),
+                                child: const Divider(height: 1),
                               ),
-                              label: SizedBox.shrink(),
-                            ),
-                            // Overflow / developer destinations
-                            ..._overflowDestinations.map(
-                              (d) => NavigationRailDestination(
-                                icon: Icon(d.icon),
-                                selectedIcon: Icon(d.selectedIcon),
-                                label: Text(d.label),
-                              ),
-                            ),
-                          ],
-                          onDestinationSelected: (i) {
-                            if (i < _primaryDestinations.length) {
-                              context.go(_primaryDestinations[i].path);
-                            } else if (i > _primaryDestinations.length) {
-                              final overflowIndex =
-                                  i - _primaryDestinations.length - 1;
-                              context.go(
-                                _overflowDestinations[overflowIndex].path,
-                              );
+                              for (
+                                var i = 0;
+                                i < _overflowDestinations.length;
+                                i++
+                              )
+                                _MaterialSidebarItem(
+                                  icon: _overflowDestinations[i].icon,
+                                  selectedIcon:
+                                      _overflowDestinations[i].selectedIcon,
+                                  label: _overflowDestinations[i].label,
+                                  selected:
+                                      selected ==
+                                      _primaryDestinations.length + i,
+                                  collapsed: collapsed,
+                                  onTap: () =>
+                                      context.go(_overflowDestinations[i].path),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Sticky trailing section
+                      const Divider(height: 1),
+                      if (!kIsWeb)
+                        _MaterialSidebarItem(
+                          icon: _contextsDestination.icon,
+                          selectedIcon: _contextsDestination.selectedIcon,
+                          label: _contextsDestination.label,
+                          selected: location.startsWith(
+                            _contextsDestination.path,
+                          ),
+                          collapsed: collapsed,
+                          onTap: () => context.go(_contextsDestination.path),
+                        ),
+                      if (kIsWeb)
+                        _LogoutButton(
+                          onLogout: () async {
+                            await ref
+                                .read(activeContextProvider.notifier)
+                                .deactivate();
+                            if (context.mounted) {
+                              context.go(AppRoutes.login);
                             }
                           },
                         ),
+                      _MaterialSidebarItem(
+                        icon: _settingsDestination.icon,
+                        selectedIcon: _settingsDestination.selectedIcon,
+                        label: _settingsDestination.label,
+                        selected: location.startsWith(
+                          _settingsDestination.path,
+                        ),
+                        collapsed: collapsed,
+                        onTap: () => context.go(_settingsDestination.path),
                       ),
-                    ),
+                      if (isInstallable)
+                        _InstallButton(
+                          onTap: () =>
+                              ref.read(pwaInstallProvider.notifier).install(),
+                        ),
+                      if (isSafariInstallable) const _SafariInstallButton(),
+                      const SizedBox(height: 8),
+                    ],
                   ),
-                  // Sticky trailing section — always visible at the bottom.
-                  const Divider(height: 1),
-                  if (!kIsWeb)
-                    _ContextsButton(
-                      onTap: () => context.go(_contextsDestination.path),
-                    ),
-                  if (kIsWeb)
-                    _LogoutButton(
-                      onLogout: () async {
-                        await ref
-                            .read(activeContextProvider.notifier)
-                            .deactivate();
-                        if (context.mounted) {
-                          context.go(AppRoutes.login);
-                        }
-                      },
-                    ),
-                  IconButton(
-                    icon: Icon(_settingsDestination.icon),
-                    selectedIcon: Icon(_settingsDestination.selectedIcon),
-                    tooltip: _settingsDestination.label,
-                    onPressed: () => context.go(_settingsDestination.path),
-                  ),
-                  if (isInstallable)
-                    _InstallButton(
-                      onTap: () =>
-                          ref.read(pwaInstallProvider.notifier).install(),
-                    ),
-                  if (isSafariInstallable) const _SafariInstallButton(),
-                  const SizedBox(height: 8),
-                ],
+                ),
               ),
               const VerticalDivider(width: 1, thickness: 1),
               Expanded(
@@ -540,20 +656,89 @@ class NavShell extends ConsumerWidget {
   }
 }
 
-/// Icon button for the Context Switcher in the [NavigationRail] trailing slot.
-/// Only shown on non-web platforms.
-class _ContextsButton extends StatelessWidget {
-  const _ContextsButton({required this.onTap});
+/// Material sidebar navigation item that adapts between expanded and collapsed
+/// modes. Expanded shows icon + label in a rounded ListTile; collapsed shows a
+/// centered icon with a pill indicator and a tooltip.
+class _MaterialSidebarItem extends StatelessWidget {
+  const _MaterialSidebarItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.collapsed,
+    required this.onTap,
+  });
 
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final bool collapsed;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      icon: const Icon(Icons.swap_horiz_outlined),
-      selectedIcon: const Icon(Icons.swap_horiz),
-      tooltip: 'Contexts',
-      onPressed: onTap,
+    final colorScheme = Theme.of(context).colorScheme;
+
+    if (collapsed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Tooltip(
+          message: label,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Center(
+              child: Container(
+                width: 56,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: selected
+                    ? BoxDecoration(
+                        color: colorScheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(16),
+                      )
+                    : null,
+                child: Icon(
+                  selected ? selectedIcon : icon,
+                  color: selected
+                      ? colorScheme.onSecondaryContainer
+                      : colorScheme.onSurfaceVariant,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
+      child: ListTile(
+        dense: true,
+        leading: Icon(
+          selected ? selectedIcon : icon,
+          color: selected
+              ? colorScheme.onSecondaryContainer
+              : colorScheme.onSurfaceVariant,
+          size: 22,
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            color: selected
+                ? colorScheme.onSecondaryContainer
+                : colorScheme.onSurface,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+        selected: selected,
+        selectedTileColor: colorScheme.secondaryContainer,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        onTap: onTap,
+      ),
     );
   }
 }
@@ -815,52 +1000,6 @@ class _OfflineBanner extends ConsumerWidget {
           ),
         Expanded(child: child),
       ],
-    );
-  }
-}
-
-/// Sidebar item for the Apple wide-screen navigation.
-class _AppleSidebarItem extends StatelessWidget {
-  const _AppleSidebarItem({
-    required this.icon,
-    required this.selectedIcon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final IconData selectedIcon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      child: ListTile(
-        dense: true,
-        leading: Icon(
-          selected ? selectedIcon : icon,
-          color: selected
-              ? CupertinoColors.activeBlue
-              : theme.colorScheme.onSurfaceVariant,
-          size: 22,
-        ),
-        title: Text(
-          label,
-          style: TextStyle(
-            color: selected ? CupertinoColors.activeBlue : null,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-        selected: selected,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        selectedTileColor: CupertinoColors.activeBlue.withValues(alpha: 0.12),
-        onTap: onTap,
-      ),
     );
   }
 }

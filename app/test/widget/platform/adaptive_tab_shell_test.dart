@@ -224,7 +224,7 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
-    testWidgets('2.3.1 Material NavigationRail on macOS at 1024dp', (
+    testWidgets('2.3.1 Material collapsible sidebar on macOS at 1024dp', (
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -236,7 +236,10 @@ void main() {
       await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(NavigationRail), findsOneWidget);
+      // The Material wide layout now uses a custom collapsible sidebar
+      // instead of NavigationRail. Verify sidebar toggle and labels.
+      expect(find.byTooltip('Collapse sidebar'), findsOneWidget);
+      expect(find.text('Chat'), findsOneWidget);
       expect(find.byType(CupertinoTabBar), findsNothing);
 
       debugDefaultTargetPlatformOverride = null;

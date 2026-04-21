@@ -20,7 +20,7 @@ Widget _buildNavShell({required String initialLocation}) {
         routes: [
           GoRoute(
             path: '/chat',
-            builder: (_, _) => const Scaffold(body: Text('Chat')),
+            builder: (_, _) => const Scaffold(body: Text('Chat page')),
           ),
           GoRoute(
             path: '/traces',
@@ -169,61 +169,135 @@ void main() {
   });
 
   group('NavShell — desktop (>=768px)', () {
-    testWidgets(
-      '5.4 NavigationRail shows primary + overflow destinations with a divider, '
-      'and Contexts trailing button',
-      (tester) async {
-        tester.view.physicalSize = const Size(1280, 900);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
+    testWidgets('5.4 sidebar shows all destination labels and toggle button', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
 
-        await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+      await tester.pumpAndSettle();
 
-        expect(find.byType(NavigationRail), findsOneWidget);
-
-        // Primary + overflow destination labels in the rail
-        // (Contexts and Settings are NOT here — they live in the trailing slot)
-        for (final label in [
-          'Chat',
-          'Skills',
-          'Workflows',
-          'Personas',
-          'Traces',
-          'Logs',
-          'Webhooks',
-          'Agents',
-          'Analytics',
-        ]) {
-          expect(
-            find.descendant(
-              of: find.byType(NavigationRail),
-              matching: find.text(label),
-            ),
-            findsOneWidget,
-            reason: '$label should appear in the navigation rail',
-          );
-        }
-
-        // A Divider must be present between primary and overflow groups
+      // All destination labels visible in the expanded sidebar
+      for (final label in [
+        'Chat',
+        'Skills',
+        'Workflows',
+        'Personas',
+        'Traces',
+        'Logs',
+        'Webhooks',
+        'Agents',
+        'Analytics',
+      ]) {
         expect(
-          find.descendant(
-            of: find.byType(NavigationRail),
-            matching: find.byType(Divider),
-          ),
-          findsWidgets,
+          find.text(label),
+          findsOneWidget,
+          reason: '$label should appear in the sidebar',
         );
+      }
 
-        // Contexts and Settings are pinned below the rail (outside NavigationRail)
-        for (final tooltip in ['Contexts', 'Settings']) {
-          expect(
-            find.byTooltip(tooltip),
-            findsOneWidget,
-            reason: '$tooltip sticky button should be visible',
-          );
-        }
-      },
-    );
+      // Contexts and Settings are pinned below the scrollable area
+      for (final tooltip in ['Contexts', 'Settings']) {
+        expect(
+          find.text(tooltip),
+          findsOneWidget,
+          reason: '$tooltip should be visible in the sidebar',
+        );
+      }
+
+      // A toggle button to collapse the sidebar must be present
+      expect(
+        find.byTooltip('Collapse sidebar'),
+        findsOneWidget,
+        reason: 'Collapse toggle should be visible when sidebar is expanded',
+      );
+    });
+
+    testWidgets('5.5 tapping toggle collapses sidebar to icon-only mode', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+      await tester.pumpAndSettle();
+
+      // Sidebar starts expanded — labels visible
+      expect(find.text('Chat'), findsOneWidget);
+      expect(find.text('Skills'), findsOneWidget);
+
+      // Collapse
+      await tester.tap(find.byTooltip('Collapse sidebar'));
+      await tester.pumpAndSettle();
+
+      // After collapse, the expand toggle should appear
+      expect(
+        find.byTooltip('Expand sidebar'),
+        findsOneWidget,
+        reason: 'Expand toggle should be visible when sidebar is collapsed',
+      );
+
+      // Labels should be hidden in collapsed mode — only tooltips remain
+      // (text labels are not rendered, icons are shown with tooltips)
+      expect(
+        find.text('Skills'),
+        findsNothing,
+        reason: 'Destination labels should be hidden when collapsed',
+      );
+    });
+
+    testWidgets('5.6 navigation works in collapsed sidebar mode', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+      await tester.pumpAndSettle();
+
+      // Collapse the sidebar
+      await tester.tap(find.byTooltip('Collapse sidebar'));
+      await tester.pumpAndSettle();
+
+      // Tap the Skills icon via its tooltip
+      await tester.tap(find.byTooltip('Skills'));
+      await tester.pumpAndSettle();
+
+      // Should navigate to skills content
+      expect(find.text('Skills content'), findsOneWidget);
+    });
+
+    testWidgets('5.7 tapping toggle again expands sidebar back', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+      await tester.pumpAndSettle();
+
+      // Collapse
+      await tester.tap(find.byTooltip('Collapse sidebar'));
+      await tester.pumpAndSettle();
+
+      // Expand
+      await tester.tap(find.byTooltip('Expand sidebar'));
+      await tester.pumpAndSettle();
+
+      // Labels should be visible again
+      expect(find.text('Chat'), findsOneWidget);
+      expect(find.text('Skills'), findsOneWidget);
+      expect(
+        find.byTooltip('Collapse sidebar'),
+        findsOneWidget,
+        reason: 'Collapse toggle should reappear after expanding',
+      );
+    });
 
     // 5.4 — non-web: contexts button present, logout button absent.
     //
@@ -231,30 +305,29 @@ void main() {
     // The web path (5.3 — logout present, contexts absent) requires a web
     // build and is verified by manual testing or a dedicated web integration
     // test run.
-    testWidgets(
-      '5.4 non-web desktop shows Contexts button and no Logout button',
-      (tester) async {
-        tester.view.physicalSize = const Size(1024, 768);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
+    testWidgets('5.8 non-web desktop shows Contexts and no Logout button', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1024, 768);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
 
-        await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(_buildNavShell(initialLocation: '/chat'));
+      await tester.pumpAndSettle();
 
-        // Contexts button must be visible in the trailing section of the rail.
-        expect(
-          find.byTooltip('Contexts'),
-          findsOneWidget,
-          reason: 'Non-web: Contexts switcher button should be present',
-        );
+      // Contexts must be visible in the sidebar trailing section.
+      expect(
+        find.text('Contexts'),
+        findsOneWidget,
+        reason: 'Non-web: Contexts switcher should be present',
+      );
 
-        // Logout button must NOT appear on non-web.
-        expect(
-          find.byTooltip('Log out'),
-          findsNothing,
-          reason: 'Non-web: Logout button should be absent',
-        );
-      },
-    );
+      // Logout button must NOT appear on non-web.
+      expect(
+        find.byTooltip('Log out'),
+        findsNothing,
+        reason: 'Non-web: Logout button should be absent',
+      );
+    });
   });
 }
