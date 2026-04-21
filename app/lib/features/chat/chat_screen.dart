@@ -166,7 +166,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (text.isEmpty && pending.isEmpty) return;
     if (isAppleTouch) HapticFeedback.lightImpact();
     _inputController.clear();
-    _inputFocus.requestFocus();
+    // Defer focus request: onSubmitted unfocuses the field after the callback
+    // returns, so an immediate requestFocus() gets overridden.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inputFocus.requestFocus();
+    });
 
     // Upload pending attachments first, then send with IDs.
     final attachmentIds = <String>[];
@@ -1982,6 +1986,7 @@ class _InputRowState extends State<_InputRow> {
                           placeholder: widget.pendingAttachments.isNotEmpty
                               ? 'Add a caption...'
                               : 'Type a message...',
+                          cursorColor: colorScheme.primary,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 14,
                             vertical: 10,
@@ -1995,6 +2000,7 @@ class _InputRowState extends State<_InputRow> {
                           key: const Key('message_input'),
                           controller: widget.controller,
                           focusNode: widget.focusNode,
+                          cursorColor: colorScheme.primary,
                           decoration: InputDecoration(
                             hintText: widget.pendingAttachments.isNotEmpty
                                 ? 'Add a caption...'

@@ -23,6 +23,15 @@ class _FakeChatNotifier extends ChatNotifier {
   Future<ChatState> build() async => const ChatState();
 
   void push(ChatState s) => state = AsyncData(s);
+
+  @override
+  Future<void> sendMessage(
+    String message, {
+    List<String> attachmentIds = const [],
+    List<ChatAttachment> attachments = const [],
+  }) async {
+    // No-op — avoids HTTP calls in widget tests.
+  }
 }
 
 class _FakePersonasNotifier extends PersonasNotifier {
@@ -88,6 +97,73 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
 
 void main() {
   group('Chat screen — input behaviour', () {
+    testWidgets('input retains focus after tapping send button', (
+      tester,
+    ) async {
+      await pumpChatScreen(tester);
+
+      // Tap the input to focus it, then enter text.
+      final inputFinder = find.byKey(const Key('message_input'));
+      await tester.tap(inputFinder);
+      await tester.pump();
+      // Drain the 350 ms _onInputFocusChange timer triggered by gaining focus.
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.enterText(inputFinder, 'hello');
+      await tester.pump();
+
+      // Verify focus before sending.
+      final textField = tester.widget<TextField>(inputFinder);
+      expect(
+        textField.focusNode?.hasFocus,
+        isTrue,
+        reason: 'input should be focused before sending',
+      );
+
+      // Tap the send button.
+      await tester.tap(find.byKey(const Key('send_button')));
+      // Pump to process the post-frame callback that re-requests focus,
+      // then drain the 350 ms _onInputFocusChange timer.
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      final afterSend = tester.widget<TextField>(inputFinder);
+      expect(
+        afterSend.focusNode?.hasFocus,
+        isTrue,
+        reason: 'input must retain focus after sending a message',
+      );
+    });
+
+    testWidgets('input retains focus after onSubmitted (Enter key)', (
+      tester,
+    ) async {
+      await pumpChatScreen(tester);
+
+      final inputFinder = find.byKey(const Key('message_input'));
+      await tester.tap(inputFinder);
+      await tester.pump();
+      // Drain the 350 ms _onInputFocusChange timer triggered by gaining focus.
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.enterText(inputFinder, 'hello');
+      await tester.pump();
+
+      // Simulate the Enter / Send text input action (triggers onSubmitted).
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      // Pump to process the post-frame callback that re-requests focus,
+      // then drain the 350 ms _onInputFocusChange timer.
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      final afterSubmit = tester.widget<TextField>(inputFinder);
+      expect(
+        afterSubmit.focusNode?.hasFocus,
+        isTrue,
+        reason: 'input must retain focus after pressing Enter / Send',
+      );
+    });
+
     testWidgets('7.5: message_input field is enabled while isSending == true', (
       tester,
     ) async {
