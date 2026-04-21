@@ -52,6 +52,14 @@ jobs:
           CODE_SIGN_IDENTITY =
           EOF
 
+          # The ShareExtension target has its own build settings in the Xcode
+          # project and does not inherit from the Runner xcconfig files.
+          # Patch project.pbxproj to disable signing for all targets.
+          PBXPROJ=app/macos/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' "$PBXPROJ"
+          sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=macosx\*\]" = "Apple Development"/"CODE_SIGN_IDENTITY[sdk=macosx*]" = ""/g' "$PBXPROJ"
+          sed -i '' 's/DEVELOPMENT_TEAM = WPW3QSLZ2F/DEVELOPMENT_TEAM = ""/g' "$PBXPROJ"
+
       - name: Install Rust target
         run: rustup target add aarch64-apple-darwin
 
