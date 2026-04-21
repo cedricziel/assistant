@@ -115,11 +115,19 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
         model: MODEL.to_string(),
         base_url: base_url.to_string(),
         timeout_secs: 120,
-        retry_config: assistant_llm::RetryConfig::default(),
+        // Disable HTTP-level retries.  On CPU-only CI runners Ollama returns
+        // 500 after a 2-minute inference timeout — that is deterministic, not
+        // transient, so retrying the same prompt just burns another 2 min.
+        // The orchestrator's tool-calling loop already provides iteration-level
+        // "retries" with an evolving prompt.
+        retry_config: assistant_llm::RetryConfig::disabled(),
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
 
-    let config = AssistantConfig::default();
+    let mut config = AssistantConfig::default();
+    // Disable learning so background skill-eval LLM calls don't compete with
+    // the test's own LLM calls on the CPU-only CI Ollama instance.
+    config.learning.enabled = false;
     let executor = Arc::new(ToolExecutor::new(
         storage.clone(),
         llm.clone(),
@@ -230,16 +238,19 @@ async fn test_tool_loop_terminates() -> Result<()> {
     let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
-    let result = f
-        .orchestrator
-        .run_turn(
-            "What is 2 + 2?",
-            f.conversation_id,
-            Interface::Cli,
-            None,
-            vec![],
-        )
-        .await?;
+    let result = tokio::time::timeout(Duration::from_secs(300), async {
+        f.orchestrator
+            .run_turn(
+                "What is 2 + 2?",
+                f.conversation_id,
+                Interface::Cli,
+                None,
+                vec![],
+            )
+            .await
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("test_tool_loop_terminates timed out after 5 minutes"))??;
 
     assert!(!result.answer.is_empty());
     Ok(())
@@ -254,29 +265,33 @@ async fn test_self_analyze_runs() -> Result<()> {
     let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
-    // Produce some traces for the memory-append tool.
-    f.orchestrator
-        .run_turn(
-            "Use memory-append to store the value 'hello' under key 'smoke-test' in target 'memory'",
-            f.conversation_id,
-            Interface::Cli,
-            None,
-            vec![],
-        )
-        .await?;
+    tokio::time::timeout(Duration::from_secs(300), async {
+        // Produce some traces for the memory-append tool.
+        f.orchestrator
+            .run_turn(
+                "Use memory-append to store the value 'hello' under key 'smoke-test' in target 'memory'",
+                f.conversation_id,
+                Interface::Cli,
+                None,
+                vec![],
+            )
+            .await?;
 
-    // Trigger self-analyze — it should complete without error.
-    let result = f
-        .orchestrator
-        .run_turn(
-            "Analyse the memory-append skill and suggest improvements",
-            f.conversation_id,
-            Interface::Cli,
-            None,
-            vec![],
-        )
-        .await?;
+        // Trigger self-analyze — it should complete without error.
+        let result = f
+            .orchestrator
+            .run_turn(
+                "Analyse the memory-append skill and suggest improvements",
+                f.conversation_id,
+                Interface::Cli,
+                None,
+                vec![],
+            )
+            .await?;
 
-    assert!(!result.answer.is_empty());
-    Ok(())
+        assert!(!result.answer.is_empty());
+        Ok(())
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("test_self_analyze_runs timed out after 5 minutes"))?
 }
