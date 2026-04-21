@@ -89,7 +89,44 @@ pub(crate) fn sanitize_history(history: &mut Vec<ChatHistoryMessage>) {
         return;
     }
 
-    // --- Pass 1: fill in missing tool results for orphaned tool calls ------
+    // --- Pass 1: drop orphaned ToolResult messages -------------------------
+    //
+    // A ToolResult is valid only when it immediately follows an
+    // AssistantToolCalls (or another valid ToolResult within the same
+    // batch).  System-injected results (e.g. from skill-learner) that
+    // have no preceding AssistantToolCalls cause providers to reject the
+    // request because the tool_call_id has no matching tool call.
+    {
+        let mut i = 0;
+        let mut remaining_results: usize = 0; // results still expected from current batch
+        while i < history.len() {
+            match &history[i] {
+                ChatHistoryMessage::AssistantToolCalls(calls) => {
+                    remaining_results = calls.len();
+                    i += 1;
+                }
+                ChatHistoryMessage::ToolResult { name, .. } => {
+                    if remaining_results > 0 {
+                        remaining_results -= 1;
+                        i += 1;
+                    } else {
+                        debug!(
+                            tool = %name,
+                            "Sanitizing history: dropping orphaned ToolResult with no preceding tool call"
+                        );
+                        history.remove(i);
+                        // don't advance i; the next element slid into this position
+                    }
+                }
+                _ => {
+                    remaining_results = 0;
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    // --- Pass 2: fill in missing tool results for orphaned tool calls ------
     //
     // Walk the history and, for every AssistantToolCalls, count how many
     // ToolResult messages follow (before the next non-ToolResult entry or

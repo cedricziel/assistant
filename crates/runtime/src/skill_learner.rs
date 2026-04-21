@@ -169,12 +169,13 @@ async fn evaluate_and_create(
                 "Skill learner: created new skill from turn"
             );
             // Record in conversation store for observability.
-            let mut msg = assistant_core::Message::new(
+            // Use System role — Tool role requires a matching AssistantToolCalls
+            // message and would cause providers to reject the request.
+            let msg = assistant_core::Message::new(
                 ctx.conversation_id,
-                assistant_core::MessageRole::Tool,
+                assistant_core::MessageRole::System,
                 format!("Auto-created skill '{final_name}': {description}"),
             );
-            msg.skill_name = Some("skill-learner".to_string());
             let conv_store = storage.conversation_store();
             if let Err(e) = conv_store.save_message(&msg).await {
                 warn!(error = %e, "Failed to record skill creation message");
