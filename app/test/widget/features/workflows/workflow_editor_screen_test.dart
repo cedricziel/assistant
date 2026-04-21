@@ -289,8 +289,8 @@ void main() {
 
       expect(find.byType(InteractiveViewer), findsOneWidget);
 
-      // Tap the FloatingActionButton to open the node palette.
-      await tester.tap(find.byType(FloatingActionButton));
+      // Tap the "Add node" FloatingActionButton to open the node palette.
+      await tester.tap(find.byTooltip('Add node'));
       await tester.pumpAndSettle();
 
       // The section header is uppercased by _PaletteSection; items are title-cased.

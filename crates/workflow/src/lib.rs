@@ -522,6 +522,27 @@ async fn execute_node(
     step_index: i64,
     action_executors: &[Arc<dyn WorkflowActionExecutor>],
 ) -> Result<String> {
+    // Skip disabled nodes — record a skipped step and return the primary
+    // outcome so downstream nodes still execute.
+    if node.config.get("disabled").and_then(|v| v.as_bool()) == Some(true) {
+        let outcome = match node.kind {
+            WorkflowNodeKind::Trigger => "trigger",
+            WorkflowNodeKind::Action => "success",
+            WorkflowNodeKind::Condition => "true",
+        };
+        store
+            .append_run_step(
+                run.id,
+                step_index,
+                node.id.as_str(),
+                "skipped",
+                Some("node disabled"),
+                None,
+            )
+            .await?;
+        return Ok(outcome.to_string());
+    }
+
     match node.kind {
         WorkflowNodeKind::Trigger => Ok("trigger".to_string()),
         WorkflowNodeKind::Condition => {
