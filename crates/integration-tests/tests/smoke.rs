@@ -115,7 +115,12 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
         model: MODEL.to_string(),
         base_url: base_url.to_string(),
         timeout_secs: 120,
-        retry_config: assistant_llm::RetryConfig::default(),
+        // Disable HTTP-level retries.  On CPU-only CI runners Ollama returns
+        // 500 after a 2-minute inference timeout — that is deterministic, not
+        // transient, so retrying the same prompt just burns another 2 min.
+        // The orchestrator's tool-calling loop already provides iteration-level
+        // "retries" with an evolving prompt.
+        retry_config: assistant_llm::RetryConfig::disabled(),
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
 
@@ -123,9 +128,6 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     // Disable learning so background skill-eval LLM calls don't compete with
     // the test's own LLM calls on the CPU-only CI Ollama instance.
     config.learning.enabled = false;
-    // Cap tool-calling iterations — the default (80) is far too high for a slow
-    // CPU-only model and causes multi-minute timeout cascades.
-    config.llm.max_iterations = 10;
     let executor = Arc::new(ToolExecutor::new(
         storage.clone(),
         llm.clone(),
