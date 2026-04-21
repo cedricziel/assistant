@@ -124,7 +124,7 @@ timeout_secs = 120
 #
 # [llm]
 # provider        = "moonshot"
-# model           = "kimi-k2.5"       # or moonshot-v1-128k, kimi-latest, kimi-k2-thinking
+# model           = "kimi-k2.6"       # or kimi-k2.6-thinking, kimi-k2.5, kimi-latest
 # api_key         = "sk-..."          # or set MOONSHOT_API_KEY env var
 # max_iterations  = 80
 # timeout_secs    = 120
