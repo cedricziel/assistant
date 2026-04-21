@@ -1,9 +1,10 @@
 # Fastfile — iOS & macOS release automation for the assistant app.
 #
 # Usage:
-#   bundle exec fastlane ios beta    — build and upload to TestFlight
-#   bundle exec fastlane ios release — build and submit to App Store
-#   bundle exec fastlane mac provision — sync macOS development profiles
+#   bundle exec fastlane ios beta             — build and upload to TestFlight
+#   bundle exec fastlane ios release          — build and submit to App Store
+#   bundle exec fastlane mac provision        — sync macOS development profiles
+#   bundle exec fastlane mac sign_and_notarize — sign + notarize the macOS .app
 
 default_platform(:ios)
 
@@ -19,8 +20,6 @@ MAC_REQUIRED_ENV_VARS = %w[
   APP_STORE_CONNECT_API_KEY_KEY_ID
   APP_STORE_CONNECT_API_KEY_ISSUER_ID
   APP_STORE_CONNECT_API_KEY_KEY
-  MATCH_GIT_URL
-  MATCH_PASSWORD
 ].freeze
 
 platform :ios do
@@ -121,6 +120,10 @@ platform :mac do
   end
 
   lane :provision do
+    %w[MATCH_GIT_URL MATCH_PASSWORD].each do |v|
+      UI.user_error!("Missing required env var: #{v}") if ENV[v].to_s.empty?
+    end
+
     # In CI the build-flutter-desktop job creates its own keychain and passes
     # KEYCHAIN_PATH / KEYCHAIN_PASSWORD. We import match certs into that
     # keychain so both Developer ID and development certs coexist.
@@ -159,6 +162,41 @@ platform :mac do
       code_sign_identity: "Apple Development",
       profile_name: ENV["sigh_com.cedricziel.assistant.macos.ShareExtension_development_macos_profile-name"] || "match Development com.cedricziel.assistant.macos.ShareExtension macos",
       targets: ["ShareExtension"]
+    )
+  end
+
+  lane :sign_and_notarize do
+    identity = ENV["APPLE_SIGNING_IDENTITY"]
+    UI.user_error!("Missing APPLE_SIGNING_IDENTITY env var") if identity.to_s.empty?
+
+    app = File.expand_path("../build/macos/Build/Products/Release/assistant_app.app")
+    UI.user_error!("App bundle not found at #{app}") unless File.exist?(app)
+    entitlements = File.expand_path("../macos/Runner/Release.entitlements")
+
+    # Bottom-up signing: embedded binaries and frameworks first, then the
+    # bundle itself. Notarization requires every binary to carry hardened
+    # runtime + a secure timestamp.
+    Dir.glob("#{app}/Contents/Resources/**/*").select { |f| File.file?(f) && File.executable?(f) }.each do |f|
+      sh("codesign", "--force", "--sign", identity, "--options", "runtime", "--timestamp", f)
+    end
+    Dir.glob("#{app}/Contents/Frameworks/*.{framework,dylib}").each do |f|
+      sh("codesign", "--force", "--sign", identity, "--options", "runtime", "--timestamp", f)
+    end
+    Dir.glob("#{app}/Contents/PlugIns/*.appex").each do |appex|
+      sh("codesign", "--force", "--sign", identity, "--options", "runtime", "--timestamp", appex)
+    end
+    sh("codesign", "--force", "--sign", identity, "--options", "runtime", "--timestamp",
+       "--entitlements", entitlements, app)
+
+    # Verify
+    sh("codesign", "--verify", "--deep", "--strict", app)
+    UI.success("Code signature verification passed")
+
+    # Notarize via ASC API key (already configured in before_all).
+    notarize(
+      package: app,
+      bundle_id: "com.cedricziel.assistant.macos",
+      print_log: true
     )
   end
 end
