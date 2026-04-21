@@ -15,7 +15,7 @@ export MOONSHOT_API_KEY=sk-...
 cat <<'EOF' >> ~/.assistant/config.toml
 [llm]
 provider = "moonshot"
-model    = "kimi-k2.5"
+model    = "kimi-k2.6"
 EOF
 
 # Run the assistant
@@ -32,7 +32,7 @@ sections in `~/.assistant/config.toml`.
 | Key              | Env var            | Default                        | Description                               |
 | ---------------- | ------------------ | ------------------------------ | ----------------------------------------- |
 | `provider`       |                    | `"ollama"`                     | Set to `"moonshot"` to use this provider  |
-| `model`          |                    | `"kimi-k2.5"`                  | Moonshot model ID (see [Models](#models)) |
+| `model`          |                    | `"kimi-k2.6"`                  | Moonshot model ID (see [Models](#models)) |
 | `api_key`        | `MOONSHOT_API_KEY` | _(required)_                   | API key; env var is checked as fallback   |
 | `base_url`       |                    | `"https://api.moonshot.ai/v1"` | API base URL                              |
 | `max_iterations` |                    | `80`                           | Max tool-calling iterations per turn      |
@@ -77,7 +77,7 @@ To use the China endpoint:
 ```toml
 [llm]
 provider = "moonshot"
-model    = "kimi-k2.5"
+model    = "kimi-k2.6"
 base_url = "https://api.moonshot.cn/v1"
 ```
 
@@ -102,15 +102,22 @@ model    = "voyage-3-lite"
 
 ## Models
 
-### Current generation (Kimi K2 / K2.5)
+### Current generation (Kimi K2.6)
 
-| Model                    | Context | Tool calling | Vision | Notes                        |
-| ------------------------ | ------- | ------------ | ------ | ---------------------------- |
-| `kimi-k2.5`              | 262K    | Yes          | Yes    | Latest flagship, recommended |
-| `kimi-k2-0905-preview`   | 262K    | Yes          | No     | K2 preview (Sep 2025)        |
-| `kimi-k2-turbo-preview`  | 262K    | Yes          | No     | Faster K2 variant            |
-| `kimi-k2-thinking`       | 262K    | Yes          | No     | Reasoning model              |
-| `kimi-k2-thinking-turbo` | 262K    | Yes          | No     | Faster reasoning variant     |
+| Model                | Context | Tool calling | Vision | Notes                        |
+| -------------------- | ------- | ------------ | ------ | ---------------------------- |
+| `kimi-k2.6`          | 262K    | Yes          | Yes    | Latest flagship, recommended |
+| `kimi-k2.6-thinking` | 262K    | Yes          | Yes    | Reasoning variant of K2.6    |
+
+### Previous generation (Kimi K2 / K2.5)
+
+| Model                    | Context | Tool calling | Vision | Notes                    |
+| ------------------------ | ------- | ------------ | ------ | ------------------------ |
+| `kimi-k2.5`              | 262K    | Yes          | Yes    | Previous flagship        |
+| `kimi-k2-0905-preview`   | 262K    | Yes          | No     | K2 preview (Sep 2025)    |
+| `kimi-k2-turbo-preview`  | 262K    | Yes          | No     | Faster K2 variant        |
+| `kimi-k2-thinking`       | 262K    | Yes          | No     | Reasoning model          |
+| `kimi-k2-thinking-turbo` | 262K    | Yes          | No     | Faster reasoning variant |
 
 ### Kimi Latest
 
@@ -150,7 +157,7 @@ Moonshot AI is OpenAI-compatible but has a few known differences:
 ```toml
 [llm]
 provider = "moonshot"
-model    = "kimi-k2.5"
+model    = "kimi-k2.6"
 # api_key set via MOONSHOT_API_KEY env var
 ```
 
@@ -159,7 +166,7 @@ model    = "kimi-k2.5"
 ```toml
 [llm]
 provider        = "moonshot"
-model           = "kimi-k2.5"
+model           = "kimi-k2.6"
 api_key         = "sk-..."
 base_url        = "https://api.moonshot.ai/v1"
 max_iterations  = 80
@@ -178,7 +185,7 @@ model    = "voyage-3-lite"
 ```toml
 [llm]
 provider = "moonshot"
-model    = "kimi-k2-thinking"
+model    = "kimi-k2.6-thinking"
 base_url = "https://api.moonshot.cn/v1"
 ```
 
@@ -221,6 +228,6 @@ timeout_secs = 300
 
 ### Vision not working
 
-Only certain models support vision (e.g. `kimi-k2.5`, `kimi-latest`,
-`moonshot-v1-*-vision-preview`). Check the [Models](#models) table
+Only certain models support vision (e.g. `kimi-k2.6`, `kimi-k2.5`,
+`kimi-latest`, `moonshot-v1-*-vision-preview`). Check the [Models](#models) table
 and ensure you are using a vision-capable model.
