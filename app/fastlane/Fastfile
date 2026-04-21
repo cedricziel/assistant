@@ -1,12 +1,13 @@
-# Fastfile — iOS release automation for the assistant app.
+# Fastfile — iOS & macOS release automation for the assistant app.
 #
 # Usage:
 #   bundle exec fastlane ios beta    — build and upload to TestFlight
 #   bundle exec fastlane ios release — build and submit to App Store
+#   bundle exec fastlane mac provision — sync macOS development profiles
 
 default_platform(:ios)
 
-REQUIRED_ENV_VARS = %w[
+IOS_REQUIRED_ENV_VARS = %w[
   APP_STORE_CONNECT_API_KEY_KEY_ID
   APP_STORE_CONNECT_API_KEY_ISSUER_ID
   APP_STORE_CONNECT_API_KEY_KEY
@@ -14,24 +15,31 @@ REQUIRED_ENV_VARS = %w[
   MATCH_PASSWORD
 ].freeze
 
-before_all do
-  missing = REQUIRED_ENV_VARS.reject { |v| ENV[v] && !ENV[v].empty? }
-  unless missing.empty?
-    UI.user_error!("Missing required environment variables:\n  #{missing.join("\n  ")}\n\nSee app/fastlane/README.md for setup instructions.")
-  end
-
-  # Create a temporary keychain in CI so match doesn't prompt.
-  setup_ci if ENV["CI"]
-
-  app_store_connect_api_key(
-    key_id:      ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
-    issuer_id:   ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
-    key_content: ENV["APP_STORE_CONNECT_API_KEY_KEY"],
-    is_key_content_base64: ENV["APP_STORE_CONNECT_API_KEY_IS_BASE64"] == "true"
-  )
-end
+MAC_REQUIRED_ENV_VARS = %w[
+  APP_STORE_CONNECT_API_KEY_KEY_ID
+  APP_STORE_CONNECT_API_KEY_ISSUER_ID
+  APP_STORE_CONNECT_API_KEY_KEY
+  MATCH_GIT_URL
+  MATCH_PASSWORD
+].freeze
 
 platform :ios do
+  before_all do
+    missing = IOS_REQUIRED_ENV_VARS.reject { |v| ENV[v] && !ENV[v].empty? }
+    unless missing.empty?
+      UI.user_error!("Missing required environment variables:\n  #{missing.join("\n  ")}\n\nSee app/fastlane/README.md for setup instructions.")
+    end
+
+    setup_ci if ENV["CI"]
+
+    app_store_connect_api_key(
+      key_id:      ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
+      issuer_id:   ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_KEY"],
+      is_key_content_base64: ENV["APP_STORE_CONNECT_API_KEY_IS_BASE64"] == "true"
+    )
+  end
+
   private_lane :build_ios do
     # Sync certificates and provisioning profiles (readonly in CI).
     match(type: "appstore")
@@ -93,6 +101,64 @@ platform :ios do
       force:                    true,
       skip_screenshots:         true,
       skip_metadata:            true
+    )
+  end
+end
+
+platform :mac do
+  before_all do
+    missing = MAC_REQUIRED_ENV_VARS.reject { |v| ENV[v] && !ENV[v].empty? }
+    unless missing.empty?
+      UI.user_error!("Missing required environment variables:\n  #{missing.join("\n  ")}\n\nSee app/fastlane/README.md for setup instructions.")
+    end
+
+    app_store_connect_api_key(
+      key_id:      ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
+      issuer_id:   ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_KEY"],
+      is_key_content_base64: ENV["APP_STORE_CONNECT_API_KEY_IS_BASE64"] == "true"
+    )
+  end
+
+  lane :provision do
+    # In CI the build-flutter-desktop job creates its own keychain and passes
+    # KEYCHAIN_PATH / KEYCHAIN_PASSWORD. We import match certs into that
+    # keychain so both Developer ID and development certs coexist.
+    match_opts = {
+      type: "development",
+      platform: "macos",
+      app_identifier: [
+        "com.cedricziel.assistant.macos",
+        "com.cedricziel.assistant.macos.ShareExtension"
+      ]
+    }
+
+    if ENV["CI"] && ENV["KEYCHAIN_PATH"]
+      match_opts[:keychain_name] = ENV["KEYCHAIN_PATH"]
+      match_opts[:keychain_password] = ENV["KEYCHAIN_PASSWORD"]
+    else
+      setup_ci if ENV["CI"]
+    end
+
+    match(match_opts)
+
+    # Switch both targets to manual signing with the profiles match installed.
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "macos/Runner.xcodeproj",
+      team_id: "WPW3QSLZ2F",
+      code_sign_identity: "Apple Development",
+      profile_name: ENV["sigh_com.cedricziel.assistant.macos_development_macos_profile-name"] || "match Development com.cedricziel.assistant.macos macos",
+      targets: ["Runner"]
+    )
+
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "macos/Runner.xcodeproj",
+      team_id: "WPW3QSLZ2F",
+      code_sign_identity: "Apple Development",
+      profile_name: ENV["sigh_com.cedricziel.assistant.macos.ShareExtension_development_macos_profile-name"] || "match Development com.cedricziel.assistant.macos.ShareExtension macos",
+      targets: ["ShareExtension"]
     )
   end
 end
