@@ -13,6 +13,21 @@ import 'package:dio/dio.dart';
 import 'models/server_capabilities.dart';
 import 'models/stream_event.dart';
 
+/// Thrown when the server rejects an API request with HTTP 401.
+///
+/// Callers can catch this to trigger re-authentication flows or surface a
+/// targeted error message rather than a generic "request failed" banner.
+class ApiAuthException implements Exception {
+  const ApiAuthException([
+    this.message = 'Authentication failed — verify your token',
+  ]);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// Configured client bundle: generated API instances + SSE streaming helper.
 class ApiClient {
   ApiClient({required String baseUrl, required String token}) : _token = token {
@@ -249,6 +264,9 @@ class ApiClient {
         ),
       );
     } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        throw const ApiAuthException();
+      }
       throw Exception('Failed to connect to conversation stream: ${e.message}');
     }
 

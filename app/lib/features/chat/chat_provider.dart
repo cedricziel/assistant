@@ -83,7 +83,10 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     _subscription = api.streamConversations().listen(
       _onEvent,
       onError: (Object e) {
-        state = AsyncData(ConversationListState(error: e.toString()));
+        final message = e is ApiAuthException
+            ? e.message
+            : 'Connection error: $e';
+        state = AsyncData(ConversationListState(error: message));
       },
       cancelOnError: false,
     );
