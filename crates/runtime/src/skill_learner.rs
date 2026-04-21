@@ -309,4 +309,113 @@ mod tests {
         let name = resolve_name_collision(&registry, "new-skill").await;
         assert_eq!(name, "new-skill");
     }
+
+    #[test]
+    fn test_heuristic_gate_passes_subagent_turn() {
+        let config = LearningConfig::default();
+        // Subagent turns have no active_skill (they don't inherit from parent).
+        let ctx = TurnContext {
+            conversation_id: Uuid::new_v4(),
+            agent_id: "subagent-abc123".to_string(),
+            tool_count: 10,
+            had_errors: false,
+            active_skill: None,
+            history: vec![],
+        };
+        assert!(
+            passes_heuristic_gate(&ctx, &config),
+            "Subagent turns with enough tool calls should pass the heuristic gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_and_create_from_subagent_turn() {
+        use assistant_llm::{
+            Capabilities, ChatHistoryMessage as CHM, LlmResponse, LlmResponseMeta, StreamChunk,
+            ToolSupport, tool_spec::ToolSpec,
+        };
+        use async_trait::async_trait;
+        use tokio::sync::mpsc;
+
+        struct MockJudgeLlm;
+
+        #[async_trait]
+        impl LlmProvider for MockJudgeLlm {
+            fn capabilities(&self) -> Capabilities {
+                Capabilities {
+                    tools: ToolSupport::None,
+                    streaming: false,
+                    vision: false,
+                    hosted_tools: vec![],
+                }
+            }
+            async fn chat(
+                &self,
+                _system: &str,
+                _history: &[CHM],
+                _tools: &[ToolSpec],
+            ) -> anyhow::Result<LlmResponse> {
+                Ok(LlmResponse::FinalAnswer(
+                    "{\"create\": true, \"name\": \"codebase-search\", \"description\": \"Search and summarize codebase patterns\", \"body\": \"# Codebase Search\\n\\n1. Glob for files\\n2. Grep for patterns\\n3. Summarize\"}".to_string(),
+                    LlmResponseMeta {
+                        model: None,
+                        input_tokens: None,
+                        output_tokens: None,
+                        finish_reason: None,
+                        response_id: None,
+                    },
+                ))
+            }
+            async fn chat_streaming(
+                &self,
+                _system: &str,
+                _history: &[CHM],
+                _tools: &[ToolSpec],
+                _sink: Option<mpsc::Sender<StreamChunk>>,
+            ) -> anyhow::Result<LlmResponse> {
+                unimplemented!()
+            }
+        }
+
+        let storage = Arc::new(
+            assistant_storage::StorageLayer::new_in_memory()
+                .await
+                .unwrap(),
+        );
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let llm: Arc<dyn LlmProvider> = Arc::new(MockJudgeLlm);
+
+        // Simulate a subagent turn with rich tool-call history.
+        let ctx = TurnContext {
+            conversation_id: Uuid::new_v4(),
+            agent_id: "subagent-test-abc".to_string(),
+            tool_count: 5,
+            had_errors: false,
+            active_skill: None,
+            history: vec![
+                ChatHistoryMessage::Text {
+                    role: assistant_llm::ChatRole::User,
+                    content: "Search the codebase for sidebar components".to_string(),
+                },
+                ChatHistoryMessage::Text {
+                    role: assistant_llm::ChatRole::Assistant,
+                    content: "Found 5 sidebar-related files across the project.".to_string(),
+                },
+            ],
+        };
+
+        let config = LearningConfig::default();
+        evaluate_and_create(ctx, &config, storage.clone(), registry.clone(), llm)
+            .await
+            .unwrap();
+
+        // Verify the skill was created.
+        let skill = registry.get("codebase-search").await;
+        assert!(
+            skill.is_some(),
+            "Skill should have been auto-created from subagent turn"
+        );
+        let skill = skill.unwrap();
+        assert_eq!(skill.description, "Search and summarize codebase patterns");
+    }
 }
