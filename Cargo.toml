@@ -78,7 +78,7 @@ reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
 reqwest-retry = "0.8"
 reqwest-tracing = "0.5"
 # OpenAI-compatible client (used by provider-openai and provider-moonshot)
-async-openai = { version = "0.34", features = ["chat-completion", "embedding", "responses"] }
+async-openai = { version = "0.35", features = ["chat-completion", "embedding", "responses"] }
 # TLS — explicit dep so binaries can install_default() when both aws-lc-rs and ring are in tree
 rustls = { version = "0.23", features = ["ring"] }
 # Logging / tracing
