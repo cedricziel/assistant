@@ -7,6 +7,8 @@
 //! | GET    | `/api/traces`         | List recent traces (filtered)    |
 //! | GET    | `/api/traces/{id}`    | Get a single trace with spans    |
 
+use std::sync::Arc;
+
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -16,14 +18,15 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use tracing::warn;
+
+use crate::backends::TraceBackend;
 
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct TracesApiState {
-    pub pool: SqlitePool,
+    pub trace_backend: Arc<dyn TraceBackend>,
 }
 
 // -- Response types ----------------------------------------------------------
@@ -107,7 +110,6 @@ pub async fn list_traces(
     Query(params): Query<TracesQueryParams>,
 ) -> Response {
     let limit = params.limit.unwrap_or(50).min(200);
-    let store = assistant_storage::traces::TraceStore::new(state.pool);
 
     let filter = assistant_storage::traces::TraceFilter {
         skill: params.skill.clone(),
@@ -121,38 +123,16 @@ pub async fn list_traces(
         ..Default::default()
     };
 
-    match store
-        .list_recent_traces(limit, filter.skill.as_deref())
+    // Use the pluggable backend (SQLite or Iceberg) with an empty agent_id
+    // so all traces are visible in the top-level view.
+    match state
+        .trace_backend
+        .list_recent_traces(limit, &filter, "")
         .await
     {
         Ok(traces) => {
             let mut summaries: Vec<TraceSummaryResponse> = traces
                 .into_iter()
-                .filter(|t| {
-                    // Apply post-fetch filters (status, conversation, since, until).
-                    if let Some(ref status) = filter.status {
-                        let trace_status = if t.error_count > 0 { "error" } else { "ok" };
-                        if trace_status != status.as_str() {
-                            return false;
-                        }
-                    }
-                    if let Some(conv_id) = filter.conversation
-                        && t.conversation_id != Some(conv_id)
-                    {
-                        return false;
-                    }
-                    if let Some(since) = filter.since
-                        && t.start_time < since
-                    {
-                        return false;
-                    }
-                    if let Some(until) = filter.until
-                        && t.start_time > until
-                    {
-                        return false;
-                    }
-                    true
-                })
                 .map(|t| {
                     let status = if t.error_count > 0 { "error" } else { "ok" }.to_string();
                     let duration_ms = t
@@ -205,9 +185,8 @@ pub async fn get_trace(
     State(state): State<TracesApiState>,
     Path(trace_id): Path<String>,
 ) -> Response {
-    let store = assistant_storage::traces::TraceStore::new(state.pool);
-
-    match store.get_trace(&trace_id).await {
+    // Use the pluggable backend with an empty agent_id for the top-level view.
+    match state.trace_backend.get_trace(&trace_id, "").await {
         Ok(spans) if spans.is_empty() => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "Trace not found"})),
@@ -264,12 +243,14 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
+    use crate::backends::SqliteTraceBackend;
+
     use super::{TracesApiState, traces_router};
 
     async fn test_state() -> (TracesApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let state = TracesApiState {
-            pool: storage.pool.clone(),
+            trace_backend: Arc::new(SqliteTraceBackend::new(storage.pool.clone())),
         };
         (state, storage)
     }

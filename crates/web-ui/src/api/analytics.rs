@@ -16,17 +16,16 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use tracing::warn;
 
-use assistant_storage::MetricsStore;
+use crate::backends::MetricsBackend;
 
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct AnalyticsApiState {
-    pub pool: SqlitePool,
+    pub metrics_backend: Arc<dyn MetricsBackend>,
     pub agent_id: Arc<RwLock<String>>,
 }
 
@@ -135,14 +134,14 @@ pub async fn get_analytics(
     let bucket_mins = bucket_minutes(window_hours);
 
     let agent_id = state.agent_id.read().await.clone();
-    let store = MetricsStore::for_agent(state.pool, &agent_id);
+    let backend = &state.metrics_backend;
 
     let (summary_res, models_res, tools_res, token_series_res, request_series_res) = tokio::join!(
-        store.summary(window_hours),
-        store.model_comparison(window_hours),
-        store.tool_usage(window_hours),
-        store.token_usage_over_time(window_hours, bucket_mins),
-        store.request_rate(window_hours, bucket_mins),
+        backend.summary(window_hours, &agent_id),
+        backend.model_comparison(window_hours, &agent_id),
+        backend.tool_usage(window_hours, &agent_id),
+        backend.token_usage_over_time(window_hours, bucket_mins, &agent_id),
+        backend.request_rate(window_hours, bucket_mins, &agent_id),
     );
 
     let summary = match summary_res {
@@ -228,12 +227,14 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
+    use crate::backends::SqliteMetricsBackend;
+
     use super::{AnalyticsApiState, analytics_api_router};
 
     async fn test_state() -> (AnalyticsApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let state = AnalyticsApiState {
-            pool: storage.pool.clone(),
+            metrics_backend: Arc::new(SqliteMetricsBackend::new(storage.pool.clone())),
             agent_id: Arc::new(RwLock::new("default".to_string())),
         };
         (state, storage)

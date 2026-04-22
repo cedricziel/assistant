@@ -77,6 +77,52 @@ impl LogStore {
         rows.into_iter().map(Self::row_to_log).collect()
     }
 
+    /// Return recent logs (not agent-scoped) with optional time and
+    /// conversation filters.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn list_recent_filtered(
+        &self,
+        limit: i64,
+        min_severity: Option<i32>,
+        target_filter: Option<&str>,
+        search: Option<&str>,
+        trace_id: Option<&str>,
+        conversation_id: Option<&str>,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> Result<Vec<RecordedLog>> {
+        let rows = sqlx::query(
+            "SELECT l.id, l.timestamp, l.observed_timestamp, l.severity_number, l.severity_text, \
+                    l.body, l.trace_id, l.span_id, dt.name AS span_name, l.service_name, l.target, l.attributes \
+             FROM logs l \
+             LEFT JOIN distributed_traces dt ON dt.span_id = l.span_id AND dt.trace_id = l.trace_id \
+             WHERE (?1 IS NULL OR l.severity_number >= ?1) \
+               AND (?2 IS NULL OR l.target = ?2) \
+               AND (?3 IS NULL OR l.body LIKE '%' || ?3 || '%') \
+               AND (?4 IS NULL OR l.trace_id = ?4) \
+               AND (?5 IS NULL OR l.timestamp >= ?5) \
+               AND (?6 IS NULL OR l.timestamp <= ?6) \
+               AND (?7 IS NULL OR EXISTS ( \
+                   SELECT 1 FROM distributed_traces dt2 \
+                   WHERE dt2.trace_id = l.trace_id AND dt2.conversation_id = ?7 \
+               )) \
+             ORDER BY l.timestamp DESC \
+             LIMIT ?8",
+        )
+        .bind(min_severity)
+        .bind(target_filter)
+        .bind(search)
+        .bind(trace_id)
+        .bind(since)
+        .bind(until)
+        .bind(conversation_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(Self::row_to_log).collect()
+    }
+
     /// Return recent logs scoped to a specific assistant agent.
     #[allow(clippy::too_many_arguments)]
     pub async fn list_recent_for_agent(

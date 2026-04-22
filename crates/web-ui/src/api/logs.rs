@@ -6,6 +6,8 @@
 //! |--------|------------|---------------------------|
 //! | GET    | `/api/logs`| List recent log entries   |
 
+use std::sync::Arc;
+
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -15,14 +17,15 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use tracing::warn;
+
+use crate::backends::LogBackend;
 
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct LogsApiState {
-    pub pool: SqlitePool,
+    pub log_backend: Arc<dyn LogBackend>,
 }
 
 // -- Response types ----------------------------------------------------------
@@ -111,41 +114,33 @@ pub async fn list_logs(
     Query(params): Query<LogsQueryParams>,
 ) -> Response {
     let limit = params.limit.unwrap_or(100).min(500);
-    let store = assistant_storage::logs::LogStore::new(state.pool);
 
     let min_severity = params.severity.as_deref().and_then(severity_text_to_number);
 
     let search = params.search.as_deref().filter(|s| !s.is_empty());
     let trace_id = params.trace_id.as_deref();
+    let conversation_id = params.conversation.as_deref();
 
-    // Use list_recent (not scoped to agent) so all logs are visible.
-    match store
-        .list_recent(
+    // Use the pluggable backend (SQLite or Iceberg) with an empty agent_id
+    // so all logs are visible in the top-level view.
+    match state
+        .log_backend
+        .list_recent_logs(
             limit,
             min_severity,
             None, // target filter not exposed in API v1
             search,
             trace_id,
+            conversation_id,
+            params.since,
+            params.until,
+            "", // empty agent_id → unscoped
         )
         .await
     {
         Ok(logs) => {
             let mut entries: Vec<LogEntryResponse> = logs
                 .into_iter()
-                .filter(|l| {
-                    // Apply post-fetch time and conversation filters.
-                    if let Some(since) = params.since
-                        && l.timestamp < since
-                    {
-                        return false;
-                    }
-                    if let Some(until) = params.until
-                        && l.timestamp > until
-                    {
-                        return false;
-                    }
-                    true
-                })
                 .map(|l| {
                     let severity = l
                         .severity_number
@@ -204,12 +199,14 @@ mod tests {
 
     use assistant_storage::StorageLayer;
 
+    use crate::backends::SqliteLogBackend;
+
     use super::{LogsApiState, logs_router};
 
     async fn test_state() -> (LogsApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
         let state = LogsApiState {
-            pool: storage.pool.clone(),
+            log_backend: Arc::new(SqliteLogBackend::new(storage.pool.clone())),
         };
         (state, storage)
     }

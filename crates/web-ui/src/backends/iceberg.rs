@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use arrow_array::cast::AsArray;
-use arrow_array::types::{Int32Type, Int64Type, TimestampMicrosecondType};
+use arrow_array::types::{Float64Type, Int32Type, Int64Type, TimestampMicrosecondType};
 use arrow_array::{Array, RecordBatch};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
@@ -23,10 +23,11 @@ use uuid::Uuid;
 
 use assistant_core::IcebergConfig;
 use assistant_storage::{
-    LogStats, RecordedLog, RecordedSpan, SkillStatsProvider, TraceFilter, TraceStats, TraceSummary,
+    LogStats, MetricsSummary, ModelTokenUsage, RecordedLog, RecordedSpan, SkillStatsProvider,
+    TimeSeriesPoint, ToolUsageStats, TraceFilter, TraceStats, TraceSummary,
 };
 
-use super::{LogBackend, TraceBackend};
+use super::{LogBackend, MetricsBackend, TraceBackend};
 
 // -- helpers ------------------------------------------------------------------
 
@@ -121,6 +122,17 @@ fn i64_col(batch: &RecordBatch, col: &str, i: usize) -> Option<i64> {
 fn i32_col(batch: &RecordBatch, col: &str, i: usize) -> Option<i32> {
     let idx = batch.schema().index_of(col).ok()?;
     let arr = batch.column(idx).as_primitive_opt::<Int32Type>()?;
+    if arr.is_null(i) {
+        None
+    } else {
+        Some(arr.value(i))
+    }
+}
+
+/// Extract a nullable `f64` at row `i`.
+fn f64_col(batch: &RecordBatch, col: &str, i: usize) -> Option<f64> {
+    let idx = batch.schema().index_of(col).ok()?;
+    let arr = batch.column(idx).as_primitive_opt::<Float64Type>()?;
     if arr.is_null(i) {
         None
     } else {
@@ -653,5 +665,320 @@ impl SkillStatsProvider for IcebergTraceBackend {
             total_output_tokens,
             common_errors,
         })
+    }
+}
+
+// -- IcebergMetricsBackend ----------------------------------------------------
+
+// OTel semantic convention metric names.
+const GEN_AI_TOKEN_USAGE: &str = "gen_ai.client.token.usage";
+const GEN_AI_OPERATION_DURATION: &str = "gen_ai.client.operation.duration";
+const ASSISTANT_TURN_COUNT: &str = "assistant.turn.count";
+const ASSISTANT_TOOL_INVOCATIONS: &str = "assistant.tool.invocations";
+const ASSISTANT_ERROR_COUNT: &str = "assistant.error.count";
+const GEN_AI_TOKEN_TYPE: &str = "gen_ai.token.type";
+
+pub struct IcebergMetricsBackend {
+    config: IcebergConfig,
+}
+
+impl IcebergMetricsBackend {
+    pub fn new(config: IcebergConfig) -> Self {
+        Self { config }
+    }
+
+    fn metrics_data_dir(&self) -> PathBuf {
+        warehouse_path(&self.config)
+            .join(&self.config.namespace)
+            .join("assistant_metric_points")
+            .join("data")
+    }
+
+    fn load_all_batches(&self) -> Vec<RecordBatch> {
+        let dir = self.metrics_data_dir();
+        let files = collect_parquet_files(&dir);
+        let mut batches = Vec::new();
+        for f in &files {
+            match read_parquet(f) {
+                Ok(b) => batches.extend(b),
+                Err(e) => tracing::warn!("skipping metric parquet file {}: {e}", f.display()),
+            }
+        }
+        batches
+    }
+}
+
+/// A parsed metric row from Parquet.
+struct MetricRow {
+    metric_name: String,
+    recorded_at: DateTime<Utc>,
+    value: Option<f64>,
+    count: Option<i64>,
+    sum: Option<f64>,
+    model: Option<String>,
+    attributes: Value,
+}
+
+/// Parse all metric rows from batches, filtering by window and agent.
+fn parse_metric_rows(batches: &[RecordBatch], window_hours: i64, agent_id: &str) -> Vec<MetricRow> {
+    let cutoff = Utc::now() - chrono::Duration::hours(window_hours);
+    let mut rows = Vec::new();
+
+    for batch in batches {
+        for i in 0..batch.num_rows() {
+            let recorded_at = match ts_col(batch, "recorded_at", i) {
+                Some(t) => t,
+                None => continue,
+            };
+            if recorded_at < cutoff {
+                continue;
+            }
+
+            // Filter by agent_id when provided (the Parquet schema has a
+            // dedicated `agent_id` column written by the Iceberg exporter).
+            if !agent_id.is_empty() {
+                let row_agent = str_col(batch, "agent_id", i).unwrap_or("");
+                if row_agent != agent_id {
+                    continue;
+                }
+            }
+
+            let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
+            let attributes: Value =
+                serde_json::from_str(attrs_str).unwrap_or(Value::Object(Default::default()));
+
+            rows.push(MetricRow {
+                metric_name: str_col_req(batch, "metric_name", i).to_string(),
+                recorded_at,
+                value: f64_col(batch, "value", i),
+                count: i64_col(batch, "count", i),
+                sum: f64_col(batch, "sum", i),
+                model: str_col(batch, "model", i).map(str::to_string),
+                attributes,
+            });
+        }
+    }
+    rows
+}
+
+/// Format a timestamp into a bucket string for a given bucket width in minutes.
+///
+/// Uses epoch-based rounding so bucket widths > 60 minutes (e.g. 180, 360)
+/// produce correct multi-hour buckets.
+fn bucket_key(ts: &DateTime<Utc>, bucket_minutes: i64) -> String {
+    let bucket_seconds = bucket_minutes.max(1) * 60;
+    let bucketed = (ts.timestamp() / bucket_seconds) * bucket_seconds;
+    Utc.timestamp_opt(bucketed, 0)
+        .single()
+        .unwrap_or(*ts)
+        .format("%Y-%m-%dT%H:%M:00Z")
+        .to_string()
+}
+
+#[async_trait]
+impl MetricsBackend for IcebergMetricsBackend {
+    async fn summary(&self, window_hours: i64, agent_id: &str) -> Result<MetricsSummary> {
+        let batches = self.load_all_batches();
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
+
+        let mut token_in: f64 = 0.0;
+        let mut token_out: f64 = 0.0;
+        let mut requests: f64 = 0.0;
+        let mut tools: f64 = 0.0;
+        let mut errors: f64 = 0.0;
+        let mut duration_sum: f64 = 0.0;
+        let mut duration_count: f64 = 0.0;
+        let mut models: std::collections::HashSet<String> = Default::default();
+
+        for row in &rows {
+            match row.metric_name.as_str() {
+                n if n == GEN_AI_TOKEN_USAGE => {
+                    let token_type = row
+                        .attributes
+                        .get(GEN_AI_TOKEN_TYPE)
+                        .and_then(|v| v.as_str());
+                    let s = row.sum.unwrap_or(0.0);
+                    match token_type {
+                        Some("input") => token_in += s,
+                        Some("output") => token_out += s,
+                        _ => {}
+                    }
+                    if let Some(ref m) = row.model {
+                        models.insert(m.clone());
+                    }
+                }
+                n if n == ASSISTANT_TURN_COUNT => {
+                    requests += row.value.unwrap_or(0.0);
+                }
+                n if n == ASSISTANT_TOOL_INVOCATIONS => {
+                    tools += row.value.unwrap_or(0.0);
+                }
+                n if n == ASSISTANT_ERROR_COUNT => {
+                    errors += row.value.unwrap_or(0.0);
+                }
+                n if n == GEN_AI_OPERATION_DURATION => {
+                    duration_sum += row.sum.unwrap_or(0.0);
+                    duration_count += row.count.unwrap_or(0) as f64;
+                }
+                _ => {}
+            }
+        }
+
+        let avg_duration_s = if duration_count > 0.0 {
+            duration_sum / duration_count
+        } else {
+            0.0
+        };
+
+        let mut unique_models: Vec<String> = models.into_iter().collect();
+        unique_models.sort();
+
+        Ok(MetricsSummary {
+            total_tokens_in: token_in as i64,
+            total_tokens_out: token_out as i64,
+            total_requests: requests as i64,
+            total_tool_invocations: tools as i64,
+            avg_duration_s,
+            error_count: errors as i64,
+            unique_models,
+        })
+    }
+
+    async fn token_usage_over_time(
+        &self,
+        window_hours: i64,
+        bucket_minutes: i64,
+        agent_id: &str,
+    ) -> Result<Vec<TimeSeriesPoint>> {
+        let batches = self.load_all_batches();
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
+
+        let mut buckets: std::collections::BTreeMap<String, f64> = Default::default();
+        for row in &rows {
+            if row.metric_name != GEN_AI_TOKEN_USAGE {
+                continue;
+            }
+            let key = bucket_key(&row.recorded_at, bucket_minutes);
+            *buckets.entry(key).or_default() += row.sum.unwrap_or(0.0);
+        }
+
+        Ok(buckets
+            .into_iter()
+            .map(|(bucket, value)| TimeSeriesPoint { bucket, value })
+            .collect())
+    }
+
+    async fn model_comparison(
+        &self,
+        window_hours: i64,
+        agent_id: &str,
+    ) -> Result<Vec<ModelTokenUsage>> {
+        let batches = self.load_all_batches();
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
+
+        struct Acc {
+            input: f64,
+            output: f64,
+            count: f64,
+        }
+
+        let mut map: HashMap<String, Acc> = HashMap::new();
+        for row in &rows {
+            if row.metric_name != GEN_AI_TOKEN_USAGE {
+                continue;
+            }
+            let model = row.model.clone().unwrap_or_else(|| "unknown".to_string());
+            let token_type = row
+                .attributes
+                .get(GEN_AI_TOKEN_TYPE)
+                .and_then(|v| v.as_str());
+            let acc = map.entry(model).or_insert(Acc {
+                input: 0.0,
+                output: 0.0,
+                count: 0.0,
+            });
+            match token_type {
+                Some("input") => {
+                    acc.input += row.sum.unwrap_or(0.0);
+                    // Only count requests from input rows to avoid double-counting
+                    // (each LLM call emits both an input and output token row).
+                    acc.count += row.count.unwrap_or(0) as f64;
+                }
+                Some("output") => acc.output += row.sum.unwrap_or(0.0),
+                _ => {}
+            }
+        }
+
+        let mut result: Vec<ModelTokenUsage> = map
+            .into_iter()
+            .map(|(model, acc)| ModelTokenUsage {
+                model,
+                input_tokens: acc.input as i64,
+                output_tokens: acc.output as i64,
+                request_count: acc.count as i64,
+                avg_duration_s: 0.0,
+            })
+            .collect();
+
+        result.sort_by(|a, b| {
+            (b.input_tokens + b.output_tokens).cmp(&(a.input_tokens + a.output_tokens))
+        });
+        Ok(result)
+    }
+
+    async fn tool_usage(&self, window_hours: i64, agent_id: &str) -> Result<Vec<ToolUsageStats>> {
+        let batches = self.load_all_batches();
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
+
+        let mut map: HashMap<String, f64> = HashMap::new();
+        for row in &rows {
+            if row.metric_name != ASSISTANT_TOOL_INVOCATIONS {
+                continue;
+            }
+            let tool_name = row
+                .attributes
+                .get("span.name")
+                .or_else(|| row.attributes.get("tool.name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            *map.entry(tool_name).or_default() += row.value.unwrap_or(0.0);
+        }
+
+        let mut result: Vec<ToolUsageStats> = map
+            .into_iter()
+            .map(|(tool_name, invocations)| ToolUsageStats {
+                tool_name,
+                invocations: invocations as i64,
+                avg_duration_s: 0.0,
+            })
+            .collect();
+
+        result.sort_by_key(|t| std::cmp::Reverse(t.invocations));
+        Ok(result)
+    }
+
+    async fn request_rate(
+        &self,
+        window_hours: i64,
+        bucket_minutes: i64,
+        agent_id: &str,
+    ) -> Result<Vec<TimeSeriesPoint>> {
+        let batches = self.load_all_batches();
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
+
+        let mut buckets: std::collections::BTreeMap<String, f64> = Default::default();
+        for row in &rows {
+            if row.metric_name != ASSISTANT_TURN_COUNT {
+                continue;
+            }
+            let key = bucket_key(&row.recorded_at, bucket_minutes);
+            *buckets.entry(key).or_default() += row.value.unwrap_or(0.0);
+        }
+
+        Ok(buckets
+            .into_iter()
+            .map(|(bucket, value)| TimeSeriesPoint { bucket, value })
+            .collect())
     }
 }

@@ -16,13 +16,16 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use assistant_storage::{LogStats, RecordedLog, RecordedSpan, TraceFilter, TraceSummary};
+use assistant_storage::{
+    LogStats, MetricsSummary, ModelTokenUsage, RecordedLog, RecordedSpan, TimeSeriesPoint,
+    ToolUsageStats, TraceFilter, TraceSummary,
+};
 
 pub mod iceberg;
 pub mod sqlite;
 
-pub use iceberg::{IcebergLogBackend, IcebergTraceBackend};
-pub use sqlite::{SqliteLogBackend, SqliteTraceBackend};
+pub use iceberg::{IcebergLogBackend, IcebergMetricsBackend, IcebergTraceBackend};
+pub use sqlite::{SqliteLogBackend, SqliteMetricsBackend, SqliteTraceBackend};
 
 // -- TraceBackend -------------------------------------------------------------
 
@@ -45,6 +48,41 @@ pub trait TraceBackend: Send + Sync {
     /// `agent_id` is used by the SQLite backend for per-agent scoping and
     /// ignored by the Iceberg backend.
     async fn get_trace(&self, trace_id: &str, agent_id: &str) -> Result<Vec<RecordedSpan>>;
+}
+
+// -- MetricsBackend -----------------------------------------------------------
+
+/// Read-side interface for metric point data (analytics dashboard).
+#[async_trait]
+pub trait MetricsBackend: Send + Sync {
+    /// Overall summary for the last `window_hours` hours.
+    async fn summary(&self, window_hours: i64, agent_id: &str) -> Result<MetricsSummary>;
+
+    /// Token-usage time series grouped into fixed-width time buckets.
+    async fn token_usage_over_time(
+        &self,
+        window_hours: i64,
+        bucket_minutes: i64,
+        agent_id: &str,
+    ) -> Result<Vec<TimeSeriesPoint>>;
+
+    /// Per-model token-usage breakdown.
+    async fn model_comparison(
+        &self,
+        window_hours: i64,
+        agent_id: &str,
+    ) -> Result<Vec<ModelTokenUsage>>;
+
+    /// Tool invocation statistics.
+    async fn tool_usage(&self, window_hours: i64, agent_id: &str) -> Result<Vec<ToolUsageStats>>;
+
+    /// Request-rate time series (turns per bucket).
+    async fn request_rate(
+        &self,
+        window_hours: i64,
+        bucket_minutes: i64,
+        agent_id: &str,
+    ) -> Result<Vec<TimeSeriesPoint>>;
 }
 
 // -- LogBackend ---------------------------------------------------------------
