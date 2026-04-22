@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,6 +15,13 @@ const _kTokenPrefix = 'assistant_context_token_';
 /// Swift App Intent code reads these directly from the Keychain.
 const _kSiriServerUrl = 'assistant_siri_server_url';
 const _kSiriAuthToken = 'assistant_siri_auth_token';
+
+/// The Keychain service name that the native Swift `KeychainHelper` uses.
+/// Must match the `service` parameter in `KeychainHelper(service:)`.
+const _kNativeKeychainService = 'com.cedricziel.assistant';
+
+/// The suffix of the shared Keychain access group (without the team prefix).
+const _kSharedAccessGroupSuffix = 'com.cedricziel.assistant.shared';
 
 /// Abstraction over platform secure key-value storage.
 ///
@@ -46,14 +54,35 @@ class FlutterSecureStorageAdapter implements SecureKeyValueStorage {
 /// [SharedPreferences].  Auth tokens live in [SecureKeyValueStorage]
 /// (platform keychain / secure enclave).
 class ContextRepository {
-  const ContextRepository({
+  ContextRepository({
     required SharedPreferences prefs,
     required SecureKeyValueStorage secureStorage,
+    String? appleTeamPrefix,
   }) : _prefs = prefs,
-       _secureStorage = secureStorage;
+       _secureStorage = secureStorage,
+       _appleTeamPrefix = appleTeamPrefix;
 
   final SharedPreferences _prefs;
   final SecureKeyValueStorage _secureStorage;
+
+  /// Apple Team ID prefix (e.g. "ABCDE12345."), resolved at startup.
+  /// `null` on web or when the native channel is unavailable.
+  final String? _appleTeamPrefix;
+
+  /// Returns `IOSOptions` that target the shared Keychain access group with
+  /// the correct service name so items are readable by the native Swift
+  /// `KeychainHelper`.
+  ///
+  /// Returns `null` if the team prefix is unavailable (web, or native call
+  /// failed).
+  IOSOptions? get _sharedIOSOptions {
+    final prefix = _appleTeamPrefix;
+    if (prefix == null || prefix.isEmpty) return null;
+    return IOSOptions(
+      accountName: _kNativeKeychainService,
+      groupId: '$prefix$_kSharedAccessGroupSuffix',
+    );
+  }
 
   // -- Read -----------------------------------------------------------------
 
@@ -189,35 +218,29 @@ class ContextRepository {
   // -- Siri credential sync -------------------------------------------------
 
   /// Writes the active context's server URL and auth token to well-known
-  /// Keychain keys so native Swift App Intent code can access them without
-  /// the Flutter engine running.
+  /// Keychain keys so native Swift code (App Intents, share extension) can
+  /// access them without the Flutter engine running.
   ///
-  /// Credentials are written to both the app's default Keychain scope (for
-  /// Siri/Shortcuts backward compatibility) and the shared Keychain access
-  /// group (for the share extension and other app extensions).
+  /// On iOS, credentials are written directly to the shared Keychain access
+  /// group via `flutter_secure_storage` with `IOSOptions(groupId:)`.
+  ///
+  /// On macOS, the `flutter_secure_storage` plugin ignores `groupId`, so the
+  /// write is performed via a native method channel instead.
+  ///
+  /// The default-scope write (Siri/Shortcuts backward compat) is always done.
   ///
   /// Call this whenever the active context changes or credentials are updated.
   Future<void> syncSiriCredentials() async {
     final activeId = getActiveContextId();
     if (activeId == null) {
-      await _secureStorage.delete(key: _kSiriServerUrl);
-      await _secureStorage.delete(key: _kSiriAuthToken);
-      await SharedCredentialsChannel.syncCredentials(
-        serverUrl: null,
-        authToken: null,
-      );
+      await _clearSiriCredentials();
       return;
     }
 
     final contexts = await loadContexts();
     final active = contexts.where((c) => c.id == activeId).firstOrNull;
     if (active == null) {
-      await _secureStorage.delete(key: _kSiriServerUrl);
-      await _secureStorage.delete(key: _kSiriAuthToken);
-      await SharedCredentialsChannel.syncCredentials(
-        serverUrl: null,
-        authToken: null,
-      );
+      await _clearSiriCredentials();
       return;
     }
 
@@ -234,12 +257,69 @@ class ContextRepository {
       await _secureStorage.delete(key: _kSiriAuthToken);
     }
 
-    // Write to shared Keychain group (share extension access).
-    // Fire-and-forget: don't block the save flow on platform channel response.
-    SharedCredentialsChannel.syncCredentials(
+    // Write to shared Keychain group (share extension + app extensions).
+    await _syncSharedKeychain(
       serverUrl: active.serverUrl,
       authToken: authToken,
     );
+  }
+
+  Future<void> _clearSiriCredentials() async {
+    await _secureStorage.delete(key: _kSiriServerUrl);
+    await _secureStorage.delete(key: _kSiriAuthToken);
+    await _syncSharedKeychain(serverUrl: null, authToken: null);
+  }
+
+  /// Writes credentials to the shared Keychain access group.
+  ///
+  /// On iOS: uses `flutter_secure_storage` with `IOSOptions(groupId:)`.
+  /// On macOS: uses native method channel (plugin ignores `groupId`).
+  Future<void> _syncSharedKeychain({
+    required String? serverUrl,
+    required String? authToken,
+  }) async {
+    if (kIsWeb) return;
+
+    final iosOptions = _sharedIOSOptions;
+
+    final platform = defaultTargetPlatform;
+
+    // iOS: write directly via flutter_secure_storage.
+    if (platform == TargetPlatform.iOS && iosOptions != null) {
+      final storage = const FlutterSecureStorage();
+      try {
+        if (serverUrl != null && serverUrl.isNotEmpty) {
+          await storage.write(
+            key: _kSiriServerUrl,
+            value: serverUrl,
+            iOptions: iosOptions,
+          );
+        } else {
+          await storage.delete(key: _kSiriServerUrl, iOptions: iosOptions);
+        }
+
+        if (authToken != null && authToken.isNotEmpty) {
+          await storage.write(
+            key: _kSiriAuthToken,
+            value: authToken,
+            iOptions: iosOptions,
+          );
+        } else {
+          await storage.delete(key: _kSiriAuthToken, iOptions: iosOptions);
+        }
+      } catch (e) {
+        debugPrint('Failed to sync credentials to shared Keychain: $e');
+      }
+      return;
+    }
+
+    // macOS: use native method channel (groupId has no effect in the plugin).
+    if (platform == TargetPlatform.macOS) {
+      await SharedCredentialsChannel.syncCredentialsMacOS(
+        serverUrl: serverUrl,
+        authToken: authToken,
+      );
+    }
   }
 
   // -- Internal helpers -----------------------------------------------------

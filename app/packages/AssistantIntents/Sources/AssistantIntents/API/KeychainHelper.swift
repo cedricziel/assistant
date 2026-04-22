@@ -23,39 +23,46 @@ public struct KeychainHelper {
     private let sharedAccessGroup: String?
 
     /// The Apple Team ID prefix (e.g. "ABCDE12345.") read from the app's
-    /// entitlements at runtime. Returns an empty string if unavailable.
-    public static var teamPrefix: String {
-        guard let entitlements = Bundle.main.infoDictionary,
-              let appId = entitlements["AppIdentifierPrefix"] as? String else {
-            // Fallback: query Keychain for the team prefix.
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrAccount as String: "__team_prefix_probe__",
-                kSecReturnAttributes as String: true,
-            ]
-            // Write a throwaway item to read back the access group.
-            let addQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrAccount as String: "__team_prefix_probe__",
-                kSecValueData as String: Data("x".utf8),
-            ]
-            SecItemAdd(addQuery as CFDictionary, nil)
-            var result: AnyObject?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            // Clean up probe.
-            SecItemDelete(addQuery as CFDictionary)
-            if status == errSecSuccess,
-               let attrs = result as? [String: Any],
-               let group = attrs[kSecAttrAccessGroup as String] as? String {
-                // group is "TEAMID.bundleid" — extract "TEAMID."
-                if let dotIndex = group.firstIndex(of: ".") {
-                    return String(group[...dotIndex])
-                }
-            }
-            return ""
+    /// entitlements at runtime. Cached after first access (thread-safe via
+    /// Swift's static let guarantee).
+    ///
+    /// Returns an empty string if the prefix cannot be determined.
+    public static let teamPrefix: String = {
+        if let entitlements = Bundle.main.infoDictionary,
+           let appId = entitlements["AppIdentifierPrefix"] as? String {
+            return appId
         }
-        return appId
-    }
+        // Fallback: query Keychain for the team prefix by writing a throwaway
+        // item and reading back the system-assigned access group.
+        let probeAccount = "__team_prefix_probe__"
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: probeAccount,
+            kSecValueData as String: Data("x".utf8),
+        ]
+        SecItemAdd(addQuery as CFDictionary, nil)
+
+        let readQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: probeAccount,
+            kSecReturnAttributes as String: true,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(readQuery as CFDictionary, &result)
+
+        // Clean up probe.
+        SecItemDelete(addQuery as CFDictionary)
+
+        if status == errSecSuccess,
+           let attrs = result as? [String: Any],
+           let group = attrs[kSecAttrAccessGroup as String] as? String {
+            // group is "TEAMID.bundleid" — extract "TEAMID."
+            if let dotIndex = group.firstIndex(of: ".") {
+                return String(group[...dotIndex])
+            }
+        }
+        return ""
+    }()
 
     public init(service: String? = nil, sharedAccessGroup: String? = nil) {
         self.service = service ?? Bundle.main.bundleIdentifier ?? "com.cedricziel.assistant"
@@ -143,10 +150,11 @@ public struct KeychainHelper {
         return status == errSecSuccess || status == errSecItemNotFound
     }
 
-    /// Returns `true` if non-empty credentials are available.
+    /// Returns `true` if a non-empty server URL is available.
+    ///
+    /// An auth token is optional — servers may not require authentication.
     public var hasCredentials: Bool {
-        guard let url = serverURL, !url.isEmpty,
-              let token = authToken, !token.isEmpty else {
+        guard let url = serverURL, !url.isEmpty else {
             return false
         }
         return true

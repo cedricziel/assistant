@@ -3,6 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/context_repository.dart';
+import '../data/shared_credentials_channel.dart';
 import '../models/context_model.dart';
 
 // -- Repository provider (override in ProviderScope for testing) ------------
@@ -20,6 +21,10 @@ final contextRepositoryProvider = Provider<ContextRepository>((ref) {
 
 /// Creates the production [ContextRepository].
 ///
+/// Fetches the Apple Team ID prefix at startup so the repository can write
+/// directly to the shared Keychain access group on iOS via
+/// `IOSOptions(groupId:)`.
+///
 /// Usage in `main()`:
 /// ```dart
 /// final repo = await createContextRepository();
@@ -30,9 +35,11 @@ final contextRepositoryProvider = Provider<ContextRepository>((ref) {
 /// ```
 Future<ContextRepository> createContextRepository() async {
   final prefs = await SharedPreferences.getInstance();
+  final teamPrefix = await SharedCredentialsChannel.getTeamPrefix();
   return ContextRepository(
     prefs: prefs,
     secureStorage: const FlutterSecureStorageAdapter(FlutterSecureStorage()),
+    appleTeamPrefix: teamPrefix,
   );
 }
 
