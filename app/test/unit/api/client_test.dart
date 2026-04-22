@@ -624,5 +624,32 @@ void main() {
       expect(events.length, equals(1));
       expect(events.first.sequenceId, equals(5));
     });
+
+    test('replay cursor formula produces next-expected sequence', () {
+      // The consumer uses: _lastSeq = (event.sequenceId ?? _lastSeq) + 1
+      // This must produce sequenceId + 1 so `since: _lastSeq` skips the
+      // already-seen event (server uses `sequence >= since`).
+      int lastSeq = 0;
+
+      // Event with server sequence 0 → cursor becomes 1.
+      final seq0 = const TokenEvent('a', sequenceId: 0).sequenceId;
+      lastSeq = (seq0 ?? lastSeq) + 1;
+      expect(lastSeq, equals(1), reason: 'after seq 0, cursor = 1');
+
+      // Event with server sequence 1 → cursor becomes 2.
+      final seq1 = const TokenEvent('b', sequenceId: 1).sequenceId;
+      lastSeq = (seq1 ?? lastSeq) + 1;
+      expect(lastSeq, equals(2), reason: 'after seq 1, cursor = 2');
+
+      // Event without id: → cursor increments from current.
+      final seqNull = const TokenEvent('c').sequenceId;
+      lastSeq = (seqNull ?? lastSeq) + 1;
+      expect(lastSeq, equals(3), reason: 'no id → fallback increment');
+
+      // Non-contiguous server sequence (e.g. batched thinking tokens).
+      final seq10 = const TokenEvent('d', sequenceId: 10).sequenceId;
+      lastSeq = (seq10 ?? lastSeq) + 1;
+      expect(lastSeq, equals(11), reason: 'after seq 10, cursor = 11');
+    });
   });
 }

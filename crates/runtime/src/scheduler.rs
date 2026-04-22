@@ -1067,4 +1067,59 @@ mod tests {
             "fresh run should not be closed"
         );
     }
+
+    #[tokio::test]
+    async fn reap_stale_recovers_despite_non_turn_request_bus_message() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (_orch, storage) = build(&server.uri()).await;
+
+        let event_store = storage.conversation_event_store();
+        let run_id = "run-nonturn-001";
+        let conv_id = Uuid::new_v4();
+
+        // Create an orphaned run.
+        event_store
+            .append_event(
+                run_id,
+                &conv_id.to_string(),
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+
+        // Backdate.
+        sqlx::query(
+            "UPDATE conversation_events SET created_at = datetime('now', '-10 minutes') \
+             WHERE run_id = ?1",
+        )
+        .bind(run_id)
+        .execute(&storage.pool)
+        .await
+        .unwrap();
+
+        // Publish a non-turn.request bus message on the same conversation.
+        // This should NOT block recovery — only turn.request matters.
+        let bus = storage.message_bus();
+        use assistant_core::PublishRequest;
+        bus.publish(
+            PublishRequest::new(
+                topic::SCHEDULE_TRIGGER,
+                serde_json::json!({"task_name": "irrelevant"}),
+            )
+            .with_conversation_id(conv_id),
+        )
+        .await
+        .unwrap();
+
+        reap_stale_and_recover(&storage, &bus).await;
+
+        // The orphan should be recovered despite the schedule.trigger message.
+        assert!(
+            event_store.is_run_complete(run_id).await.unwrap(),
+            "non-turn.request bus message should not block orphan recovery"
+        );
+    }
 }
