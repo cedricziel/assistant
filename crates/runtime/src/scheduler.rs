@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use assistant_core::{
-    ChannelContent, ChannelMessage, ChannelType, ChannelUser, Interface, PublishRequest,
-    bus_messages, strip_html_comments, topic,
+    ChannelContent, ChannelMessage, ChannelType, ChannelUser, Interface, MessageBus,
+    PublishRequest, bus_messages, strip_html_comments, topic,
 };
 use assistant_storage::StorageLayer;
 use chrono::Utc;
@@ -23,6 +23,7 @@ use opentelemetry::{
     KeyValue,
     trace::{Span as _, SpanKind},
 };
+use sqlx::SqlitePool;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -59,9 +60,13 @@ pub fn spawn_scheduler(
         let mut last_event_prune = Instant::now()
             .checked_sub(EVENT_PRUNE_INTERVAL)
             .unwrap_or_else(Instant::now);
+        let mut last_reap_stale = Instant::now()
+            .checked_sub(REAP_STALE_INTERVAL)
+            .unwrap_or_else(Instant::now);
 
-        // Prune once on startup.
+        // Run once on startup.
         prune_conversation_events(&storage).await;
+        reap_stale_and_recover(&storage, orchestrator.bus().as_ref()).await;
 
         loop {
             tokio::time::sleep(poll_interval).await;
@@ -80,6 +85,11 @@ pub fn spawn_scheduler(
             if last_event_prune.elapsed() >= EVENT_PRUNE_INTERVAL {
                 prune_conversation_events(&storage).await;
                 last_event_prune = Instant::now();
+            }
+
+            if last_reap_stale.elapsed() >= REAP_STALE_INTERVAL {
+                reap_stale_and_recover(&storage, orchestrator.bus().as_ref()).await;
+                last_reap_stale = Instant::now();
             }
         }
     })
@@ -397,6 +407,114 @@ async fn prune_conversation_events(storage: &StorageLayer) {
         Ok(_) => {}
         Err(e) => warn!("Failed to prune conversation events: {e}"),
     }
+}
+
+// -- Crash recovery ---------------------------------------------------------
+
+/// How often stale bus messages and orphaned SSE runs are checked (5 minutes).
+const REAP_STALE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// A claimed bus message older than this is considered stale (5 minutes).
+const STALE_CLAIM_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// Reclaim stale bus messages and close orphaned SSE event streams.
+///
+/// 1. Calls `bus.reap_stale()` to reset stale `Claimed` → `Pending` messages.
+/// 2. Finds runs that have a `run_started` event but no terminal event and are
+///    older than `STALE_CLAIM_TIMEOUT`.
+/// 3. For each orphan, checks whether an active (Pending/Claimed) bus message
+///    still references that conversation — if so, the run may still complete
+///    after bus redelivery, so we skip it.
+/// 4. Otherwise, appends a synthetic `agent_error` event so clients see a
+///    terminal event and can retry cleanly.
+pub(crate) async fn reap_stale_and_recover(storage: &StorageLayer, bus: &dyn MessageBus) {
+    // Step 1: reclaim stale bus messages.
+    match bus.reap_stale(STALE_CLAIM_TIMEOUT).await {
+        Ok(n) if n > 0 => info!("Reaped {n} stale bus message(s)"),
+        Ok(_) => {}
+        Err(e) => warn!("Failed to reap stale bus messages: {e}"),
+    }
+
+    // Step 2: find orphaned SSE runs.
+    let event_store = storage.conversation_event_store();
+    let stale_timeout = chrono::Duration::from_std(STALE_CLAIM_TIMEOUT).unwrap_or_default();
+    let orphans = match event_store.find_incomplete_runs(stale_timeout).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("Failed to find incomplete runs: {e}");
+            return;
+        }
+    };
+
+    if orphans.is_empty() {
+        return;
+    }
+
+    info!(
+        count = orphans.len(),
+        "Found orphaned SSE run(s), checking for active bus messages"
+    );
+
+    // Step 3 & 4: for each orphan, check bus and potentially close.
+    for (run_id, conversation_id) in orphans {
+        let has_active = match has_active_bus_message(&storage.pool, &conversation_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(
+                    run_id = %run_id,
+                    error = %e,
+                    "Failed to check bus messages for orphan — skipping"
+                );
+                continue;
+            }
+        };
+
+        if has_active {
+            info!(
+                run_id = %run_id,
+                conversation_id = %conversation_id,
+                "Orphaned run still has active bus message — skipping (may recover)"
+            );
+            continue;
+        }
+
+        match event_store
+            .append_synthetic_terminal(
+                &run_id,
+                &conversation_id,
+                "Server restarted — this run was interrupted. You may retry your message.",
+            )
+            .await
+        {
+            Ok(seq) => info!(
+                run_id = %run_id,
+                conversation_id = %conversation_id,
+                sequence = seq,
+                "Appended synthetic agent_error to orphaned run"
+            ),
+            Err(e) => warn!(
+                run_id = %run_id,
+                error = %e,
+                "Failed to append synthetic terminal for orphaned run"
+            ),
+        }
+    }
+}
+
+/// Check whether there is a Pending or Claimed `turn.request` bus message for a
+/// conversation.  Only `turn.request` messages initiate orchestrator runs; other
+/// topics (e.g. `schedule.trigger`) should not block orphan recovery.
+async fn has_active_bus_message(pool: &SqlitePool, conversation_id: &str) -> Result<bool> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM bus_messages \
+         WHERE conversation_id = ?1 \
+           AND topic = 'turn.request' \
+           AND status IN ('pending', 'claimed')",
+    )
+    .bind(conversation_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(count > 0)
 }
 
 // -- Tests ------------------------------------------------------------------
@@ -806,5 +924,202 @@ mod tests {
             .await
             .unwrap();
         assert!(msg.is_some(), "turn.request must be published");
+    }
+
+    // -- reap_stale_and_recover ------------------------------------------------
+
+    #[tokio::test]
+    async fn reap_stale_closes_orphaned_run() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (_orch, storage) = build(&server.uri()).await;
+
+        let event_store = storage.conversation_event_store();
+        let run_id = "run-orphan-001";
+        let conv_id = "conv-orphan-001";
+
+        // Simulate an orphaned run: run_started but no terminal event.
+        event_store
+            .append_event(
+                run_id,
+                conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+        event_store
+            .append_event(
+                run_id,
+                conv_id,
+                1,
+                "token",
+                &serde_json::json!({"token": "partial"}),
+            )
+            .await
+            .unwrap();
+
+        // Backdate so it's older than the stale threshold.
+        sqlx::query(
+            "UPDATE conversation_events SET created_at = datetime('now', '-10 minutes') \
+             WHERE run_id = ?1",
+        )
+        .bind(run_id)
+        .execute(&storage.pool)
+        .await
+        .unwrap();
+
+        let bus = storage.message_bus();
+        reap_stale_and_recover(&storage, &bus).await;
+
+        // The orphaned run should now have a synthetic terminal event.
+        assert!(
+            event_store.is_run_complete(run_id).await.unwrap(),
+            "orphaned run should be marked complete after recovery"
+        );
+
+        let events = event_store.list_events_since(run_id, 2).await.unwrap();
+        assert_eq!(events.len(), 1, "should have exactly one synthetic event");
+        assert_eq!(events[0].event_type, "agent_error");
+        assert_eq!(events[0].payload["synthetic"], true);
+    }
+
+    #[tokio::test]
+    async fn reap_stale_skips_run_with_active_bus_message() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (_orch, storage) = build(&server.uri()).await;
+
+        let event_store = storage.conversation_event_store();
+        let run_id = "run-active-001";
+        let conv_id = Uuid::new_v4();
+
+        // Create an orphaned run.
+        event_store
+            .append_event(
+                run_id,
+                &conv_id.to_string(),
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+
+        // Backdate.
+        sqlx::query(
+            "UPDATE conversation_events SET created_at = datetime('now', '-10 minutes') \
+             WHERE run_id = ?1",
+        )
+        .bind(run_id)
+        .execute(&storage.pool)
+        .await
+        .unwrap();
+
+        // Publish an active bus message for the same conversation.
+        let bus = storage.message_bus();
+        use assistant_core::PublishRequest;
+        bus.publish(
+            PublishRequest::new(topic::TURN_REQUEST, serde_json::json!({"prompt": "retry"}))
+                .with_conversation_id(conv_id),
+        )
+        .await
+        .unwrap();
+
+        reap_stale_and_recover(&storage, &bus).await;
+
+        // The run should NOT be closed — bus message is still active.
+        assert!(
+            !event_store.is_run_complete(run_id).await.unwrap(),
+            "run with active bus message should not be closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn reap_stale_skips_fresh_runs() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (_orch, storage) = build(&server.uri()).await;
+
+        let event_store = storage.conversation_event_store();
+        let run_id = "run-fresh-001";
+        let conv_id = "conv-fresh-001";
+
+        // Create a run that just started (no backdating).
+        event_store
+            .append_event(
+                run_id,
+                conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+
+        let bus = storage.message_bus();
+        reap_stale_and_recover(&storage, &bus).await;
+
+        // Fresh run should not be touched.
+        assert!(
+            !event_store.is_run_complete(run_id).await.unwrap(),
+            "fresh run should not be closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn reap_stale_recovers_despite_non_turn_request_bus_message() {
+        let server = MockServer::start().await;
+        mount_answer(&server, "done").await;
+        let (_orch, storage) = build(&server.uri()).await;
+
+        let event_store = storage.conversation_event_store();
+        let run_id = "run-nonturn-001";
+        let conv_id = Uuid::new_v4();
+
+        // Create an orphaned run.
+        event_store
+            .append_event(
+                run_id,
+                &conv_id.to_string(),
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+
+        // Backdate.
+        sqlx::query(
+            "UPDATE conversation_events SET created_at = datetime('now', '-10 minutes') \
+             WHERE run_id = ?1",
+        )
+        .bind(run_id)
+        .execute(&storage.pool)
+        .await
+        .unwrap();
+
+        // Publish a non-turn.request bus message on the same conversation.
+        // This should NOT block recovery — only turn.request matters.
+        let bus = storage.message_bus();
+        use assistant_core::PublishRequest;
+        bus.publish(
+            PublishRequest::new(
+                topic::SCHEDULE_TRIGGER,
+                serde_json::json!({"task_name": "irrelevant"}),
+            )
+            .with_conversation_id(conv_id),
+        )
+        .await
+        .unwrap();
+
+        reap_stale_and_recover(&storage, &bus).await;
+
+        // The orphan should be recovered despite the schedule.trigger message.
+        assert!(
+            event_store.is_run_complete(run_id).await.unwrap(),
+            "non-turn.request bus message should not block orphan recovery"
+        );
     }
 }

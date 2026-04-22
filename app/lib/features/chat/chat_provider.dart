@@ -1138,9 +1138,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         final chatState = state.value ?? const ChatState();
 
         if (event is RunStartedEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
         } else if (event is TokenEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           final newContent = chatState.streamingContent + event.token;
           final ms = List<ChatMessage>.from(chatState.messages);
           if (chatState.streamingContent.isEmpty) {
@@ -1156,13 +1156,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
         } else if (event is StatusEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onStatusEvent(chatState, event);
         } else if (event is ToolResultEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onToolResultEvent(chatState, event);
         } else if (event is DoneEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           final ms = List<ChatMessage>.from(chatState.messages);
           final uIdx = ms.indexWhere((m) => m.id == userMsgId);
           if (uIdx != -1) {
@@ -1184,8 +1184,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
           return true;
+        } else if (event is AgentErrorEvent) {
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
+          final ms = List<ChatMessage>.from(chatState.messages)
+            ..removeWhere((m) => m.id == 'assistant-streaming');
+          final uIdx = ms.indexWhere((m) => m.id == userMsgId);
+          if (uIdx != -1) {
+            ms[uIdx] = ms[uIdx].copyWith(status: MessageStatus.failed);
+          }
+          state = AsyncData(chatState.copyWith(messages: ms, isSending: false));
+          return false;
         } else if (event is ErrorEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           return false;
         }
       }
@@ -1502,10 +1512,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         if (event is RunStartedEvent) {
           // Capture the run ID for potential reconnect; don't change UI.
           _currentRunId = event.runId;
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           continue;
         } else if (event is TokenEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           tokenController.add(event.token);
           final newContent = chatState.streamingContent + event.token;
           final msgs = List<ChatMessage>.from(chatState.messages);
@@ -1526,22 +1536,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
         } else if (event is StatusEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onStatusEvent(chatState, event);
         } else if (event is ToolResultEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onToolResultEvent(chatState, event);
         } else if (event is ThinkingEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onThinkingEvent(chatState, event);
         } else if (event is SubagentStartedEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onSubagentStartedEvent(chatState, event);
         } else if (event is SubagentCompletedEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           _onSubagentCompletedEvent(chatState, event);
         } else if (event is DoneEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           unawaited(tokenController.close());
           _closeThinkingController();
           final msgs = List<ChatMessage>.from(chatState.messages);
@@ -1583,7 +1593,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           // Refresh conversation list to update timestamps/titles.
           return;
         } else if (event is AudioReadyEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           final msgs = List<ChatMessage>.from(chatState.messages);
           final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
           if (idx != -1) {
@@ -1594,7 +1604,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
           state = AsyncData(chatState.copyWith(messages: msgs));
         } else if (event is ErrorEvent) {
-          _lastSeq++;
+          _lastSeq = (event.sequenceId ?? _lastSeq) + 1;
           unawaited(tokenController.close());
           _closeThinkingController();
           final msgs = List<ChatMessage>.from(chatState.messages)

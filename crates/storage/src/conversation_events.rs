@@ -114,11 +114,11 @@ impl ConversationEventStore {
         Ok(count > 0)
     }
 
-    /// Return `true` if the run has completed (a `done` or `error` event was persisted).
+    /// Return `true` if the run has completed (a `done` or `agent_error` event was persisted).
     pub async fn is_run_complete(&self, run_id: &str) -> Result<bool> {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM conversation_events \
-             WHERE run_id = ?1 AND (event_type = 'done' OR event_type = 'error')",
+             WHERE run_id = ?1 AND (event_type = 'done' OR event_type = 'agent_error')",
         )
         .bind(run_id)
         .fetch_one(&self.pool)
@@ -134,6 +134,73 @@ impl ConversationEventStore {
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    /// Find runs that have a `run_started` event but no terminal event
+    /// (`done` or `agent_error`), and whose `run_started` was created more than
+    /// `older_than` ago.
+    ///
+    /// Returns `(run_id, conversation_id)` pairs for orphaned runs that likely
+    /// died mid-stream (e.g. server restart).
+    pub async fn find_incomplete_runs(
+        &self,
+        older_than: Duration,
+    ) -> Result<Vec<(String, String)>> {
+        let cutoff = Utc::now() - older_than;
+        let rows = sqlx::query(
+            "SELECT DISTINCT ce.run_id, ce.conversation_id \
+             FROM conversation_events ce \
+             WHERE ce.event_type = 'run_started' \
+               AND ce.created_at < ?1 \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM conversation_events ce2 \
+                   WHERE ce2.run_id = ce.run_id \
+                     AND ce2.event_type IN ('done', 'agent_error') \
+               )",
+        )
+        .bind(cutoff)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let results = rows
+            .iter()
+            .map(|r| {
+                let run_id: String = r.try_get("run_id").unwrap_or_default();
+                let conversation_id: String = r.try_get("conversation_id").unwrap_or_default();
+                (run_id, conversation_id)
+            })
+            .collect();
+        Ok(results)
+    }
+
+    /// Append a synthetic `agent_error` terminal event to an orphaned run.
+    ///
+    /// Auto-determines the next sequence number. The payload includes
+    /// `"synthetic": true` so clients can distinguish crash recovery from real
+    /// errors.
+    pub async fn append_synthetic_terminal(
+        &self,
+        run_id: &str,
+        conversation_id: &str,
+        message: &str,
+    ) -> Result<i64> {
+        let next_seq: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(sequence), -1) + 1 \
+             FROM conversation_events WHERE run_id = ?1",
+        )
+        .bind(run_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let payload = serde_json::json!({
+            "message": message,
+            "synthetic": true,
+        });
+
+        self.append_event(run_id, conversation_id, next_seq, "agent_error", &payload)
+            .await?;
+
+        Ok(next_seq)
     }
 }
 
@@ -422,7 +489,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn is_run_complete_detects_error_event() {
+    async fn is_run_complete_detects_agent_error_event() {
         let store = make_store().await;
         let run_id = "run-004";
         let conv_id = "conv-004";
@@ -444,15 +511,172 @@ mod tests {
                 run_id,
                 conv_id,
                 1,
-                "error",
+                "agent_error",
                 &serde_json::json!({"message": "LLM failed"}),
             )
             .await
             .unwrap();
         assert!(
             store.is_run_complete(run_id).await.unwrap(),
-            "error event should mark run as complete"
+            "agent_error event should mark run as complete"
         );
+    }
+
+    #[tokio::test]
+    async fn find_incomplete_runs_returns_orphans() {
+        let store = make_store().await;
+
+        // Create a run that started 10 minutes ago but has no terminal event.
+        let orphan_run = "run-orphan";
+        let orphan_conv = "conv-orphan";
+        store
+            .append_event(
+                orphan_run,
+                orphan_conv,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": orphan_run}),
+            )
+            .await
+            .unwrap();
+
+        // Backdate the run_started event so it's older than the threshold.
+        sqlx::query(
+            "UPDATE conversation_events SET created_at = datetime('now', '-10 minutes') \
+             WHERE run_id = ?1",
+        )
+        .bind(orphan_run)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let orphans = store
+            .find_incomplete_runs(Duration::minutes(5))
+            .await
+            .unwrap();
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(
+            orphans[0],
+            (orphan_run.to_string(), orphan_conv.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn find_incomplete_runs_excludes_completed() {
+        let store = make_store().await;
+        let run_id = "run-completed";
+        let conv_id = "conv-completed";
+
+        store
+            .append_event(
+                run_id,
+                conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+        store
+            .append_event(
+                run_id,
+                conv_id,
+                1,
+                "done",
+                &serde_json::json!({"content": "bye"}),
+            )
+            .await
+            .unwrap();
+
+        // Backdate so it's old enough.
+        sqlx::query(
+            "UPDATE conversation_events SET created_at = datetime('now', '-10 minutes') \
+             WHERE run_id = ?1",
+        )
+        .bind(run_id)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let orphans = store
+            .find_incomplete_runs(Duration::minutes(5))
+            .await
+            .unwrap();
+        assert!(
+            orphans.is_empty(),
+            "completed run should not appear as orphan"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_incomplete_runs_respects_age_threshold() {
+        let store = make_store().await;
+        let run_id = "run-fresh";
+        let conv_id = "conv-fresh";
+
+        // Create a run that just started (no backdating — it's fresh).
+        store
+            .append_event(
+                run_id,
+                conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+
+        let orphans = store
+            .find_incomplete_runs(Duration::minutes(5))
+            .await
+            .unwrap();
+        assert!(orphans.is_empty(), "fresh run should not appear as orphan");
+    }
+
+    #[tokio::test]
+    async fn append_synthetic_terminal_correct_sequence() {
+        let store = make_store().await;
+        let run_id = "run-synth";
+        let conv_id = "conv-synth";
+
+        // Append some events first.
+        store
+            .append_event(
+                run_id,
+                conv_id,
+                0,
+                "run_started",
+                &serde_json::json!({"run_id": run_id}),
+            )
+            .await
+            .unwrap();
+        store
+            .append_event(
+                run_id,
+                conv_id,
+                1,
+                "token",
+                &serde_json::json!({"token": "hi"}),
+            )
+            .await
+            .unwrap();
+
+        let seq = store
+            .append_synthetic_terminal(run_id, conv_id, "Server restarted")
+            .await
+            .unwrap();
+
+        assert_eq!(seq, 2, "synthetic event should get next sequence");
+
+        // Verify the event was persisted correctly.
+        let events = store.list_events_since(run_id, 2).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "agent_error");
+        assert_eq!(events[0].payload["message"], "Server restarted");
+        assert_eq!(events[0].payload["synthetic"], true);
+
+        // Run should now be complete.
+        assert!(store.is_run_complete(run_id).await.unwrap());
     }
 
     #[tokio::test]
