@@ -122,10 +122,7 @@ Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 | -------------------------------- | -------------------------------------- | --------------------------------------------------------------------------- |
 | `assistant-core`                 | `crates/core`                          | Shared types, ToolHandler trait, MessageBus trait                           |
 | `assistant-llm`                  | `crates/llm`                           | LlmProvider trait, EmbeddingProvider, LlmClient                             |
-| `assistant-provider-ollama`      | `crates/provider-ollama`               | Ollama LlmProvider implementation                                           |
-| `assistant-provider-anthropic`   | `crates/provider-anthropic`            | Anthropic LlmProvider implementation                                        |
-| `assistant-provider-openai`      | `crates/provider-openai`               | OpenAI LlmProvider implementation                                           |
-| `assistant-provider-moonshot`    | `crates/provider-moonshot`             | Moonshot/Kimi LlmProvider (OpenAI-compatible)                               |
+| `assistant-llm-provider`         | `crates/llm-provider`                  | All LlmProvider implementations (Ollama, Anthropic, OpenAI, Moonshot)       |
 | `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins                                |
 | `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus                  |
 | `assistant-bus-nats`             | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)                         |
@@ -149,7 +146,7 @@ Dependency order (no cycles):
 
 ```
 interface-cli -> runtime -> llm -> core
-                    |         '-> provider-ollama, provider-anthropic, provider-openai, provider-moonshot
+                    |         '-> llm-provider -> llm, core
                     |-> storage -> core
                     |-> bus-nats -> core  (optional, feature = "nats")
                     |-> tool-executor -> core, storage, llm

@@ -423,12 +423,9 @@ dependencies = [
  "assistant-interface-signal",
  "assistant-interface-slack",
  "assistant-llm",
+ "assistant-llm-provider",
  "assistant-mcp-client",
  "assistant-mcp-server",
- "assistant-provider-anthropic",
- "assistant-provider-moonshot",
- "assistant-provider-ollama",
- "assistant-provider-openai",
  "assistant-runtime",
  "assistant-skills",
  "assistant-storage",
@@ -627,6 +624,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant-llm-provider"
+version = "0.1.132"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "assistant-llm",
+ "async-openai",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "dirs",
+ "futures",
+ "getrandom 0.4.2",
+ "reqwest 0.12.28",
+ "reqwest-middleware",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "assistant-mcp-client"
 version = "0.1.132"
 dependencies = [
@@ -657,75 +679,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "assistant-provider-anthropic"
-version = "0.1.132"
-dependencies = [
- "anyhow",
- "assistant-core",
- "assistant-llm",
- "async-trait",
- "futures",
- "reqwest-middleware",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "assistant-provider-moonshot"
-version = "0.1.132"
-dependencies = [
- "anyhow",
- "assistant-core",
- "assistant-llm",
- "async-openai",
- "async-trait",
- "futures",
- "reqwest-middleware",
- "serde_json",
- "tokio",
- "tracing",
- "wiremock",
-]
-
-[[package]]
-name = "assistant-provider-ollama"
-version = "0.1.132"
-dependencies = [
- "anyhow",
- "assistant-core",
- "assistant-llm",
- "async-trait",
- "reqwest-middleware",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "assistant-provider-openai"
-version = "0.1.132"
-dependencies = [
- "anyhow",
- "assistant-core",
- "assistant-llm",
- "async-openai",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "dirs",
- "futures",
- "getrandom 0.4.2",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tokio",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -859,11 +812,8 @@ dependencies = [
  "assistant-bus-nats",
  "assistant-core",
  "assistant-llm",
+ "assistant-llm-provider",
  "assistant-mcp-client",
- "assistant-provider-anthropic",
- "assistant-provider-moonshot",
- "assistant-provider-ollama",
- "assistant-provider-openai",
  "assistant-runtime",
  "assistant-skills",
  "assistant-storage",

@@ -34,7 +34,7 @@ use assistant_llm::{
     ToolSupport, build_reqwest_client, is_transient_error_message, with_retry,
 };
 
-use crate::oauth::OAuthManager;
+use super::oauth::OAuthManager;
 
 // ── OpenAIProviderConfig ──────────────────────────────────────────────────────
 
