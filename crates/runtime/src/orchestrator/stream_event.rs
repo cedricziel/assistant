@@ -19,7 +19,13 @@ pub enum OrchestratorEvent {
     /// A human-readable status update while the turn is in progress.
     ///
     /// Examples: `"Calling tool: web-search"`, `"Processing results…"`.
-    Status(String),
+    Status {
+        /// Human-readable status message.
+        message: String,
+        /// Provider-assigned tool-call ID (e.g. Anthropic `tool_use_id`).
+        /// `None` for status messages that are not tool-call related.
+        tool_call_id: Option<String>,
+    },
 
     /// A tool call completed (successfully or with an error).
     ToolResult {
@@ -31,6 +37,9 @@ pub enum OrchestratorEvent {
         arguments: Option<serde_json::Value>,
         /// The tool's output, truncated to a reasonable display length.
         result: Option<String>,
+        /// Provider-assigned tool-call ID (e.g. Anthropic `tool_use_id`).
+        /// `None` for providers that do not use IDs (Ollama).
+        tool_call_id: Option<String>,
     },
 
     /// A skill run completed (success or failure).
@@ -180,6 +189,55 @@ mod tests {
     }
 
     #[test]
+    fn status_event_carries_tool_call_id() {
+        let event = OrchestratorEvent::Status {
+            message: "Calling tool: web-search".to_string(),
+            tool_call_id: Some("call_abc123".to_string()),
+        };
+        match event {
+            OrchestratorEvent::Status {
+                message,
+                tool_call_id,
+            } => {
+                assert_eq!(message, "Calling tool: web-search");
+                assert_eq!(tool_call_id.as_deref(), Some("call_abc123"));
+            }
+            _ => panic!("expected Status variant"),
+        }
+    }
+
+    #[test]
+    fn status_event_without_tool_call_id() {
+        let event = OrchestratorEvent::Status {
+            message: "Processing…".to_string(),
+            tool_call_id: None,
+        };
+        match event {
+            OrchestratorEvent::Status { tool_call_id, .. } => {
+                assert!(tool_call_id.is_none());
+            }
+            _ => panic!("expected Status variant"),
+        }
+    }
+
+    #[test]
+    fn tool_result_carries_tool_call_id() {
+        let event = OrchestratorEvent::ToolResult {
+            tool_name: "file-read".to_string(),
+            status: "ok".to_string(),
+            arguments: None,
+            result: Some("contents".to_string()),
+            tool_call_id: Some("call_xyz789".to_string()),
+        };
+        match event {
+            OrchestratorEvent::ToolResult { tool_call_id, .. } => {
+                assert_eq!(tool_call_id.as_deref(), Some("call_xyz789"));
+            }
+            _ => panic!("expected ToolResult variant"),
+        }
+    }
+
+    #[test]
     fn subagent_event_wraps_inner_events() {
         let event = OrchestratorEvent::SubagentEvent {
             agent_id: "research-agent".to_string(),
@@ -188,6 +246,7 @@ mod tests {
                 status: "ok".to_string(),
                 arguments: Some(serde_json::json!({"query": "rust async"})),
                 result: Some("Found results".to_string()),
+                tool_call_id: Some("call_inner_123".to_string()),
             }),
         };
         match event {

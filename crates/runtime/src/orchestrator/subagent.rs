@@ -423,6 +423,7 @@ impl SubagentRunner for Orchestrator {
 
                             let name = tool_call_item.name;
                             let params = tool_call_item.params;
+                            let tool_call_id = tool_call_item.id;
                             let turn_index = base_turn + iteration as i64 + 1;
 
                             // -- OTel: tool span (child of agent span) ---------
@@ -502,6 +503,7 @@ impl SubagentRunner for Orchestrator {
                                 &mut scratch_attachments,
                                 &mut scratch_attachment_ids,
                                 child_event_sink.as_ref(),
+                                tool_call_id.as_deref(),
                             )
                             .await;
 

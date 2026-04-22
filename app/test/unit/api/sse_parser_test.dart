@@ -152,6 +152,48 @@ void main() {
     });
 
     // -----------------------------------------------------------------------
+    // Status event with tool_call_id
+    // -----------------------------------------------------------------------
+
+    test('StatusEvent parses toolCallId from JSON data', () async {
+      const raw =
+          'event: status\ndata: {"message":"Calling tool: web-search","tool_call_id":"call_abc123"}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      final status = events.first as StatusEvent;
+      expect(status.message, equals('Calling tool: web-search'));
+      expect(status.toolCallId, equals('call_abc123'));
+    });
+
+    test('StatusEvent handles plain-text data for backwards compat', () async {
+      const raw = 'event: status\ndata: Calling tool: file-read\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      final status = events.first as StatusEvent;
+      expect(status.message, equals('Calling tool: file-read'));
+      expect(status.toolCallId, isNull);
+    });
+
+    test('ToolResultEvent parses toolCallId from JSON data', () async {
+      const raw =
+          'event: tool_result\ndata: {"tool_name":"web-search","status":"ok","tool_call_id":"call_xyz789"}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      final result = events.first as ToolResultEvent;
+      expect(result.toolName, equals('web-search'));
+      expect(result.toolCallId, equals('call_xyz789'));
+    });
+
+    test('ToolResultEvent has null toolCallId when not in JSON', () async {
+      const raw =
+          'event: tool_result\ndata: {"tool_name":"file-read","status":"ok"}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      final result = events.first as ToolResultEvent;
+      expect(result.toolCallId, isNull);
+    });
+
+    // -----------------------------------------------------------------------
     // Empty stream
     // -----------------------------------------------------------------------
 

@@ -306,7 +306,13 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
       if (eventType == 'token' && dataLine != null) {
         yield TokenEvent(dataLine);
       } else if (eventType == 'status' && dataLine != null) {
-        yield StatusEvent(dataLine);
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield StatusEvent.fromJson(json);
+        } catch (_) {
+          // Older servers send plain-text status messages.
+          yield StatusEvent(dataLine);
+        }
       } else if (eventType == 'tool_result' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
