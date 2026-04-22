@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.134](https://github.com/cedricziel/assistant/compare/v0.1.133...v0.1.134) (2026-04-22)
+
+
+### Features
+
+* **app:** SSE client robustness — backoff, auto-reconnect, heartbeat timeout ([#604](https://github.com/cedricziel/assistant/issues/604)) ([c9fb3d5](https://github.com/cedricziel/assistant/commit/c9fb3d51a75641c31ccd5693bd797d29299e006c))
+* consolidate five interface crates into assistant-interfaces ([#601](https://github.com/cedricziel/assistant/issues/601)) ([3225eb3](https://github.com/cedricziel/assistant/commit/3225eb3a9bf3be1de658f1cac04193eebaae245c))
+
 ## [0.1.133](https://github.com/cedricziel/assistant/compare/v0.1.132...v0.1.133) (2026-04-22)
 
 
