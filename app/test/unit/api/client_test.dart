@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -650,6 +651,108 @@ void main() {
       final seq10 = const TokenEvent('d', sequenceId: 10).sequenceId;
       lastSeq = (seq10 ?? lastSeq) + 1;
       expect(lastSeq, equals(11), reason: 'after seq 10, cursor = 11');
+    });
+  });
+
+  group('withHeartbeatTimeout', () {
+    test(
+      'throws TimeoutException when no data arrives within timeout',
+      () async {
+        final controller = StreamController<List<int>>();
+        addTearDown(controller.close);
+
+        final wrapped = withHeartbeatTimeout(
+          controller.stream,
+          timeout: const Duration(milliseconds: 200),
+        );
+
+        expect(wrapped.toList(), throwsA(isA<TimeoutException>()));
+      },
+    );
+
+    test('resets timeout on each chunk', () async {
+      final controller = StreamController<List<int>>();
+      addTearDown(controller.close);
+
+      final wrapped = withHeartbeatTimeout(
+        controller.stream,
+        timeout: const Duration(milliseconds: 300),
+      );
+
+      final received = <List<int>>[];
+      final completer = Completer<void>();
+
+      wrapped.listen(
+        received.add,
+        onError: (Object e) {
+          if (!completer.isCompleted) completer.completeError(e);
+        },
+        onDone: () {
+          if (!completer.isCompleted) completer.complete();
+        },
+      );
+
+      // Send data at 150ms intervals — each resets the 300ms watchdog.
+      for (var i = 0; i < 4; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        controller.add([i]);
+      }
+      // Stop sending — watchdog fires after 300ms.
+      try {
+        await completer.future.timeout(const Duration(seconds: 1));
+        fail('should have thrown TimeoutException');
+      } on TimeoutException {
+        // expected
+      } catch (e) {
+        expect(e, isA<TimeoutException>());
+      }
+
+      expect(
+        received.length,
+        4,
+        reason: 'all 4 chunks delivered before timeout',
+      );
+    });
+
+    test('cancelling wrapped stream cancels watchdog timer', () async {
+      final controller = StreamController<List<int>>();
+      addTearDown(controller.close);
+
+      final wrapped = withHeartbeatTimeout(
+        controller.stream,
+        timeout: const Duration(milliseconds: 200),
+      );
+
+      final sub = wrapped.listen((_) {});
+
+      // Cancel before timeout fires.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await sub.cancel();
+
+      // If the watchdog timer leaked, it would fire around 200ms.
+      // Wait past that point — if no crash/error, the timer was cancelled.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+
+    test('normal stream with data completes without timeout', () async {
+      final data = [
+        [1, 2, 3],
+        [4, 5, 6],
+      ];
+
+      Stream<List<int>> source() async* {
+        for (final chunk in data) {
+          yield chunk;
+        }
+      }
+
+      final wrapped = withHeartbeatTimeout(
+        source(),
+        timeout: const Duration(seconds: 1),
+      );
+
+      final result = await wrapped.toList();
+      expect(result, equals(data));
     });
   });
 }

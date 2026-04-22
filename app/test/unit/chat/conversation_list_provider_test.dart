@@ -25,8 +25,12 @@ class _FakeApiClient extends ApiClient {
   final StreamController<ConversationListEvent> streamController;
   final _FakeConversationsApi _conversationsApi;
 
+  /// Number of times [streamConversations] has been called.
+  int streamConversationsCallCount = 0;
+
   @override
   Stream<ConversationListEvent> streamConversations({String? agentId}) {
+    streamConversationsCallCount++;
     return streamController.stream;
   }
 
@@ -283,25 +287,32 @@ void main() {
     // Error handling
     // -----------------------------------------------------------------------
 
-    test('captures error when stream emits an error', () async {
-      final controller = StreamController<ConversationListEvent>.broadcast();
-      final client = _FakeApiClient(streamController: controller);
-      final container = _makeContainer(client: client);
-      addTearDown(container.dispose);
-      addTearDown(controller.close);
-      final sub = _keepAlive(container);
-      addTearDown(sub.close);
+    test(
+      'schedules reconnect (no immediate error) on non-auth stream error',
+      () async {
+        final controller = StreamController<ConversationListEvent>.broadcast();
+        final client = _FakeApiClient(streamController: controller);
+        final container = _makeContainer(client: client);
+        addTearDown(container.dispose);
+        addTearDown(controller.close);
+        final sub = _keepAlive(container);
+        addTearDown(sub.close);
 
-      await container.read(conversationListProvider.future);
+        await container.read(conversationListProvider.future);
 
-      controller.addError(Exception('network failure'));
-      await Future<void>.delayed(Duration.zero);
+        controller.addError(Exception('network failure'));
+        await Future<void>.delayed(Duration.zero);
 
-      final state = container.read(conversationListProvider).value!;
-      expect(state.error, isNotNull);
-      expect(state.error, contains('network failure'));
-      expect(state.conversations, isEmpty);
-    });
+        // With auto-reconnect, non-auth errors schedule a reconnect
+        // instead of immediately showing an error.
+        final state = container.read(conversationListProvider).value!;
+        expect(
+          state.error,
+          isNull,
+          reason: 'should not show error during reconnect attempts',
+        );
+      },
+    );
 
     test('surfaces auth-specific message on ApiAuthException', () async {
       final controller = StreamController<ConversationListEvent>.broadcast();
@@ -586,5 +597,157 @@ void main() {
         expect(state.conversations.any((c) => c.id == 'remove'), isFalse);
       },
     );
+
+    // -------------------------------------------------------------------
+    // Auto-reconnect on stream error
+    // -------------------------------------------------------------------
+
+    test('auto-reconnects on non-auth stream error', () async {
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+
+      await container.read(conversationListProvider.future);
+      final initialCallCount = client.streamConversationsCallCount;
+
+      // Emit an error on the stream.
+      controller.addError(Exception('connection lost'));
+      // Wait for reconnect delay (2s base) + buffer.
+      await Future<void>.delayed(const Duration(seconds: 3));
+
+      expect(
+        client.streamConversationsCallCount,
+        greaterThan(initialCallCount),
+        reason: 'should attempt to reconnect after non-auth error',
+      );
+    });
+
+    test('does not auto-reconnect on ApiAuthException', () async {
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+
+      await container.read(conversationListProvider.future);
+      final initialCallCount = client.streamConversationsCallCount;
+
+      // Emit an auth error.
+      controller.addError(const ApiAuthException());
+      await Future<void>.delayed(const Duration(seconds: 3));
+
+      expect(
+        client.streamConversationsCallCount,
+        equals(initialCallCount),
+        reason: 'should NOT reconnect on auth errors',
+      );
+      final state = container.read(conversationListProvider).value!;
+      expect(state.error, isNotNull);
+    });
+
+    test('gives up after max reconnect attempts', () async {
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+
+      await container.read(conversationListProvider.future);
+
+      // Emit errors to exhaust reconnect attempts.
+      // Each error triggers a reconnect with increasing delay.
+      // Delays: 2s, 4s, 8s, 16s, 30s = 60s total — we'll speed this up
+      // by emitting errors rapidly (each reconnect re-subscribes to the
+      // same broadcast stream, so the next error hits immediately).
+      for (var i = 0; i < 6; i++) {
+        controller.addError(Exception('error $i'));
+        await Future<void>.delayed(const Duration(seconds: 3));
+      }
+
+      final state = container.read(conversationListProvider).value!;
+      expect(
+        state.error,
+        isNotNull,
+        reason: 'should show error after all reconnect attempts exhausted',
+      );
+    });
+
+    test('resets reconnect attempts on successful snapshot', () async {
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+
+      await container.read(conversationListProvider.future);
+
+      // Trigger an error and reconnect.
+      controller.addError(Exception('blip'));
+      await Future<void>.delayed(const Duration(seconds: 3));
+
+      // Reconnected — send a snapshot to reset attempt counter.
+      controller.add(
+        ConversationSnapshotEvent([_makeEntry(id: 'c1', title: 'Back')]),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final state = container.read(conversationListProvider).value!;
+      expect(state.conversations.length, 1);
+      expect(state.error, isNull);
+
+      // Another error should trigger reconnect (attempt counter was reset).
+      final callCountBefore = client.streamConversationsCallCount;
+      controller.addError(Exception('another blip'));
+      await Future<void>.delayed(const Duration(seconds: 3));
+
+      expect(
+        client.streamConversationsCallCount,
+        greaterThan(callCountBefore),
+        reason: 'should reconnect again after counter was reset by snapshot',
+      );
+    });
+
+    test('preserves existing conversations during reconnect', () async {
+      final controller = StreamController<ConversationListEvent>.broadcast();
+      final client = _FakeApiClient(streamController: controller);
+      final container = _makeContainer(client: client);
+      addTearDown(container.dispose);
+      addTearDown(controller.close);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+
+      await container.read(conversationListProvider.future);
+
+      // Load initial data.
+      controller.add(
+        ConversationSnapshotEvent([
+          _makeEntry(id: 'c1', title: 'Keep'),
+          _makeEntry(id: 'c2', title: 'Also Keep'),
+        ]),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // Error on the stream.
+      controller.addError(Exception('network blip'));
+      await Future<void>.delayed(const Duration(seconds: 1));
+
+      // Conversations should still be visible during reconnect.
+      final state = container.read(conversationListProvider).value!;
+      expect(
+        state.conversations.length,
+        2,
+        reason: 'existing conversations should be preserved during reconnect',
+      );
+    });
   });
 }

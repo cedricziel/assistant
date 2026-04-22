@@ -44,9 +44,14 @@ class ConversationListState {
 /// is patched reactively — no manual refresh needed.
 class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   static const _debounceDuration = Duration(milliseconds: 300);
+  static const _maxReconnectAttempts = 5;
+  static const _baseReconnectDelay = Duration(seconds: 2);
+  static const _maxReconnectDelay = Duration(seconds: 30);
 
   StreamSubscription<ConversationListEvent>? _subscription;
   Timer? _debounceTimer;
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
   final Map<String, ConversationListEntry> _pendingUpserts = {};
 
   @override
@@ -64,6 +69,8 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
       _subscription = null;
       _debounceTimer?.cancel();
       _debounceTimer = null;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
     });
 
     // Return loading state — the snapshot event will replace it.
@@ -75,6 +82,8 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     _subscription = null;
     _debounceTimer?.cancel();
     _debounceTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _pendingUpserts.clear();
   }
 
@@ -82,19 +91,51 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     _resetStream();
     _subscription = api.streamConversations().listen(
       _onEvent,
-      onError: (Object e) {
-        final message = e is ApiAuthException
-            ? e.message
-            : 'Connection error: $e';
-        state = AsyncData(ConversationListState(error: message));
-      },
+      onError: (Object e) => _onStreamError(e, api),
       cancelOnError: false,
     );
+  }
+
+  void _onStreamError(Object e, ApiClient api) {
+    if (e is ApiAuthException) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      state = AsyncData(ConversationListState(error: e.message));
+      return;
+    }
+
+    // Preserve existing conversations during reconnect attempts.
+    final current = state.value ?? const ConversationListState();
+
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      // Exhausted — show error, keep conversations visible.
+      state = AsyncData(current.copyWith(error: 'Connection error: $e'));
+      return;
+    }
+
+    _scheduleReconnect(api);
+  }
+
+  void _scheduleReconnect(ApiClient api) {
+    _reconnectTimer?.cancel();
+
+    final delayMs =
+        (_baseReconnectDelay.inMilliseconds * (1 << _reconnectAttempts)).clamp(
+          0,
+          _maxReconnectDelay.inMilliseconds,
+        );
+    _reconnectAttempts++;
+
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
+      if (!ref.mounted) return;
+      _subscribe(api);
+    });
   }
 
   void _onEvent(ConversationListEvent event) {
     switch (event) {
       case ConversationSnapshotEvent(:final conversations):
+        _reconnectAttempts = 0;
         _flushPendingUpserts();
         state = AsyncData(ConversationListState(conversations: conversations));
       case ConversationUpsertedEvent(:final conversation):
@@ -145,6 +186,7 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   Future<void> refresh() async {
     final api = _api;
     if (api == null) return;
+    _reconnectAttempts = 0;
     state = const AsyncLoading();
     _subscribe(api);
   }
@@ -842,6 +884,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Conversation ID at the time the stream was interrupted.
   String? _disconnectedConversationId;
 
+  /// Maximum number of replay retries with exponential backoff before
+  /// deferring to app-resume reconnection.
+  static const _maxStreamRetries = 3;
+
+  /// Base delay for exponential backoff between retries (1s, 2s, 4s).
+  static const _baseRetryDelay = Duration(seconds: 1);
+
   /// Whether a transient stream interruption occurred that should be retried
   /// on app resume.
   bool get needsReconnect => _needsReconnect;
@@ -1416,8 +1465,23 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     } catch (e) {
       unawaited(tokenController.close());
 
-      // Transient error with a run ID: defer recovery to app resume.
+      // Transient error with a run ID: retry with exponential backoff.
       if (_isTransientError(e) && _currentRunId != null) {
+        for (var attempt = 0; attempt < _maxStreamRetries; attempt++) {
+          await Future<void>.delayed(_baseRetryDelay * (1 << attempt));
+          if (_cancelled || !ref.mounted) return;
+
+          final replayed = await _replayRun(
+            api,
+            conversationId,
+            userMsgId,
+            _currentRunId!,
+            _lastSeq,
+          );
+          if (replayed) return;
+        }
+
+        // All retries exhausted — defer to app resume.
         _needsReconnect = true;
         _disconnectedUserMsgId = userMsgId;
         _disconnectedConversationId = conversationId;
@@ -1662,21 +1726,26 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
     } catch (e) {
       unawaited(tokenController.close());
-      // Attempt immediate replay (works for brief network blips).
-      if (_currentRunId != null) {
-        final replayed = await _replayRun(
-          api,
-          conversationId,
-          userMsgId,
-          _currentRunId!,
-          _lastSeq,
-        );
-        if (replayed) return;
-      }
+      _closeThinkingController();
 
-      // Transient error with a run ID: defer recovery to app resume
-      // instead of showing an error banner.
+      // Transient error with a run ID: retry with exponential backoff,
+      // then defer to app-resume reconnection if all retries fail.
       if (_isTransientError(e) && _currentRunId != null) {
+        for (var attempt = 0; attempt < _maxStreamRetries; attempt++) {
+          await Future<void>.delayed(_baseRetryDelay * (1 << attempt));
+          if (_cancelled || !ref.mounted) return;
+
+          final replayed = await _replayRun(
+            api,
+            conversationId,
+            userMsgId,
+            _currentRunId!,
+            _lastSeq,
+          );
+          if (replayed) return;
+        }
+
+        // All retries exhausted — defer to app resume.
         _needsReconnect = true;
         _disconnectedUserMsgId = userMsgId;
         _disconnectedConversationId = conversationId;
@@ -1717,6 +1786,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Returns `true` if [error] looks like a transient connection failure
   /// (iOS backgrounding, network blip) rather than a permanent server error.
   static bool _isTransientError(Object error) {
+    if (error is TimeoutException) return true;
     if (error is DioException &&
         error.type == DioExceptionType.connectionError) {
       return true;

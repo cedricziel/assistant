@@ -64,6 +64,9 @@ class _FakeApiClient extends ApiClient {
   // or a DioException (simulated 404/410).
   final List<dynamic> _replayQueue = [];
 
+  /// Number of times [streamEventsFrom] has been called.
+  int replayCallCount = 0;
+
   StreamController<StreamEvent> enqueueReplayStream() {
     final ctrl = StreamController<StreamEvent>();
     _replayQueue.add(ctrl);
@@ -89,6 +92,7 @@ class _FakeApiClient extends ApiClient {
     String runId, {
     int since = 0,
   }) async* {
+    replayCallCount++;
     if (_replayQueue.isNotEmpty) {
       final item = _replayQueue.removeAt(0);
       if (item is DioException) throw item;
@@ -469,12 +473,14 @@ void main() {
       await tester.runAsync(() async {
         ctrl1.add(const RunStartedEvent('run-abc'));
         await Future<void>.delayed(Duration.zero); // deliver RunStartedEvent
-        ctrl1.addError(Exception('network drop'));
+        ctrl1.addError(const SocketException('network drop'));
         await ctrl1.close();
-        // Allow catch block + _replayRun to run.
+        // Allow catch block to start.
         await Future<void>.delayed(Duration.zero);
         await Future<void>.delayed(Duration.zero);
       });
+      // Pump fake clock to fire the first retry delay (1s backoff).
+      await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
 
       final chatState = notifier.state.value!;
@@ -1130,6 +1136,10 @@ void main() {
           await Future<void>.delayed(Duration.zero);
           await Future<void>.delayed(Duration.zero);
         });
+        // Pump fake clock through all 3 retry delays (1s + 2s + 4s).
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pump(const Duration(seconds: 5));
         await tester.pumpAndSettle();
 
         final chatState = notifier.state.value!;
@@ -1185,18 +1195,20 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         await Future<void>.delayed(Duration.zero);
       });
+      // Pump fake clock for first retry delay (1s backoff).
+      await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
 
       final chatState = notifier.state.value!;
       expect(
         chatState.error,
         isNull,
-        reason: 'successful immediate replay should clear the error',
+        reason: 'successful replay on first retry should clear the error',
       );
       expect(
         notifier.needsReconnect,
         isFalse,
-        reason: 'no deferred reconnect needed when immediate replay works',
+        reason: 'no deferred reconnect needed when replay works',
       );
       final userMsg = chatState.messages.firstWhere((m) => m.isUser);
       expect(
@@ -1211,9 +1223,11 @@ void main() {
     ) async {
       final fakeApi = _FakeApiClient();
       final ctrl = fakeApi.enqueueStream();
-      // First replay (in catch block) fails.
-      fakeApi.enqueueReplayError(404);
-      // Second replay (in attemptReconnect) succeeds.
+      // 3 replay failures for the backoff retries in the catch block.
+      for (var i = 0; i < 3; i++) {
+        fakeApi.enqueueReplayError(404);
+      }
+      // Fourth replay (in attemptReconnect) succeeds.
       fakeApi.enqueueReplayStream()
         ..add(const TokenEvent('resumed'))
         ..add(const DoneEvent(role: 'assistant', content: 'resumed'))
@@ -1235,6 +1249,10 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         await Future<void>.delayed(Duration.zero);
       });
+      // Pump fake clock through all 3 retry delays.
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
 
       expect(notifier.needsReconnect, isTrue);
@@ -1269,9 +1287,11 @@ void main() {
       (tester) async {
         final fakeApi = _FakeApiClient();
         final ctrl = fakeApi.enqueueStream();
-        // First replay (in catch block) fails.
-        fakeApi.enqueueReplayError(404);
-        // Second replay (in attemptReconnect) also fails.
+        // 3 replay failures for the backoff retries in the catch block.
+        for (var i = 0; i < 3; i++) {
+          fakeApi.enqueueReplayError(404);
+        }
+        // Fourth replay (in attemptReconnect) also fails.
         fakeApi.enqueueReplayError(404);
         // loadConversation will also fail (fake API has no real server).
 
@@ -1291,6 +1311,10 @@ void main() {
           await Future<void>.delayed(Duration.zero);
           await Future<void>.delayed(Duration.zero);
         });
+        // Pump fake clock through all 3 retry delays.
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pump(const Duration(seconds: 5));
         await tester.pumpAndSettle();
 
         expect(notifier.needsReconnect, isTrue);
@@ -1382,8 +1406,10 @@ void main() {
     testWidgets('clearConversation resets reconnect state', (tester) async {
       final fakeApi = _FakeApiClient();
       final ctrl = fakeApi.enqueueStream();
-      // Replay fails in catch so deferred reconnect is set.
-      fakeApi.enqueueReplayError(404);
+      // 3 replay failures for the backoff retries in the catch block.
+      for (var i = 0; i < 3; i++) {
+        fakeApi.enqueueReplayError(404);
+      }
 
       final notifier = await _pumpTestApp(tester, fakeApi);
 
@@ -1401,6 +1427,10 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         await Future<void>.delayed(Duration.zero);
       });
+      // Pump fake clock through all 3 retry delays.
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
 
       expect(notifier.needsReconnect, isTrue);
@@ -1411,6 +1441,146 @@ void main() {
         notifier.needsReconnect,
         isFalse,
         reason: 'clearConversation should reset reconnect state',
+      );
+    });
+  });
+
+  // -- Phase: Exponential backoff on stream reconnect -------------------------
+
+  group('ChatNotifier — exponential backoff retries', () {
+    testWidgets('retries up to 3 times before deferring to app resume', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      // First stream: emits RunStartedEvent then network error.
+      final ctrl1 = fakeApi.enqueueStream();
+      // Enqueue 3 replay failures (empty streams that end without DoneEvent).
+      for (var i = 0; i < 3; i++) {
+        fakeApi.enqueueReplayStream().close();
+      }
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+
+      // Deliver RunStartedEvent + error via real async.
+      await tester.runAsync(() async {
+        ctrl1.add(const RunStartedEvent('run-backoff'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl1.addError(const SocketException('Connection reset by peer'));
+        await ctrl1.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      // The catch block's Future.delayed runs in the fake-async zone.
+      // Pump the fake clock forward to fire each retry delay: 1s, 2s, 4s.
+      await tester.pump(const Duration(seconds: 2)); // fires 1s delay
+      await tester.pump(const Duration(seconds: 3)); // fires 2s delay
+      await tester.pump(const Duration(seconds: 5)); // fires 4s delay
+      await tester.pumpAndSettle();
+
+      expect(
+        fakeApi.replayCallCount,
+        equals(3),
+        reason: 'should attempt exactly 3 replay retries before giving up',
+      );
+      expect(
+        notifier.needsReconnect,
+        isTrue,
+        reason: 'after all retries fail, should defer to app resume',
+      );
+    });
+
+    testWidgets('succeeds on second retry attempt', (tester) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl1 = fakeApi.enqueueStream();
+      // First replay: empty (fails without DoneEvent → returns false).
+      fakeApi.enqueueReplayStream().close();
+      // Second replay: success.
+      fakeApi.enqueueReplayStream()
+        ..add(const TokenEvent('recovered'))
+        ..add(const DoneEvent(role: 'assistant', content: 'recovered'))
+        ..close();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('recover'));
+      await tester.pump();
+
+      // Deliver RunStartedEvent + error via real async.
+      await tester.runAsync(() async {
+        ctrl1.add(const RunStartedEvent('run-recover'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl1.addError(const SocketException('Connection reset by peer'));
+        await ctrl1.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      // Pump fake clock: first retry at 1s, second at 2s.
+      await tester.pump(const Duration(seconds: 2)); // fires 1s delay
+      await tester.pump(const Duration(seconds: 3)); // fires 2s delay
+      await tester.pumpAndSettle();
+
+      expect(
+        fakeApi.replayCallCount,
+        equals(2),
+        reason: 'should stop retrying after second attempt succeeds',
+      );
+      expect(
+        notifier.needsReconnect,
+        isFalse,
+        reason: 'successful retry should not set needsReconnect',
+      );
+      final userMsg = notifier.state.value!.messages.firstWhere(
+        (m) => m.isUser,
+      );
+      expect(
+        userMsg.status,
+        MessageStatus.ok,
+        reason: 'user message should be ok after successful retry',
+      );
+    });
+
+    testWidgets('cancelStream during retry backoff stops retrying', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl1 = fakeApi.enqueueStream();
+      // Enqueue 3 replays — but we should not reach all of them.
+      for (var i = 0; i < 3; i++) {
+        fakeApi.enqueueReplayStream().close();
+      }
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('cancel-me'));
+      await tester.pump();
+
+      // Deliver RunStartedEvent + error via real async.
+      await tester.runAsync(() async {
+        ctrl1.add(const RunStartedEvent('run-cancel'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl1.addError(const SocketException('Connection reset by peer'));
+        await ctrl1.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      // Let first retry fire (1s delay).
+      await tester.pump(const Duration(seconds: 2));
+      // Cancel before second retry fires (2s delay).
+      notifier.cancelStream();
+      // Advance past all remaining retry windows.
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+
+      expect(
+        fakeApi.replayCallCount,
+        lessThanOrEqualTo(1),
+        reason: 'cancelStream should prevent further retries',
       );
     });
   });
