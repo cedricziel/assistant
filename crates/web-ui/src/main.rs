@@ -38,8 +38,8 @@ use axum::{
     routing::{get, post},
 };
 use backends::{
-    IcebergLogBackend, IcebergTraceBackend, LogBackend, SqliteLogBackend, SqliteTraceBackend,
-    TraceBackend,
+    IcebergLogBackend, IcebergMetricsBackend, IcebergTraceBackend, LogBackend, MetricsBackend,
+    SqliteLogBackend, SqliteMetricsBackend, SqliteTraceBackend, TraceBackend,
 };
 use clap::Parser;
 use serde_json::json;
@@ -135,6 +135,7 @@ pub(crate) struct AppState {
     pub(crate) nats_token: Option<String>,
     pub(crate) trace_backend: Arc<dyn TraceBackend>,
     pub(crate) log_backend: Arc<dyn LogBackend>,
+    pub(crate) metrics_backend: Arc<dyn MetricsBackend>,
     pub(crate) push_dispatcher: Option<Arc<PushDispatcher>>,
 }
 
@@ -328,20 +329,25 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let registry = Arc::new(registry);
 
-    let (trace_backend, log_backend): (Arc<dyn TraceBackend>, Arc<dyn LogBackend>) =
-        match config.observability.exporter {
-            OtelExporter::Iceberg => {
-                let iceberg_cfg = config.observability.iceberg.clone();
-                (
-                    Arc::new(IcebergTraceBackend::new(iceberg_cfg.clone())),
-                    Arc::new(IcebergLogBackend::new(iceberg_cfg)),
-                )
-            }
-            _ => (
-                Arc::new(SqliteTraceBackend::new(storage.pool.clone())),
-                Arc::new(SqliteLogBackend::new(storage.pool.clone())),
-            ),
-        };
+    let (trace_backend, log_backend, metrics_backend): (
+        Arc<dyn TraceBackend>,
+        Arc<dyn LogBackend>,
+        Arc<dyn MetricsBackend>,
+    ) = match config.observability.exporter {
+        OtelExporter::Iceberg => {
+            let iceberg_cfg = config.observability.iceberg.clone();
+            (
+                Arc::new(IcebergTraceBackend::new(iceberg_cfg.clone())),
+                Arc::new(IcebergLogBackend::new(iceberg_cfg.clone())),
+                Arc::new(IcebergMetricsBackend::new(iceberg_cfg)),
+            )
+        }
+        _ => (
+            Arc::new(SqliteTraceBackend::new(storage.pool.clone())),
+            Arc::new(SqliteLogBackend::new(storage.pool.clone())),
+            Arc::new(SqliteMetricsBackend::new(storage.pool.clone())),
+        ),
+    };
 
     // -- Push dispatcher (built here so AppState can hold a reference) -------
     let push_store_for_state = Arc::new(storage.push_subscription_store());
@@ -373,6 +379,7 @@ async fn run_with_args(args: Args) -> Result<()> {
             .or_else(|| std::env::var("NATS_TOKEN").ok()),
         trace_backend,
         log_backend,
+        metrics_backend,
         push_dispatcher: push_dispatcher_for_state,
     };
 
@@ -600,11 +607,11 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let traces_api_state = api::traces::TracesApiState {
-        pool: storage.pool.clone(),
+        trace_backend: state.trace_backend.clone(),
     };
 
     let logs_api_state = api::logs::LogsApiState {
-        pool: storage.pool.clone(),
+        log_backend: state.log_backend.clone(),
     };
 
     let skills_api_state = api::skills::SkillsApiState {
@@ -622,7 +629,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let analytics_api_state = api::analytics::AnalyticsApiState {
-        pool: storage.pool.clone(),
+        metrics_backend: state.metrics_backend.clone(),
         agent_id: state.agent_id.clone(),
     };
 
