@@ -501,11 +501,14 @@ pub(crate) async fn reap_stale_and_recover(storage: &StorageLayer, bus: &dyn Mes
     }
 }
 
-/// Check whether there is a Pending or Claimed bus message for a conversation.
+/// Check whether there is a Pending or Claimed `turn.request` bus message for a
+/// conversation.  Only `turn.request` messages initiate orchestrator runs; other
+/// topics (e.g. `schedule.trigger`) should not block orphan recovery.
 async fn has_active_bus_message(pool: &SqlitePool, conversation_id: &str) -> Result<bool> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM bus_messages \
          WHERE conversation_id = ?1 \
+           AND topic = 'turn.request' \
            AND status IN ('pending', 'claimed')",
     )
     .bind(conversation_id)
