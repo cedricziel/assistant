@@ -270,5 +270,5 @@ Prefixes: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.
 ## CI
 
 GitHub Actions runs on push to `main` and PRs: check, test, lint (clippy), format.
-The `interface-signal` crate no longer has a feature gate — it compiles unconditionally as part of the workspace lint.
+All messenger interfaces compile unconditionally as part of the `assistant-interfaces` crate.
 Integration tests run with `continue-on-error: true` (require Ollama).
