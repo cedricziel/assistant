@@ -50,6 +50,22 @@ where
     }
 }
 
+/// Build an SSE response with keepalive pings and `Cache-Control: no-cache`.
+///
+/// Keepalive prevents proxies from closing idle connections (nginx default 60s,
+/// AWS ALB 60s).  `Cache-Control: no-cache` prevents intermediaries from
+/// buffering the stream.
+fn sse_response(rx: mpsc::Receiver<Result<Event, Infallible>>) -> Response {
+    let mut response = Sse::new(ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::default())
+        .into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-cache"),
+    );
+    response
+}
+
 // -- Conversation API below --------------------------------------------------
 //
 // Designed for native/external clients (mobile apps, desktop apps, etc.)
@@ -92,7 +108,7 @@ use axum::{
     http::{StatusCode, header},
     response::{
         IntoResponse, Response,
-        sse::{Event, Sse},
+        sse::{Event, KeepAlive, Sse},
     },
     routing::{delete, get, patch, post},
 };
@@ -513,7 +529,7 @@ pub async fn stream_conversations(
         }
     });
 
-    Sse::new(ReceiverStream::new(sse_rx)).into_response()
+    sse_response(sse_rx)
 }
 
 /// `POST /api/conversations` — create a new conversation.
@@ -927,10 +943,11 @@ pub async fn send_message(
     // Emit run_started as first SSE event so the client learns the run_id.
     let run_started_sse = Event::default()
         .event("run_started")
-        .data(run_started_payload.to_string());
+        .data(run_started_payload.to_string())
+        .id("0");
     if sse_tx.send(Ok(run_started_sse)).await.is_err() {
         run_broadcaster.finish_run(&run_id).await;
-        return Sse::new(ReceiverStream::new(sse_rx)).into_response();
+        return sse_response(sse_rx);
     }
 
     tokio::spawn(async move {
@@ -1043,7 +1060,7 @@ pub async fn send_message(
                     }
                     let p = serde_json::json!({"message": message});
                     let e = Event::default().event("agent_error").data(message.clone());
-                    ("error", p, e)
+                    ("agent_error", p, e)
                 }
                 OrchestratorEvent::Thinking(ref content) => {
                     // Send SSE immediately for real-time rendering.
@@ -1162,6 +1179,7 @@ pub async fn send_message(
                 payload: payload.clone(),
             };
             let _ = broadcast_tx.send(live);
+            let sse_event = sse_event.id(seq.to_string());
             seq += 1;
 
             if sse_tx.send(Ok(sse_event)).await.is_err() {
@@ -1221,7 +1239,10 @@ pub async fn send_message(
             payload: done_data.clone(),
         });
 
-        let done = Event::default().event("done").data(done_data.to_string());
+        let done = Event::default()
+            .event("done")
+            .data(done_data.to_string())
+            .id(seq.to_string());
         let _ = sse_tx.send(Ok(done)).await;
 
         // Signal run completion — drops broadcast channel, subscribers observe close.
@@ -1241,7 +1262,7 @@ pub async fn send_message(
 
     // Include run_id in response headers as a fallback for clients that crash
     // before receiving the run_started SSE event.
-    let mut response = Sse::new(ReceiverStream::new(sse_rx)).into_response();
+    let mut response = sse_response(sse_rx);
     if let Ok(hv) = run_id.to_string().parse::<header::HeaderValue>() {
         response.headers_mut().insert("X-Run-Id", hv);
     }
@@ -1435,7 +1456,7 @@ pub async fn stream_run_events(
     // Check if the run completed before we even arrived.
     let already_complete = past_events
         .iter()
-        .any(|e| e.event_type == "done" || e.event_type == "error");
+        .any(|e| e.event_type == "done" || e.event_type == "agent_error");
 
     let conv_id_str_clone = conv_id_str.clone();
     tokio::spawn(async move {
@@ -1443,7 +1464,8 @@ pub async fn stream_run_events(
         for row in past_events {
             let ev = Event::default()
                 .event(row.event_type.as_str())
-                .data(row.payload.to_string());
+                .data(row.payload.to_string())
+                .id(row.sequence.to_string());
             if sse_tx.send(Ok(ev)).await.is_err() {
                 return;
             }
@@ -1465,8 +1487,9 @@ pub async fn stream_run_events(
                 Ok(live) => {
                     let ev = Event::default()
                         .event(live.event_type.as_str())
-                        .data(live.payload.to_string());
-                    let is_terminal = live.event_type == "done" || live.event_type == "error";
+                        .data(live.payload.to_string())
+                        .id(live.sequence.to_string());
+                    let is_terminal = live.event_type == "done" || live.event_type == "agent_error";
                     if sse_tx.send(Ok(ev)).await.is_err() {
                         return;
                     }
@@ -1490,7 +1513,7 @@ pub async fn stream_run_events(
         }
     });
 
-    Sse::new(ReceiverStream::new(sse_rx)).into_response()
+    sse_response(sse_rx)
 }
 
 // -- Quick-message handler --------------------------------------------------
@@ -1947,7 +1970,7 @@ pub async fn send_voice_message(
         }
     });
 
-    Sse::new(ReceiverStream::new(sse_rx)).into_response()
+    sse_response(sse_rx)
 }
 
 /// `GET /api/messages/{id}/audio` — synthesize TTS audio for an assistant
