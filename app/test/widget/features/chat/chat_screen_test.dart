@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
@@ -8,6 +9,7 @@ import 'package:assistant_app/api/models/server_profile.dart';
 import 'package:assistant_app/features/chat/audio_player_widget.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
+import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -894,15 +896,17 @@ void main() {
 
   group('Chat screen — streaming dots gate', () {
     testWidgets(
-      'tool call chips render during streaming even when content is empty',
+      'tool call timeline entry renders as StreamingTimelineEntry during streaming',
       (tester) async {
         final res = await pumpChatScreen(tester);
 
-        final assistantMsg = ChatMessage(
-          id: 'assistant-streaming',
+        // Tool calls are separate timeline entries, not chips on the bubble.
+        final toolCallEntry = ChatMessage(
+          id: 'toolcall-web-search-1',
           role: 'assistant',
           content: '',
           isStreaming: true,
+          timelineType: TimelineEntryType.toolCall,
           toolCalls: [
             ToolCallRecord(
               toolName: 'web-search',
@@ -910,22 +914,33 @@ void main() {
             ),
           ],
         );
+        final assistantMsg = ChatMessage(
+          id: 'assistant-streaming',
+          role: 'assistant',
+          content: '',
+          isStreaming: true,
+        );
 
         res.notifier.push(
           ChatState(
             conversationId: 'c1',
-            messages: [assistantMsg],
+            messages: [toolCallEntry, assistantMsg],
             isSending: true,
           ),
         );
         await tester.pump();
 
-        // Tool call chip should be visible (not hidden behind dots).
+        // Tool call renders as a StreamingTimelineEntry (vertical, outside bubble).
+        expect(
+          find.byType(StreamingTimelineEntry),
+          findsOneWidget,
+          reason:
+              'Tool call must render as StreamingTimelineEntry, not a chip in the bubble',
+        );
         expect(
           find.text('web-search'),
           findsOneWidget,
-          reason:
-              'Tool call chip must render during streaming even when content is empty',
+          reason: 'Tool name must be visible in the timeline entry',
         );
       },
     );
@@ -966,5 +981,97 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'dots shown when streaming with tokenStream set but no content yet',
+      (tester) async {
+        final res = await pumpChatScreen(tester);
+
+        // This matches real behaviour: the provider always creates the
+        // placeholder with a non-null tokenStream.
+        final controller = StreamController<String>.broadcast();
+        addTearDown(controller.close);
+
+        final assistantMsg = ChatMessage(
+          id: 'assistant-streaming',
+          role: 'assistant',
+          content: '',
+          isStreaming: true,
+          tokenStream: controller.stream,
+        );
+
+        res.notifier.push(
+          ChatState(
+            conversationId: 'c1',
+            messages: [assistantMsg],
+            isSending: true,
+          ),
+        );
+        await tester.pump();
+
+        // Dots indicator must appear even when tokenStream is non-null.
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is SizedBox && w.height == 16 && w.width == 40,
+          ),
+          findsOneWidget,
+          reason:
+              'Dots indicator must show before first token even when tokenStream is set',
+        );
+      },
+    );
+
+    testWidgets('dots disappear once content arrives', (tester) async {
+      final res = await pumpChatScreen(tester);
+
+      final controller = StreamController<String>.broadcast();
+      addTearDown(controller.close);
+
+      final assistantMsg = ChatMessage(
+        id: 'assistant-streaming',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        tokenStream: controller.stream,
+      );
+
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [assistantMsg],
+          isSending: true,
+        ),
+      );
+      await tester.pump();
+
+      // Dots should be visible initially.
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is SizedBox && w.height == 16 && w.width == 40,
+        ),
+        findsOneWidget,
+      );
+
+      // Simulate first token arriving — update content.
+      assistantMsg.content = 'Hello';
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [assistantMsg],
+          isSending: true,
+          streamingContent: 'Hello',
+        ),
+      );
+      await tester.pump();
+
+      // Dots must be gone now.
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is SizedBox && w.height == 16 && w.width == 40,
+        ),
+        findsNothing,
+        reason: 'Dots must disappear once content starts streaming',
+      );
+    });
   });
 }

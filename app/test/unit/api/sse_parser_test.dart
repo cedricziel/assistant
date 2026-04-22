@@ -87,6 +87,19 @@ void main() {
       expect(done.content, equals('hi'));
     });
 
+    test('DoneEvent preserves messageId when present in JSON', () async {
+      const raw =
+          'event: done\ndata: {"role":"assistant","content":"ok","message_id":"abc-123"}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      final done = events.first as DoneEvent;
+      expect(
+        done.messageId,
+        equals('abc-123'),
+        reason: 'messageId must be parsed from the done event JSON',
+      );
+    });
+
     test('DoneEvent falls back when data is not valid JSON', () async {
       const raw = 'event: done\ndata: not-json\n\n';
       final events = await parseSseByteStream(_uint8Stream(raw)).toList();
