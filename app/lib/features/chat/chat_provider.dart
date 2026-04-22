@@ -221,6 +221,7 @@ class ToolCallRecord {
   ToolCallRecord({
     required this.toolName,
     required this.status,
+    this.toolCallId,
     this.arguments,
     this.result,
     DateTime? startedAt,
@@ -228,6 +229,10 @@ class ToolCallRecord {
   }) : startedAt = startedAt ?? DateTime.now();
 
   final String toolName;
+
+  /// Provider-assigned tool-call ID (e.g. Anthropic `tool_use_id`).
+  /// Used to correlate StatusEvent → ToolResultEvent when available.
+  final String? toolCallId;
 
   /// Mutable so the pending chip can be updated to a resolved status in place
   /// during streaming, matching the pattern used for [ChatMessage.content].
@@ -567,8 +572,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// Create a tool-call timeline entry and insert it before the streaming
   /// assistant placeholder. Called from both [_streamMessage] and
   /// [_streamVoiceMessage] when a [StatusEvent] is received.
-  void _onStatusEvent(ChatState chatState, String statusMessage) {
-    final toolName = _extractToolName(statusMessage);
+  void _onStatusEvent(ChatState chatState, StatusEvent event) {
+    final toolName = _extractToolName(event.message);
     final msgs = List<ChatMessage>.from(chatState.messages);
 
     // Complete any currently-active timeline entries before adding a new one.
@@ -583,7 +588,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       isStreaming: true,
       timelineType: TimelineEntryType.toolCall,
       toolCalls: [
-        ToolCallRecord(toolName: toolName, status: ToolCallStatus.pending),
+        ToolCallRecord(
+          toolName: toolName,
+          status: ToolCallStatus.pending,
+          toolCallId: event.toolCallId,
+        ),
       ],
     );
 
@@ -597,7 +606,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     }
 
     state = AsyncData(
-      chatState.copyWith(messages: msgs, statusMessage: statusMessage),
+      chatState.copyWith(messages: msgs, statusMessage: event.message),
     );
   }
 
@@ -607,14 +616,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final resolvedStatus = _parseToolStatus(event.status);
     final msgs = List<ChatMessage>.from(chatState.messages);
 
-    // Find the pending tool-call timeline entry matching the tool name.
-    final entryIdx = msgs.lastIndexWhere(
-      (m) =>
-          m.timelineType == TimelineEntryType.toolCall &&
-          m.toolCalls.isNotEmpty &&
-          m.toolCalls.first.toolName == event.toolName &&
-          m.toolCalls.first.status == ToolCallStatus.pending,
-    );
+    // Match by toolCallId when available (stable), fall back to tool name.
+    final entryIdx = event.toolCallId != null
+        ? msgs.lastIndexWhere(
+            (m) =>
+                m.timelineType == TimelineEntryType.toolCall &&
+                m.toolCalls.isNotEmpty &&
+                m.toolCalls.first.toolCallId == event.toolCallId &&
+                m.toolCalls.first.status == ToolCallStatus.pending,
+          )
+        : msgs.lastIndexWhere(
+            (m) =>
+                m.timelineType == TimelineEntryType.toolCall &&
+                m.toolCalls.isNotEmpty &&
+                m.toolCalls.first.toolName == event.toolName &&
+                m.toolCalls.first.status == ToolCallStatus.pending,
+          );
 
     if (entryIdx != -1) {
       final record = msgs[entryIdx].toolCalls.first;
@@ -1140,7 +1157,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           );
         } else if (event is StatusEvent) {
           _lastSeq++;
-          _onStatusEvent(chatState, event.message);
+          _onStatusEvent(chatState, event);
         } else if (event is ToolResultEvent) {
           _lastSeq++;
           _onToolResultEvent(chatState, event);
@@ -1306,7 +1323,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             ),
           );
         } else if (event is StatusEvent) {
-          _onStatusEvent(chatState, event.message);
+          _onStatusEvent(chatState, event);
         } else if (event is ToolResultEvent) {
           _onToolResultEvent(chatState, event);
         } else if (event is ThinkingEvent) {
@@ -1510,7 +1527,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           );
         } else if (event is StatusEvent) {
           _lastSeq++;
-          _onStatusEvent(chatState, event.message);
+          _onStatusEvent(chatState, event);
         } else if (event is ToolResultEvent) {
           _lastSeq++;
           _onToolResultEvent(chatState, event);

@@ -973,9 +973,15 @@ pub async fn send_message(
                     let e = Event::default().event("token").data(token.clone());
                     ("token", p, e)
                 }
-                OrchestratorEvent::Status(ref msg) => {
-                    let p = serde_json::json!({"message": msg});
-                    let e = Event::default().event("status").data(msg.clone());
+                OrchestratorEvent::Status {
+                    ref message,
+                    ref tool_call_id,
+                } => {
+                    let mut p = serde_json::json!({"message": message});
+                    if let Some(id) = tool_call_id {
+                        p["tool_call_id"] = serde_json::Value::String(id.clone());
+                    }
+                    let e = Event::default().event("status").data(p.to_string());
                     ("status", p, e)
                 }
                 OrchestratorEvent::ToolResult {
@@ -983,6 +989,7 @@ pub async fn send_message(
                     ref status,
                     ref arguments,
                     ref result,
+                    ref tool_call_id,
                 } => {
                     let mut p = serde_json::json!({"tool_name": tool_name, "status": status});
                     if let Some(args) = arguments {
@@ -990,6 +997,9 @@ pub async fn send_message(
                     }
                     if let Some(res) = result {
                         p["result"] = serde_json::Value::String(res.clone());
+                    }
+                    if let Some(id) = tool_call_id {
+                        p["tool_call_id"] = serde_json::Value::String(id.clone());
                     }
                     let e = Event::default().event("tool_result").data(p.to_string());
                     ("tool_result", p, e)
@@ -1099,18 +1109,29 @@ pub async fn send_message(
                         OrchestratorEvent::Thinking(t) => {
                             ("subagent_thinking", serde_json::json!({"content": t}))
                         }
-                        OrchestratorEvent::Status(s) => {
-                            ("subagent_status", serde_json::json!({"message": s}))
+                        OrchestratorEvent::Status {
+                            message,
+                            tool_call_id,
+                        } => {
+                            let mut d = serde_json::json!({"message": message});
+                            if let Some(id) = tool_call_id {
+                                d["tool_call_id"] = serde_json::Value::String(id.clone());
+                            }
+                            ("subagent_status", d)
                         }
                         OrchestratorEvent::ToolResult {
                             tool_name,
                             status,
                             arguments,
                             result,
-                        } => (
-                            "subagent_tool_result",
-                            serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result}),
-                        ),
+                            tool_call_id,
+                        } => {
+                            let mut d = serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result});
+                            if let Some(id) = tool_call_id {
+                                d["tool_call_id"] = serde_json::Value::String(id.clone());
+                            }
+                            ("subagent_tool_result", d)
+                        }
                         other => (
                             "subagent_event",
                             serde_json::json!({"type": format!("{other:?}")}),
@@ -1774,12 +1795,22 @@ pub async fn send_voice_message(
                     full_text.push_str(&token);
                     Event::default().event("token").data(token)
                 }
-                OrchestratorEvent::Status(msg) => Event::default().event("status").data(msg),
+                OrchestratorEvent::Status {
+                    message,
+                    tool_call_id,
+                } => {
+                    let mut data = serde_json::json!({"message": message});
+                    if let Some(id) = tool_call_id {
+                        data["tool_call_id"] = serde_json::Value::String(id);
+                    }
+                    Event::default().event("status").data(data.to_string())
+                }
                 OrchestratorEvent::ToolResult {
                     tool_name,
                     status,
                     arguments,
                     result,
+                    tool_call_id,
                 } => {
                     let mut data = serde_json::json!({
                         "tool_name": tool_name,
@@ -1790,6 +1821,9 @@ pub async fn send_voice_message(
                     }
                     if let Some(res) = result {
                         data["result"] = serde_json::Value::String(res);
+                    }
+                    if let Some(id) = tool_call_id {
+                        data["tool_call_id"] = serde_json::Value::String(id);
                     }
                     Event::default().event("tool_result").data(data.to_string())
                 }
@@ -1836,18 +1870,29 @@ pub async fn send_voice_message(
                         OrchestratorEvent::Thinking(t) => {
                             ("thinking", serde_json::json!({"content": t}))
                         }
-                        OrchestratorEvent::Status(s) => {
-                            ("status", serde_json::json!({"message": s}))
+                        OrchestratorEvent::Status {
+                            message,
+                            tool_call_id,
+                        } => {
+                            let mut d = serde_json::json!({"message": message});
+                            if let Some(id) = tool_call_id {
+                                d["tool_call_id"] = serde_json::Value::String(id.clone());
+                            }
+                            ("status", d)
                         }
                         OrchestratorEvent::ToolResult {
                             tool_name,
                             status,
                             arguments,
                             result,
-                        } => (
-                            "tool_result",
-                            serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result}),
-                        ),
+                            tool_call_id,
+                        } => {
+                            let mut d = serde_json::json!({"tool_name": tool_name, "status": status, "arguments": arguments, "result": result});
+                            if let Some(id) = tool_call_id {
+                                d["tool_call_id"] = serde_json::Value::String(id.clone());
+                            }
+                            ("tool_result", d)
+                        }
                         other => ("event", serde_json::json!({"type": format!("{other:?}")})),
                     };
                     let event_type = format!("subagent_{inner_type}");

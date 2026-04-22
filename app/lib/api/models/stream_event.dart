@@ -99,23 +99,38 @@ class TokenEvent extends StreamEvent {
 ///
 /// Corresponds to `event:status` in the SSE stream.  The caller may display
 /// this as a transient status indicator (e.g. "Calling tool: web-search").
+///
+/// The data payload is JSON: `{"message":"...","tool_call_id":"..."}`.
+/// Older servers may send a plain string — the parser falls back gracefully.
 class StatusEvent extends StreamEvent {
-  const StatusEvent(this.message);
+  const StatusEvent(this.message, {this.toolCallId});
 
   /// Human-readable status message.
   final String message;
+
+  /// Provider-assigned tool-call ID (e.g. Anthropic `tool_use_id`).
+  /// `null` when the server does not include it.
+  final String? toolCallId;
+
+  factory StatusEvent.fromJson(Map<String, dynamic> json) {
+    return StatusEvent(
+      json['message'] as String? ?? '',
+      toolCallId: json['tool_call_id'] as String?,
+    );
+  }
 }
 
 /// A tool execution completed.
 ///
 /// Corresponds to `event:tool_result` in the SSE stream.  The JSON body is
-/// `{"tool_name":"...","status":"ok"|"error"|"denied","arguments":{...},"result":"..."}`.
+/// `{"tool_name":"...","status":"ok"|"error"|"denied","arguments":{...},"result":"...","tool_call_id":"..."}`.
 class ToolResultEvent extends StreamEvent {
   const ToolResultEvent({
     required this.toolName,
     required this.status,
     this.arguments,
     this.result,
+    this.toolCallId,
   });
 
   /// The name of the tool that was called.
@@ -130,12 +145,17 @@ class ToolResultEvent extends StreamEvent {
   /// The tool's output, truncated for display (may be null).
   final String? result;
 
+  /// Provider-assigned tool-call ID (e.g. Anthropic `tool_use_id`).
+  /// `null` for providers that do not use IDs (Ollama) or older servers.
+  final String? toolCallId;
+
   factory ToolResultEvent.fromJson(Map<String, dynamic> json) {
     return ToolResultEvent(
       toolName: json['tool_name'] as String? ?? '',
       status: json['status'] as String? ?? 'ok',
       arguments: json['arguments'] as Map<String, dynamic>?,
       result: json['result'] as String?,
+      toolCallId: json['tool_call_id'] as String?,
     );
   }
 }

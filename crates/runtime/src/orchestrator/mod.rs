@@ -708,6 +708,7 @@ impl Orchestrator {
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
+                        let tool_call_id = tool_call_item.id;
                         let turn_index = base_turn + iteration as i64 + 1;
                         let active_skill_guard = self.active_skill.read().await;
                         let active_skill_ref = active_skill_guard.as_deref();
@@ -752,9 +753,10 @@ impl Orchestrator {
 
                             if let Some(sink) = token_sink.as_ref() {
                                 let _ = sink
-                                    .send(OrchestratorEvent::Status(format!(
-                                        "Calling tool: {name}"
-                                    )))
+                                    .send(OrchestratorEvent::Status {
+                                        message: format!("Calling tool: {name}"),
+                                        tool_call_id: tool_call_id.clone(),
+                                    })
                                     .await;
                             }
 
@@ -777,6 +779,7 @@ impl Orchestrator {
                                 &mut turn_attachments,
                                 &mut turn_attachment_ids,
                                 token_sink.as_ref(),
+                                tool_call_id.as_deref(),
                             )
                             .await;
                         } else {
@@ -801,6 +804,7 @@ impl Orchestrator {
                                     &tool_handlers,
                                     &builtin_span,
                                     token_sink.as_ref(),
+                                    tool_call_id.as_deref(),
                                 )
                                 .await;
                             if matches!(outcome, DispatchOutcome::Denied) {
@@ -1117,6 +1121,7 @@ impl Orchestrator {
                     for tool_call_item in tool_call_items {
                         let name = tool_call_item.name;
                         let params = tool_call_item.params;
+                        let tool_call_id = tool_call_item.id;
                         let turn_index = base_turn + iteration as i64 + 1;
                         let active_skill_guard = self.active_skill.read().await;
                         let active_skill_ref = active_skill_guard.as_deref();
@@ -1147,6 +1152,7 @@ impl Orchestrator {
                                 &tool_handlers,
                                 &iteration_span,
                                 token_sink.as_ref(),
+                                tool_call_id.as_deref(),
                             )
                             .await;
                         if matches!(outcome, DispatchOutcome::Denied) {

@@ -110,6 +110,7 @@ impl Orchestrator {
         turn_attachments: &mut Vec<Attachment>,
         turn_attachment_ids: &mut Vec<Uuid>,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
+        tool_call_id: Option<&str>,
     ) -> String {
         let duration_ms = elapsed.as_millis() as i64;
         let span_name = format!("execute_tool {tool_name}");
@@ -245,6 +246,7 @@ impl Orchestrator {
                     status: tool_status.to_string(),
                     arguments: tool_arguments.cloned(),
                     result: truncated_result,
+                    tool_call_id: tool_call_id.map(|s| s.to_string()),
                 })
                 .await;
 
@@ -315,6 +317,7 @@ impl Orchestrator {
         tool_handlers: &[Arc<dyn ToolHandler>],
         instrument_span: &tracing::Span,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
+        tool_call_id: Option<&str>,
     ) -> DispatchOutcome {
         // Confirmation gate.
         let requires_confirm = tool_handlers
@@ -350,6 +353,7 @@ impl Orchestrator {
                         status: "denied".to_string(),
                         arguments: Some(params.clone()),
                         result: Some(observation.clone()),
+                        tool_call_id: tool_call_id.map(|s| s.to_string()),
                     })
                     .await;
             }
@@ -358,7 +362,10 @@ impl Orchestrator {
 
         if let Some(sink) = event_sink {
             let _ = sink
-                .send(OrchestratorEvent::Status(format!("Calling tool: {name}")))
+                .send(OrchestratorEvent::Status {
+                    message: format!("Calling tool: {name}"),
+                    tool_call_id: tool_call_id.map(|s| s.to_string()),
+                })
                 .await;
         }
 
@@ -385,6 +392,7 @@ impl Orchestrator {
             turn_attachments,
             turn_attachment_ids,
             event_sink,
+            tool_call_id,
         )
         .await;
 
