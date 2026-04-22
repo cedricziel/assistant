@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use assistant_core::{AssistantConfig, MemoryConfig, expand_tilde};
-use assistant_llm::LlmProvider;
+use assistant_core::{AssistantConfig, LlmProvider, MemoryConfig, expand_tilde};
 use assistant_skills::SkillSource;
 use assistant_storage::StorageLayer;
 use tracing::info;

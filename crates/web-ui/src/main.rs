@@ -15,11 +15,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use assistant_core::LlmProvider;
 use assistant_core::{
     BusKind, Interface, LlmProviderKind, MessageBus, OtelExporter, apply_agent_context,
     default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
-use assistant_llm::LlmProvider;
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
 use assistant_runtime::{Orchestrator, init_tracing};
 use assistant_skills::SkillSource;

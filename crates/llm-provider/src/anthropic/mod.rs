@@ -6,13 +6,13 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use assistant_core::LlmConfig;
 use assistant_core::types::{
     AnthropicUserLocation, AnthropicWebFetchOptions, AnthropicWebSearchOptions,
 };
-use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
+use assistant_core::{
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmConfig, LlmProvider,
+    LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
+    ToolSupport,
 };
 
 // ── AnthropicConfig ───────────────────────────────────────────────────────────
@@ -164,9 +164,9 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// Create from explicit config.
     pub fn new(config: AnthropicConfig) -> anyhow::Result<Self> {
-        let http = assistant_llm::build_http_client(
+        let http = crate::http::build_http_client(
             config.timeout_secs,
-            &assistant_llm::RetryConfig::default(),
+            &crate::retry::RetryConfig::default(),
         )?;
         Ok(Self { config, http })
     }
@@ -900,7 +900,7 @@ fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<Ll
 
 #[cfg(test)]
 mod tests {
-    use assistant_llm::{ChatHistoryMessage, ChatRole, ContentBlock};
+    use assistant_core::{ChatHistoryMessage, ChatRole, ContentBlock};
 
     use super::build_anthropic_messages;
 

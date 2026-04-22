@@ -5,12 +5,9 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use crate::provider::{Capabilities, LlmProvider, ToolSupport};
-use crate::stream_chunk::StreamChunk;
-use crate::tool_spec::ToolSpec;
-use crate::types::{
-    ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ToolCallItem,
-    ToolCallResponse,
+use assistant_core::{
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse,
+    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
 };
 
 /// Configuration for the LLM client.
@@ -596,7 +593,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::types::{ChatHistoryMessage, ContentBlock};
 
     fn make_client(base_url: &str) -> LlmClient {
         LlmClient::new(LlmClientConfig {

@@ -25,7 +25,6 @@ path = "src/lib.rs"
 
 [dependencies]
 assistant-core = { path = "../core" }
-assistant-llm = { path = "../llm" }
 assistant-storage = { path = "../storage" }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-skills = { path = "../skills" }

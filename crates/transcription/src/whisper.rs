@@ -30,9 +30,9 @@ pub struct WhisperProvider {
 
 impl WhisperProvider {
     pub fn new(api_key: impl Into<String>) -> anyhow::Result<Self> {
-        let client = assistant_llm::build_http_client(
+        let client = assistant_llm_provider::http::build_http_client(
             DEFAULT_TIMEOUT_SECS,
-            &assistant_llm::RetryConfig::default(),
+            &assistant_llm_provider::retry::RetryConfig::default(),
         )?;
         Ok(Self {
             base_url: "https://api.openai.com/v1".to_string(),

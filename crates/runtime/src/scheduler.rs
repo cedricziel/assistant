@@ -405,8 +405,10 @@ async fn prune_conversation_events(storage: &StorageLayer) {
 mod tests {
     use std::sync::Arc;
 
-    use assistant_core::{AssistantConfig, MessageBus, topic};
+    use assistant_core::{AssistantConfig, LlmProvider, MessageBus, topic};
+    use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
     use assistant_storage::StorageLayer;
+    use assistant_storage::registry::SkillRegistry;
     use assistant_tool_executor::ToolExecutor;
     use chrono::{Duration, Timelike, Utc};
     use wiremock::{
@@ -416,8 +418,6 @@ mod tests {
 
     use super::*;
     use crate::orchestrator::Orchestrator;
-    use assistant_llm::{LlmClient, LlmClientConfig, LlmProvider};
-    use assistant_storage::registry::SkillRegistry;
 
     // -- Helpers -------------------------------------------------------------
 
@@ -447,7 +447,7 @@ mod tests {
                 model: "test".to_string(),
                 base_url: base_url.to_string(),
                 timeout_secs: 10,
-                retry_config: assistant_llm::RetryConfig::disabled(),
+                retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
             })
             .unwrap(),
         );
@@ -647,7 +647,7 @@ mod tests {
                 model: "test".to_string(),
                 base_url: base_url.to_string(),
                 timeout_secs: 10,
-                retry_config: assistant_llm::RetryConfig::disabled(),
+                retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
             })
             .unwrap(),
         );

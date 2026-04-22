@@ -19,11 +19,9 @@ use assistant_core::{
     MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
     set_runtime_workspace_dir, validate_agent_id,
 };
-use assistant_llm::{
-    EmbeddingProvider, LlmEmbedder, LlmProvider, VoyageConfig, VoyageEmbedder,
-    WithEmbeddingOverride,
-};
+use assistant_core::{EmbeddingProvider, LlmEmbedder, LlmProvider, WithEmbeddingOverride};
 use assistant_llm_provider::{OllamaConfig, OllamaProvider, OpenAIProvider, OpenAIProviderConfig};
+use assistant_llm_provider::{VoyageConfig, VoyageEmbedder};
 use assistant_runtime::{
     CommandContext, CommandRegistry, Orchestrator, init_tracing,
     orchestrator::ConfirmationCallback, spawn_memory_indexer, spawn_scheduler,

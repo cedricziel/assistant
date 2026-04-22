@@ -7,8 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, Interface, Message, ToolHandler};
-use assistant_llm::ChatHistoryMessage;
+use assistant_core::{ChatHistoryMessage, ExecutionContext, Interface, Message, ToolHandler};
 use assistant_storage::conversations::ConversationStore;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Span as _;

@@ -21,12 +21,14 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-use assistant_core::LlmConfig;
-use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, RetryConfig, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
-    ToolSupport, build_reqwest_client, is_transient_error_message, with_retry,
+use assistant_core::{
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmConfig, LlmProvider,
+    LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
+    ToolSupport,
 };
+
+use crate::http::build_reqwest_client;
+use crate::retry::{RetryConfig, is_transient_error_message, with_retry};
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -76,7 +78,7 @@ impl MoonshotProvider {
         let client = Client::with_config(oai_cfg).with_http_client(http);
 
         let traced_client =
-            assistant_llm::build_http_client(timeout_secs, &assistant_llm::RetryConfig::default())?;
+            crate::http::build_http_client(timeout_secs, &crate::retry::RetryConfig::default())?;
 
         debug!(
             model = %model,

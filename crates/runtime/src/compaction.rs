@@ -21,8 +21,10 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{CompactionConfig, Message, MessageRole};
-use assistant_llm::{ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, ToolCallItem};
+use assistant_core::{
+    ChatHistoryMessage, ChatRole, CompactionConfig, ContentBlock, LlmProvider, LlmResponse,
+    Message, MessageRole, ToolCallItem,
+};
 use assistant_storage::conversations::ConversationStore;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -175,7 +177,7 @@ async fn summarise(llm: &Arc<dyn LlmProvider>, transcript: &str) -> Option<Strin
         )
         .await
     {
-        Ok(assistant_llm::LlmResponse::FinalAnswer(text, _)) => Some(text),
+        Ok(LlmResponse::FinalAnswer(text, _)) => Some(text),
         Ok(_) => {
             warn!("Compaction summary returned unexpected response variant");
             None

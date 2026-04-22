@@ -120,8 +120,7 @@ Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 
 | Crate (package name)             | Path                                   | Purpose                                                                     |
 | -------------------------------- | -------------------------------------- | --------------------------------------------------------------------------- |
-| `assistant-core`                 | `crates/core`                          | Shared types, ToolHandler trait, MessageBus trait                           |
-| `assistant-llm`                  | `crates/llm`                           | LlmProvider trait, EmbeddingProvider, LlmClient                             |
+| `assistant-core`                 | `crates/core`                          | Shared types, LLM traits (LlmProvider, EmbeddingProvider), ToolHandler      |
 | `assistant-llm-provider`         | `crates/llm-provider`                  | All LlmProvider implementations (Ollama, Anthropic, OpenAI, Moonshot)       |
 | `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins                                |
 | `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus                  |
@@ -145,11 +144,11 @@ Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 Dependency order (no cycles):
 
 ```
-interface-cli -> runtime -> llm -> core
-                    |         '-> llm-provider -> llm, core
+interface-cli -> runtime -> core
+                    |         '-> llm-provider -> core
                     |-> storage -> core
                     |-> bus-nats -> core  (optional, feature = "nats")
-                    |-> tool-executor -> core, storage, llm
+                    |-> tool-executor -> core, storage
                     '-> mcp-server, interface-slack, interface-mattermost, interface-matrix, interface-nextcloud (optional features)
 ```
 

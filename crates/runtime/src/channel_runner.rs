@@ -19,8 +19,9 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ChannelAdapter, ChannelContent, ChannelMessage, ConversationConfig};
-use assistant_llm::ContentBlock;
+use assistant_core::{
+    ChannelAdapter, ChannelContent, ChannelMessage, ContentBlock, ConversationConfig,
+};
 use assistant_storage::CommandEventStore;
 use base64::Engine as _;
 use futures::StreamExt;
@@ -462,7 +463,7 @@ mod tests {
     #[test]
     fn image_file_data_dispatched_as_attachment() {
         use assistant_core::ChannelContent;
-        use assistant_llm::ContentBlock;
+        use assistant_core::ContentBlock;
         use base64::Engine as _;
 
         let data = b"fakeimgbytes".to_vec();

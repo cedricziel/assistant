@@ -2321,7 +2321,8 @@ mod tests {
     use std::collections::HashMap;
 
     use assistant_core::AssistantConfig;
-    use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
+    use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
+    use assistant_llm_provider::retry::RetryConfig;
     use assistant_runtime::{CommandRegistry, Orchestrator};
     use assistant_storage::{
         AttachmentStore, CommandEventStore, ConversationEventStore, ConversationStore,
@@ -2443,7 +2444,8 @@ mod tests {
     /// contended. Use this for tests that only exercise the event log endpoints.
     async fn event_log_state() -> (ApiState, Arc<StorageLayer>) {
         use assistant_core::AssistantConfig;
-        use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
+        use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
+        use assistant_llm_provider::retry::RetryConfig;
         use assistant_runtime::Orchestrator;
         use assistant_tool_executor::ToolExecutor;
 
@@ -3466,7 +3468,8 @@ mod tests {
 
         // Build a state that uses the same pool (events are now gone).
         use assistant_core::AssistantConfig;
-        use assistant_llm::{LlmClient, LlmClientConfig, RetryConfig};
+        use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
+        use assistant_llm_provider::retry::RetryConfig;
         use assistant_runtime::Orchestrator;
         use assistant_tool_executor::ToolExecutor;
         let mut config = AssistantConfig::default();

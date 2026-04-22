@@ -2,23 +2,29 @@
 //!
 //! Houses all provider backends (Ollama, Anthropic, OpenAI, Moonshot) in a
 //! single crate with shared infrastructure. Each provider lives in its own
-//! submodule and implements [`assistant_llm::LlmProvider`].
+//! submodule and implements [`assistant_core::LlmProvider`].
 
 use std::sync::Arc;
 
-use assistant_core::LlmConfig;
 use assistant_core::types::LlmProviderKind;
-use assistant_llm::LlmProvider;
+use assistant_core::{LlmConfig, LlmProvider};
 
+// -- Provider implementations --
 pub mod anthropic;
 pub mod moonshot;
 pub mod ollama;
 pub mod openai;
 
+// -- Shared provider infrastructure --
+pub mod http;
+pub mod retry;
+pub mod voyage;
+
 pub use anthropic::{AnthropicConfig, AnthropicProvider};
 pub use moonshot::MoonshotProvider;
 pub use ollama::{OllamaConfig, OllamaProvider};
 pub use openai::{OAuthManager, OpenAIProvider, OpenAIProviderConfig};
+pub use voyage::{VoyageConfig, VoyageEmbedder};
 
 /// Create an [`LlmProvider`] from the given configuration.
 ///

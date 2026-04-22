@@ -11,8 +11,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::LearningConfig;
-use assistant_llm::{ChatHistoryMessage, LlmProvider};
+use assistant_core::{ChatHistoryMessage, ChatRole, LearningConfig, LlmProvider, LlmResponse};
 use assistant_storage::{SkillRegistry, StorageLayer};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -112,14 +111,14 @@ async fn evaluate_and_create(
 
     // Call the LLM as judge.
     let judge_history = vec![ChatHistoryMessage::Text {
-        role: assistant_llm::ChatRole::User,
+        role: ChatRole::User,
         content: format!("Here is the conversation turn to evaluate:\n\n{history_text}"),
     }];
     let response = llm.chat(JUDGE_SYSTEM_PROMPT, &judge_history, &[]).await?;
 
     let text = match &response {
-        assistant_llm::LlmResponse::FinalAnswer(t, _) => t.trim(),
-        assistant_llm::LlmResponse::Thinking(t, _) => t.trim(),
+        LlmResponse::FinalAnswer(t, _) => t.trim(),
+        LlmResponse::Thinking(t, _) => t.trim(),
         _ => return Ok(()), // ToolCalls response is unexpected here
     };
     let decision: serde_json::Value = serde_json::from_str(text)
@@ -209,8 +208,6 @@ async fn resolve_name_collision(registry: &SkillRegistry, base_name: &str) -> St
 
 /// Format chat history into a human-readable summary for the LLM judge.
 fn format_history_for_judge(history: &[ChatHistoryMessage]) -> String {
-    use assistant_llm::ChatRole;
-
     let mut parts = Vec::new();
     for msg in history {
         match msg {
@@ -331,9 +328,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_evaluate_and_create_from_subagent_turn() {
-        use assistant_llm::{
+        use assistant_core::{
             Capabilities, ChatHistoryMessage as CHM, LlmResponse, LlmResponseMeta, StreamChunk,
-            ToolSupport, tool_spec::ToolSpec,
+            ToolSpec, ToolSupport,
         };
         use async_trait::async_trait;
         use tokio::sync::mpsc;
@@ -395,11 +392,11 @@ mod tests {
             active_skill: None,
             history: vec![
                 ChatHistoryMessage::Text {
-                    role: assistant_llm::ChatRole::User,
+                    role: ChatRole::User,
                     content: "Search the codebase for sidebar components".to_string(),
                 },
                 ChatHistoryMessage::Text {
-                    role: assistant_llm::ChatRole::Assistant,
+                    role: ChatRole::Assistant,
                     content: "Found 5 sidebar-related files across the project.".to_string(),
                 },
             ],

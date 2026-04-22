@@ -26,13 +26,15 @@ use serde_json::Value;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, warn};
 
-use assistant_core::LlmConfig;
 use assistant_core::types::OpenAIUserLocation;
-use assistant_llm::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmProvider, LlmResponse,
-    LlmResponseMeta, RetryConfig, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
-    ToolSupport, build_reqwest_client, is_transient_error_message, with_retry,
+use assistant_core::{
+    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmConfig, LlmProvider,
+    LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
+    ToolSupport,
 };
+
+use crate::http::build_reqwest_client;
+use crate::retry::{RetryConfig, is_transient_error_message, with_retry};
 
 use super::oauth::OAuthManager;
 
@@ -726,7 +728,7 @@ fn normalise_base_url(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assistant_llm::{ChatHistoryMessage, ChatRole, ToolCallItem};
+    use assistant_core::{ChatHistoryMessage, ChatRole, ToolCallItem};
 
     #[test]
     fn normalise_base_url_adds_v1() {

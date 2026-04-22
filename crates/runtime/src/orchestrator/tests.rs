@@ -3,11 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assistant_core::{
-    AssistantConfig, MessageBus, PublishRequest, bus_messages, topic, types::Interface,
+    AssistantConfig, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, MessageBus,
+    PublishRequest, ToolCallItem, bus_messages, topic, types::Interface,
 };
-use assistant_llm::{
-    ChatHistoryMessage, ChatRole, LlmClient, LlmClientConfig, LlmProvider, ToolCallItem,
-};
+use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
 use assistant_tool_executor::ToolExecutor;
 use serde_json::{Value, json};
@@ -57,7 +56,7 @@ async fn build_with_config(
             model: "test".to_string(),
             base_url: base_url.to_string(),
             timeout_secs: 10,
-            retry_config: assistant_llm::RetryConfig::disabled(),
+            retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
         })
         .unwrap(),
     );
@@ -890,7 +889,6 @@ async fn empty_final_answer_not_persisted_in_run_turn() {
 #[test]
 fn serialize_history_multimodal_user_omits_base64_data() {
     use crate::otel_spans::serialize_history_for_span;
-    use assistant_llm::ContentBlock;
 
     let history = vec![ChatHistoryMessage::MultimodalUser {
         content: vec![
@@ -919,8 +917,6 @@ fn serialize_history_multimodal_user_omits_base64_data() {
 
 #[tokio::test]
 async fn prepare_history_with_attachments_emits_multimodal_user() {
-    use assistant_llm::ContentBlock;
-
     let server = MockServer::start().await;
     mount_answer(&server, "ok").await;
     let (orch, _) = build(&server.uri()).await;
@@ -969,7 +965,7 @@ async fn prepare_history_without_attachments_emits_plain_text() {
     let last = history.last().expect("history non-empty");
     match last {
         ChatHistoryMessage::Text { role, content } => {
-            assert_eq!(*role, assistant_llm::ChatRole::User);
+            assert_eq!(*role, ChatRole::User);
             assert_eq!(content, "hello");
         }
         other => panic!("expected Text, got {:?}", other),
@@ -1033,7 +1029,7 @@ async fn build_with_executor(
             model: "test".to_string(),
             base_url: base_url.to_string(),
             timeout_secs: 10,
-            retry_config: assistant_llm::RetryConfig::disabled(),
+            retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
         })
         .unwrap(),
     );
@@ -1334,7 +1330,7 @@ fn sanitize_history_trailing_user_inserts_assistant() {
 #[test]
 fn sanitize_history_trailing_multimodal_user_inserts_assistant() {
     let mut history = vec![ChatHistoryMessage::MultimodalUser {
-        content: vec![assistant_llm::ContentBlock::Text("image msg".into())],
+        content: vec![ContentBlock::Text("image msg".into())],
     }];
     crate::history::sanitize_history(&mut history);
     assert_eq!(history.len(), 2);
@@ -2401,7 +2397,7 @@ async fn with_submit_timeout_respected() {
             model: "test".to_string(),
             base_url: server.uri(),
             timeout_secs: 10,
-            retry_config: assistant_llm::RetryConfig::disabled(),
+            retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
         })
         .unwrap(),
     );
@@ -2495,7 +2491,7 @@ async fn timeout_cancels_in_flight_worker_turn() {
             model: "test".to_string(),
             base_url: server.uri(),
             timeout_secs: 30,
-            retry_config: assistant_llm::RetryConfig::disabled(),
+            retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
         })
         .unwrap(),
     );
@@ -2865,7 +2861,7 @@ async fn with_audio_store_makes_store_available() {
             model: "test".to_string(),
             base_url: "http://localhost:1".to_string(),
             timeout_secs: 10,
-            retry_config: assistant_llm::RetryConfig::disabled(),
+            retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
         })
         .unwrap(),
     );

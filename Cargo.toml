@@ -10,7 +10,6 @@ publish = false
 members = [
     "crates/core",
     "crates/skills",
-    "crates/llm",
     "crates/llm-provider",
     "crates/storage",
     "crates/workflow",
@@ -176,7 +175,6 @@ opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" 
 opentelemetry-exporter-iceberg = { path = "crates/opentelemetry-exporter-iceberg" }
 core = { path = "crates/core" }
 skills = { path = "crates/skills" }
-llm = { path = "crates/llm" }
 storage = { path = "crates/storage" }
 runtime = { path = "crates/runtime" }
 tool-executor = { path = "crates/tool-executor" }

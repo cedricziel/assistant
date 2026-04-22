@@ -1,3 +1,10 @@
+//! Shared LLM types used across the workspace.
+//!
+//! These types form the contract between the LLM provider implementations,
+//! the orchestrator, and other consumers.  They live in `core` so that any
+//! crate in the workspace can reference them without depending on a specific
+//! provider crate.
+
 use serde::{Deserialize, Serialize};
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -112,7 +119,7 @@ pub struct ToolCallResponse {
     pub thinking: Option<String>,
 }
 
-/// The outcome of a single `LlmClient::chat` invocation.
+/// The outcome of a single LLM chat invocation.
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
     /// The model wants to call one or more tools.

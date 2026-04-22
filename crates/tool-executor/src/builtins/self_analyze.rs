@@ -8,8 +8,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{ExecutionContext, ToolHandler, ToolOutput};
-use assistant_llm::{ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse};
+use assistant_core::{
+    ChatHistoryMessage, ChatRole, ExecutionContext, LlmProvider, LlmResponse, ToolHandler,
+    ToolOutput,
+};
 use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use async_trait::async_trait;
 use tracing::{debug, warn};

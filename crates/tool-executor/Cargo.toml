@@ -11,7 +11,6 @@ name = "assistant_tool_executor"
 [dependencies]
 assistant-core = { path = "../core" }
 assistant-skills = { path = "../skills" }
-assistant-llm = { path = "../llm" }
 assistant-storage = { path = "../storage" }
 assistant-transcription = { path = "../transcription" }
 serde_json = { workspace = true }

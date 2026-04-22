@@ -422,7 +422,6 @@ dependencies = [
  "assistant-interface-nextcloud",
  "assistant-interface-signal",
  "assistant-interface-slack",
- "assistant-llm",
  "assistant-llm-provider",
  "assistant-mcp-client",
  "assistant-mcp-server",
@@ -470,7 +469,7 @@ version = "0.1.132"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
+ "assistant-llm-provider",
  "assistant-runtime",
  "assistant-skills",
  "assistant-storage",
@@ -605,31 +604,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "assistant-llm"
-version = "0.1.132"
-dependencies = [
- "anyhow",
- "assistant-core",
- "async-trait",
- "futures",
- "reqwest 0.12.28",
- "reqwest-middleware",
- "reqwest-retry",
- "reqwest-tracing",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "wiremock",
-]
-
-[[package]]
 name = "assistant-llm-provider"
 version = "0.1.132"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
  "async-openai",
  "async-trait",
  "base64 0.22.1",
@@ -639,6 +618,8 @@ dependencies = [
  "getrandom 0.4.2",
  "reqwest 0.12.28",
  "reqwest-middleware",
+ "reqwest-retry",
+ "reqwest-tracing",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -687,7 +668,7 @@ version = "0.1.132"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
+ "assistant-llm-provider",
  "assistant-skills",
  "assistant-storage",
  "assistant-tool-executor",
@@ -762,7 +743,6 @@ version = "0.1.132"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
  "assistant-skills",
  "assistant-storage",
  "assistant-transcription",
@@ -788,7 +768,7 @@ version = "0.1.132"
 dependencies = [
  "anyhow",
  "assistant-core",
- "assistant-llm",
+ "assistant-llm-provider",
  "async-trait",
  "reqwest 0.12.28",
  "reqwest-middleware",
@@ -811,7 +791,6 @@ dependencies = [
  "assistant-a2a-json-schema",
  "assistant-bus-nats",
  "assistant-core",
- "assistant-llm",
  "assistant-llm-provider",
  "assistant-mcp-client",
  "assistant-runtime",

@@ -10,8 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::{AssistantConfig, base_dir, resolve_dir, resolve_path};
-use assistant_llm::LlmProvider;
+use assistant_core::{AssistantConfig, LlmProvider, base_dir, resolve_dir, resolve_path};
 use assistant_storage::{MemoryChunkStore, StorageLayer};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};

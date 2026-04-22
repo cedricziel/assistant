@@ -3,7 +3,7 @@
 //! Builds the full system prompt from memory files and skill metadata,
 //! optionally appending extension-tool instructions for messaging interfaces.
 
-use assistant_llm::ToolSpec;
+use assistant_core::ToolSpec;
 use assistant_skills::SkillDef as SpecSkillDef;
 
 use super::Orchestrator;

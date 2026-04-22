@@ -8,12 +8,13 @@ description = "Consolidated LLM provider implementations (Ollama, Anthropic, Ope
 
 [dependencies]
 assistant-core       = { path = "../core" }
-assistant-llm        = { path = "../llm" }
 async-trait          = { workspace = true }
 anyhow               = { workspace = true }
 tokio                = { workspace = true }
 reqwest              = { workspace = true }
 reqwest-middleware    = { workspace = true }
+reqwest-retry        = { workspace = true }
+reqwest-tracing      = { workspace = true }
 serde                = { workspace = true }
 serde_json           = { workspace = true }
 tracing              = { workspace = true }
