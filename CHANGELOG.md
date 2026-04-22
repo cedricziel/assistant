@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.135](https://github.com/cedricziel/assistant/compare/v0.1.134...v0.1.135) (2026-04-22)
+
+
+### Features
+
+* **web-ui:** route traces, logs, and analytics through pluggable backends ([#605](https://github.com/cedricziel/assistant/issues/605)) ([1583bc1](https://github.com/cedricziel/assistant/commit/1583bc171b1e5bd639faf2236b1486584ff05c18))
+
+
+### Bug Fixes
+
+* **app:** share extension credential sync — direct Keychain writes via IOSOptions ([#606](https://github.com/cedricziel/assistant/issues/606)) ([d48ffff](https://github.com/cedricziel/assistant/commit/d48ffffd55dc58ead7d6e1fbf0843ab6a27673ff))
+
 ## [0.1.134](https://github.com/cedricziel/assistant/compare/v0.1.133...v0.1.134) (2026-04-22)
 
 

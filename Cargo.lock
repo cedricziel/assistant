@@ -359,11 +359,11 @@ dependencies = [
 
 [[package]]
 name = "assistant"
-version = "0.1.134"
+version = "0.1.135"
 
 [[package]]
 name = "assistant-a2a-json-schema"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "chrono",
  "serde",
@@ -373,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-backup"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-bus-nats"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -411,7 +411,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-cli"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-backup",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-core"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -461,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-integration-tests"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-interfaces"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-llm-provider"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-client"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-mcp-server"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-runtime"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-skills"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "gray_matter",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-storage"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-tool-executor"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-transcription"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-web-ui"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-workflow"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-core",
@@ -765,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-workflow-http"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "assistant-workflow",
@@ -3929,7 +3929,7 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-exporter-iceberg"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -3954,7 +3954,7 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-exporter-sqlite"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "chrono",
  "opentelemetry",
