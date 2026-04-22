@@ -300,7 +300,9 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
     if (line.startsWith('event:')) {
       eventType = line.substring('event:'.length).trim();
     } else if (line.startsWith('data:')) {
-      dataLine = line.substring('data:'.length).trim();
+      // Per the SSE spec, multiple `data:` lines are concatenated with '\n'.
+      final value = line.substring('data:'.length).trim();
+      dataLine = dataLine == null ? value : '$dataLine\n$value';
     } else if (line.isEmpty) {
       // Blank line — dispatch the event.
       if (eventType == 'token' && dataLine != null) {
@@ -426,7 +428,8 @@ Stream<ConversationListEvent> parseConversationSseByteStream(
     if (line.startsWith('event:')) {
       eventType = line.substring('event:'.length).trim();
     } else if (line.startsWith('data:')) {
-      dataLine = line.substring('data:'.length).trim();
+      final value = line.substring('data:'.length).trim();
+      dataLine = dataLine == null ? value : '$dataLine\n$value';
     } else if (line.isEmpty) {
       if (eventType != null && dataLine != null) {
         try {
