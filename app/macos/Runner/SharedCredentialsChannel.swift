@@ -1,8 +1,12 @@
 import FlutterMacOS
 import AssistantIntents
 
-/// Method channel that writes credentials to the shared Keychain access group
-/// so that app extensions (share extension) can read them.
+/// Method channel that exposes the Apple Team ID prefix to Dart and writes
+/// credentials to the shared Keychain access group for macOS app extensions.
+///
+/// On macOS, `flutter_secure_storage`'s `groupId` (kSecAttrAccessGroup) is
+/// guarded behind `#if os(iOS)` in the plugin's native code, so it has no
+/// effect. We therefore keep the direct Keychain write for macOS.
 final class SharedCredentialsChannel {
     static let channelName = "com.cedricziel.assistant/shared_credentials"
 
@@ -10,6 +14,9 @@ final class SharedCredentialsChannel {
         let channel = FlutterMethodChannel(name: channelName, binaryMessenger: messenger)
         channel.setMethodCallHandler { call, result in
             switch call.method {
+            case "getTeamPrefix":
+                result(KeychainHelper.teamPrefix)
+
             case "syncCredentials":
                 guard let args = call.arguments as? [String: Any] else {
                     result(FlutterError(code: "INVALID_ARGS", message: "Expected a map", details: nil))
