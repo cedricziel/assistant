@@ -542,4 +542,87 @@ void main() {
       expect(e.message, equals('Calling tool: web-search'));
     });
   });
+
+  group('SSE id: field → sequenceId', () {
+    test('parses id: field into sequenceId on TokenEvent', () async {
+      const sse = 'id:42\nevent:token\ndata:hello\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first, isA<TokenEvent>());
+      expect(events.first.sequenceId, equals(42));
+    });
+
+    test('sequenceId is null when no id: line present', () async {
+      const sse = 'event:token\ndata:hello\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first.sequenceId, isNull);
+    });
+
+    test('sequenceId is null for non-numeric id: values', () async {
+      const sse = 'id:not-a-number\nevent:token\ndata:hello\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first.sequenceId, isNull);
+    });
+
+    test('id: field threads through DoneEvent', () async {
+      final payload = jsonEncode({
+        'role': 'assistant',
+        'content': 'bye',
+        'message_id': 'msg-1',
+      });
+      final sse = 'id:99\nevent:done\ndata:$payload\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      final done = events.first as DoneEvent;
+      expect(done.sequenceId, equals(99));
+      expect(done.content, equals('bye'));
+      expect(done.messageId, equals('msg-1'));
+    });
+
+    test('id: field threads through RunStartedEvent', () async {
+      const sse = 'id:0\nevent:run_started\ndata:{"run_id":"r1"}\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      final rs = events.first as RunStartedEvent;
+      expect(rs.sequenceId, equals(0));
+      expect(rs.runId, equals('r1'));
+    });
+
+    test('id: field threads through AgentErrorEvent', () async {
+      const sse = 'id:7\nevent:agent_error\ndata:Server crashed\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      final err = events.first as AgentErrorEvent;
+      expect(err.sequenceId, equals(7));
+      expect(err.message, equals('Server crashed'));
+    });
+
+    test('id: resets between events', () async {
+      const sse =
+          'id:1\nevent:token\ndata:a\n\n'
+          'event:token\ndata:b\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(2));
+      expect(events[0].sequenceId, equals(1));
+      expect(events[1].sequenceId, isNull);
+    });
+
+    test('id: field order does not matter within an event block', () async {
+      // id: after event: and data: — should still work.
+      const sse = 'event:token\ndata:hello\nid:5\n\n';
+      final events = await parseSseByteStream(_sseBytes(sse)).toList();
+
+      expect(events.length, equals(1));
+      expect(events.first.sequenceId, equals(5));
+    });
+  });
 }

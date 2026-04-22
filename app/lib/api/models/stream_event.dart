@@ -3,7 +3,13 @@
 /// Events arrive from `POST /api/conversations/{id}/messages` as a
 /// `text/event-stream` (Server-Sent Events) response.
 sealed class StreamEvent {
-  const StreamEvent();
+  const StreamEvent({this.sequenceId});
+
+  /// The server-assigned event sequence number parsed from the SSE `id:` field.
+  ///
+  /// `null` when the server did not include an `id:` line (e.g. ephemeral
+  /// thinking tokens or older servers).
+  final int? sequenceId;
 }
 
 // -- Conversation list stream events -----------------------------------------
@@ -88,7 +94,7 @@ class ConversationListEntry {
 /// Corresponds to `event:token` in the SSE stream.  The caller should
 /// accumulate these into a display buffer to show the streaming response.
 class TokenEvent extends StreamEvent {
-  const TokenEvent(this.token);
+  const TokenEvent(this.token, {super.sequenceId});
 
   /// The incremental text chunk (may be a single word, part of a word, or
   /// whitespace).
@@ -103,7 +109,7 @@ class TokenEvent extends StreamEvent {
 /// The data payload is JSON: `{"message":"...","tool_call_id":"..."}`.
 /// Older servers may send a plain string — the parser falls back gracefully.
 class StatusEvent extends StreamEvent {
-  const StatusEvent(this.message, {this.toolCallId});
+  const StatusEvent(this.message, {this.toolCallId, super.sequenceId});
 
   /// Human-readable status message.
   final String message;
@@ -131,6 +137,7 @@ class ToolResultEvent extends StreamEvent {
     this.arguments,
     this.result,
     this.toolCallId,
+    super.sequenceId,
   });
 
   /// The name of the tool that was called.
@@ -168,7 +175,12 @@ class ToolResultEvent extends StreamEvent {
 /// and persist `content`.  `messageId` is the DB UUID of the saved assistant
 /// message and should be used as [ChatMessage.id] when present.
 class DoneEvent extends StreamEvent {
-  const DoneEvent({required this.role, required this.content, this.messageId});
+  const DoneEvent({
+    required this.role,
+    required this.content,
+    this.messageId,
+    super.sequenceId,
+  });
 
   final String role;
 
@@ -194,7 +206,7 @@ class DoneEvent extends StreamEvent {
 /// `{"run_id":"<uuid>"}`.  Clients should store this ID so they can reconnect
 /// via the event-log replay endpoint if the connection drops.
 class RunStartedEvent extends StreamEvent {
-  const RunStartedEvent(this.runId);
+  const RunStartedEvent(this.runId, {super.sequenceId});
 
   /// The UUID of the orchestrator run.
   final String runId;
@@ -205,7 +217,7 @@ class RunStartedEvent extends StreamEvent {
 /// May be produced by the client-side SSE parser when the stream closes
 /// unexpectedly or when an HTTP error status is received.
 class ErrorEvent extends StreamEvent {
-  const ErrorEvent(this.message);
+  const ErrorEvent(this.message, {super.sequenceId});
 
   final String message;
 }
@@ -216,7 +228,7 @@ class ErrorEvent extends StreamEvent {
 /// `POST /api/conversations/{id}/voice`.  The JSON body is
 /// `{"role":"user","content":"<transcribed text>"}`.
 class TranscriptEvent extends StreamEvent {
-  const TranscriptEvent(this.transcript);
+  const TranscriptEvent(this.transcript, {super.sequenceId});
 
   /// The transcribed text of the user's spoken message.
   final String transcript;
@@ -231,7 +243,7 @@ class TranscriptEvent extends StreamEvent {
 /// Corresponds to `event:thinking` in the SSE stream.  The JSON body is
 /// `{"content":"<thinking text>"}`.
 class ThinkingEvent extends StreamEvent {
-  const ThinkingEvent(this.content);
+  const ThinkingEvent(this.content, {super.sequenceId});
 
   /// The reasoning text produced by the LLM.
   final String content;
@@ -246,7 +258,11 @@ class ThinkingEvent extends StreamEvent {
 /// Corresponds to `event:subagent_started` in the SSE stream.  The JSON body
 /// is `{"agent_id":"...","task":"..."}`.
 class SubagentStartedEvent extends StreamEvent {
-  const SubagentStartedEvent({required this.agentId, required this.task});
+  const SubagentStartedEvent({
+    required this.agentId,
+    required this.task,
+    super.sequenceId,
+  });
 
   final String agentId;
   final String task;
@@ -268,6 +284,7 @@ class SubagentCompletedEvent extends StreamEvent {
     required this.agentId,
     required this.status,
     required this.summary,
+    super.sequenceId,
   });
 
   final String agentId;
@@ -292,6 +309,7 @@ class SkillCompleteEvent extends StreamEvent {
     required this.skillName,
     required this.success,
     required this.summary,
+    super.sequenceId,
   });
 
   final String skillName;
@@ -312,7 +330,7 @@ class SkillCompleteEvent extends StreamEvent {
 /// Corresponds to `event:agent_error` in the SSE stream.  The data is a
 /// plain-text error message.
 class AgentErrorEvent extends StreamEvent {
-  const AgentErrorEvent(this.message);
+  const AgentErrorEvent(this.message, {super.sequenceId});
 
   final String message;
 }
@@ -322,7 +340,11 @@ class AgentErrorEvent extends StreamEvent {
 /// Corresponds to `event:subagent_token` in the SSE stream.  The JSON body is
 /// `{"agent_id":"...","data":{"content":"..."}}`.
 class SubagentTokenEvent extends StreamEvent {
-  const SubagentTokenEvent({required this.agentId, required this.content});
+  const SubagentTokenEvent({
+    required this.agentId,
+    required this.content,
+    super.sequenceId,
+  });
 
   final String agentId;
   final String content;
@@ -341,7 +363,11 @@ class SubagentTokenEvent extends StreamEvent {
 /// Corresponds to `event:subagent_thinking` in the SSE stream.  The JSON body
 /// is `{"agent_id":"...","data":{"content":"..."}}`.
 class SubagentThinkingEvent extends StreamEvent {
-  const SubagentThinkingEvent({required this.agentId, required this.content});
+  const SubagentThinkingEvent({
+    required this.agentId,
+    required this.content,
+    super.sequenceId,
+  });
 
   final String agentId;
   final String content;
@@ -366,6 +392,7 @@ class SubagentToolResultEvent extends StreamEvent {
     required this.status,
     this.arguments,
     this.result,
+    super.sequenceId,
   });
 
   final String agentId;
@@ -391,7 +418,11 @@ class SubagentToolResultEvent extends StreamEvent {
 /// Corresponds to `event:subagent_status` in the SSE stream.  The JSON body
 /// is `{"agent_id":"...","data":{"message":"..."}}`.
 class SubagentStatusEvent extends StreamEvent {
-  const SubagentStatusEvent({required this.agentId, required this.message});
+  const SubagentStatusEvent({
+    required this.agentId,
+    required this.message,
+    super.sequenceId,
+  });
 
   final String agentId;
   final String message;
@@ -410,7 +441,7 @@ class SubagentStatusEvent extends StreamEvent {
 /// Corresponds to `event:audio_ready` in the SSE stream.  The JSON body is
 /// `{"audio_id":"<uuid>"}`.
 class AudioReadyEvent extends StreamEvent {
-  const AudioReadyEvent(this.audioId);
+  const AudioReadyEvent(this.audioId, {super.sequenceId});
 
   /// Opaque identifier used with GET /api/audio/{audioId}.
   final String audioId;

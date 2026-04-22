@@ -295,6 +295,7 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
 
   String? eventType;
   String? dataLine;
+  String? eventId;
 
   await for (final line in lines) {
     if (line.startsWith('event:')) {
@@ -303,114 +304,187 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
       // Per the SSE spec, multiple `data:` lines are concatenated with '\n'.
       final value = line.substring('data:'.length).trim();
       dataLine = dataLine == null ? value : '$dataLine\n$value';
+    } else if (line.startsWith('id:')) {
+      eventId = line.substring('id:'.length).trim();
     } else if (line.isEmpty) {
       // Blank line — dispatch the event.
+      final seq = int.tryParse(eventId ?? '');
       if (eventType == 'token' && dataLine != null) {
-        yield TokenEvent(dataLine);
+        yield TokenEvent(dataLine, sequenceId: seq);
       } else if (eventType == 'status' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield StatusEvent.fromJson(json);
+          yield StatusEvent(
+            json['message'] as String? ?? '',
+            toolCallId: json['tool_call_id'] as String?,
+            sequenceId: seq,
+          );
         } catch (_) {
           // Older servers send plain-text status messages.
-          yield StatusEvent(dataLine);
+          yield StatusEvent(dataLine, sequenceId: seq);
         }
       } else if (eventType == 'tool_result' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield ToolResultEvent.fromJson(json);
+          yield ToolResultEvent(
+            toolName: json['tool_name'] as String? ?? '',
+            status: json['status'] as String? ?? 'ok',
+            arguments: json['arguments'] as Map<String, dynamic>?,
+            result: json['result'] as String?,
+            toolCallId: json['tool_call_id'] as String?,
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed tool_result events
         }
       } else if (eventType == 'run_started' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield RunStartedEvent(json['run_id'] as String? ?? '');
+          yield RunStartedEvent(
+            json['run_id'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed run_started events
         }
       } else if (eventType == 'done' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield DoneEvent.fromJson(json);
+          yield DoneEvent(
+            role: json['role'] as String? ?? 'assistant',
+            content: json['content'] as String? ?? '',
+            messageId: json['message_id'] as String?,
+            sequenceId: seq,
+          );
         } catch (_) {
-          yield DoneEvent(role: 'assistant', content: dataLine);
+          yield DoneEvent(
+            role: 'assistant',
+            content: dataLine,
+            sequenceId: seq,
+          );
         }
       } else if (eventType == 'transcript' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield TranscriptEvent.fromJson(json);
+          yield TranscriptEvent(
+            json['content'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed transcript events
         }
       } else if (eventType == 'thinking' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield ThinkingEvent.fromJson(json);
+          yield ThinkingEvent(
+            json['content'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed thinking events
         }
       } else if (eventType == 'subagent_started' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield SubagentStartedEvent.fromJson(json);
+          yield SubagentStartedEvent(
+            agentId: json['agent_id'] as String? ?? '',
+            task: json['task'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed subagent_started events
         }
       } else if (eventType == 'subagent_completed' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield SubagentCompletedEvent.fromJson(json);
+          yield SubagentCompletedEvent(
+            agentId: json['agent_id'] as String? ?? '',
+            status: json['status'] as String? ?? 'ok',
+            summary: json['summary'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed subagent_completed events
         }
       } else if (eventType == 'skill_complete' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield SkillCompleteEvent.fromJson(json);
+          yield SkillCompleteEvent(
+            skillName: json['skill_name'] as String? ?? '',
+            success: json['success'] as bool? ?? false,
+            summary: json['summary'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed skill_complete events
         }
       } else if (eventType == 'subagent_token' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield SubagentTokenEvent.fromJson(json);
+          final data = json['data'] as Map<String, dynamic>? ?? {};
+          yield SubagentTokenEvent(
+            agentId: json['agent_id'] as String? ?? '',
+            content: data['content'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed subagent_token events
         }
       } else if (eventType == 'subagent_thinking' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield SubagentThinkingEvent.fromJson(json);
+          final data = json['data'] as Map<String, dynamic>? ?? {};
+          yield SubagentThinkingEvent(
+            agentId: json['agent_id'] as String? ?? '',
+            content: data['content'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed subagent_thinking events
         }
       } else if (eventType == 'subagent_tool_result' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield SubagentToolResultEvent.fromJson(json);
+          final data = json['data'] as Map<String, dynamic>? ?? {};
+          yield SubagentToolResultEvent(
+            agentId: json['agent_id'] as String? ?? '',
+            toolName: data['tool_name'] as String? ?? '',
+            status: data['status'] as String? ?? 'ok',
+            arguments: data['arguments'] as Map<String, dynamic>?,
+            result: data['result'] as String?,
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed subagent_tool_result events
         }
       } else if (eventType == 'subagent_status' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield SubagentStatusEvent.fromJson(json);
+          final data = json['data'] as Map<String, dynamic>? ?? {};
+          yield SubagentStatusEvent(
+            agentId: json['agent_id'] as String? ?? '',
+            message: data['message'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed subagent_status events
         }
       } else if (eventType == 'agent_error' && dataLine != null) {
-        yield AgentErrorEvent(dataLine);
+        yield AgentErrorEvent(dataLine, sequenceId: seq);
       } else if (eventType == 'audio_ready' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield AudioReadyEvent.fromJson(json);
+          yield AudioReadyEvent(
+            json['audio_id'] as String? ?? '',
+            sequenceId: seq,
+          );
         } catch (_) {
           // ignore malformed audio_ready events
         }
       }
       eventType = null;
       dataLine = null;
+      eventId = null;
     }
   }
 }
@@ -430,6 +504,8 @@ Stream<ConversationListEvent> parseConversationSseByteStream(
     } else if (line.startsWith('data:')) {
       final value = line.substring('data:'.length).trim();
       dataLine = dataLine == null ? value : '$dataLine\n$value';
+    } else if (line.startsWith('id:')) {
+      // Consume but ignore — conversation list events don't use sequence IDs.
     } else if (line.isEmpty) {
       if (eventType != null && dataLine != null) {
         try {
