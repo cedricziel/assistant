@@ -117,9 +117,6 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace -- -D warnings
 
-      - name: cargo clippy (signal feature)
-        run: cargo clippy -p assistant-cli --features signal -- -D warnings
-
   format:
     name: Format
     if: github.event.action != 'closed'

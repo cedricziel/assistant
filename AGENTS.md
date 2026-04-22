@@ -118,28 +118,24 @@ GitHub Actions runs `flutter analyze --fatal-infos` and `flutter test` on every 
 
 Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 
-| Crate (package name)             | Path                                   | Purpose                                                                     |
-| -------------------------------- | -------------------------------------- | --------------------------------------------------------------------------- |
-| `assistant-core`                 | `crates/core`                          | Shared types, LLM traits (LlmProvider, EmbeddingProvider), ToolHandler      |
-| `assistant-llm-provider`         | `crates/llm-provider`                  | All LlmProvider implementations (Ollama, Anthropic, OpenAI, Moonshot)       |
-| `assistant-skills`               | `crates/skills`                        | Skill parsing, validation, embedded builtins                                |
-| `assistant-storage`              | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus                  |
-| `assistant-bus-nats`             | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)                         |
-| `assistant-runtime`              | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler, ChannelRunner        |
-| `assistant-tool-executor`        | `crates/tool-executor`                 | ToolHandler registry, builtin tools, dispatch                               |
-| `assistant-mcp-server`           | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                                               |
-| `assistant-mcp-client`           | `crates/mcp-client`                    | MCP client for external MCP server connections                              |
-| `assistant-cli`                  | `crates/interface-cli`                 | Unified binary: REPL + subcommands                                          |
-| `assistant-interface-slack`      | `crates/interface-slack`               | Slack bot (thin reqwest/tokio-tungstenite client, ChannelAdapter)           |
-| `assistant-interface-mattermost` | `crates/interface-mattermost`          | Mattermost bot (thin reqwest/tokio-tungstenite client, ChannelAdapter)      |
-| `assistant-interface-matrix`     | `crates/interface-matrix`              | Matrix bot (thin reqwest long-poll, ChannelAdapter)                         |
-| `assistant-interface-nextcloud`  | `crates/interface-nextcloud`           | Nextcloud Talk webhook bot (axum, ChannelAdapter)                           |
-| `assistant-interface-signal`     | `crates/interface-signal`              | Signal interface via signal-cli-rest-api (WebSocket + REST, ChannelAdapter) |
-| `assistant-web-ui`               | `crates/web-ui`                        | Web UI/A2A server implementation (invoked via `assistant webui serve`)      |
-| `assistant-transcription`        | `crates/transcription`                 | Voice transcription providers (Whisper, Ollama, etc)                        |
-| `assistant-a2a-json-schema`      | `crates/a2a-json-schema`               | A2A protocol JSON Schema types                                              |
-| `opentelemetry-exporter-sqlite`  | `crates/opentelemetry-exporter-sqlite` | SQLite exporter for OpenTelemetry spans/logs                                |
-| `assistant-integration-tests`    | `crates/integration-tests`             | End-to-end smoke tests                                                      |
+| Crate (package name)            | Path                                   | Purpose                                                                |
+| ------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
+| `assistant-core`                | `crates/core`                          | Shared types, LLM traits (LlmProvider, EmbeddingProvider), ToolHandler |
+| `assistant-llm-provider`        | `crates/llm-provider`                  | All LlmProvider implementations (Ollama, Anthropic, OpenAI, Moonshot)  |
+| `assistant-skills`              | `crates/skills`                        | Skill parsing, validation, embedded builtins                           |
+| `assistant-storage`             | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus             |
+| `assistant-bus-nats`            | `crates/bus-nats`                      | NATS JetStream MessageBus (optional, feature-gated)                    |
+| `assistant-runtime`             | `crates/runtime`                       | Orchestrator (main ReAct loop), SafetyGate, Scheduler, ChannelRunner   |
+| `assistant-tool-executor`       | `crates/tool-executor`                 | ToolHandler registry, builtin tools, dispatch                          |
+| `assistant-mcp-server`          | `crates/mcp-server`                    | stdio JSON-RPC 2.0 MCP server                                          |
+| `assistant-mcp-client`          | `crates/mcp-client`                    | MCP client for external MCP server connections                         |
+| `assistant-cli`                 | `crates/interface-cli`                 | Unified binary: REPL + subcommands                                     |
+| `assistant-interfaces`          | `crates/interfaces`                    | All messenger adapters (Slack, Mattermost, Matrix, Nextcloud, Signal)  |
+| `assistant-web-ui`              | `crates/web-ui`                        | Web UI/A2A server implementation (invoked via `assistant webui serve`) |
+| `assistant-transcription`       | `crates/transcription`                 | Voice transcription providers (Whisper, Ollama, etc)                   |
+| `assistant-a2a-json-schema`     | `crates/a2a-json-schema`               | A2A protocol JSON Schema types                                         |
+| `opentelemetry-exporter-sqlite` | `crates/opentelemetry-exporter-sqlite` | SQLite exporter for OpenTelemetry spans/logs                           |
+| `assistant-integration-tests`   | `crates/integration-tests`             | End-to-end smoke tests                                                 |
 
 Dependency order (no cycles):
 
@@ -149,7 +145,7 @@ interface-cli -> runtime -> core
                     |-> storage -> core
                     |-> bus-nats -> core  (optional, feature = "nats")
                     |-> tool-executor -> core, storage
-                    '-> mcp-server, interface-slack, interface-mattermost, interface-matrix, interface-nextcloud (optional features)
+                    '-> mcp-server, interfaces -> core, runtime, storage, transcription
 ```
 
 ## Architecture Decisions
@@ -159,7 +155,7 @@ interface-cli -> runtime -> core
 
 ### Messenger Interface Clients
 
-All messenger interface crates (`interface-slack`, `interface-mattermost`, `interface-matrix`, `interface-nextcloud`) use **thin `reqwest` + `tokio-tungstenite` HTTP/WebSocket clients** — not heavy platform SDKs. This was a deliberate decision (see `openspec/changes/thin-messenger-http-clients/design.md`):
+All messenger interface adapters live in `crates/interfaces/` (`assistant-interfaces`) as sub-modules (`slack`, `mattermost`, `matrix`, `nextcloud`, `signal`). They use **thin `reqwest` + `tokio-tungstenite` HTTP/WebSocket clients** — not heavy platform SDKs. This was a deliberate decision (see `openspec/changes/thin-messenger-http-clients/design.md`):
 
 - **Matrix**: uses plain long-poll `/sync` via `reqwest`, _not_ `matrix-sdk`. The old `matrix-sdk` dep was removed to eliminate its 80k+ line transitive footprint and SQLite state store. The workspace still has a `matrix-sdk` entry in `Cargo.toml` for future reference but the interface crate does not use it.
 - **Slack**: uses `reqwest` + `tokio-tungstenite` Socket Mode, _not_ `slack-morphism`.
@@ -274,5 +270,5 @@ Prefixes: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`.
 ## CI
 
 GitHub Actions runs on push to `main` and PRs: check, test, lint (clippy), format.
-The `interface-signal` crate no longer has a feature gate — it compiles unconditionally as part of the workspace lint.
+All messenger interfaces compile unconditionally as part of the `assistant-interfaces` crate.
 Integration tests run with `continue-on-error: true` (require Ollama).

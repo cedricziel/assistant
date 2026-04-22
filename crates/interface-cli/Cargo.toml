@@ -6,14 +6,9 @@ edition.workspace = true
 description = "Interactive CLI REPL for the local AI assistant"
 
 [features]
-slack = ["dep:assistant-interface-slack"]
-mattermost = ["dep:assistant-interface-mattermost"]
-matrix = ["dep:assistant-interface-matrix"]
-nextcloud = ["dep:assistant-interface-nextcloud"]
-signal = ["dep:assistant-interface-signal"]
 mcp = ["dep:assistant-mcp-server"]
 nats = ["dep:assistant-bus-nats", "assistant-web-ui/nats"]
-default = ["slack", "mattermost", "matrix", "nextcloud", "signal", "mcp", "nats"]
+default = ["mcp", "nats"]
 
 [[bin]]
 name = "assistant"
@@ -30,12 +25,8 @@ assistant-llm-provider = { path = "../llm-provider" }
 assistant-skills = { path = "../skills" }
 assistant-tool-executor = { path = "../tool-executor" }
 assistant-runtime = { path = "../runtime" }
-# Optional interface crates (activated by features)
-assistant-interface-slack = { path = "../interface-slack", optional = true }
-assistant-interface-mattermost = { path = "../interface-mattermost", optional = true }
-assistant-interface-matrix = { path = "../interface-matrix", optional = true }
-assistant-interface-nextcloud = { path = "../interface-nextcloud", optional = true }
-assistant-interface-signal = { path = "../interface-signal", optional = true }
+# Consolidated messenger interfaces (Slack, Mattermost, Matrix, Nextcloud, Signal)
+assistant-interfaces = { path = "../interfaces" }
 assistant-web-ui = { path = "../web-ui", default-features = false }
 assistant-mcp-server = { path = "../mcp-server", optional = true }
 assistant-bus-nats = { path = "../bus-nats", optional = true }
