@@ -2,7 +2,7 @@
 
 The share extension credential pipeline had three layers:
 
-```
+```text
 Flutter ContextRepository
   → flutter_secure_storage (app-only keychain, Siri backward compat)
   → SharedCredentialsChannel (Dart method channel → Swift)
@@ -29,7 +29,7 @@ Current code demanded both URL and non-empty auth token. Changed to require only
 
 **Old architecture (method channel bridge):**
 
-```
+```text
 Dart syncSiriCredentials()
   → flutter_secure_storage (default scope, Siri compat)
   → MethodChannel "syncCredentials" → Swift → KeychainHelper.write()
@@ -38,7 +38,7 @@ Dart syncSiriCredentials()
 
 **New architecture (direct write):**
 
-```
+```text
 Dart syncSiriCredentials()
   → flutter_secure_storage (default scope, Siri compat)
   → flutter_secure_storage with IOSOptions(
@@ -61,11 +61,12 @@ Direct writes through `flutter_secure_storage` are synchronous to the Keychain �
 **macOS limitation:** The `flutter_secure_storage_darwin` plugin wraps `groupId` in `#if os(iOS)` — it has no effect on macOS. For macOS, the method channel `syncCredentials` call is retained as a fallback.
 
 **Key mapping:**
-| Dart | Native Keychain | Value |
-|------|----------------|-------|
-| `IOSOptions(accountName:)` | `kSecAttrService` | `"com.cedricziel.assistant"` |
-| `IOSOptions(groupId:)` | `kSecAttrAccessGroup` | `"TEAMID.com.cedricziel.assistant.shared"` |
-| `write(key:)` | `kSecAttrAccount` | `"assistant_siri_server_url"` or `"assistant_siri_auth_token"` |
+
+| Dart                       | Native Keychain       | Value                                                          |
+| -------------------------- | --------------------- | -------------------------------------------------------------- |
+| `IOSOptions(accountName:)` | `kSecAttrService`     | `"com.cedricziel.assistant"`                                   |
+| `IOSOptions(groupId:)`     | `kSecAttrAccessGroup` | `"TEAMID.com.cedricziel.assistant.shared"`                     |
+| `write(key:)`              | `kSecAttrAccount`     | `"assistant_siri_server_url"` or `"assistant_siri_auth_token"` |
 
 These match what the Swift `KeychainHelper` reads with in the share extension.
 

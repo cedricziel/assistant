@@ -11,21 +11,20 @@ The iOS share extension always shows "Not Connected" even when the user is logge
 ## What Changes
 
 - **Fix `hasCredentials` to accept URL-only** — A valid server URL is sufficient. The auth token should be optional (matching the `AssistantContext` model where `authToken: null` means "server requires no auth").
-- **Await the shared Keychain sync** — Make the `SharedCredentialsChannel.syncCredentials()` call awaited so failures are observable. Log errors instead of swallowing them.
-- **Add a verification round-trip** — After writing credentials via the method channel, read them back from the shared Keychain to confirm they landed. If verification fails, retry once and log an error.
-- **Sync credentials on app foreground** — Re-sync shared Keychain credentials when the app returns to foreground, covering the case where the initial sync failed due to a race condition.
+- **Eliminate method channel bridge on iOS** — Replace fire-and-forget `syncCredentials` method channel with direct `flutter_secure_storage` writes using `IOSOptions(groupId:)` which maps to `kSecAttrAccessGroup`. This removes the race condition and makes writes synchronous to the Keychain.
+- **Retain method channel for macOS** — The `flutter_secure_storage_darwin` plugin guards `groupId` behind `#if os(iOS)`, so macOS continues using the native `syncCredentials` method channel as a fallback.
+- **Resolve team prefix at startup** — Fetch the Apple Team ID prefix once via a lightweight `getTeamPrefix` method channel call, cache it, and inject into `ContextRepository` for constructing `IOSOptions(groupId:)`.
+- **Cache `KeychainHelper.teamPrefix`** — Change from `static var` (recomputed on every access via Keychain probe) to `static let` (cached, thread-safe).
 
 ## Non-goals
 
-- Changing the overall credential sharing architecture (shared Keychain group via method channel is correct)
 - Adding UI in the main app for diagnosing share extension issues
 - Offline queueing in the share extension
-- Changing how `flutter_secure_storage` itself is configured
 
 ## Impact
 
-- **Swift** (`AssistantIntents` package): `KeychainHelper.hasCredentials` logic change
-- **Dart** (`context_repository.dart`): Await the sync call, add logging on failure
-- **Dart** (`shared_credentials_channel.dart`): Stop swallowing errors, propagate failures
-- **Swift** (`SharedCredentialsChannel.swift`): Add verification read-back after write
-- **Dart** (app lifecycle): Add foreground re-sync hook
+- **Swift** (`AssistantIntents` package): `KeychainHelper.hasCredentials` accepts URL-only; `teamPrefix` cached via `static let`
+- **Swift** (`SharedCredentialsChannel.swift`): iOS removes `syncCredentials`, adds `getTeamPrefix`; macOS retains both
+- **Dart** (`context_repository.dart`): Direct `IOSOptions(groupId:)` writes on iOS; method channel fallback on macOS
+- **Dart** (`shared_credentials_channel.dart`): `getTeamPrefix()` (cached) replaces `syncCredentials()` on iOS; `syncCredentialsMacOS()` retained
+- **Dart** (`context_providers.dart`): Fetches team prefix at startup, injects into `ContextRepository`

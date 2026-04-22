@@ -4,7 +4,7 @@
 
 - [x] **T5: Add unit test for `hasCredentials` without token** — Write a Swift test confirming that `hasCredentials` returns `true` when `serverURL` is set but `authToken` is nil/empty.
 
-- [x] **T7: Replace `syncCredentials` with `getTeamPrefix` in SharedCredentialsChannel (Swift)** — Both iOS and macOS `SharedCredentialsChannel.swift`: remove the `syncCredentials` case and add a `getTeamPrefix` case that returns `KeychainHelper.teamPrefix`. (Design: D6)
+- [x] **T7: Add `getTeamPrefix` in SharedCredentialsChannel (Swift)** — iOS removes the `syncCredentials` case and uses direct `IOSOptions(groupId:)` writes; macOS retains `syncCredentials` as the fallback and also adds `getTeamPrefix`. (Design: D6)
 
 - [x] **T8: Replace `syncCredentials` with `getTeamPrefix` in SharedCredentialsChannel (Dart)** — `shared_credentials_channel.dart`: remove `syncCredentials`, add `getTeamPrefix()` that calls the native side and caches the result. Log errors instead of swallowing. (Design: D6)
 

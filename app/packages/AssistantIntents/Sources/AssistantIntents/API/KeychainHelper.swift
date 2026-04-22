@@ -35,23 +35,31 @@ public struct KeychainHelper {
         // Fallback: query Keychain for the team prefix by writing a throwaway
         // item and reading back the system-assigned access group.
         let probeAccount = "__team_prefix_probe__"
-        let addQuery: [String: Any] = [
+        let probeService = "\(Bundle.main.bundleIdentifier ?? "com.cedricziel.assistant").team-prefix-probe"
+        let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: probeService,
             kSecAttrAccount as String: probeAccount,
-            kSecValueData as String: Data("x".utf8),
         ]
-        SecItemAdd(addQuery as CFDictionary, nil)
 
-        let readQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: probeAccount,
-            kSecReturnAttributes as String: true,
-        ]
+        // Remove any stale probe first so the read-back reflects this process.
+        SecItemDelete(baseQuery as CFDictionary)
+
+        var addQuery = baseQuery
+        addQuery[kSecValueData as String] = Data("x".utf8)
+
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            return ""
+        }
+
+        var readQuery = baseQuery
+        readQuery[kSecReturnAttributes as String] = true
         var result: AnyObject?
         let status = SecItemCopyMatching(readQuery as CFDictionary, &result)
 
         // Clean up probe.
-        SecItemDelete(addQuery as CFDictionary)
+        SecItemDelete(baseQuery as CFDictionary)
 
         if status == errSecSuccess,
            let attrs = result as? [String: Any],

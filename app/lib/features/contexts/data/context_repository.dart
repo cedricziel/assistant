@@ -285,7 +285,14 @@ class ContextRepository {
     final platform = defaultTargetPlatform;
 
     // iOS: write directly via flutter_secure_storage.
-    if (platform == TargetPlatform.iOS && iosOptions != null) {
+    if (platform == TargetPlatform.iOS) {
+      if (iosOptions == null) {
+        debugPrint(
+          'Skipping shared Keychain sync on iOS: Apple team prefix '
+          'unavailable (getTeamPrefix returned null at startup).',
+        );
+        return;
+      }
       final storage = const FlutterSecureStorage();
       try {
         if (serverUrl != null && serverUrl.isNotEmpty) {
