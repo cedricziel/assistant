@@ -1,3 +1,7 @@
+//! Nextcloud Talk messenger interface adapter.
+//!
+//! Webhook adapter, HMAC signing, runner, and platform tools.
+
 mod adapter;
 pub(crate) mod config;
 pub mod runner;

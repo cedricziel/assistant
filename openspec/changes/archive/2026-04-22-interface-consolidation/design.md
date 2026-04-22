@@ -48,7 +48,7 @@ The CLI (`interface-cli`) feature-gates each interface behind `slack`, `mattermo
 
 **Decision**: Nested modules, one per platform.
 
-```
+```text
 crates/interfaces/src/
   lib.rs              # re-exports XxxInterface + XxxConfigExt
   common.rs           # shared backoff/retry helpers (extracted)

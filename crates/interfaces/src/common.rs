@@ -38,5 +38,5 @@ pub fn rand_jitter() -> f64 {
     let v = seed
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
-    (v >> 33) as f64 / (u32::MAX as f64)
+    (v >> 32) as f64 / ((1u64 << 32) as f64)
 }
