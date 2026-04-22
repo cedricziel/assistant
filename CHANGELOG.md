@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.133](https://github.com/cedricziel/assistant/compare/v0.1.132...v0.1.133) (2026-04-22)
+
+
+### Features
+
+* consolidate LLM providers and move types to core ([#599](https://github.com/cedricziel/assistant/issues/599)) ([1b3c23b](https://github.com/cedricziel/assistant/commit/1b3c23bf3f857ef02bcc9053961be64d3d081258))
+* **runtime:** crash recovery for orphaned SSE runs and server-side sequence tracking ([#600](https://github.com/cedricziel/assistant/issues/600)) ([3814720](https://github.com/cedricziel/assistant/commit/38147208aa0132f0186e577c5deb1759aa958977))
+* **runtime:** propagate tool_call_id for stable tool-call correlation ([#597](https://github.com/cedricziel/assistant/issues/597)) ([bc70c33](https://github.com/cedricziel/assistant/commit/bc70c3389fdf2cba4897d9c6f275ea9c231d7bf8))
+
+
+### Bug Fixes
+
+* **app:** render tool calls as timeline entries and fix streaming progress indicator ([#595](https://github.com/cedricziel/assistant/issues/595)) ([aa706ee](https://github.com/cedricziel/assistant/commit/aa706ee72e8fda71572d7d8589740d624e0cedb6))
+* **web-ui:** align SSE with spec and harden for production ([#598](https://github.com/cedricziel/assistant/issues/598)) ([19c9898](https://github.com/cedricziel/assistant/commit/19c98987739d070abadc3ec0b97151e3ca3912df))
+
 ## [0.1.132](https://github.com/cedricziel/assistant/compare/v0.1.131...v0.1.132) (2026-04-21)
 
 
