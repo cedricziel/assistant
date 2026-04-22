@@ -33,7 +33,6 @@ import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'image_utils.dart';
 import 'streaming_timeline_entry.dart';
-import 'tool_call_chip.dart';
 import 'voice_recorder_button.dart';
 
 /// Main chat screen.
@@ -683,13 +682,7 @@ class _MessageBubble extends StatelessWidget {
                   ? Border.all(color: colorScheme.error, width: 1.5)
                   : null,
             ),
-            child:
-                message.isStreaming &&
-                    message.content.isEmpty &&
-                    message.toolCalls.isEmpty &&
-                    message.tokenStream == null
-                ? _streamingDotsIndicator()
-                : isUser
+            child: isUser
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     mainAxisSize: MainAxisSize.min,
@@ -742,25 +735,9 @@ class _MessageBubble extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Tool call chips — one per invocation, in order.
-                      if (message.toolCalls.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: message.toolCalls
-                                .map((tc) => ToolCallChip(record: tc))
-                                .toList(),
-                          ),
-                        ),
-                      // Divider between chips and reply text.
-                      if (message.toolCalls.isNotEmpty &&
-                          message.content.isNotEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 6),
-                          child: Divider(height: 1, thickness: 0.5),
-                        ),
+                      // Animated dots while waiting for first token.
+                      if (message.isStreaming && message.content.isEmpty)
+                        _streamingDotsIndicator(),
                       if (message.isStreaming && message.tokenStream != null)
                         StreamMarkdown(
                           stream: message.tokenStream!,
@@ -783,7 +760,7 @@ class _MessageBubble extends StatelessWidget {
                           builderRegistry: BuilderRegistry()
                             ..register('mermaid', const MermaidBuilder()),
                         )
-                      else
+                      else if (message.content.isNotEmpty)
                         SmoothMarkdown(
                           data: message.content,
                           styleSheet:

@@ -324,10 +324,7 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
       } else if (eventType == 'done' && dataLine != null) {
         try {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
-          yield DoneEvent(
-            role: json['role'] as String? ?? 'assistant',
-            content: json['content'] as String? ?? '',
-          );
+          yield DoneEvent.fromJson(json);
         } catch (_) {
           yield DoneEvent(role: 'assistant', content: dataLine);
         }

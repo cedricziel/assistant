@@ -564,54 +564,91 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     }
   }
 
-  /// Push a pending [ToolCallRecord] onto the streaming assistant message and
-  /// update state.  Called from both [_streamMessage] and [_streamVoiceMessage]
-  /// when a [StatusEvent] is received.
+  /// Create a tool-call timeline entry and insert it before the streaming
+  /// assistant placeholder. Called from both [_streamMessage] and
+  /// [_streamVoiceMessage] when a [StatusEvent] is received.
   void _onStatusEvent(ChatState chatState, String statusMessage) {
     final toolName = _extractToolName(statusMessage);
     final msgs = List<ChatMessage>.from(chatState.messages);
+
+    // Complete any currently-active timeline entries before adding a new one.
+    _completeActiveTimelineEntries(msgs);
+
+    final entryId =
+        'toolcall-$toolName-${DateTime.now().millisecondsSinceEpoch}';
+    final entry = ChatMessage(
+      id: entryId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+      timelineType: TimelineEntryType.toolCall,
+      toolCalls: [
+        ToolCallRecord(toolName: toolName, status: ToolCallStatus.pending),
+      ],
+    );
+
+    // Insert before the assistant-streaming placeholder so tool calls render
+    // above the reply bubble.
     final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
     if (idx != -1) {
-      msgs[idx].toolCalls.add(
-        ToolCallRecord(toolName: toolName, status: ToolCallStatus.pending),
-      );
+      msgs.insert(idx, entry);
+    } else {
+      msgs.add(entry);
     }
+
     state = AsyncData(
       chatState.copyWith(messages: msgs, statusMessage: statusMessage),
     );
   }
 
-  /// Resolve the pending [ToolCallRecord] for [event] and update state.
+  /// Resolve the pending tool-call timeline entry for [event] and update state.
   /// Called from both [_streamMessage] and [_streamVoiceMessage].
   void _onToolResultEvent(ChatState chatState, ToolResultEvent event) {
     final resolvedStatus = _parseToolStatus(event.status);
     final msgs = List<ChatMessage>.from(chatState.messages);
-    final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
-    if (idx != -1) {
-      final callIdx = msgs[idx].toolCalls.indexWhere(
-        (tc) =>
-            tc.toolName == event.toolName &&
-            tc.status == ToolCallStatus.pending,
-      );
-      if (callIdx != -1) {
-        msgs[idx].toolCalls[callIdx].status = resolvedStatus;
-        msgs[idx].toolCalls[callIdx].arguments = event.arguments;
-        msgs[idx].toolCalls[callIdx].result = event.result;
-        msgs[idx].toolCalls[callIdx].duration = DateTime.now().difference(
-          msgs[idx].toolCalls[callIdx].startedAt,
-        );
-      } else {
-        // No matching pending chip — append a resolved record directly.
-        msgs[idx].toolCalls.add(
+
+    // Find the pending tool-call timeline entry matching the tool name.
+    final entryIdx = msgs.lastIndexWhere(
+      (m) =>
+          m.timelineType == TimelineEntryType.toolCall &&
+          m.toolCalls.isNotEmpty &&
+          m.toolCalls.first.toolName == event.toolName &&
+          m.toolCalls.first.status == ToolCallStatus.pending,
+    );
+
+    if (entryIdx != -1) {
+      final record = msgs[entryIdx].toolCalls.first;
+      record.status = resolvedStatus;
+      record.arguments = event.arguments;
+      record.result = event.result;
+      record.duration = DateTime.now().difference(record.startedAt);
+      msgs[entryIdx].isStreaming = false;
+    } else {
+      // No matching pending entry — insert a resolved one directly.
+      final entryId =
+          'toolcall-${event.toolName}-${DateTime.now().millisecondsSinceEpoch}';
+      final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
+      final entry = ChatMessage(
+        id: entryId,
+        role: 'assistant',
+        content: '',
+        timelineType: TimelineEntryType.toolCall,
+        toolCalls: [
           ToolCallRecord(
             toolName: event.toolName,
             status: resolvedStatus,
             arguments: event.arguments,
             result: event.result,
           ),
-        );
+        ],
+      );
+      if (idx != -1) {
+        msgs.insert(idx, entry);
+      } else {
+        msgs.add(entry);
       }
     }
+
     state = AsyncData(
       chatState.copyWith(
         messages: msgs,
@@ -839,36 +876,48 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         id: conversationId,
       );
       final detail = response.data!;
-      final messages = detail.messages
-          .map(
-            (m) => ChatMessage(
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              ttsAvailable: m.ttsAvailable,
-              toolCalls: m.toolCalls
-                  ?.map(
-                    (tc) => ToolCallRecord(
-                      toolName: tc.name,
-                      status: _parseToolStatus(tc.status),
-                      arguments: tc.arguments?.asMap.cast<String, dynamic>(),
-                      result: tc.result,
-                    ),
-                  )
-                  .toList(),
-              attachments: m.attachments
-                  ?.map(
-                    (a) => ChatAttachment(
-                      id: a.id,
-                      filename: a.filename,
-                      mimeType: a.mimeType,
-                      url: a.url,
-                    ),
-                  )
-                  .toList(),
+      final messages = <ChatMessage>[];
+      for (final m in detail.messages) {
+        // Convert persisted tool calls into separate timeline entries so
+        // they render identically to the streaming path.
+        final toolCalls = m.toolCalls?.toList() ?? <dynamic>[];
+        for (final tc in toolCalls) {
+          messages.add(
+            ChatMessage(
+              id: 'toolcall-${tc.name}-${m.id}',
+              role: 'assistant',
+              content: '',
+              timelineType: TimelineEntryType.toolCall,
+              toolCalls: [
+                ToolCallRecord(
+                  toolName: tc.name,
+                  status: _parseToolStatus(tc.status),
+                  arguments: tc.arguments?.asMap.cast<String, dynamic>(),
+                  result: tc.result,
+                ),
+              ],
             ),
-          )
-          .toList();
+          );
+        }
+        messages.add(
+          ChatMessage(
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            ttsAvailable: m.ttsAvailable,
+            attachments: m.attachments
+                ?.map(
+                  (a) => ChatAttachment(
+                    id: a.id,
+                    filename: a.filename,
+                    mimeType: a.mimeType,
+                    url: a.url,
+                  ),
+                )
+                .toList(),
+          ),
+        );
+      }
 
       state = AsyncData(
         ChatState(conversationId: conversationId, messages: messages),
@@ -1104,12 +1153,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
           final aIdx = ms.indexWhere((m) => m.id == 'assistant-streaming');
           if (aIdx != -1) {
-            final placeholder = ms[aIdx];
             ms[aIdx] = ChatMessage(
               id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
               role: 'assistant',
               content: event.content,
-              toolCalls: placeholder.toolCalls,
             );
           }
           state = AsyncData(
@@ -1308,7 +1355,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               content: event.content,
               audioId: placeholder.audioId,
               ttsAvailable: placeholder.ttsAvailable,
-              toolCalls: placeholder.toolCalls,
             );
           }
           state = AsyncData(
@@ -1495,7 +1541,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
             msgs[userIdx] = msgs[userIdx].copyWith(status: MessageStatus.ok);
           }
           // Replace streaming placeholder with final assistant message,
-          // preserving audio id and accumulated tool call records.
+          // preserving audio id. Tool calls are separate timeline entries.
           final assistantId =
               event.messageId ??
               'assistant-${DateTime.now().millisecondsSinceEpoch}';
@@ -1508,7 +1554,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
               content: event.content,
               audioId: placeholder.audioId,
               ttsAvailable: placeholder.ttsAvailable,
-              toolCalls: placeholder.toolCalls,
             );
           }
           state = AsyncData(
@@ -1564,14 +1609,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         final msgs = List<ChatMessage>.from(finalState.messages);
         final idx = msgs.indexWhere((m) => m.id == 'assistant-streaming');
         if (idx != -1) {
-          final placeholder = msgs[idx];
           msgs[idx] = ChatMessage(
             id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
             role: 'assistant',
             content: finalState.streamingContent.isNotEmpty
                 ? finalState.streamingContent
                 : '(incomplete response)',
-            toolCalls: placeholder.toolCalls,
           );
         }
         // Mark user message as ok — we got at least a partial response.
