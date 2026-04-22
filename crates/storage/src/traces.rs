@@ -63,6 +63,19 @@ pub struct TraceFilter {
     pub until: Option<DateTime<Utc>>,
 }
 
+impl TraceFilter {
+    /// Returns `true` when any filter beyond `skill` is set, meaning the
+    /// caller must apply additional in-memory filtering.
+    pub fn has_post_filters(&self) -> bool {
+        self.status.is_some()
+            || self.conversation.is_some()
+            || self.min_duration_ms.is_some()
+            || self.interface.is_some()
+            || self.since.is_some()
+            || self.until.is_some()
+    }
+}
+
 /// A persisted OpenTelemetry span row enriched with tool metadata.
 #[derive(Debug, Clone)]
 pub struct RecordedSpan {

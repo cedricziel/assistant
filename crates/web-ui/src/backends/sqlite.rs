@@ -34,10 +34,44 @@ impl TraceBackend for SqliteTraceBackend {
     ) -> Result<Vec<TraceSummary>> {
         let store = TraceStore::new(self.pool.clone());
         if agent_id.is_empty() {
-            // Unscoped: return all traces (top-level API view).
-            store
-                .list_recent_traces(limit, filter.skill.as_deref())
-                .await
+            // Unscoped: the base query only accepts a skill filter, so we
+            // fetch a larger batch and apply the remaining filters in memory.
+            let fetch_limit = if filter.has_post_filters() {
+                limit * 4
+            } else {
+                limit
+            };
+            let mut traces = store
+                .list_recent_traces(fetch_limit, filter.skill.as_deref())
+                .await?;
+            if filter.has_post_filters() {
+                traces.retain(|t| {
+                    if let Some(ref status) = filter.status {
+                        let t_status = if t.error_count > 0 { "error" } else { "ok" };
+                        if t_status != status.as_str() {
+                            return false;
+                        }
+                    }
+                    if let Some(conv) = filter.conversation
+                        && t.conversation_id != Some(conv)
+                    {
+                        return false;
+                    }
+                    if let Some(since) = filter.since
+                        && t.start_time < since
+                    {
+                        return false;
+                    }
+                    if let Some(until) = filter.until
+                        && t.start_time > until
+                    {
+                        return false;
+                    }
+                    true
+                });
+                traces.truncate(limit as usize);
+            }
+            Ok(traces)
         } else {
             store
                 .list_recent_traces_for_agent(limit, filter, agent_id)
@@ -85,7 +119,16 @@ impl LogBackend for SqliteLogBackend {
         if agent_id.is_empty() {
             // Unscoped: return all logs (top-level API view).
             store
-                .list_recent(limit, min_severity, target_filter, search, trace_id)
+                .list_recent_filtered(
+                    limit,
+                    min_severity,
+                    target_filter,
+                    search,
+                    trace_id,
+                    conversation_id,
+                    since,
+                    until,
+                )
                 .await
         } else {
             store

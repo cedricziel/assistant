@@ -719,8 +719,8 @@ struct MetricRow {
     attributes: Value,
 }
 
-/// Parse all metric rows from batches, filtering by window.
-fn parse_metric_rows(batches: &[RecordBatch], window_hours: i64) -> Vec<MetricRow> {
+/// Parse all metric rows from batches, filtering by window and agent.
+fn parse_metric_rows(batches: &[RecordBatch], window_hours: i64, agent_id: &str) -> Vec<MetricRow> {
     let cutoff = Utc::now() - chrono::Duration::hours(window_hours);
     let mut rows = Vec::new();
 
@@ -732,6 +732,15 @@ fn parse_metric_rows(batches: &[RecordBatch], window_hours: i64) -> Vec<MetricRo
             };
             if recorded_at < cutoff {
                 continue;
+            }
+
+            // Filter by agent_id when provided (the Parquet schema has a
+            // dedicated `agent_id` column written by the Iceberg exporter).
+            if !agent_id.is_empty() {
+                let row_agent = str_col(batch, "agent_id", i).unwrap_or("");
+                if row_agent != agent_id {
+                    continue;
+                }
             }
 
             let attrs_str = str_col(batch, "attributes", i).unwrap_or("{}");
@@ -753,17 +762,24 @@ fn parse_metric_rows(batches: &[RecordBatch], window_hours: i64) -> Vec<MetricRo
 }
 
 /// Format a timestamp into a bucket string for a given bucket width in minutes.
+///
+/// Uses epoch-based rounding so bucket widths > 60 minutes (e.g. 180, 360)
+/// produce correct multi-hour buckets.
 fn bucket_key(ts: &DateTime<Utc>, bucket_minutes: i64) -> String {
-    let minute = ts.format("%M").to_string().parse::<i64>().unwrap_or(0);
-    let bucketed = (minute / bucket_minutes) * bucket_minutes;
-    format!("{}:{:02}:00Z", ts.format("%Y-%m-%dT%H"), bucketed)
+    let bucket_seconds = bucket_minutes.max(1) * 60;
+    let bucketed = (ts.timestamp() / bucket_seconds) * bucket_seconds;
+    Utc.timestamp_opt(bucketed, 0)
+        .single()
+        .unwrap_or(*ts)
+        .format("%Y-%m-%dT%H:%M:00Z")
+        .to_string()
 }
 
 #[async_trait]
 impl MetricsBackend for IcebergMetricsBackend {
-    async fn summary(&self, window_hours: i64, _agent_id: &str) -> Result<MetricsSummary> {
+    async fn summary(&self, window_hours: i64, agent_id: &str) -> Result<MetricsSummary> {
         let batches = self.load_all_batches();
-        let rows = parse_metric_rows(&batches, window_hours);
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
 
         let mut token_in: f64 = 0.0;
         let mut token_out: f64 = 0.0;
@@ -832,10 +848,10 @@ impl MetricsBackend for IcebergMetricsBackend {
         &self,
         window_hours: i64,
         bucket_minutes: i64,
-        _agent_id: &str,
+        agent_id: &str,
     ) -> Result<Vec<TimeSeriesPoint>> {
         let batches = self.load_all_batches();
-        let rows = parse_metric_rows(&batches, window_hours);
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
 
         let mut buckets: std::collections::BTreeMap<String, f64> = Default::default();
         for row in &rows {
@@ -855,10 +871,10 @@ impl MetricsBackend for IcebergMetricsBackend {
     async fn model_comparison(
         &self,
         window_hours: i64,
-        _agent_id: &str,
+        agent_id: &str,
     ) -> Result<Vec<ModelTokenUsage>> {
         let batches = self.load_all_batches();
-        let rows = parse_metric_rows(&batches, window_hours);
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
 
         struct Acc {
             input: f64,
@@ -882,11 +898,15 @@ impl MetricsBackend for IcebergMetricsBackend {
                 count: 0.0,
             });
             match token_type {
-                Some("input") => acc.input += row.sum.unwrap_or(0.0),
+                Some("input") => {
+                    acc.input += row.sum.unwrap_or(0.0);
+                    // Only count requests from input rows to avoid double-counting
+                    // (each LLM call emits both an input and output token row).
+                    acc.count += row.count.unwrap_or(0) as f64;
+                }
                 Some("output") => acc.output += row.sum.unwrap_or(0.0),
                 _ => {}
             }
-            acc.count += row.count.unwrap_or(0) as f64;
         }
 
         let mut result: Vec<ModelTokenUsage> = map
@@ -906,9 +926,9 @@ impl MetricsBackend for IcebergMetricsBackend {
         Ok(result)
     }
 
-    async fn tool_usage(&self, window_hours: i64, _agent_id: &str) -> Result<Vec<ToolUsageStats>> {
+    async fn tool_usage(&self, window_hours: i64, agent_id: &str) -> Result<Vec<ToolUsageStats>> {
         let batches = self.load_all_batches();
-        let rows = parse_metric_rows(&batches, window_hours);
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
 
         let mut map: HashMap<String, f64> = HashMap::new();
         for row in &rows {
@@ -942,10 +962,10 @@ impl MetricsBackend for IcebergMetricsBackend {
         &self,
         window_hours: i64,
         bucket_minutes: i64,
-        _agent_id: &str,
+        agent_id: &str,
     ) -> Result<Vec<TimeSeriesPoint>> {
         let batches = self.load_all_batches();
-        let rows = parse_metric_rows(&batches, window_hours);
+        let rows = parse_metric_rows(&batches, window_hours, agent_id);
 
         let mut buckets: std::collections::BTreeMap<String, f64> = Default::default();
         for row in &rows {
