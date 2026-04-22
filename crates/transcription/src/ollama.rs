@@ -33,9 +33,9 @@ pub struct OllamaTranscriptionProvider {
 
 impl OllamaTranscriptionProvider {
     pub fn new() -> anyhow::Result<Self> {
-        let client = assistant_llm::build_http_client(
+        let client = assistant_llm_provider::http::build_http_client(
             DEFAULT_TIMEOUT_SECS,
-            &assistant_llm::RetryConfig::default(),
+            &assistant_llm_provider::retry::RetryConfig::default(),
         )?;
         Ok(Self {
             base_url: "http://localhost:11434/v1".to_string(),

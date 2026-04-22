@@ -9,8 +9,9 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use assistant_core::{Message, MessageRole};
-use assistant_llm::{ChatHistoryMessage, ChatRole, ContentBlock};
+use assistant_core::{
+    ChatHistoryMessage, ChatRole, ContentBlock, Message, MessageRole, ToolCallItem,
+};
 use assistant_storage::conversations::ConversationStore;
 
 /// Pre-loaded attachment content blocks keyed by message ID.
@@ -48,8 +49,7 @@ pub(crate) fn messages_to_chat_history(
             }
             MessageRole::Assistant => {
                 if let Some(tc_json) = m.tool_calls_json
-                    && let Ok(items) =
-                        serde_json::from_str::<Vec<assistant_llm::ToolCallItem>>(&tc_json)
+                    && let Ok(items) = serde_json::from_str::<Vec<ToolCallItem>>(&tc_json)
                     && !items.is_empty()
                 {
                     return Some(ChatHistoryMessage::AssistantToolCalls(items));

@@ -5,8 +5,10 @@
 
 use std::sync::Arc;
 
-use assistant_core::{Attachment, ExecutionContext, Message, MessageRole, ToolHandler};
-use assistant_llm::{Capabilities, ChatHistoryMessage, HostedTool, ToolCallItem, ToolSpec};
+use assistant_core::{
+    Attachment, Capabilities, ChatHistoryMessage, ExecutionContext, HostedTool, Message,
+    MessageRole, ToolCallItem, ToolHandler, ToolSpec,
+};
 use assistant_storage::conversations::ConversationStore;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Span as _;

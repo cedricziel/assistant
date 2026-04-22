@@ -8,8 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use assistant_core::{ClaimFilter, Interface, PublishRequest, ToolHandler, bus_messages, topic};
-use assistant_llm::ContentBlock;
+use assistant_core::{
+    ClaimFilter, ContentBlock, Interface, PublishRequest, ToolHandler, bus_messages, topic,
+};
 use chrono::{DateTime, Local, Utc};
 use opentelemetry::{
     Context as OtelContext, KeyValue,
@@ -816,7 +817,7 @@ impl Orchestrator {
 /// Returns `true` if the turn error is transient (rate-limit / overload) and
 /// the message should be nacked for redelivery rather than permanently failed.
 fn is_transient_turn_error(e: &anyhow::Error) -> bool {
-    use assistant_llm::retry::is_transient_error_message;
+    use assistant_llm_provider::retry::is_transient_error_message;
     is_transient_error_message(&e.to_string())
 }
 

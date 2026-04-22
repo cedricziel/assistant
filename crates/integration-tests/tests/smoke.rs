@@ -14,7 +14,7 @@ use std::{env, time::Duration};
 
 use anyhow::Result;
 use assistant_core::{AssistantConfig, ExecutionContext, MessageBus, types::Interface};
-use assistant_llm::{LlmClient, LlmClientConfig};
+use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_runtime::Orchestrator;
 use assistant_skills::SkillSource;
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
@@ -120,7 +120,7 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
         // transient, so retrying the same prompt just burns another 2 min.
         // The orchestrator's tool-calling loop already provides iteration-level
         // "retries" with an evolving prompt.
-        retry_config: assistant_llm::RetryConfig::disabled(),
+        retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
     };
     let llm = Arc::new(LlmClient::new(llm_config)?);
 

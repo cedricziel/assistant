@@ -8,7 +8,7 @@ description = "Pluggable audio transcription providers (Whisper, Ollama, Deepgra
 
 [dependencies]
 assistant-core = { path = "../core" }
-assistant-llm  = { path = "../llm" }
+assistant-llm-provider = { path = "../llm-provider" }
 async-trait    = { workspace = true }
 anyhow         = { workspace = true }
 tokio          = { workspace = true }

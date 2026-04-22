@@ -28,8 +28,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use assistant_core::MessageRole;
-use assistant_llm::LlmProvider;
+use assistant_core::{LlmProvider, MessageRole};
 use assistant_storage::{MemoryChunkStore, StorageLayer};
 use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
@@ -250,13 +249,13 @@ mod tests {
     struct NoEmbedLlm;
 
     #[async_trait::async_trait]
-    impl assistant_llm::LlmProvider for NoEmbedLlm {
+    impl assistant_core::LlmProvider for NoEmbedLlm {
         fn provider_name(&self) -> &str {
             "test"
         }
-        fn capabilities(&self) -> assistant_llm::Capabilities {
-            assistant_llm::Capabilities {
-                tools: assistant_llm::ToolSupport::None,
+        fn capabilities(&self) -> assistant_core::Capabilities {
+            assistant_core::Capabilities {
+                tools: assistant_core::ToolSupport::None,
                 streaming: false,
                 vision: false,
                 hosted_tools: vec![],
@@ -265,18 +264,18 @@ mod tests {
         async fn chat(
             &self,
             _system: &str,
-            _history: &[assistant_llm::ChatHistoryMessage],
-            _tools: &[assistant_llm::ToolSpec],
-        ) -> anyhow::Result<assistant_llm::LlmResponse> {
+            _history: &[assistant_core::ChatHistoryMessage],
+            _tools: &[assistant_core::ToolSpec],
+        ) -> anyhow::Result<assistant_core::LlmResponse> {
             anyhow::bail!("not implemented")
         }
         async fn chat_streaming(
             &self,
             _system: &str,
-            _history: &[assistant_llm::ChatHistoryMessage],
-            _tools: &[assistant_llm::ToolSpec],
-            _sink: Option<tokio::sync::mpsc::Sender<assistant_llm::StreamChunk>>,
-        ) -> anyhow::Result<assistant_llm::LlmResponse> {
+            _history: &[assistant_core::ChatHistoryMessage],
+            _tools: &[assistant_core::ToolSpec],
+            _sink: Option<tokio::sync::mpsc::Sender<assistant_core::StreamChunk>>,
+        ) -> anyhow::Result<assistant_core::LlmResponse> {
             anyhow::bail!("not implemented")
         }
     }
@@ -291,7 +290,7 @@ mod tests {
                 .await
                 .expect("in-memory DB"),
         );
-        let _llm: Arc<dyn assistant_llm::LlmProvider> = Arc::new(NoEmbedLlm);
+        let _llm: Arc<dyn assistant_core::LlmProvider> = Arc::new(NoEmbedLlm);
 
         let conv_id = Uuid::new_v4();
         let agent_id = "test-agent".to_string();

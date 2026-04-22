@@ -16,17 +16,12 @@ use uuid::Uuid;
 
 use assistant_core::{
     AssistantConfig, ConversationConfig, EmbeddingConfig, EmbeddingProviderKind, Interface,
-    LlmProviderKind, MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir,
-    set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
+    MemoryLoader, MessageBus, apply_agent_context, default_workspace_dir, set_runtime_agent_root,
+    set_runtime_workspace_dir, validate_agent_id,
 };
-use assistant_llm::{
-    EmbeddingProvider, LlmEmbedder, LlmProvider, VoyageConfig, VoyageEmbedder,
-    WithEmbeddingOverride,
-};
-use assistant_provider_anthropic::AnthropicProvider;
-use assistant_provider_moonshot::MoonshotProvider;
-use assistant_provider_ollama::{OllamaConfig, OllamaProvider};
-use assistant_provider_openai::{OpenAIProvider, OpenAIProviderConfig};
+use assistant_core::{EmbeddingProvider, LlmEmbedder, LlmProvider, WithEmbeddingOverride};
+use assistant_llm_provider::{OllamaConfig, OllamaProvider, OpenAIProvider, OpenAIProviderConfig};
+use assistant_llm_provider::{VoyageConfig, VoyageEmbedder};
 use assistant_runtime::{
     CommandContext, CommandRegistry, Orchestrator, init_tracing,
     orchestrator::ConfirmationCallback, spawn_memory_indexer, spawn_scheduler,
@@ -1034,24 +1029,8 @@ async fn bootstrap(
     let registry = Arc::new(registry);
 
     // Build LLM client — dispatch on configured provider.
-    let llm: Arc<dyn LlmProvider> = match config.llm.provider {
-        LlmProviderKind::Ollama => Arc::new(
-            OllamaProvider::from_llm_config(&config.llm)
-                .context("Failed to create Ollama LLM client")?,
-        ),
-        LlmProviderKind::Anthropic => Arc::new(
-            AnthropicProvider::from_llm_config(&config.llm)
-                .context("Failed to create Anthropic LLM client")?,
-        ),
-        LlmProviderKind::OpenAI => Arc::new(
-            OpenAIProvider::from_llm_config(&config.llm)
-                .context("Failed to create OpenAI LLM client")?,
-        ),
-        LlmProviderKind::Moonshot => Arc::new(
-            MoonshotProvider::from_llm_config(&config.llm)
-                .context("Failed to create Moonshot LLM client")?,
-        ),
-    };
+    let llm: Arc<dyn LlmProvider> = assistant_llm_provider::create_provider(&config.llm)
+        .context("Failed to create LLM provider")?;
 
     // Optionally wrap with a dedicated embedding provider.
     let llm: Arc<dyn LlmProvider> = if let Some(ref emb_cfg) = config.llm.embeddings {

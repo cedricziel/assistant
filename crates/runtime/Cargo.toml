@@ -7,7 +7,7 @@ description = "ReAct orchestrator and safety gate for the assistant runtime"
 
 [dependencies]
 assistant-core = { path = "../core" }
-assistant-llm = { path = "../llm" }
+assistant-llm-provider = { path = "../llm-provider" }
 assistant-storage = { path = "../storage" }
 opentelemetry-exporter-sqlite = { path = "../opentelemetry-exporter-sqlite" }
 opentelemetry-exporter-iceberg = { path = "../opentelemetry-exporter-iceberg" }

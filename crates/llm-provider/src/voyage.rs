@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tracing::debug;
 
-use crate::embedding::EmbeddingProvider;
+use assistant_core::EmbeddingProvider;
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 

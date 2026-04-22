@@ -5,9 +5,9 @@
 
 use std::collections::HashMap;
 
-use assistant_core::Interface;
-use assistant_llm::{
-    ChatHistoryMessage, ChatRole, LlmProvider, LlmResponse, LlmResponseMeta, ToolSpec,
+use assistant_core::{
+    ChatHistoryMessage, ChatRole, ContentBlock, Interface, LlmProvider, LlmResponse,
+    LlmResponseMeta, ToolSpec,
 };
 use opentelemetry::{
     Array, Context as OtelContext, KeyValue, StringValue, Value, global,
@@ -370,17 +370,17 @@ pub(crate) fn serialize_history_for_span(history: &[ChatHistoryMessage]) -> Stri
                 let blocks: Vec<serde_json::Value> = content
                     .iter()
                     .map(|block| match block {
-                        assistant_llm::ContentBlock::Text(t) => {
+                        ContentBlock::Text(t) => {
                             serde_json::json!({"type": "text", "text": t})
                         }
-                        assistant_llm::ContentBlock::Image { media_type, data } => {
+                        ContentBlock::Image { media_type, data } => {
                             serde_json::json!({
                                 "type": "image",
                                 "media_type": media_type,
                                 "size_base64_chars": data.len(),
                             })
                         }
-                        assistant_llm::ContentBlock::Document { media_type, data } => {
+                        ContentBlock::Document { media_type, data } => {
                             serde_json::json!({
                                 "type": "document",
                                 "media_type": media_type,

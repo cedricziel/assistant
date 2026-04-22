@@ -7,9 +7,9 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use crate::stream_chunk::StreamChunk;
-use crate::tool_spec::ToolSpec;
-use crate::{ChatHistoryMessage, LlmResponse};
+use super::stream_chunk::StreamChunk;
+use super::tool_spec::ToolSpec;
+use super::types::{ChatHistoryMessage, LlmResponse};
 
 // ── Capabilities ─────────────────────────────────────────────────────────────
 

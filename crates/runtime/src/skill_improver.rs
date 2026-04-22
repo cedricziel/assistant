@@ -6,8 +6,7 @@
 //! immediately with revert-on-regression safety.
 
 use anyhow::Result;
-use assistant_core::LearningConfig;
-use assistant_llm::LlmProvider;
+use assistant_core::{ChatHistoryMessage, ChatRole, LearningConfig, LlmProvider, LlmResponse};
 use assistant_storage::{
     RefinementStatus, RefinementsStore, SkillRegistry, SkillStatsProvider, StorageLayer,
 };
@@ -240,8 +239,6 @@ async fn generate_refinement(
     current_body: &str,
     stats: &assistant_storage::TraceStats,
 ) -> Result<Option<String>> {
-    use assistant_llm::ChatHistoryMessage;
-
     let user_msg = format!(
         "Skill: {skill_name}\n\n\
          Current body:\n```\n{current_body}\n```\n\n\
@@ -268,15 +265,15 @@ async fn generate_refinement(
     );
 
     let history = vec![ChatHistoryMessage::Text {
-        role: assistant_llm::ChatRole::User,
+        role: ChatRole::User,
         content: user_msg,
     }];
 
     let response = llm.chat(REFINE_SYSTEM_PROMPT, &history, &[]).await?;
 
     let text = match &response {
-        assistant_llm::LlmResponse::FinalAnswer(t, _) => t.trim(),
-        assistant_llm::LlmResponse::Thinking(t, _) => t.trim(),
+        LlmResponse::FinalAnswer(t, _) => t.trim(),
+        LlmResponse::Thinking(t, _) => t.trim(),
         _ => return Ok(None),
     };
 
@@ -312,9 +309,9 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use assistant_llm::{
-        Capabilities, ChatHistoryMessage, LlmResponse, LlmResponseMeta, StreamChunk, ToolSupport,
-        tool_spec::ToolSpec,
+    use assistant_core::{
+        Capabilities, ChatHistoryMessage, LlmResponse, LlmResponseMeta, StreamChunk, ToolSpec,
+        ToolSupport,
     };
     use assistant_storage::TraceStats;
     use async_trait::async_trait;

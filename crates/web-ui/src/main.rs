@@ -15,15 +15,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use assistant_core::LlmProvider;
 use assistant_core::{
     BusKind, Interface, LlmProviderKind, MessageBus, OtelExporter, apply_agent_context,
     default_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir, validate_agent_id,
 };
-use assistant_llm::LlmProvider;
-use assistant_provider_anthropic::AnthropicProvider;
-use assistant_provider_moonshot::MoonshotProvider;
-use assistant_provider_ollama::OllamaProvider;
-use assistant_provider_openai::OpenAIProvider;
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
 use assistant_runtime::{Orchestrator, init_tracing};
 use assistant_skills::SkillSource;
@@ -381,24 +377,8 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     // 2. LLM provider
-    let llm: Arc<dyn LlmProvider> = match config.llm.provider {
-        LlmProviderKind::Ollama => Arc::new(
-            OllamaProvider::from_llm_config(&config.llm)
-                .context("Failed to create Ollama LLM provider")?,
-        ),
-        LlmProviderKind::Anthropic => Arc::new(
-            AnthropicProvider::from_llm_config(&config.llm)
-                .context("Failed to create Anthropic LLM provider")?,
-        ),
-        LlmProviderKind::OpenAI => Arc::new(
-            OpenAIProvider::from_llm_config(&config.llm)
-                .context("Failed to create OpenAI LLM provider")?,
-        ),
-        LlmProviderKind::Moonshot => Arc::new(
-            MoonshotProvider::from_llm_config(&config.llm)
-                .context("Failed to create Moonshot LLM provider")?,
-        ),
-    };
+    let llm: Arc<dyn LlmProvider> = assistant_llm_provider::create_provider(&config.llm)
+        .context("Failed to create LLM provider")?;
 
     info!(
         "Chat LLM: provider={}, model={}",

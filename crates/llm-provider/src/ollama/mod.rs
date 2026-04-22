@@ -1,14 +1,17 @@
 //! `OllamaProvider` — [`LlmProvider`] implementation backed by Ollama.
 
+pub mod client;
+
 use async_trait::async_trait;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use assistant_core::LlmConfig;
-use assistant_llm::{
-    Capabilities, ChatHistoryMessage, LlmClient, LlmClientConfig, LlmProvider, LlmResponse,
-    StreamChunk, ToolSpec, ToolSupport,
+use assistant_core::{
+    Capabilities, ChatHistoryMessage, LlmConfig, LlmProvider, LlmResponse, StreamChunk, ToolSpec,
+    ToolSupport,
 };
+
+use self::client::{LlmClient, LlmClientConfig};
 
 // ── OllamaConfig ─────────────────────────────────────────────────────────────
 
@@ -64,11 +67,11 @@ impl OllamaProvider {
             model: config.model,
             base_url: config.base_url.clone(),
             timeout_secs: config.timeout_secs,
-            retry_config: assistant_llm::RetryConfig::default(),
+            retry_config: crate::retry::RetryConfig::default(),
         };
-        let http = assistant_llm::build_http_client(
+        let http = crate::http::build_http_client(
             config.timeout_secs,
-            &assistant_llm::RetryConfig::default(),
+            &crate::retry::RetryConfig::default(),
         )?;
         Ok(Self {
             inner: LlmClient::new(client_config)?,

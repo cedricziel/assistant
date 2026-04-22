@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
-use assistant_core::{AssistantConfig, ExecutionContext, SubagentRunner, ToolHandler, ToolOutput};
-use assistant_llm::{LlmProvider, ToolSpec};
+use assistant_core::{
+    AssistantConfig, ExecutionContext, LlmProvider, SubagentRunner, ToolHandler, ToolOutput,
+    ToolSpec,
+};
 use assistant_storage::{SkillRegistry, SkillStatsProvider, StorageLayer};
 use tracing::warn;
 

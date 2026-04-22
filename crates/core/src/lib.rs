@@ -6,6 +6,7 @@ pub mod channel;
 pub mod command;
 pub mod config;
 pub mod context;
+pub mod llm;
 pub mod memory;
 pub mod subagent;
 pub mod text;
@@ -30,6 +31,15 @@ pub use context::{
     agent_base_dir, apply_agent_context, default_agent_id, default_workspace_dir,
     runtime_agent_root, runtime_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
     validate_agent_id,
+};
+// -- LLM abstractions (types, traits, streaming) --
+pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};
+pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport};
+pub use llm::stream_chunk::StreamChunk;
+pub use llm::tool_spec::ToolSpec;
+pub use llm::types::{
+    ChatHistoryMessage, ChatRole, ContentBlock, LlmResponse, LlmResponseMeta, ToolCallItem,
+    ToolCallResponse,
 };
 pub use memory::{
     MemoryLoader, base_dir, expand_tilde, resolve_dir, resolve_path, strip_html_comments,

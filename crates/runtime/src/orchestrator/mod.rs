@@ -7,12 +7,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assistant_core::{
-    Attachment, AttachmentMeta, ExecutionContext, Interface, MemoryLoader, Message, MessageBus,
-    ToolHandler, context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type,
+    Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, ExecutionContext,
+    Interface, LlmProvider, LlmResponse, MemoryLoader, Message, MessageBus, StreamChunk,
+    ToolHandler, ToolSpec, context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type,
     is_text_mime_type, strip_html_comments,
-};
-use assistant_llm::{
-    ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, LlmResponse, ToolSpec,
 };
 use assistant_storage::{SkillRegistry, StorageLayer, conversations::ConversationStore};
 use assistant_tool_executor::ToolExecutor;
@@ -589,15 +587,13 @@ impl Orchestrator {
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
-                let (chunk_tx, mut chunk_rx) = mpsc::channel::<assistant_llm::StreamChunk>(64);
+                let (chunk_tx, mut chunk_rx) = mpsc::channel::<StreamChunk>(64);
                 let oe_sink_clone = oe_sink.clone();
                 let forward_handle = tokio::spawn(async move {
                     while let Some(chunk) = chunk_rx.recv().await {
                         let event = match chunk {
-                            assistant_llm::StreamChunk::Text(t) => OrchestratorEvent::Token(t),
-                            assistant_llm::StreamChunk::Thinking(t) => {
-                                OrchestratorEvent::Thinking(t)
-                            }
+                            StreamChunk::Text(t) => OrchestratorEvent::Token(t),
+                            StreamChunk::Thinking(t) => OrchestratorEvent::Thinking(t),
                         };
                         let _ = oe_sink_clone.send(event).await;
                     }
@@ -963,15 +959,13 @@ impl Orchestrator {
             let llm_start = std::time::Instant::now();
             let response = if let Some(ref oe_sink) = token_sink {
                 // Adapt OrchestratorEvent sink → StreamChunk sink expected by chat_streaming.
-                let (chunk_tx, mut chunk_rx) = mpsc::channel::<assistant_llm::StreamChunk>(64);
+                let (chunk_tx, mut chunk_rx) = mpsc::channel::<StreamChunk>(64);
                 let oe_sink_clone = oe_sink.clone();
                 let forward_handle = tokio::spawn(async move {
                     while let Some(chunk) = chunk_rx.recv().await {
                         let event = match chunk {
-                            assistant_llm::StreamChunk::Text(t) => OrchestratorEvent::Token(t),
-                            assistant_llm::StreamChunk::Thinking(t) => {
-                                OrchestratorEvent::Thinking(t)
-                            }
+                            StreamChunk::Text(t) => OrchestratorEvent::Token(t),
+                            StreamChunk::Thinking(t) => OrchestratorEvent::Thinking(t),
                         };
                         let _ = oe_sink_clone.send(event).await;
                     }

@@ -6,10 +6,10 @@
 
 use anyhow::Result;
 use assistant_core::{
-    AgentReport, AgentReportStatus, AgentSpawn, DEFAULT_MAX_AGENT_DEPTH, ExecutionContext,
-    Interface, Message, SubagentRunner,
+    AgentReport, AgentReportStatus, AgentSpawn, ChatHistoryMessage, ChatRole,
+    DEFAULT_MAX_AGENT_DEPTH, ExecutionContext, Interface, LlmResponse, Message, StreamChunk,
+    SubagentRunner,
 };
-use assistant_llm::{ChatHistoryMessage, ChatRole, LlmResponse, StreamChunk};
 use async_trait::async_trait;
 use opentelemetry::{
     Context as OtelContext, KeyValue, global,

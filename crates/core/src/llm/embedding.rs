@@ -9,10 +9,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use crate::provider::{Capabilities, LlmProvider};
-use crate::stream_chunk::StreamChunk;
-use crate::tool_spec::ToolSpec;
-use crate::{ChatHistoryMessage, LlmResponse};
+use super::provider::{Capabilities, LlmProvider};
+use super::stream_chunk::StreamChunk;
+use super::tool_spec::ToolSpec;
+use super::types::{ChatHistoryMessage, LlmResponse};
 
 // ── EmbeddingProvider trait ──────────────────────────────────────────────────
 
@@ -115,7 +115,7 @@ impl LlmProvider for WithEmbeddingOverride {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::LlmResponseMeta;
+    use crate::llm::types::LlmResponseMeta;
 
     /// Stub provider that always returns a fixed answer.
     struct StubChat;
@@ -124,7 +124,7 @@ mod tests {
     impl LlmProvider for StubChat {
         fn capabilities(&self) -> Capabilities {
             Capabilities {
-                tools: crate::ToolSupport::None,
+                tools: super::super::provider::ToolSupport::None,
                 streaming: false,
                 vision: false,
                 hosted_tools: Vec::new(),
@@ -182,7 +182,7 @@ mod tests {
     impl LlmProvider for StubChatWithEmbedding {
         fn capabilities(&self) -> Capabilities {
             Capabilities {
-                tools: crate::ToolSupport::None,
+                tools: super::super::provider::ToolSupport::None,
                 streaming: false,
                 vision: false,
                 hosted_tools: Vec::new(),
@@ -300,8 +300,6 @@ mod tests {
         let embedder: Arc<dyn EmbeddingProvider> = Arc::new(FailingEmbedder);
         let composite = WithEmbeddingOverride::new(chat, embedder);
 
-        // The inner provider supports embeddings, but the override should use
-        // the dedicated (failing) embedder instead.
         let result = composite.embed("hello").await;
         assert!(result.is_err());
         assert!(
@@ -314,9 +312,6 @@ mod tests {
 
     #[tokio::test]
     async fn no_override_uses_main_provider_embed() {
-        // When no WithEmbeddingOverride is applied, the provider's own
-        // embed() is called.  This simulates the Ollama/OpenAI path where
-        // [llm.embeddings] is not configured.
         let provider: Arc<dyn LlmProvider> = Arc::new(StubChatWithEmbedding);
         let result = provider.embed("test").await.unwrap();
         assert_eq!(
@@ -328,10 +323,6 @@ mod tests {
 
     #[tokio::test]
     async fn no_override_error_when_main_provider_lacks_embeddings() {
-        // When no WithEmbeddingOverride is applied and the main provider
-        // does not support embeddings (like Anthropic), embed() returns
-        // an error.  This simulates the case where the user forgot to
-        // configure [llm.embeddings].
         let provider: Arc<dyn LlmProvider> = Arc::new(StubChat);
         let result = provider.embed("test").await;
         assert!(
@@ -344,8 +335,6 @@ mod tests {
 
     #[tokio::test]
     async fn llm_embedder_adapter_delegates_error() {
-        // Verify LlmEmbedder wraps an LlmProvider for use as EmbeddingProvider.
-        // StubChat.embed() returns an error, so LlmEmbedder should propagate it.
         let provider: Arc<dyn LlmProvider> = Arc::new(StubChat);
         let adapter = LlmEmbedder(provider);
         let result = adapter.embed("hello").await;
@@ -354,8 +343,6 @@ mod tests {
 
     #[tokio::test]
     async fn llm_embedder_adapter_delegates_success() {
-        // When wrapping a provider that supports embeddings, the adapter
-        // should forward the result.
         let provider: Arc<dyn LlmProvider> = Arc::new(StubChatWithEmbedding);
         let adapter = LlmEmbedder(provider);
         let result = adapter.embed("hello").await.unwrap();
@@ -370,8 +357,6 @@ mod tests {
 
     #[tokio::test]
     async fn override_replaces_working_embed_with_dedicated() {
-        // Even if the inner provider supports embeddings natively,
-        // the override should take precedence.
         let chat: Arc<dyn LlmProvider> = Arc::new(StubChatWithEmbedding);
         let embedder: Arc<dyn EmbeddingProvider> = Arc::new(StubEmbedder);
         let composite = WithEmbeddingOverride::new(chat, embedder);
