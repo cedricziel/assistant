@@ -100,7 +100,7 @@ class ApiClient {
       yield RunStartedEvent(runIdHeader);
     }
 
-    yield* _parseSse(response.data!.stream);
+    yield* _parseSse(withHeartbeatTimeout(response.data!.stream));
   }
 
   /// Replay events for an existing orchestrator run.
@@ -130,7 +130,7 @@ class ApiClient {
       rethrow; // 404 / 410 propagate to caller
     }
 
-    yield* _parseSse(response.data!.stream);
+    yield* _parseSse(withHeartbeatTimeout(response.data!.stream));
   }
 
   // -- Voice / capabilities ---------------------------------------------------
@@ -193,7 +193,7 @@ class ApiClient {
       return;
     }
 
-    yield* _parseSse(response.data!.stream);
+    yield* _parseSse(withHeartbeatTimeout(response.data!.stream));
   }
 
   /// Fetch the audio bytes for a message (GET /api/messages/{id}/audio).
@@ -270,7 +270,7 @@ class ApiClient {
       throw Exception('Failed to connect to conversation stream: ${e.message}');
     }
 
-    yield* _parseConversationSse(response.data!.stream);
+    yield* _parseConversationSse(withHeartbeatTimeout(response.data!.stream));
   }
 
   // -- SSE parser -------------------------------------------------------------
@@ -281,6 +281,60 @@ class ApiClient {
   Stream<ConversationListEvent> _parseConversationSse(
     Stream<List<int>> byteStream,
   ) => parseConversationSseByteStream(byteStream);
+}
+
+// -- Heartbeat timeout wrapper ------------------------------------------------
+
+/// Wraps an SSE byte stream with a watchdog timer that fires a
+/// [TimeoutException] if no data arrives within [timeout].
+///
+/// The server sends keepalive comments every 30 seconds. A 90-second default
+/// tolerates 2 missed keepalives before declaring the connection stale.
+Stream<List<int>> withHeartbeatTimeout(
+  Stream<List<int>> source, {
+  Duration timeout = const Duration(seconds: 90),
+}) {
+  late StreamController<List<int>> controller;
+  StreamSubscription<List<int>>? subscription;
+  Timer? watchdog;
+
+  void resetWatchdog() {
+    watchdog?.cancel();
+    watchdog = Timer(timeout, () {
+      controller.addError(
+        TimeoutException('No data received within $timeout', timeout),
+      );
+      subscription?.cancel();
+      controller.close();
+    });
+  }
+
+  controller = StreamController<List<int>>(
+    onListen: () {
+      resetWatchdog();
+      subscription = source.listen(
+        (data) {
+          resetWatchdog();
+          controller.add(data);
+        },
+        onError: (Object e, StackTrace st) {
+          watchdog?.cancel();
+          controller.addError(e, st);
+        },
+        onDone: () {
+          watchdog?.cancel();
+          controller.close();
+        },
+      );
+    },
+    onCancel: () {
+      watchdog?.cancel();
+      watchdog = null;
+      return subscription?.cancel();
+    },
+  );
+
+  return controller.stream;
 }
 
 // -- SSE parser (top-level for testability) -----------------------------------
