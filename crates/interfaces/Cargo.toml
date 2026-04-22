@@ -1,0 +1,69 @@
+[package]
+name = "assistant-interfaces"
+version = "0.1.133"
+edition.workspace = true
+license.workspace = true
+description = "Consolidated messenger interface adapters (Slack, Mattermost, Matrix, Nextcloud, Signal)"
+
+[lib]
+name = "assistant_interfaces"
+path = "src/lib.rs"
+
+[dependencies]
+# Workspace crates
+assistant-core = { path = "../core" }
+assistant-runtime = { path = "../runtime" }
+assistant-storage = { path = "../storage" }
+assistant-transcription = { path = "../transcription" }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
+
+# IDs and time
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# HTTP client
+reqwest = { workspace = true }
+
+# Async streams
+futures = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Slack-specific: bounded LRU cache for dedup
+lru = { workspace = true }
+
+# Matrix-specific: home directory, URL encoding
+dirs = { workspace = true }
+urlencoding = { workspace = true }
+
+# Nextcloud-specific: webhook HTTP server + HMAC signing
+axum = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+getrandom = { workspace = true }
+tokio-util = { workspace = true }
+
+# Signal-specific: base64 auth, config parsing
+base64 = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }

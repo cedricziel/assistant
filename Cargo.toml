@@ -19,11 +19,7 @@ members = [
     "crates/mcp-client",
     "crates/mcp-server",
     "crates/interface-cli",
-    "crates/interface-signal",
-    "crates/interface-slack",
-    "crates/interface-mattermost",
-    "crates/interface-matrix",
-    "crates/interface-nextcloud",
+    "crates/interfaces",
     "crates/transcription",
     "crates/integration-tests",
     "crates/web-ui",
@@ -35,10 +31,7 @@ members = [
 ]
 default-members = [
     "crates/interface-cli",
-    "crates/interface-signal",
-    "crates/interface-slack",
-    "crates/interface-mattermost",
-    "crates/interface-nextcloud",
+    "crates/interfaces",
     "crates/web-ui",
     "crates/mcp-server",
 ]

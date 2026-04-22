@@ -64,30 +64,25 @@ enum Command {
     /// Run only the Slack interface (no interactive REPL).
     ///
     /// Requires Slack bot_token and app_token configured in ~/.assistant/config.toml.
-    #[cfg(feature = "slack")]
     Slack,
     /// Run only the Mattermost interface (no interactive REPL).
     ///
     /// Requires Mattermost server_url and token configured in ~/.assistant/config.toml.
-    #[cfg(feature = "mattermost")]
     Mattermost,
     /// Run only the Nextcloud Talk interface (no interactive REPL).
     ///
     /// Requires Nextcloud server_url and secret configured in ~/.assistant/config.toml.
     /// The bot receives messages via webhooks from the Nextcloud Talk server.
-    #[cfg(feature = "nextcloud")]
     Nextcloud,
     /// Run only the Matrix bot interface (no interactive REPL).
     ///
     /// Requires homeserver_url and credentials configured in ~/.assistant/config.toml.
-    #[cfg(feature = "matrix")]
     #[command(about = "Start the Matrix bot (requires [matrix] in config.toml)")]
     Matrix,
     /// Run only the Signal interface (no interactive REPL).
     ///
     /// Requires a running signal-cli-rest-api daemon and [signal] section in
     /// ~/.assistant/config.toml.
-    #[cfg(feature = "signal")]
     Signal,
     /// Manage Persona contexts.
     Persona {
@@ -1248,25 +1243,13 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "mcp"))]
     let is_mcp = false;
 
-    #[cfg(feature = "slack")]
     let is_slack_only = matches!(cli.command, Some(Command::Slack));
-    #[cfg(not(feature = "slack"))]
-    let is_slack_only = false;
 
-    #[cfg(feature = "mattermost")]
     let is_mattermost_only = matches!(cli.command, Some(Command::Mattermost));
-    #[cfg(not(feature = "mattermost"))]
-    let is_mattermost_only = false;
 
-    #[cfg(feature = "nextcloud")]
     let is_nextcloud_only = matches!(cli.command, Some(Command::Nextcloud));
-    #[cfg(not(feature = "nextcloud"))]
-    let is_nextcloud_only = false;
 
-    #[cfg(feature = "signal")]
     let is_signal_only = matches!(cli.command, Some(Command::Signal));
-    #[cfg(not(feature = "signal"))]
-    let is_signal_only = false;
 
     let confirmation_cb: Arc<dyn ConfirmationCallback> = if is_mcp
         || is_slack_only
@@ -1438,9 +1421,8 @@ async fn main() -> Result<()> {
         .transpose()?;
 
     // 8. Slack-only mode.
-    #[cfg(feature = "slack")]
     if let Some(Command::Slack) = &cli.command {
-        use assistant_interface_slack::SlackInterface;
+        use assistant_interfaces::SlackInterface;
         let slack_cfg = bs.config.slack.clone().context(
             "Slack is not configured. Add a [slack] section to ~/.assistant/config.toml",
         )?;
@@ -1480,9 +1462,8 @@ async fn main() -> Result<()> {
     }
 
     // 9. Mattermost-only mode.
-    #[cfg(feature = "mattermost")]
     if let Some(Command::Mattermost) = &cli.command {
-        use assistant_interface_mattermost::MattermostInterface;
+        use assistant_interfaces::MattermostInterface;
         let mm_cfg = bs.config.mattermost.clone().context(
             "Mattermost is not configured. Add a [mattermost] section to ~/.assistant/config.toml",
         )?;
@@ -1514,9 +1495,8 @@ async fn main() -> Result<()> {
     }
 
     // 9b. Nextcloud-only mode.
-    #[cfg(feature = "nextcloud")]
     if let Some(Command::Nextcloud) = &cli.command {
-        use assistant_interface_nextcloud::NextcloudInterface;
+        use assistant_interfaces::NextcloudInterface;
         let nc_cfg = bs.config.nextcloud.clone().context(
             "Nextcloud is not configured. Add a [nextcloud] section to ~/.assistant/config.toml",
         )?;
@@ -1548,9 +1528,8 @@ async fn main() -> Result<()> {
     }
 
     // 9c. Matrix-only mode.
-    #[cfg(feature = "matrix")]
     if let Some(Command::Matrix) = &cli.command {
-        use assistant_interface_matrix::MatrixInterface;
+        use assistant_interfaces::MatrixInterface;
         let matrix_cfg = bs.config.matrix.clone().context(
             "Matrix is not configured. Add a [matrix] section to ~/.assistant/config.toml",
         )?;
@@ -1578,9 +1557,8 @@ async fn main() -> Result<()> {
     }
 
     // 9d. Signal-only mode.
-    #[cfg(feature = "signal")]
     if let Some(Command::Signal) = &cli.command {
-        use assistant_interface_signal::SignalInterface;
+        use assistant_interfaces::SignalInterface;
         let sig_cfg = bs.config.signal.clone().context(
             "Signal is not configured. Add a [signal] section to ~/.assistant/config.toml",
         )?;
@@ -1613,9 +1591,8 @@ async fn main() -> Result<()> {
     //     background tasks for those interfaces.
 
     // 10a. Slack — register slack-post as an ambient tool and start in background.
-    #[cfg(feature = "slack")]
     if bs.config.slack.is_some() && interface_selected(&orchestrator_interfaces, "slack") {
-        use assistant_interface_slack::SlackInterface;
+        use assistant_interfaces::SlackInterface;
         let slack_cfg = bs.config.slack.clone().unwrap_or_default();
         let mut iface = SlackInterface::new(slack_cfg, bs.orchestrator.clone(), bs.storage.clone());
         if let Some(ref tp) = transcription_provider {
@@ -1646,10 +1623,9 @@ async fn main() -> Result<()> {
     }
 
     // 10b. Mattermost — start in background if configured.
-    #[cfg(feature = "mattermost")]
     if bs.config.mattermost.is_some() && interface_selected(&orchestrator_interfaces, "mattermost")
     {
-        use assistant_interface_mattermost::MattermostInterface;
+        use assistant_interfaces::MattermostInterface;
         let mm_cfg = bs.config.mattermost.clone().unwrap_or_default();
         let mut iface = MattermostInterface::new(mm_cfg, bs.orchestrator.clone());
         if let Some(ref tp) = transcription_provider {
@@ -1671,9 +1647,8 @@ async fn main() -> Result<()> {
     }
 
     // 10b-ii. Matrix — start in background if configured.
-    #[cfg(feature = "matrix")]
     if bs.config.matrix.is_some() && interface_selected(&orchestrator_interfaces, "matrix") {
-        use assistant_interface_matrix::MatrixInterface;
+        use assistant_interfaces::MatrixInterface;
         let matrix_cfg = bs.config.matrix.clone().unwrap_or_default();
         let mut iface = MatrixInterface::new(matrix_cfg, bs.orchestrator.clone());
         if let Some(ref tp) = transcription_provider {
@@ -1698,9 +1673,8 @@ async fn main() -> Result<()> {
     //      Pass a CancellationToken so the HTTP server shuts down without
     //      installing process-wide signal handlers (which would conflict
     //      with the REPL's Ctrl-C handling).
-    #[cfg(feature = "nextcloud")]
     if bs.config.nextcloud.is_some() && interface_selected(&orchestrator_interfaces, "nextcloud") {
-        use assistant_interface_nextcloud::NextcloudInterface;
+        use assistant_interfaces::NextcloudInterface;
         let nc_cfg = bs.config.nextcloud.clone().unwrap_or_default();
         let shutdown_token = tokio_util::sync::CancellationToken::new();
         let mut iface =
@@ -1724,9 +1698,8 @@ async fn main() -> Result<()> {
     }
 
     // 10d. Signal — start in background if configured.
-    #[cfg(feature = "signal")]
     if bs.config.signal.is_some() && interface_selected(&orchestrator_interfaces, "signal") {
-        use assistant_interface_signal::SignalInterface;
+        use assistant_interfaces::SignalInterface;
         let sig_cfg = bs.config.signal.clone().unwrap_or_default();
         let mut iface = SignalInterface::new(sig_cfg, bs.orchestrator.clone());
         if let Some(ref tp) = transcription_provider {
