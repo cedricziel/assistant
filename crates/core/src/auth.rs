@@ -55,7 +55,8 @@ impl AuthContext {
     ///
     /// Permission is granted if:
     /// 1. The user is an org admin (bypasses space-level checks), OR
-    /// 2. The user holds a sufficient role in the space AND the scopes
+    /// 2. The user holds an org-level management scope (e.g. `org:manage`), OR
+    /// 3. The user holds a sufficient role in the space AND the scopes
     ///    include the requested resource+action.
     pub fn can(
         &self,
@@ -66,6 +67,15 @@ impl AuthContext {
     ) -> bool {
         // Org admins can do everything.
         if self.is_org_admin() {
+            return true;
+        }
+
+        // Org-level management scope bypasses space-role checks.
+        if self
+            .scopes
+            .iter()
+            .any(|s| s.resource == ResourceKind::Org && s.action == Action::Manage)
+        {
             return true;
         }
 
@@ -359,8 +369,16 @@ mod tests {
     #[test]
     fn role_in_returns_correct_role() {
         let ctx = make_member("eng");
-        assert_eq!(ctx.role_in(&SpaceId::from("eng")), Some(&Role::Member));
-        assert_eq!(ctx.role_in(&SpaceId::from("mktg")), None);
+        assert_eq!(
+            ctx.role_in(&SpaceId::from("eng")),
+            Some(&Role::Member),
+            "should return Member role for assigned space"
+        );
+        assert_eq!(
+            ctx.role_in(&SpaceId::from("mktg")),
+            None,
+            "should return None for unassigned space"
+        );
     }
 
     // -- org admin bypasses --

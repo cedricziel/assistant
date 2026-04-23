@@ -90,7 +90,7 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 - [x] `feat(auth): JWT signing and validation`
   - Create `crates/auth/src/jwt.rs`
-  - Key generation (EdDSA or RS256), key persistence (load from file or generate)
+  - HS256 shared-secret generation, key persistence (load from file or generate)
   - `sign(claims: &AuthContext, expiry: Duration) -> Result<String>`
   - `validate(token: &str) -> Result<AuthContext>`
   - Claim mapping: AuthContext fields ↔ JWT registered + custom claims

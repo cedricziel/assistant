@@ -18,11 +18,11 @@ pub mod types;
 pub mod upload;
 
 pub use allowlist::AllowlistFilter;
-// -- Auth & identity (multi-user) --
 pub use attachment::{
     AttachmentMeta, MAX_ATTACHMENT_SIZE, RESIZABLE_MIME_TYPES, SUPPORTED_MIME_TYPES,
     extension_for_mime, is_resizable_mime_type, is_supported_mime_type, is_text_mime_type,
 };
+// -- Auth & identity (multi-user) --
 pub use auth::{
     AuthContext, AuthProvider, AuthorizeRequest, AuthorizeResponse, ClientInfo, ClientRegistration,
     IdentityResolver, TokenGrant, TokenResponse,

@@ -171,8 +171,8 @@ rand = "0.9"
 # Internal crates
 opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
 opentelemetry-exporter-iceberg = { path = "crates/opentelemetry-exporter-iceberg" }
-core = { path = "crates/core" }
-auth = { path = "crates/auth" }
+core = { path = "crates/core", package = "assistant-core" }
+auth = { path = "crates/auth", package = "assistant-auth" }
 skills = { path = "crates/skills" }
 storage = { path = "crates/storage" }
 runtime = { path = "crates/runtime" }

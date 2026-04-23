@@ -1,7 +1,7 @@
 //! JWT signing and validation.
 //!
-//! Uses RS256 (RSA-PKCS1-SHA256) for broad compatibility with OAuth2 clients.
-//! Keys can be generated fresh or loaded from PEM files.
+//! Uses HS256 (HMAC-SHA256) with a 256-bit shared secret for single-server
+//! deployments. Keys can be generated fresh or loaded from secret files.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -46,35 +46,26 @@ pub struct Claims {
     pub spaces: HashMap<String, String>,
     /// OAuth2 client ID that requested this token.
     pub client_id: String,
-    /// Space-separated scope string.
+    /// Space-separated scope string (standard OAuth2 format).
     #[serde(default)]
     pub scope: String,
+    /// Optional per-scope resource ID restrictions (e.g. from API keys).
+    /// Key = scope string ("personas:read"), value = allowed resource IDs.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub scope_restrictions: HashMap<String, Vec<String>>,
 }
 
 // -- Key pair --
 
-/// An RSA key pair for signing and verifying JWTs.
+/// A shared secret for signing and verifying JWTs (HS256).
 pub struct JwtKeyPair {
     encoding: EncodingKey,
     decoding: DecodingKey,
 }
 
 impl JwtKeyPair {
-    /// Generate a new RSA-2048 key pair.
+    /// Generate a new 256-bit random shared secret.
     pub fn generate() -> Result<Self> {
-        use jsonwebtoken::jwk;
-        // Use the rsa crate would be heavier. Instead we generate via
-        // jsonwebtoken's built-in RSA key generation isn't available,
-        // so we use a simpler HMAC-based approach for now and upgrade
-        // to RSA when the `rsa` crate is added.
-        //
-        // For v1 we use HS256 with a 256-bit random secret, which is
-        // secure for a single-server deployment (no key distribution needed).
-        let _ = jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-            key_type: jwk::OctetKeyType::Octet,
-            value: String::new(),
-        });
-
         let secret = generate_secret();
         Ok(Self {
             encoding: EncodingKey::from_secret(&secret),
@@ -102,13 +93,25 @@ impl JwtKeyPair {
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("creating directory for {path:?}"))?;
             }
-            std::fs::write(path, &secret)
-                .with_context(|| format!("writing JWT secret to {path:?}"))?;
-            // Restrict permissions on Unix.
+            // On Unix, create file with 0600 atomically to avoid a race
+            // where umask could briefly make the secret world-readable.
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+                use std::io::Write;
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)
+                    .with_context(|| format!("writing JWT secret to {path:?}"))?;
+                f.write_all(&secret)
+                    .with_context(|| format!("writing JWT secret to {path:?}"))?;
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::write(path, &secret)
+                    .with_context(|| format!("writing JWT secret to {path:?}"))?;
             }
             Ok(Self::from_secret(&secret))
         }
@@ -170,6 +173,14 @@ impl JwtManager {
             .collect::<Vec<_>>()
             .join(" ");
 
+        // Preserve resource-ID restrictions (e.g. from API keys).
+        let mut scope_restrictions = HashMap::new();
+        for s in &ctx.scopes {
+            if let Some(ids) = &s.resource_ids {
+                scope_restrictions.insert(s.to_string(), ids.clone());
+            }
+        }
+
         let claims = Claims {
             iss: self.issuer.clone(),
             sub: ctx.user_id.0.clone(),
@@ -184,6 +195,7 @@ impl JwtManager {
             spaces,
             client_id: ctx.client_id.clone(),
             scope: scope_str,
+            scope_restrictions,
         };
 
         let header = Header::new(Algorithm::HS256);
@@ -232,7 +244,14 @@ pub fn claims_to_context(claims: &Claims) -> Result<AuthContext> {
         claims
             .scope
             .split(' ')
-            .map(parse_scope)
+            .map(|s| {
+                let mut scope = parse_scope(s)?;
+                // Restore resource-ID restrictions from the JWT if present.
+                if let Some(ids) = claims.scope_restrictions.get(s) {
+                    scope.resource_ids = Some(ids.clone());
+                }
+                Ok(scope)
+            })
             .collect::<Result<Vec<_>>>()?
     };
 

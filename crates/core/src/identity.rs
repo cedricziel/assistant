@@ -234,6 +234,14 @@ impl Scope {
         }
     }
 
+    /// If this scope restricts access to specific resource IDs, returns them.
+    ///
+    /// Callers should use this to filter listing results when `covers()`
+    /// returns `false` due to a missing `target_id`.
+    pub fn visible_ids(&self) -> Option<&[String]> {
+        self.resource_ids.as_deref()
+    }
+
     /// Returns `true` if this scope covers the given resource, action, and
     /// optional target ID.
     pub fn covers(
@@ -248,8 +256,9 @@ impl Scope {
         match (&self.resource_ids, target_id) {
             // Unrestricted scope covers everything.
             (None, _) => true,
-            // Restricted scope but no target → allow (listing).
-            (Some(_), None) => true,
+            // Restricted scope but no target → deny (caller must use
+            // `visible_ids()` to filter listings).
+            (Some(_), None) => false,
             // Restricted scope with target → must be in the list.
             (Some(ids), Some(id)) => ids.iter().any(|s| s == id),
         }
@@ -294,8 +303,14 @@ mod tests {
         assert!(scope.covers(&ResourceKind::Personas, &Action::Read, Some("p1")));
         assert!(scope.covers(&ResourceKind::Personas, &Action::Read, Some("p2")));
         assert!(!scope.covers(&ResourceKind::Personas, &Action::Read, Some("p3")));
-        // Listing (no target) allowed even with restriction.
-        assert!(scope.covers(&ResourceKind::Personas, &Action::Read, None));
+        // Listing (no target) denied — callers must use visible_ids() to filter.
+        assert!(!scope.covers(&ResourceKind::Personas, &Action::Read, None));
+        // visible_ids() returns the restriction set.
+        assert_eq!(
+            scope.visible_ids(),
+            Some(vec!["p1".to_string(), "p2".to_string()].as_slice()),
+            "restricted scope should expose allowed IDs"
+        );
     }
 
     #[test]

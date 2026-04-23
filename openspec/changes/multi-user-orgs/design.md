@@ -102,14 +102,14 @@ API keys are owned by a user, carry explicit scopes (`resource:action`), and can
 ```
 personas:read, personas:write, personas:delete
 conversations:read, conversations:write, conversations:delete
-messages:send, messages:read
+messages:read, messages:write
 skills:read, skills:execute, skills:write
-interfaces:read, interfaces:manage
+interfaces:read, interfaces:write
 bindings:read, bindings:write
-users:read, users:manage
+users:read, users:write, users:manage
 org:read, org:manage
-api_keys:read, api_keys:write, api_keys:revoke
-spaces:read, spaces:manage
+api_keys:read, api_keys:write, api_keys:delete
+spaces:read, spaces:write, spaces:manage
 ```
 
 ### D8: Interface instances are named, typed, owned resources with persona bindings
@@ -356,7 +356,7 @@ CLI                      Assistant Server
   },
 
   "client_id": "webui",
-  "scope": "personas:read conversations:read conversations:write messages:send skills:execute"
+  "scope": "personas:read conversations:read conversations:write messages:write skills:execute"
 }
 ```
 

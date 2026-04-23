@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "assistant-auth"
-version = "0.1.134"
+version = "0.1.135"
 dependencies = [
  "anyhow",
  "argon2",
