@@ -403,6 +403,18 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             "037_learning_refinement_revert",
             include_str!("../../../migrations/037_learning_refinement_revert.sql"),
         ),
+        (
+            "038_conversation_user_id",
+            include_str!("../../../migrations/038_conversation_user_id.sql"),
+        ),
+        (
+            "039_persona_owner",
+            include_str!("../../../migrations/039_persona_owner.sql"),
+        ),
+        (
+            "040_message_sender",
+            include_str!("../../../migrations/040_message_sender.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {

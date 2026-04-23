@@ -40,6 +40,9 @@ pub struct Message {
     pub tool_calls_json: Option<String>,
     pub turn: i64,
     pub created_at: DateTime<Utc>,
+    /// The user who sent this message (multi-user scoping).
+    /// `None` for assistant/system/tool messages and legacy data.
+    pub sender_user_id: Option<String>,
 }
 
 impl Message {
@@ -53,6 +56,7 @@ impl Message {
             tool_calls_json: None,
             turn: 0,
             created_at: Utc::now(),
+            sender_user_id: None,
         }
     }
 

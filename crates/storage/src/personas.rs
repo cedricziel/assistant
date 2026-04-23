@@ -25,6 +25,9 @@ pub struct PersonaRecord {
     /// Default output destination for scheduler-originated turns. `None` means
     /// scheduler output is stored in conversation history only (no delivery).
     pub home_channel: Option<HomeChannel>,
+    /// The user who owns this persona (multi-user scoping).
+    /// `None` means org-owned (visible to all org members).
+    pub owner_user_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -88,7 +91,7 @@ impl PersonaStore {
 
     pub async fn list(&self) -> Result<Vec<PersonaRecord>> {
         let rows = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
              FROM personas
              ORDER BY is_default DESC, id ASC",
         )
@@ -140,7 +143,7 @@ impl PersonaStore {
 
     pub async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
         let row = sqlx::query(
-            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, created_at, updated_at
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
              FROM personas
              WHERE id = ?1",
         )
@@ -230,6 +233,60 @@ impl PersonaStore {
         .rows_affected();
         anyhow::ensure!(rows > 0, "persona '{}' not found", id);
         Ok(())
+    }
+
+    /// List personas accessible to a given user: org-owned (`owner_user_id IS NULL`)
+    /// plus those owned by the user (`owner_user_id = ?`).
+    pub async fn list_accessible(&self, user_id: &str) -> Result<Vec<PersonaRecord>> {
+        anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
+
+        let rows = sqlx::query(
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
+             FROM personas
+             WHERE owner_user_id IS NULL OR owner_user_id = ?1
+             ORDER BY is_default DESC, id ASC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(row_to_record).collect()
+    }
+
+    /// Create a user-owned persona.
+    pub async fn create_owned(
+        &self,
+        id: &str,
+        name: &str,
+        owner_user_id: &str,
+    ) -> Result<PersonaRecord> {
+        anyhow::ensure!(
+            !owner_user_id.trim().is_empty(),
+            "owner_user_id must be non-empty"
+        );
+
+        sqlx::query(
+            "INSERT INTO personas (id, name, is_default, owner_user_id) VALUES (?1, ?2, 0, ?3)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(owner_user_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE") {
+                anyhow::anyhow!(
+                    "persona with id '{}' already exists (UNIQUE constraint)",
+                    id
+                )
+            } else {
+                anyhow::anyhow!("failed to create persona '{}': {}", id, e)
+            }
+        })?;
+
+        self.get(id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("persona '{}' missing after create_owned", id))
     }
 
     /// Clear the per-persona turn timeout, reverting to the compiled-in default.
@@ -424,6 +481,116 @@ mod tests {
         let default = list.iter().find(|p| p.id == "default").unwrap();
         assert!(default.turn_timeout_secs.is_none());
     }
+
+    // -----------------------------------------------------------------------
+    // Owner / user-scoping tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn create_owned_sets_owner_user_id() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let persona = store
+            .create_owned("alice-bot", "Alice Bot", "alice")
+            .await
+            .unwrap();
+        assert_eq!(
+            persona.owner_user_id.as_deref(),
+            Some("alice"),
+            "owned persona should persist owner_user_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn org_owned_persona_has_null_owner() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let persona = store.create("shared-bot", "Shared Bot").await.unwrap();
+        assert!(
+            persona.owner_user_id.is_none(),
+            "org-owned persona should have no owner"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_accessible_includes_org_owned_and_user_owned() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        // Create an org-owned persona (NULL owner)
+        store.create("shared", "Shared").await.unwrap();
+        // Create user-owned personas
+        store
+            .create_owned("alice-bot", "Alice Bot", "alice")
+            .await
+            .unwrap();
+        store
+            .create_owned("bob-bot", "Bob Bot", "bob")
+            .await
+            .unwrap();
+
+        // Alice should see shared + alice-bot, but not bob-bot
+        let alice_list = store.list_accessible("alice").await.unwrap();
+        let alice_ids: Vec<&str> = alice_list.iter().map(|p| p.id.as_str()).collect();
+        assert!(alice_ids.contains(&"shared"), "Alice should see org-owned");
+        assert!(alice_ids.contains(&"alice-bot"), "Alice should see her own");
+        assert!(
+            !alice_ids.contains(&"bob-bot"),
+            "Alice should not see Bob's"
+        );
+
+        // Bob should see shared + bob-bot, but not alice-bot
+        let bob_list = store.list_accessible("bob").await.unwrap();
+        let bob_ids: Vec<&str> = bob_list.iter().map(|p| p.id.as_str()).collect();
+        assert!(bob_ids.contains(&"shared"), "Bob should see org-owned");
+        assert!(bob_ids.contains(&"bob-bot"), "Bob should see his own");
+        assert!(
+            !bob_ids.contains(&"alice-bot"),
+            "Bob should not see Alice's"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_returns_all_personas_regardless_of_owner() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.create("shared", "Shared").await.unwrap();
+        store
+            .create_owned("alice-bot", "Alice Bot", "alice")
+            .await
+            .unwrap();
+
+        let all = store.list().await.unwrap();
+        // 3 = seeded "default" from migration + "shared" + "alice-bot"
+        assert_eq!(all.len(), 3, "list() should return all personas");
+        let ids: Vec<&str> = all.iter().map(|p| p.id.as_str()).collect();
+        assert!(ids.contains(&"shared"), "should include shared persona");
+        assert!(
+            ids.contains(&"alice-bot"),
+            "should include alice-bot persona"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_accessible_rejects_empty_user_id() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let result = store.list_accessible("").await;
+        assert!(result.is_err(), "empty user_id should be rejected");
+    }
+
+    #[tokio::test]
+    async fn create_owned_rejects_empty_owner() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let result = store.create_owned("bot", "Bot", "").await;
+        assert!(result.is_err(), "empty owner_user_id should be rejected");
+    }
 }
 
 fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
@@ -449,6 +616,7 @@ fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
             .unwrap_or(None)
             .map(|v| v as u64),
         home_channel,
+        owner_user_id: row.try_get("owner_user_id").unwrap_or(None),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })

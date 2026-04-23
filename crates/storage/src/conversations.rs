@@ -16,6 +16,9 @@ pub struct ConversationRecord {
     pub id: Uuid,
     pub agent_id: String,
     pub title: Option<String>,
+    /// The user who owns this conversation (multi-user scoping).
+    /// `None` for legacy/unscoped conversations.
+    pub user_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -24,6 +27,8 @@ pub struct ConversationRecord {
 pub struct ConversationStore {
     pool: SqlitePool,
     agent_id: String,
+    /// When set, all queries are scoped to this user.
+    user_id: Option<String>,
     broadcaster: Option<Arc<dyn ConversationBroadcast>>,
 }
 
@@ -32,6 +37,7 @@ impl ConversationStore {
         Self {
             pool,
             agent_id: "default".to_string(),
+            user_id: None,
             broadcaster: None,
         }
     }
@@ -40,8 +46,15 @@ impl ConversationStore {
         Self {
             pool,
             agent_id: agent_id.into(),
+            user_id: None,
             broadcaster: None,
         }
+    }
+
+    /// Scope all queries to a specific user.
+    pub fn with_user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
+        self
     }
 
     /// Attach a broadcaster that will receive events on every conversation mutation.
@@ -65,13 +78,14 @@ impl ConversationStore {
         let id_str = id.to_string();
 
         sqlx::query(
-            "INSERT INTO conversations (id, title, agent_id, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?4) \
+            "INSERT INTO conversations (id, title, agent_id, user_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id_str)
         .bind(title)
         .bind(&self.agent_id)
+        .bind(&self.user_id)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -98,12 +112,13 @@ impl ConversationStore {
         let id_str = id.to_string();
 
         sqlx::query(
-            "INSERT INTO conversations (id, title, agent_id, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?4)",
+            "INSERT INTO conversations (id, title, agent_id, user_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
         )
         .bind(&id_str)
         .bind(title)
         .bind(&self.agent_id)
+        .bind(&self.user_id)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -112,6 +127,7 @@ impl ConversationStore {
             id,
             agent_id: self.agent_id.clone(),
             title: title.map(|s| s.to_string()),
+            user_id: self.user_id.clone(),
             created_at: now,
             updated_at: now,
         };
@@ -127,15 +143,28 @@ impl ConversationStore {
     pub async fn get_conversation(&self, id: Uuid) -> Result<Option<ConversationRecord>> {
         let id_str = id.to_string();
 
-        let row = sqlx::query(
-            "SELECT id, title, agent_id, created_at, updated_at \
-             FROM conversations \
-             WHERE id = ?1 AND agent_id = ?2",
-        )
-        .bind(&id_str)
-        .bind(&self.agent_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = if self.user_id.is_some() {
+            sqlx::query(
+                "SELECT id, title, agent_id, user_id, created_at, updated_at \
+                 FROM conversations \
+                 WHERE id = ?1 AND agent_id = ?2 AND user_id = ?3",
+            )
+            .bind(&id_str)
+            .bind(&self.agent_id)
+            .bind(&self.user_id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT id, title, agent_id, user_id, created_at, updated_at \
+                 FROM conversations \
+                 WHERE id = ?1 AND agent_id = ?2",
+            )
+            .bind(&id_str)
+            .bind(&self.agent_id)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         row.map(|r| {
             let raw_id: String = r.get("id");
@@ -143,6 +172,7 @@ impl ConversationStore {
                 id: Uuid::parse_str(&raw_id)?,
                 agent_id: r.get("agent_id"),
                 title: r.get("title"),
+                user_id: r.get("user_id"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),
             })
@@ -152,15 +182,28 @@ impl ConversationStore {
 
     /// List all conversations, most-recently updated first.
     pub async fn list_conversations(&self) -> Result<Vec<ConversationRecord>> {
-        let rows = sqlx::query(
-            "SELECT id, title, agent_id, created_at, updated_at \
-             FROM conversations \
-             WHERE agent_id = ?1 \
-             ORDER BY updated_at DESC",
-        )
-        .bind(&self.agent_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = if self.user_id.is_some() {
+            sqlx::query(
+                "SELECT id, title, agent_id, user_id, created_at, updated_at \
+                 FROM conversations \
+                 WHERE agent_id = ?1 AND user_id = ?2 \
+                 ORDER BY updated_at DESC",
+            )
+            .bind(&self.agent_id)
+            .bind(&self.user_id)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT id, title, agent_id, user_id, created_at, updated_at \
+                 FROM conversations \
+                 WHERE agent_id = ?1 \
+                 ORDER BY updated_at DESC",
+            )
+            .bind(&self.agent_id)
+            .fetch_all(&self.pool)
+            .await?
+        };
 
         rows.into_iter()
             .map(|r| {
@@ -169,6 +212,7 @@ impl ConversationStore {
                     id: Uuid::parse_str(&raw_id)?,
                     agent_id: r.get("agent_id"),
                     title: r.get("title"),
+                    user_id: r.get("user_id"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
                 })
@@ -266,8 +310,8 @@ impl ConversationStore {
 
         sqlx::query(
             "INSERT INTO messages \
-                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                (id, conversation_id, role, content, skill_name, tool_calls_json, turn, created_at, sender_user_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
              ON CONFLICT(id) DO NOTHING",
         )
         .bind(&id)
@@ -278,6 +322,7 @@ impl ConversationStore {
         .bind(&msg.tool_calls_json)
         .bind(msg.turn)
         .bind(msg.created_at)
+        .bind(&msg.sender_user_id)
         .execute(&self.pool)
         .await?;
 
@@ -324,7 +369,7 @@ impl ConversationStore {
         let conv_id_str = conversation_id.to_string();
 
         let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
@@ -349,6 +394,7 @@ impl ConversationStore {
                     tool_calls_json: r.get("tool_calls_json"),
                     turn: r.get("turn"),
                     created_at: r.get("created_at"),
+                    sender_user_id: r.get("sender_user_id"),
                 })
             })
             .collect()
@@ -358,7 +404,7 @@ impl ConversationStore {
     pub async fn get_message(&self, message_id: Uuid) -> Result<Option<Message>> {
         let id_str = message_id.to_string();
         let row = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.id = ?1 AND c.agent_id = ?2",
@@ -381,6 +427,7 @@ impl ConversationStore {
                 tool_calls_json: r.get("tool_calls_json"),
                 turn: r.get("turn"),
                 created_at: r.get("created_at"),
+                sender_user_id: r.get("sender_user_id"),
             })
         })
         .transpose()
@@ -392,7 +439,7 @@ impl ConversationStore {
 
         // Fetch the newest rows first, then reverse to restore chronological order.
         let rows = sqlx::query(
-            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at \
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.skill_name, m.tool_calls_json, m.turn, m.created_at, m.sender_user_id \
              FROM messages m \
              INNER JOIN conversations c ON c.id = m.conversation_id \
              WHERE m.conversation_id = ?1 AND c.agent_id = ?2 \
@@ -420,6 +467,7 @@ impl ConversationStore {
                     tool_calls_json: r.get("tool_calls_json"),
                     turn: r.get("turn"),
                     created_at: r.get("created_at"),
+                    sender_user_id: r.get("sender_user_id"),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -663,6 +711,121 @@ mod tests {
             }
             _ => panic!("expected Upserted event"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // User-scoping tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_user_scoped_conversation_isolation() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+
+        let alice_store = storage
+            .conversation_store()
+            .with_user_id("alice".to_string());
+        let bob_store = storage.conversation_store().with_user_id("bob".to_string());
+
+        let alice_conv = alice_store
+            .create_conversation(Some("Alice's chat"))
+            .await
+            .unwrap();
+        let bob_conv = bob_store
+            .create_conversation(Some("Bob's chat"))
+            .await
+            .unwrap();
+
+        // Alice sees only her conversation
+        let alice_list = alice_store.list_conversations().await.unwrap();
+        assert_eq!(alice_list.len(), 1, "Alice should see 1 conversation");
+        assert_eq!(
+            alice_list[0].id, alice_conv.id,
+            "Alice's list should contain her conversation"
+        );
+        assert_eq!(
+            alice_list[0].user_id.as_deref(),
+            Some("alice"),
+            "conversation should retain Alice's user_id"
+        );
+
+        // Bob sees only his
+        let bob_list = bob_store.list_conversations().await.unwrap();
+        assert_eq!(bob_list.len(), 1, "Bob should see 1 conversation");
+        assert_eq!(
+            bob_list[0].id, bob_conv.id,
+            "Bob's list should contain his conversation"
+        );
+        assert_eq!(
+            bob_list[0].user_id.as_deref(),
+            Some("bob"),
+            "conversation should retain Bob's user_id"
+        );
+
+        // Alice cannot get Bob's conversation
+        let cross = alice_store.get_conversation(bob_conv.id).await.unwrap();
+        assert!(cross.is_none(), "Alice should not see Bob's conversation");
+    }
+
+    #[tokio::test]
+    async fn test_unscoped_store_sees_all_conversations() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+
+        let alice_store = storage
+            .conversation_store()
+            .with_user_id("alice".to_string());
+        let unscoped_store = storage.conversation_store();
+
+        alice_store
+            .create_conversation(Some("Alice's chat"))
+            .await
+            .unwrap();
+        unscoped_store
+            .create_conversation(Some("Legacy chat"))
+            .await
+            .unwrap();
+
+        // Unscoped store sees everything
+        let all = unscoped_store.list_conversations().await.unwrap();
+        assert_eq!(all.len(), 2, "unscoped store should see all conversations");
+    }
+
+    #[tokio::test]
+    async fn test_message_sender_user_id_persisted() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut msg = Message::user(conv.id, "from alice");
+        msg.turn = 1;
+        msg.sender_user_id = Some("alice".to_string());
+        store.save_message(&msg).await.unwrap();
+
+        let history = store.load_history(conv.id).await.unwrap();
+        assert_eq!(history.len(), 1, "should have exactly one message");
+        assert_eq!(
+            history[0].sender_user_id.as_deref(),
+            Some("alice"),
+            "sender_user_id should round-trip"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_message_sender_user_id_defaults_to_none() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = storage.conversation_store();
+
+        let conv = store.create_conversation(None).await.unwrap();
+
+        let mut msg = Message::user(conv.id, "no sender");
+        msg.turn = 1;
+        store.save_message(&msg).await.unwrap();
+
+        let history = store.load_history(conv.id).await.unwrap();
+        assert!(
+            history[0].sender_user_id.is_none(),
+            "sender_user_id should default to None"
+        );
     }
 
     #[tokio::test]

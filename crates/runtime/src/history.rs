@@ -239,6 +239,7 @@ mod tests {
             tool_calls_json: None,
             turn: 0,
             created_at: chrono::Utc::now(),
+            sender_user_id: None,
         }
     }
 
@@ -252,6 +253,7 @@ mod tests {
             tool_calls_json: None,
             turn: 1,
             created_at: chrono::Utc::now(),
+            sender_user_id: None,
         }
     }
 

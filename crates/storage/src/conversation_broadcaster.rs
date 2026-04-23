@@ -73,6 +73,7 @@ mod tests {
             id: Uuid::new_v4(),
             agent_id: "default".to_string(),
             title: Some("Test".to_string()),
+            user_id: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -123,6 +124,7 @@ mod tests {
             id: Uuid::new_v4(),
             agent_id: "default".to_string(),
             title: None,
+            user_id: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
