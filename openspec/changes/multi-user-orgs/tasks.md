@@ -120,44 +120,44 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 **Commits:**
 
-- [ ] `feat(auth): PKCE challenge and verification`
+- [x] `feat(auth): PKCE challenge and verification`
   - Create `crates/auth/src/oauth2/pkce.rs`
   - `generate_verifier() -> String`, `challenge_from_verifier(verifier) -> String`
   - `verify(verifier, challenge) -> bool`
   - S256 method per RFC 7636
 
-- [ ] `test(auth): PKCE challenge round-trip`
+- [x] `test(auth): PKCE challenge round-trip`
 
-- [ ] `feat(auth): authorization code grant logic`
+- [x] `feat(auth): authorization code grant logic`
   - Create `crates/auth/src/oauth2/server.rs`
   - `AuthCodeStore` (in-memory or DB-backed): generate, store, exchange, expire
   - `generate_auth_code(user_id, client_id, redirect_uri, pkce_challenge, scopes) -> String`
   - `exchange_auth_code(code, client_id, redirect_uri, pkce_verifier) -> Result<(AccessToken, RefreshToken)>`
 
-- [ ] `feat(auth): refresh token management`
+- [x] `feat(auth): refresh token management`
   - Add to `crates/auth/src/oauth2/server.rs`
   - `RefreshTokenStore`: generate, store, rotate, revoke
   - `refresh(token, client_id) -> Result<(AccessToken, RefreshToken)>` with rotation
 
-- [ ] `test(auth): authorization code flow end-to-end (in-memory)`
+- [x] `test(auth): authorization code flow end-to-end (in-memory)`
   - Full flow: generate code → exchange with PKCE → get tokens → refresh → revoke
 
-- [ ] `feat(auth): device code flow`
+- [x] `feat(auth): device code flow`
   - Create `crates/auth/src/oauth2/device.rs`
   - `initiate(client_id) -> DeviceCodeResponse { device_code, user_code, verification_uri, interval }`
   - `poll(device_code) -> PollResult { Pending | Authorized(tokens) | Expired }`
   - `complete(user_code, user_id)` — called when user approves in browser
 
-- [ ] `test(auth): device code flow lifecycle`
+- [x] `test(auth): device code flow lifecycle`
 
-- [ ] `feat(auth): dynamic client registration (RFC 7591)`
+- [x] `feat(auth): dynamic client registration (RFC 7591)`
   - Create `crates/auth/src/oauth2/clients.rs`
   - `ClientStore`: register, lookup, list
   - `register(req: ClientRegistration) -> Result<ClientInfo>`
   - Validate redirect_uris, grant_types, response_types
   - Generate `client_id`, optional `client_secret` for confidential clients
 
-- [ ] `test(auth): dynamic client registration and lookup`
+- [x] `test(auth): dynamic client registration and lookup`
 
 ---
 
