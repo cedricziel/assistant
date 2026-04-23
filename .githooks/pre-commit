@@ -23,15 +23,24 @@ step() {
     echo -e "${BOLD}==> $1${RESET}"
 }
 
+# ── Detect which areas changed ──────────────────────────────────────────────
+
+FLUTTER_CHANGED=false
+if git diff --cached --name-only | grep -qE '^(app/|openapi\.json)'; then
+    FLUTTER_CHANGED=true
+fi
+
 # ── Preflight: verify required toolchains ────────────────────────────────────
 
 step "Checking required tools..."
 command -v cargo >/dev/null 2>&1 \
     || fail "cargo not found on PATH — install Rust: https://rustup.rs"
-command -v flutter >/dev/null 2>&1 \
-    || fail "flutter not found on PATH — install Flutter: https://docs.flutter.dev/get-started/install"
-command -v dart >/dev/null 2>&1 \
-    || fail "dart not found on PATH — install Flutter/Dart: https://docs.flutter.dev/get-started/install"
+if [ "$FLUTTER_CHANGED" = true ]; then
+    command -v flutter >/dev/null 2>&1 \
+        || fail "flutter not found on PATH — install Flutter: https://docs.flutter.dev/get-started/install"
+    command -v dart >/dev/null 2>&1 \
+        || fail "dart not found on PATH — install Flutter/Dart: https://docs.flutter.dev/get-started/install"
+fi
 
 # ── Rust: formatting ────────────────────────────────────────────────────────
 
@@ -41,9 +50,13 @@ cargo fmt --all -- --check \
 
 # ── Flutter/Dart: dart_pre_commit (format, analyze, deps, OSV) ──────────────
 
-step "Running dart_pre_commit checks..."
-(cd app && flutter pub get --suppress-analytics >/dev/null 2>&1 && flutter pub run dart_pre_commit) \
-    || fail "dart_pre_commit failed — fix issues above before committing"
+if [ "$FLUTTER_CHANGED" = true ]; then
+    step "Running dart_pre_commit checks..."
+    (cd app && flutter pub get --suppress-analytics >/dev/null 2>&1 && flutter pub run dart_pre_commit) \
+        || fail "dart_pre_commit failed — fix issues above before committing"
+else
+    step "Skipping dart_pre_commit (no app/ or openapi.json changes)"
+fi
 
 # ── Rust: clippy ─────────────────────────────────────────────────────────────
 
@@ -59,8 +72,12 @@ cargo machete --with-metadata \
 
 # ── Flutter: tests ───────────────────────────────────────────────────────────
 
-step "Running Flutter tests..."
-(cd app && flutter test) \
-    || fail "flutter test failed — fix failing tests before committing"
+if [ "$FLUTTER_CHANGED" = true ]; then
+    step "Running Flutter tests..."
+    (cd app && flutter test) \
+        || fail "flutter test failed — fix failing tests before committing"
+else
+    step "Skipping Flutter tests (no app/ or openapi.json changes)"
+fi
 
 echo -e "${GREEN}All pre-commit checks passed.${RESET}"
