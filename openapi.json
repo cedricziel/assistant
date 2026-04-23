@@ -41,6 +41,30 @@
         "security": []
       }
     },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "GET /.well-known/oauth-authorization-server",
+        "operationId": "metadata",
+        "responses": {
+          "200": {
+            "description": "Authorization server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerMetadata"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/agent/authenticatedExtendedCard": {
       "get": {
         "tags": [
@@ -3274,6 +3298,363 @@
         ]
       }
     },
+    "/oauth/authorize": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "GET /oauth/authorize — render login form.",
+        "operationId": "authorize_get",
+        "parameters": [
+          {
+            "name": "response_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "client_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "code_challenge",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "code_challenge_method",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Login form HTML"
+          },
+          "400": {
+            "description": "Invalid parameters"
+          }
+        },
+        "security": [
+          {}
+        ]
+      },
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "POST /oauth/authorize — validate credentials, generate auth code, redirect.",
+        "operationId": "authorize_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizeForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "303": {
+            "description": "Redirect with authorization code"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/oauth/device": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "POST /oauth/device — initiate the device authorization flow.",
+        "operationId": "device_initiate",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceInitiateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Device code issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCodeResponseSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/oauth/device/verify": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "GET /oauth/device/verify — render page where user enters the code.",
+        "operationId": "device_verify_page",
+        "parameters": [
+          {
+            "name": "user_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device verification form HTML"
+          }
+        },
+        "security": [
+          {}
+        ]
+      },
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "POST /oauth/device/verify — user approves the device code.",
+        "operationId": "device_verify_submit",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceVerifyForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Device authorized"
+          },
+          "400": {
+            "description": "Invalid or expired code"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/oauth/register": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "POST /oauth/register — register a new OAuth2 client.",
+        "operationId": "register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientRegistrationSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Client registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientInfoSchema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid registration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/oauth/revoke": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "POST /oauth/revoke — revoke a refresh token.",
+        "operationId": "revoke",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Token revoked (or already invalid)"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/oauth/token": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "POST /oauth/token",
+        "operationId": "token",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/tasks": {
       "get": {
         "tags": [
@@ -4506,6 +4887,52 @@
           }
         }
       },
+      "AuthorizeForm": {
+        "type": "object",
+        "description": "Form fields for POST /oauth/authorize (password credential submission).",
+        "required": [
+          "client_id",
+          "redirect_uri"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "code_challenge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "CancelTaskRequest": {
         "type": "object",
         "description": "Request for the `CancelTask` method.",
@@ -4562,6 +4989,87 @@
           "tokenUrl": {
             "type": "string",
             "description": "The token URL."
+          }
+        }
+      },
+      "ClientInfoSchema": {
+        "type": "object",
+        "description": "OpenAPI schema mirror for [`assistant_core::auth::ClientInfo`].",
+        "required": [
+          "client_id",
+          "client_name",
+          "redirect_uris",
+          "grant_types",
+          "token_endpoint_auth_method"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": "string"
+          }
+        }
+      },
+      "ClientRegistrationSchema": {
+        "type": "object",
+        "description": "OpenAPI schema mirror for [`assistant_core::auth::ClientRegistration`].",
+        "required": [
+          "client_name",
+          "redirect_uris",
+          "grant_types"
+        ],
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "response_types": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_method": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -4859,6 +5367,78 @@
           "tokenUrl": {
             "type": "string",
             "description": "The token URL."
+          }
+        }
+      },
+      "DeviceCodeResponseSchema": {
+        "type": "object",
+        "description": "OpenAPI schema mirror for [`assistant_auth::oauth2::device::DeviceCodeResponse`].",
+        "required": [
+          "device_code",
+          "user_code",
+          "verification_uri",
+          "interval",
+          "expires_in"
+        ],
+        "properties": {
+          "device_code": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "interval": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "verification_uri": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceInitiateRequest": {
+        "type": "object",
+        "description": "POST /oauth/device request body.",
+        "required": [
+          "client_id"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DeviceVerifyForm": {
+        "type": "object",
+        "description": "Form fields for POST /oauth/device/verify.",
+        "required": [
+          "user_code",
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email for authentication."
+          },
+          "password": {
+            "type": "string",
+            "description": "Password for authentication."
+          },
+          "user_code": {
+            "type": "string"
           }
         }
       },
@@ -5229,6 +5809,24 @@
               "null"
             ],
             "description": "URL to the OAuth2 authorization server metadata (RFC 8414)."
+          }
+        }
+      },
+      "OAuthErrorResponse": {
+        "type": "object",
+        "description": "OAuth2 error response — OpenAPI schema type.",
+        "required": [
+          "error",
+          "error_description"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error code (e.g. `invalid_grant`, `invalid_request`)."
+          },
+          "error_description": {
+            "type": "string",
+            "description": "Human-readable description of the error."
           }
         }
       },
@@ -5637,6 +6235,30 @@
           }
         }
       },
+      "RevokeRequest": {
+        "type": "object",
+        "description": "POST /oauth/revoke request body.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "client_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "token_type_hint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Role": {
         "type": "string",
         "description": "Defines the sender of a message in A2A protocol communication.",
@@ -5853,6 +6475,66 @@
           "voice_send": {
             "type": "boolean",
             "description": "Whether the server can accept voice messages (STT configured)."
+          }
+        }
+      },
+      "ServerMetadata": {
+        "type": "object",
+        "description": "RFC 8414 authorization server metadata.",
+        "required": [
+          "issuer",
+          "authorization_endpoint",
+          "token_endpoint",
+          "registration_endpoint",
+          "revocation_endpoint",
+          "device_authorization_endpoint",
+          "response_types_supported",
+          "grant_types_supported",
+          "token_endpoint_auth_methods_supported",
+          "code_challenge_methods_supported"
+        ],
+        "properties": {
+          "authorization_endpoint": {
+            "type": "string"
+          },
+          "code_challenge_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "device_authorization_endpoint": {
+            "type": "string"
+          },
+          "grant_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "registration_endpoint": {
+            "type": "string"
+          },
+          "response_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revocation_endpoint": {
+            "type": "string"
+          },
+          "token_endpoint": {
+            "type": "string"
+          },
+          "token_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -6443,6 +7125,86 @@
           "value": {
             "type": "number",
             "format": "double"
+          }
+        }
+      },
+      "TokenRequest": {
+        "type": "object",
+        "description": "Standard OAuth2 token request (form-encoded per RFC 6749 §4.1.3).",
+        "required": [
+          "grant_type"
+        ],
+        "properties": {
+          "client_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Authorization code (for `authorization_code` grant)."
+          },
+          "code_verifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "PKCE verifier (RFC 7636)."
+          },
+          "device_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Device code (for device code grant)."
+          },
+          "grant_type": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refresh_token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Refresh token (for `refresh_token` grant)."
+          }
+        }
+      },
+      "TokenResponse": {
+        "type": "object",
+        "description": "Standard OAuth2 token response.",
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in"
+        ],
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "refresh_token": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "token_type": {
+            "type": "string"
           }
         }
       },
@@ -7105,6 +7867,10 @@
     {
       "name": "web-push",
       "description": "Web Push — VAPID key retrieval and push subscription management for PWA notifications"
+    },
+    {
+      "name": "oauth",
+      "description": "OAuth2 — authorization, token exchange, device code flow, client registration, and server metadata"
     }
   ]
 }

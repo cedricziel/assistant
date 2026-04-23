@@ -4,6 +4,7 @@ pub(crate) mod audio_store;
 pub mod auth;
 pub(crate) mod backends;
 mod flutter_assets;
+mod oauth;
 mod openapi;
 pub(crate) mod push;
 
@@ -185,6 +186,14 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let storage = Arc::new(StorageLayer::new(&db_path).await?);
+
+    // -- Org-level storage (users, spaces, auth state) --------------------------
+    let org_db_path = db_path.with_file_name("org.db");
+    let org_storage = Arc::new(
+        assistant_storage::OrgStorageLayer::new(&org_db_path)
+            .await
+            .context("Failed to open org.db")?,
+    );
 
     // -- Load assistant config from ~/.assistant/config.toml --------------------
     let mut config = match assistant_core::default_config_path() {
@@ -641,6 +650,42 @@ async fn run_with_args(args: Args) -> Result<()> {
         vapid_public_key: Arc::new(vapid_public_key),
     });
 
+    // -- OAuth2 state -------------------------------------------------------
+    let oauth_state = {
+        use assistant_auth::jwt::{JwtKeyPair, JwtManager};
+        use assistant_auth::oauth2::clients::ClientRegistrar;
+        use assistant_auth::oauth2::device::DeviceCodeManager;
+        use assistant_auth::oauth2::server::OAuth2Server;
+
+        let jwt_key_pair = JwtKeyPair::generate().context("Failed to generate JWT signing key")?;
+        let jwt_manager = Arc::new(JwtManager::new(
+            jwt_key_pair,
+            base_url.clone(),
+            base_url.clone(),
+        ));
+
+        let oauth2_server = Arc::new(OAuth2Server::new(
+            Arc::new(org_storage.auth_code_store()),
+            Arc::new(org_storage.refresh_token_store()),
+        ));
+
+        let client_registrar = Arc::new(ClientRegistrar::new(Arc::new(org_storage.client_store())));
+
+        let device_manager = Arc::new(DeviceCodeManager::new(
+            Arc::new(org_storage.device_code_store()),
+            format!("{base_url}/oauth/device/verify"),
+        ));
+
+        oauth::OAuthState {
+            oauth2_server,
+            jwt_manager,
+            client_registrar,
+            device_manager,
+            org_storage: org_storage.clone(),
+            issuer: base_url.clone(),
+        }
+    };
+
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
         .route("/health", get(health))
@@ -652,7 +697,9 @@ async fn run_with_args(args: Args) -> Result<()> {
         // Public workflow webhook trigger ingress.
         .merge(api::workflows::workflow_public_router().with_state(workflows_api_state.clone()))
         // A2A agent card is public per spec — callers need it to discover auth.
-        .merge(a2a::public_router().with_state(a2a_state.clone()));
+        .merge(a2a::public_router().with_state(a2a_state.clone()))
+        // OAuth2 endpoints (public — clients need these for auth flows).
+        .merge(oauth::oauth_router().with_state(oauth_state));
 
     // -- Router: protected routes (auth required) --------------------------
     let protected_routes = Router::new()

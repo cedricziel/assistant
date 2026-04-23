@@ -27,6 +27,8 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(AuthorizationCodeOAuthFlow.serializer)
       ..add(CancelTaskRequest.serializer)
       ..add(ClientCredentialsOAuthFlow.serializer)
+      ..add(ClientInfoSchema.serializer)
+      ..add(ClientRegistrationSchema.serializer)
       ..add(CommandArgResponse.serializer)
       ..add(CommandDefResponse.serializer)
       ..add(CommandEventResponse.serializer)
@@ -38,6 +40,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(CreateTaskPushNotificationConfigRequest.serializer)
       ..add(CreateWebhookRequest.serializer)
       ..add(DeviceCodeOAuthFlow.serializer)
+      ..add(DeviceCodeResponseSchema.serializer)
       ..add(ExecuteCommandRequest.serializer)
       ..add(HttpAuthSecurityScheme.serializer)
       ..add(ImplicitOAuthFlow.serializer)
@@ -50,6 +53,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(ModelUsageResponse.serializer)
       ..add(MutualTlsSecurityScheme.serializer)
       ..add(OAuth2SecurityScheme.serializer)
+      ..add(OAuthErrorResponse.serializer)
       ..add(OAuthFlows.serializer)
       ..add(OpenIdConnectSecurityScheme.serializer)
       ..add(PasswordOAuthFlow.serializer)
@@ -70,6 +74,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SendMessageRequest.serializer)
       ..add(SendMessageResponse.serializer)
       ..add(ServerCapabilities.serializer)
+      ..add(ServerMetadata.serializer)
       ..add(SetActivePersonaRequest.serializer)
       ..add(SetSkillAccessModeRequest.serializer)
       ..add(SkillDetail.serializer)
@@ -96,6 +101,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(TaskStatus.serializer)
       ..add(TaskStatusUpdateEvent.serializer)
       ..add(TimeSeriesResponse.serializer)
+      ..add(TokenResponse.serializer)
       ..add(ToolCallSummary.serializer)
       ..add(ToolUsageResponse.serializer)
       ..add(TraceDetailResponse.serializer)
@@ -197,6 +203,12 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
           const FullType(
               BuiltList, const [const FullType(SecurityRequirement)]),
           () => ListBuilder<SecurityRequirement>())
@@ -223,9 +235,30 @@ Serializers _$serializers = (Serializers().toBuilder()
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
       ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
           const FullType(
               BuiltList, const [const FullType(SecurityRequirement)]),
           () => ListBuilder<SecurityRequirement>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())

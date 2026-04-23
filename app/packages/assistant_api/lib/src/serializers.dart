@@ -34,6 +34,8 @@ import 'package:assistant_api/src/model/authentication_info.dart';
 import 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/cancel_task_request.dart';
 import 'package:assistant_api/src/model/client_credentials_o_auth_flow.dart';
+import 'package:assistant_api/src/model/client_info_schema.dart';
+import 'package:assistant_api/src/model/client_registration_schema.dart';
 import 'package:assistant_api/src/model/command_arg_response.dart';
 import 'package:assistant_api/src/model/command_def_response.dart';
 import 'package:assistant_api/src/model/command_event_response.dart';
@@ -45,6 +47,7 @@ import 'package:assistant_api/src/model/create_skill_request.dart';
 import 'package:assistant_api/src/model/create_task_push_notification_config_request.dart';
 import 'package:assistant_api/src/model/create_webhook_request.dart';
 import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
+import 'package:assistant_api/src/model/device_code_response_schema.dart';
 import 'package:assistant_api/src/model/execute_command_request.dart';
 import 'package:assistant_api/src/model/http_auth_security_scheme.dart';
 import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
@@ -57,6 +60,7 @@ import 'package:assistant_api/src/model/model_part.dart';
 import 'package:assistant_api/src/model/model_usage_response.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
 import 'package:assistant_api/src/model/o_auth2_security_scheme.dart';
+import 'package:assistant_api/src/model/o_auth_error_response.dart';
 import 'package:assistant_api/src/model/o_auth_flows.dart';
 import 'package:assistant_api/src/model/open_id_connect_security_scheme.dart';
 import 'package:assistant_api/src/model/password_o_auth_flow.dart';
@@ -77,6 +81,7 @@ import 'package:assistant_api/src/model/send_message_configuration.dart';
 import 'package:assistant_api/src/model/send_message_request.dart';
 import 'package:assistant_api/src/model/send_message_response.dart';
 import 'package:assistant_api/src/model/server_capabilities.dart';
+import 'package:assistant_api/src/model/server_metadata.dart';
 import 'package:assistant_api/src/model/set_active_persona_request.dart';
 import 'package:assistant_api/src/model/set_skill_access_mode_request.dart';
 import 'package:assistant_api/src/model/skill_detail.dart';
@@ -103,6 +108,7 @@ import 'package:assistant_api/src/model/task_state.dart';
 import 'package:assistant_api/src/model/task_status.dart';
 import 'package:assistant_api/src/model/task_status_update_event.dart';
 import 'package:assistant_api/src/model/time_series_response.dart';
+import 'package:assistant_api/src/model/token_response.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
 import 'package:assistant_api/src/model/tool_usage_response.dart';
 import 'package:assistant_api/src/model/trace_detail_response.dart';
@@ -148,6 +154,8 @@ part 'serializers.g.dart';
   AuthorizationCodeOAuthFlow,
   CancelTaskRequest,
   ClientCredentialsOAuthFlow,
+  ClientInfoSchema,
+  ClientRegistrationSchema,
   CommandArgResponse,
   CommandDefResponse,
   CommandEventResponse,
@@ -159,6 +167,7 @@ part 'serializers.g.dart';
   CreateTaskPushNotificationConfigRequest,
   CreateWebhookRequest,
   DeviceCodeOAuthFlow,
+  DeviceCodeResponseSchema,
   ExecuteCommandRequest,
   HttpAuthSecurityScheme,
   ImplicitOAuthFlow,
@@ -171,6 +180,7 @@ part 'serializers.g.dart';
   ModelUsageResponse,
   MutualTlsSecurityScheme,
   OAuth2SecurityScheme,
+  OAuthErrorResponse,
   OAuthFlows,
   OpenIdConnectSecurityScheme,
   PasswordOAuthFlow,
@@ -191,6 +201,7 @@ part 'serializers.g.dart';
   SendMessageRequest,
   SendMessageResponse,
   ServerCapabilities,
+  ServerMetadata,
   SetActivePersonaRequest,
   SetSkillAccessModeRequest,
   SkillDetail,
@@ -217,6 +228,7 @@ part 'serializers.g.dart';
   TaskStatus,
   TaskStatusUpdateEvent,
   TimeSeriesResponse,
+  TokenResponse,
   ToolCallSummary,
   ToolUsageResponse,
   TraceDetailResponse,
