@@ -1,116 +1,154 @@
-//! Token-based authentication for the web UI.
+//! Authentication middleware for the web UI.
 //!
-//! Provides a login page (cookie-based sessions for browsers) and Bearer token
-//! validation for A2A / API callers.  The server **requires** an auth token to
-//! start — see [`AuthConfig`] and the `--auth-token` / `ASSISTANT_WEB_TOKEN`
-//! environment variable.
+//! Resolves an [`AuthContext`] from incoming requests using (in order):
+//!
+//! 1. `Authorization: Bearer <JWT>` — validated by [`JwtManager`]
+//! 2. Session cookie containing a JWT
+//! 3. `Authorization: Bearer <api_key>` — resolved via [`ApiKeyStore`]
+//! 4. `Authorization: Bearer <legacy_token>` — backward-compatible static token
+//!
+//! The resolved [`AuthContext`] is injected as an [`Extension`] so all
+//! downstream handlers can extract it.
+//!
+//! The legacy token (`ASSISTANT_WEB_TOKEN`) is supported as a migration bridge:
+//! it maps to a default org-admin context so existing single-user deployments
+//! continue to work without reconfiguration.
 
 use std::sync::Arc;
 
 use axum::Form;
 use axum::body::Body;
-use axum::extract::{Extension, Request};
+use axum::extract::{Request, State};
 use axum::http::header::{COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
-use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
-use sha2::Sha256;
+
+use assistant_auth::api_keys::{self, ApiKeyStore};
+use assistant_auth::jwt::JwtManager;
+use assistant_auth::middleware::{AuthState, RequireScope};
+use assistant_core::auth::AuthContext;
+use assistant_core::identity::{Action, ResourceKind, SpaceId};
 
 // -- Configuration ----------------------------------------------------------
 
-/// Session cookie name.  `__Host-` prefix is only valid over HTTPS; since
-/// the UI commonly runs over plain HTTP on localhost we use a simpler name.
+/// Session cookie name.
 const SESSION_COOKIE: &str = "assistant_session";
 
-/// HMAC message used to derive the session token from the auth token.
-const SESSION_HMAC_MSG: &[u8] = b"assistant-web-session-v1";
-
-/// Shared authentication configuration injected via [`Extension`].
+/// Shared authentication configuration for the web UI.
+///
+/// Wraps [`AuthState`] (JWT + API key + legacy token resolution) and adds
+/// web-specific settings like cookie attributes.
 #[derive(Clone)]
-pub struct AuthConfig {
-    /// The raw auth token (for Bearer comparison).
-    token: Arc<String>,
-    /// Pre-computed HMAC-SHA256 hex digest used as the session cookie value.
-    session_value: Arc<String>,
+pub struct WebAuthConfig {
+    /// Auth state for token resolution (JWT, API key, legacy).
+    pub auth_state: AuthState,
     /// When `true`, the `Secure` attribute is added to session cookies.
-    /// Should be `true` whenever the server is *not* bound to a loopback
-    /// address (cookies must only travel over HTTPS in that case).
-    secure_cookie: bool,
+    pub secure_cookie: bool,
 }
 
-impl AuthConfig {
-    /// Create a new [`AuthConfig`] from the raw token string.
+impl WebAuthConfig {
+    /// Create a new [`WebAuthConfig`].
     ///
-    /// Set `secure_cookie` to `true` when the server binds to a non-loopback
-    /// address so that the session cookie gets the `Secure` attribute.
-    pub fn new(token: String, secure_cookie: bool) -> Self {
-        let session_value = compute_session_value(&token);
+    /// - `jwt_manager`: signs and validates JWTs.
+    /// - `api_key_store`: resolves `ask_live_` API keys.
+    /// - `legacy_token`: optional backward-compatible static token.
+    /// - `legacy_context`: [`AuthContext`] returned when the legacy token matches.
+    /// - `secure_cookie`: set `true` for non-loopback addresses (HTTPS required).
+    pub fn new(
+        jwt_manager: Arc<JwtManager>,
+        api_key_store: Arc<dyn ApiKeyStore>,
+        legacy_token: Option<String>,
+        legacy_context: Option<AuthContext>,
+        secure_cookie: bool,
+    ) -> Self {
         Self {
-            token: Arc::new(token),
-            session_value: Arc::new(session_value),
+            auth_state: AuthState {
+                jwt_manager,
+                api_key_store,
+                legacy_token,
+                legacy_context,
+            },
             secure_cookie,
         }
     }
 }
 
-// -- Session token derivation -----------------------------------------------
+// -- Token resolution -------------------------------------------------------
 
-type HmacSha256 = Hmac<Sha256>;
-
-/// Derive a stable session cookie value from the auth token using HMAC-SHA256.
+/// Try to resolve an [`AuthContext`] from a bearer token string.
 ///
-/// The cookie never contains the raw token — only this derived value.
-fn compute_session_value(auth_token: &str) -> String {
-    let mut mac =
-        HmacSha256::new_from_slice(auth_token.as_bytes()).expect("HMAC accepts any key length");
-    mac.update(SESSION_HMAC_MSG);
-    hex::encode(mac.finalize().into_bytes())
-}
-
-/// Constant-time comparison of two equal-length byte slices.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
+/// Resolution order: JWT → API key → legacy token.
+async fn resolve_bearer(auth: &AuthState, token: &str) -> Option<AuthContext> {
+    // 1. Try JWT.
+    if let Ok(ctx) = auth.jwt_manager.validate_to_context(token) {
+        return Some(ctx);
     }
-    a.iter()
-        .zip(b.iter())
-        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-        == 0
+
+    // 2. Try API key.
+    if token.starts_with("ask_live_")
+        && let Ok(ctx) = api_keys::resolve_key(token, auth.api_key_store.as_ref()).await
+    {
+        return Some(ctx);
+    }
+
+    // 3. Try legacy token.
+    if let Some(ref legacy) = auth.legacy_token
+        && token == legacy
+        && let Some(ref ctx) = auth.legacy_context
+    {
+        return Some(ctx.clone());
+    }
+
+    None
 }
 
 // -- Middleware --------------------------------------------------------------
 
 /// Axum middleware that enforces authentication on every matched route.
 ///
-/// Accepts either:
-/// - A valid session cookie (browser flow), or
-/// - An `Authorization: Bearer <token>` header (API / A2A flow).
+/// Resolves an [`AuthContext`] from Bearer tokens or session cookies and
+/// inserts it as an [`Extension<AuthContext>`] for downstream handlers.
 ///
 /// Unauthenticated browser requests are redirected to `/login`.
 /// Unauthenticated API requests receive `401 Unauthorized`.
 pub async fn require_auth(
-    Extension(auth): Extension<AuthConfig>,
-    request: Request,
+    State(config): State<WebAuthConfig>,
+    mut request: Request,
     next: Next,
 ) -> Response {
-    // 1. Check session cookie.
-    if let Some(cookie_header) = request.headers().get(COOKIE)
-        && let Ok(cookies) = cookie_header.to_str()
-        && extract_cookie(cookies, SESSION_COOKIE)
-            .map(|v| constant_time_eq(v.as_bytes(), auth.session_value.as_bytes()))
-            .unwrap_or(false)
+    let auth = config.auth_state.clone();
+
+    // Extract bearer token and session cookie JWT before any async work,
+    // so we hold only owned values across .await points.
+    let bearer_token: Option<String> = request
+        .headers()
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|t| t.trim().to_string());
+
+    let cookie_jwt: Option<String> = request
+        .headers()
+        .get(COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|cookies| extract_cookie(cookies, SESSION_COOKIE))
+        .map(|s| s.to_string());
+
+    // 1. Check Authorization: Bearer <token>.
+    if let Some(ref token) = bearer_token
+        && let Some(ctx) = resolve_bearer(&auth, token).await
     {
+        request.extensions_mut().insert(ctx);
         return next.run(request).await;
     }
 
-    // 2. Check Authorization: Bearer <token>.
-    if let Some(auth_header) = request.headers().get("authorization")
-        && let Ok(value) = auth_header.to_str()
-        && let Some(bearer) = value.strip_prefix("Bearer ")
-        && constant_time_eq(bearer.trim().as_bytes(), auth.token.as_bytes())
+    // 2. Check session cookie for a JWT.
+    if let Some(ref jwt) = cookie_jwt
+        && let Ok(ctx) = auth.jwt_manager.validate_to_context(jwt)
     {
+        request.extensions_mut().insert(ctx);
         return next.run(request).await;
     }
 
@@ -123,14 +161,12 @@ pub async fn require_auth(
         .unwrap_or(false);
 
     if accepts_html {
-        // Redirect browsers to the login page.
         Response::builder()
             .status(StatusCode::SEE_OTHER)
             .header(LOCATION, "/login")
             .body(Body::empty())
             .unwrap()
     } else {
-        // Return 401 for API callers.
         Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header("WWW-Authenticate", "Bearer")
@@ -187,7 +223,7 @@ pub async fn require_same_origin_mutation(request: Request, next: Next) -> Respo
             .unwrap();
     };
 
-    if !constant_time_eq(origin_host.as_bytes(), host.as_bytes()) {
+    if !origin_host.eq_ignore_ascii_case(host) {
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Body::from("Forbidden"))
@@ -195,6 +231,116 @@ pub async fn require_same_origin_mutation(request: Request, next: Next) -> Respo
     }
 
     next.run(request).await
+}
+
+// -- Permission guard -------------------------------------------------------
+
+/// Tower [`Layer`] that checks whether the authenticated user has the required
+/// scope (space + resource + action) before passing the request to the inner
+/// service.
+///
+/// Must be applied **after** [`require_auth`] in the middleware stack so that
+/// `Extension<AuthContext>` is present in the request extensions.
+///
+/// Returns 401 if no [`AuthContext`] is found, 403 if the scope check fails.
+///
+/// # Usage
+///
+/// ```ignore
+/// Router::new()
+///     .route("/personas", get(list))
+///     .route_layer(require_scope_layer(
+///         SpaceId::from("eng"),
+///         ResourceKind::Personas,
+///         Action::Read,
+///     ))
+/// ```
+pub fn require_scope_layer(
+    space_id: SpaceId,
+    resource: ResourceKind,
+    action: Action,
+) -> RequireScopeLayer {
+    RequireScopeLayer {
+        scope: RequireScope {
+            space_id,
+            resource,
+            action,
+            target_id: None,
+        },
+    }
+}
+
+/// A [`tower::Layer`] produced by [`require_scope_layer`].
+#[derive(Clone)]
+pub struct RequireScopeLayer {
+    scope: RequireScope,
+}
+
+impl<S> tower::Layer<S> for RequireScopeLayer {
+    type Service = RequireScopeService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RequireScopeService {
+            inner,
+            scope: self.scope.clone(),
+        }
+    }
+}
+
+/// Tower [`Service`] that enforces a scope check before forwarding to the
+/// inner service.
+#[derive(Clone)]
+pub struct RequireScopeService<S> {
+    inner: S,
+    scope: RequireScope,
+}
+
+impl<S> tower::Service<Request> for RequireScopeService<S>
+where
+    S: tower::Service<Request, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, S::Error>> + Send>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: Request) -> Self::Future {
+        let scope = self.scope.clone();
+        let mut inner = self.inner.clone();
+        // Swap so the ready inner is used (standard tower pattern).
+        std::mem::swap(&mut self.inner, &mut inner);
+
+        Box::pin(async move {
+            let Some(ctx) = request.extensions().get::<AuthContext>() else {
+                return Ok(Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .header("WWW-Authenticate", "Bearer")
+                    .body(Body::from("Unauthorized"))
+                    .unwrap());
+            };
+
+            if let Err(err) = scope.check(ctx) {
+                return Ok((
+                    StatusCode::FORBIDDEN,
+                    format!(
+                        "insufficient permissions: requires {}:{} in space {}",
+                        err.resource, err.action, err.space_id,
+                    ),
+                )
+                    .into_response());
+            }
+
+            inner.call(request).await
+        })
+    }
 }
 
 // -- Login page -------------------------------------------------------------
@@ -250,38 +396,56 @@ pub async fn login_page() -> Html<String> {
     login_html(None)
 }
 
-/// `POST /login` — validate the submitted token and set a session cookie.
+/// `POST /login` — validate the submitted token and set a session cookie (JWT).
 #[derive(Deserialize)]
 pub(crate) struct LoginForm {
     token: String,
 }
 
 pub(crate) async fn login_submit(
-    Extension(auth): Extension<AuthConfig>,
+    State(config): State<WebAuthConfig>,
     Form(form): Form<LoginForm>,
 ) -> Response {
-    if constant_time_eq(form.token.as_bytes(), auth.token.as_bytes()) {
-        let secure = if auth.secure_cookie { "; Secure" } else { "" };
-        let cookie = format!(
-            "{}={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800{}",
-            SESSION_COOKIE, auth.session_value, secure,
-        );
-        Response::builder()
-            .status(StatusCode::SEE_OTHER)
-            .header(LOCATION, "/")
-            .header(SET_COOKIE, cookie)
-            .body(Body::empty())
-            .unwrap()
-    } else {
-        login_html(Some("Invalid token.")).into_response()
+    let auth = &config.auth_state;
+
+    // Resolve the token (could be a legacy token, JWT, or API key).
+    let ctx = resolve_bearer(auth, &form.token).await;
+
+    match ctx {
+        Some(ctx) => {
+            // Sign a session JWT for the cookie using the resolved context's identity.
+            let display = if ctx.email.is_empty() {
+                ctx.user_id.to_string()
+            } else {
+                ctx.email.clone()
+            };
+            let jwt = match auth.jwt_manager.sign(&ctx, ctx.org_id.as_ref(), &display) {
+                Ok(t) => t,
+                Err(_) => return login_html(Some("Internal error.")).into_response(),
+            };
+
+            let ttl = auth.jwt_manager.access_ttl_secs();
+            let secure = if config.secure_cookie { "; Secure" } else { "" };
+            let cookie = format!(
+                "{}={}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}{}",
+                SESSION_COOKIE, jwt, ttl, secure,
+            );
+            Response::builder()
+                .status(StatusCode::SEE_OTHER)
+                .header(LOCATION, "/")
+                .header(SET_COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap()
+        }
+        None => login_html(Some("Invalid token.")).into_response(),
     }
 }
 
 /// `POST /logout` — clear the session cookie and redirect to login.
-pub async fn logout(Extension(auth): Extension<AuthConfig>) -> Response {
-    let secure = if auth.secure_cookie { "; Secure" } else { "" };
+pub async fn logout(State(config): State<WebAuthConfig>) -> Response {
+    let secure = if config.secure_cookie { "; Secure" } else { "" };
     let cookie = format!(
-        "{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{}",
+        "{}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{}",
         SESSION_COOKIE, secure,
     );
     Response::builder()
@@ -323,28 +487,742 @@ fn parse_host_from_url(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use axum::Extension;
+    use axum::Router;
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    use assistant_auth::api_keys::InMemoryApiKeyStore;
+    use assistant_auth::jwt::JwtKeyPair;
+    use assistant_core::identity::{OrgId, Role, Scope, SpaceId, UserId};
+
     use super::*;
 
-    #[test]
-    fn test_compute_session_value_deterministic() {
-        let a = compute_session_value("my-secret");
-        let b = compute_session_value("my-secret");
-        assert_eq!(a, b, "same token should produce same session value");
+    /// Build a [`WebAuthConfig`] backed by in-memory stores with a shared
+    /// JWT secret so we can sign tokens in tests.
+    fn test_config() -> (WebAuthConfig, Arc<JwtManager>) {
+        let secret = b"test-secret-that-is-long-enough!!";
+        let kp_state = JwtKeyPair::from_secret(secret);
+        let kp_sign = JwtKeyPair::from_secret(secret);
+
+        let jwt_state = Arc::new(JwtManager::new(
+            kp_state,
+            "https://test.local".into(),
+            "https://test.local".into(),
+        ));
+        let jwt_sign = Arc::new(JwtManager::new(
+            kp_sign,
+            "https://test.local".into(),
+            "https://test.local".into(),
+        ));
+
+        let config = WebAuthConfig::new(
+            jwt_state,
+            Arc::new(InMemoryApiKeyStore::new()),
+            Some("legacy-token-123".into()),
+            Some(make_admin_context()),
+            false,
+        );
+
+        (config, jwt_sign)
     }
 
-    #[test]
-    fn test_compute_session_value_differs_for_different_tokens() {
-        let a = compute_session_value("token-a");
-        let b = compute_session_value("token-b");
-        assert_ne!(a, b);
+    fn make_admin_context() -> AuthContext {
+        let mut space_roles = HashMap::new();
+        space_roles.insert(SpaceId::from("default"), Role::OrgAdmin);
+        AuthContext {
+            user_id: UserId::from("admin"),
+            org_id: OrgId::from("default"),
+            email: "admin@local".into(),
+            space_roles,
+            scopes: vec![Scope::new(
+                assistant_core::identity::ResourceKind::Org,
+                assistant_core::identity::Action::Manage,
+            )],
+            client_id: "legacy".into(),
+        }
     }
 
-    #[test]
-    fn test_constant_time_eq() {
-        assert!(constant_time_eq(b"hello", b"hello"));
-        assert!(!constant_time_eq(b"hello", b"world"));
-        assert!(!constant_time_eq(b"short", b"longer"));
+    fn make_user_context() -> AuthContext {
+        let mut space_roles = HashMap::new();
+        space_roles.insert(SpaceId::from("eng"), Role::Member);
+        AuthContext {
+            user_id: UserId::from("alice"),
+            org_id: OrgId::from("acme"),
+            email: "alice@acme.com".into(),
+            space_roles,
+            scopes: vec![
+                Scope::new(ResourceKind::Conversations, Action::Read),
+                Scope::new(ResourceKind::Conversations, Action::Write),
+                Scope::new(ResourceKind::Personas, Action::Read),
+            ],
+            client_id: "webui".into(),
+        }
     }
+
+    /// Build a test app that returns the extracted AuthContext user_id.
+    fn test_app(config: WebAuthConfig) -> Router {
+        async fn whoami(Extension(ctx): Extension<AuthContext>) -> String {
+            ctx.user_id.to_string()
+        }
+
+        Router::new()
+            .route("/whoami", get(whoami))
+            .route_layer(axum::middleware::from_fn_with_state(config, require_auth))
+    }
+
+    // -- Tests: Bearer JWT ---------------------------------------------------
+
+    #[tokio::test]
+    async fn bearer_jwt_produces_auth_context() {
+        let (config, jwt_sign) = test_config();
+        let app = test_app(config);
+
+        let ctx = make_user_context();
+        let token = jwt_sign.sign(&ctx, "acme", "Alice").unwrap();
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK, "valid JWT should pass auth");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            "alice",
+            "AuthContext should contain the JWT user_id"
+        );
+    }
+
+    // -- Tests: Legacy token -------------------------------------------------
+
+    #[tokio::test]
+    async fn bearer_legacy_token_produces_admin_context() {
+        let (config, _jwt_sign) = test_config();
+        let app = test_app(config);
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("authorization", "Bearer legacy-token-123")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "legacy token should pass auth"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            "admin",
+            "legacy token should map to admin context"
+        );
+    }
+
+    // -- Tests: API key ------------------------------------------------------
+
+    #[tokio::test]
+    async fn bearer_api_key_produces_auth_context() {
+        let (config, _jwt_sign) = test_config();
+
+        // Store an API key in the in-memory store.
+        let key = assistant_auth::api_keys::generate_key();
+        let mut space_roles = HashMap::new();
+        space_roles.insert(SpaceId::from("eng"), Role::Member);
+        let record = assistant_auth::api_keys::ApiKeyRecord {
+            id: "key_test".into(),
+            user_id: UserId::from("bob"),
+            name: "Test Key".into(),
+            key_hash: key.key_hash.clone(),
+            key_prefix: key.key_prefix.clone(),
+            org_id: OrgId::from("acme"),
+            space_roles,
+            scopes: vec![],
+            expires_at: None,
+            created_at: chrono::Utc::now(),
+        };
+        config
+            .auth_state
+            .api_key_store
+            .store_key(record)
+            .await
+            .unwrap();
+
+        let app = test_app(config);
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("authorization", format!("Bearer {}", key.plaintext))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "valid API key should pass auth"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            "bob",
+            "API key should resolve to the key owner"
+        );
+    }
+
+    // -- Tests: Session cookie -----------------------------------------------
+
+    #[tokio::test]
+    async fn session_cookie_jwt_produces_auth_context() {
+        let (config, jwt_sign) = test_config();
+        let app = test_app(config);
+
+        let ctx = make_user_context();
+        let jwt = jwt_sign.sign(&ctx, "acme", "Alice").unwrap();
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("cookie", format!("{}={}", SESSION_COOKIE, jwt))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "valid session cookie JWT should pass auth"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            "alice",
+            "session cookie should resolve to JWT user"
+        );
+    }
+
+    // -- Tests: Unauthenticated requests ------------------------------------
+
+    #[tokio::test]
+    async fn missing_auth_returns_401_for_api() {
+        let (config, _jwt_sign) = test_config();
+        let app = test_app(config);
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "missing auth should return 401 for API requests"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_auth_redirects_browsers() {
+        let (config, _jwt_sign) = test_config();
+        let app = test_app(config);
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("accept", "text/html")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::SEE_OTHER,
+            "missing auth should redirect browsers"
+        );
+        assert_eq!(
+            resp.headers().get("location").unwrap().to_str().unwrap(),
+            "/login"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_bearer_returns_401() {
+        let (config, _jwt_sign) = test_config();
+        let app = test_app(config);
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("authorization", "Bearer invalid-garbage")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "invalid bearer should return 401"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_session_cookie_returns_401() {
+        let (config, _jwt_sign) = test_config();
+        let app = test_app(config);
+
+        // Sign a JWT with a different secret so it fails signature validation.
+        let other_kp = JwtKeyPair::from_secret(b"other-secret-that-is-long-enough");
+        let other_mgr = JwtManager::new(
+            other_kp,
+            "https://test.local".into(),
+            "https://test.local".into(),
+        );
+        let ctx = make_user_context();
+        let bad_jwt = other_mgr.sign(&ctx, "acme", "Alice").unwrap();
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("cookie", format!("{}={}", SESSION_COOKIE, bad_jwt))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "session cookie signed with wrong secret should return 401"
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_session_cookie_returns_401() {
+        // Build a JwtManager with a negative TTL so the token is already expired.
+        let kp = JwtKeyPair::from_secret(b"test-secret-key-for-unit-tests!");
+        let expired_mgr =
+            JwtManager::new(kp, "https://test.local".into(), "https://test.local".into())
+                .with_access_ttl(chrono::Duration::seconds(-120));
+
+        let ctx = make_user_context();
+        let expired_jwt = expired_mgr.sign(&ctx, "acme", "Alice").unwrap();
+
+        // The auth config uses the same secret so signature is valid, but the
+        // token is expired.
+        let verify_kp = JwtKeyPair::from_secret(b"test-secret-key-for-unit-tests!");
+        let verify_mgr = Arc::new(JwtManager::new(
+            verify_kp,
+            "https://test.local".into(),
+            "https://test.local".into(),
+        ));
+        let config = WebAuthConfig::new(
+            verify_mgr,
+            Arc::new(InMemoryApiKeyStore::new()),
+            None,
+            None,
+            false,
+        );
+        let app = test_app(config);
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("cookie", format!("{}={}", SESSION_COOKIE, expired_jwt))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "expired session cookie should return 401"
+        );
+    }
+
+    // -- Tests: RequireScope middleware ----------------------------------------
+
+    use assistant_core::identity::{Action, ResourceKind};
+
+    /// Build a test app with auth + scope check on a protected route.
+    fn scoped_app(
+        config: WebAuthConfig,
+        space: &str,
+        resource: ResourceKind,
+        action: Action,
+    ) -> Router {
+        async fn whoami(Extension(ctx): Extension<AuthContext>) -> String {
+            ctx.user_id.to_string()
+        }
+
+        Router::new()
+            .route("/protected", get(whoami))
+            .route_layer(require_scope_layer(SpaceId::from(space), resource, action))
+            .route_layer(axum::middleware::from_fn_with_state(config, require_auth))
+    }
+
+    #[tokio::test]
+    async fn scope_allows_admin() {
+        let (config, jwt_sign) = test_config();
+        let app = scoped_app(config, "any-space", ResourceKind::Users, Action::Manage);
+
+        let ctx = make_admin_context();
+        let token = jwt_sign.sign(&ctx, "default", "Admin").unwrap();
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/protected")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "org admin should bypass scope checks"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_allows_matching_permission() {
+        let (config, jwt_sign) = test_config();
+        let app = scoped_app(config, "eng", ResourceKind::Conversations, Action::Read);
+
+        // make_user_context has no scopes but has Member role in "eng" space.
+        // Member can read conversations.
+        let ctx = make_user_context();
+        let token = jwt_sign.sign(&ctx, "acme", "Alice").unwrap();
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/protected")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "member with matching space/resource/action should pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_denies_wrong_space() {
+        let (config, jwt_sign) = test_config();
+        let app = scoped_app(
+            config,
+            "marketing",
+            ResourceKind::Conversations,
+            Action::Read,
+        );
+
+        let ctx = make_user_context(); // only has "eng" space
+        let token = jwt_sign.sign(&ctx, "acme", "Alice").unwrap();
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/protected")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "wrong space should return 403"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_denies_insufficient_action() {
+        let (config, jwt_sign) = test_config();
+        let app = scoped_app(config, "eng", ResourceKind::Users, Action::Manage);
+
+        let ctx = make_user_context(); // Member in "eng", no manage scope
+        let token = jwt_sign.sign(&ctx, "acme", "Alice").unwrap();
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/protected")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "insufficient action should return 403"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_str = String::from_utf8_lossy(&body);
+        assert!(
+            body_str.contains("insufficient permissions"),
+            "403 body should explain the denial"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_returns_401_without_auth_context() {
+        // No auth middleware → no AuthContext extension → should 401
+        async fn whoami(Extension(ctx): Extension<AuthContext>) -> String {
+            ctx.user_id.to_string()
+        }
+
+        let app = Router::new()
+            .route("/protected", get(whoami))
+            .route_layer(require_scope_layer(
+                SpaceId::from("eng"),
+                ResourceKind::Conversations,
+                Action::Read,
+            ));
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/protected")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "missing AuthContext should return 401"
+        );
+    }
+
+    // -- Tests: CSRF (require_same_origin_mutation) ---------------------------
+
+    use axum::routing::post;
+
+    /// Build a test app with CSRF middleware on a POST endpoint.
+    fn csrf_app() -> Router {
+        async fn ok() -> &'static str {
+            "ok"
+        }
+
+        Router::new()
+            .route("/action", post(ok))
+            .route("/action", get(ok))
+            .route_layer(axum::middleware::from_fn(require_same_origin_mutation))
+    }
+
+    #[tokio::test]
+    async fn csrf_allows_safe_methods() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri("/action")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "GET should bypass CSRF check"
+        );
+    }
+
+    #[tokio::test]
+    async fn csrf_allows_bearer_auth() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/action")
+                    .header("authorization", "Bearer some-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "Bearer-authenticated POST should bypass CSRF check"
+        );
+    }
+
+    #[tokio::test]
+    async fn csrf_allows_matching_origin() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/action")
+                    .header("host", "example.com")
+                    .header("origin", "https://example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "POST with matching Origin should pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn csrf_blocks_mismatched_origin() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/action")
+                    .header("host", "example.com")
+                    .header("origin", "https://evil.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "POST with mismatched Origin should be blocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn csrf_allows_mixed_case_origin() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/action")
+                    .header("host", "Example.COM")
+                    .header("origin", "https://example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "POST with case-different but matching Origin should pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn csrf_blocks_missing_origin_on_mutation() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/action")
+                    .header("host", "example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "POST without Origin/Referer should be blocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn csrf_falls_back_to_referer() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/action")
+                    .header("host", "example.com")
+                    .header("referer", "https://example.com/page")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "POST with matching Referer (no Origin) should pass"
+        );
+    }
+
+    // -- Tests: Helpers (kept from original) ----------------------------------
 
     #[test]
     fn test_extract_cookie() {

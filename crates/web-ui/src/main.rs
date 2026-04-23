@@ -54,7 +54,7 @@ use utoipa::OpenApi as _;
 use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
 
-use auth::AuthConfig;
+use auth::WebAuthConfig;
 
 use a2a::agent_store::AgentStore;
 use a2a::handlers::{A2AState, build_default_agent_card};
@@ -73,8 +73,8 @@ struct Args {
     #[arg(long)]
     db_path: Option<PathBuf>,
 
-    /// Authentication token.  Falls back to ASSISTANT_WEB_TOKEN env var.
-    /// The server will refuse to start without a token.
+    /// Optional legacy authentication token.  Falls back to ASSISTANT_WEB_TOKEN env var.
+    /// When empty or absent the server starts without legacy-token auth.
     #[arg(long, env = "ASSISTANT_WEB_TOKEN")]
     auth_token: Option<String>,
 
@@ -163,22 +163,15 @@ async fn run_with_args(args: Args) -> Result<()> {
         return Ok(());
     }
 
-    // -- Auth token (required) -----------------------------------------------
-    let auth_token = match args.auth_token.map(|t| t.trim().to_string()) {
-        Some(t) if !t.is_empty() => t,
-        _ => {
-            anyhow::bail!(
-                "No authentication token configured.\n\
-                 Set --auth-token <TOKEN> or the ASSISTANT_WEB_TOKEN environment variable.\n\
-                 The web UI refuses to start without authentication."
-            );
-        }
-    };
+    // -- Auth token (legacy, optional) -----------------------------------------
+    let legacy_token = args
+        .auth_token
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
 
-    // Parse listen address early so we can pass `is_loopback` to AuthConfig.
+    // Parse listen address early so we can determine cookie security.
     let addr: SocketAddr = args.listen.parse()?;
     let secure_cookie = !addr.ip().is_loopback() && !args.no_secure_cookie;
-    let auth_config = AuthConfig::new(auth_token, secure_cookie);
 
     let db_path = match args.db_path.or_else(default_db_path) {
         Some(p) => p,
@@ -650,19 +643,23 @@ async fn run_with_args(args: Args) -> Result<()> {
         vapid_public_key: Arc::new(vapid_public_key),
     });
 
-    // -- OAuth2 state -------------------------------------------------------
-    let oauth_state = {
+    // -- JWT + OAuth2 state ---------------------------------------------------
+    let jwt_manager = {
         use assistant_auth::jwt::{JwtKeyPair, JwtManager};
-        use assistant_auth::oauth2::clients::ClientRegistrar;
-        use assistant_auth::oauth2::device::DeviceCodeManager;
-        use assistant_auth::oauth2::server::OAuth2Server;
-
-        let jwt_key_pair = JwtKeyPair::generate().context("Failed to generate JWT signing key")?;
-        let jwt_manager = Arc::new(JwtManager::new(
+        let jwt_secret_path = db_path.with_file_name("jwt_secret");
+        let jwt_key_pair = JwtKeyPair::load_or_generate(&jwt_secret_path)
+            .context("Failed to load or generate JWT signing key")?;
+        Arc::new(JwtManager::new(
             jwt_key_pair,
             base_url.clone(),
             base_url.clone(),
-        ));
+        ))
+    };
+
+    let oauth_state = {
+        use assistant_auth::oauth2::clients::ClientRegistrar;
+        use assistant_auth::oauth2::device::DeviceCodeManager;
+        use assistant_auth::oauth2::server::OAuth2Server;
 
         let oauth2_server = Arc::new(OAuth2Server::new(
             Arc::new(org_storage.auth_code_store()),
@@ -678,13 +675,37 @@ async fn run_with_args(args: Args) -> Result<()> {
 
         oauth::OAuthState {
             oauth2_server,
-            jwt_manager,
+            jwt_manager: jwt_manager.clone(),
             client_registrar,
             device_manager,
             org_storage: org_storage.clone(),
             issuer: base_url.clone(),
+            secure_cookie,
         }
     };
+
+    // -- Auth config (JWT + API key + legacy token) --------------------------
+    let legacy_context = legacy_token.as_ref().map(|_| {
+        use assistant_core::auth::AuthContext;
+        use assistant_core::identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
+        let mut space_roles = std::collections::HashMap::new();
+        space_roles.insert(SpaceId::from("default"), Role::OrgAdmin);
+        AuthContext {
+            user_id: UserId::from("admin"),
+            org_id: OrgId::from("default"),
+            email: String::new(),
+            space_roles,
+            scopes: vec![Scope::new(ResourceKind::Org, Action::Manage)],
+            client_id: "legacy".into(),
+        }
+    });
+    let auth_config = WebAuthConfig::new(
+        jwt_manager,
+        Arc::new(assistant_auth::api_keys::InMemoryApiKeyStore::new()),
+        legacy_token,
+        legacy_context,
+        secure_cookie,
+    );
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
@@ -692,6 +713,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         .route("/ready", get(ready))
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
+        .with_state(auth_config.clone())
         // OpenAPI spec + Swagger UI (public — clients need the spec to discover auth).
         .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", openapi::ApiDoc::openapi()))
         // Public workflow webhook trigger ingress.
@@ -728,7 +750,10 @@ async fn run_with_args(args: Args) -> Result<()> {
         .route_layer(axum::middleware::from_fn(
             auth::require_same_origin_mutation,
         ))
-        .route_layer(axum::middleware::from_fn(auth::require_auth));
+        .route_layer(axum::middleware::from_fn_with_state(
+            auth_config,
+            auth::require_auth,
+        ));
 
     // -- CORS layer for /api/* routes ----------------------------------------
     //
@@ -768,7 +793,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         // paths (no auth required — FR-013).
         .fallback(flutter_assets::flutter_handler)
         .layer(cors)
-        .layer(Extension(auth_config))
         .layer(TraceLayer::new_for_http());
 
     // Warn when binding to a non-loopback address.

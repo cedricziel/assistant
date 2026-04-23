@@ -140,6 +140,7 @@ impl FromRequestParts<AuthState> for AuthExtractor {
 ///
 /// Verifies that the extracted [`AuthContext`] has the required scope
 /// for the given space, resource, and action.
+#[derive(Clone)]
 pub struct RequireScope {
     pub space_id: SpaceId,
     pub resource: ResourceKind,

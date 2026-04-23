@@ -293,16 +293,16 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 **Commits:**
 
-- [ ] `feat(web-ui): OAuth2 route module scaffold`
+- [x] `feat(web-ui): OAuth2 route module scaffold`
   - Create `crates/web-ui/src/oauth/mod.rs` with sub-modules and route registration
   - Wire into main router at `/oauth/*`
 
-- [ ] `feat(web-ui): GET /oauth/authorize endpoint`
+- [x] `feat(web-ui): GET /oauth/authorize endpoint`
   - Password mode: render login form (HTML or redirect to SPA login page)
   - OIDC mode: redirect to external IdP with state + PKCE
   - Validate `client_id`, `redirect_uri`, `response_type`, `code_challenge`
 
-- [ ] `feat(web-ui): POST /oauth/authorize — password credential validation`
+- [x] `feat(web-ui): POST /oauth/authorize — password credential validation`
   - Accept email + password form submission
   - Validate via `AuthProvider`, generate auth code, redirect to `redirect_uri?code=`
 
@@ -311,48 +311,48 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - Validate id_token, provision/lookup user
   - Generate our auth code, redirect to original client's redirect_uri
 
-- [ ] `feat(web-ui): POST /oauth/token endpoint`
+- [x] `feat(web-ui): POST /oauth/token endpoint`
   - Grant types: `authorization_code` (with PKCE), `refresh_token`, `urn:ietf:params:oauth:grant-type:device_code`
   - Returns `{ access_token, token_type, expires_in, refresh_token }`
 
-- [ ] `feat(web-ui): POST /oauth/register — dynamic client registration`
+- [x] `feat(web-ui): POST /oauth/register — dynamic client registration`
   - Accept `ClientRegistration`, validate, store, return `ClientInfo`
   - Optionally gate behind org admin approval (org setting)
 
-- [ ] `feat(web-ui): POST /oauth/device — device code initiation`
+- [x] `feat(web-ui): POST /oauth/device — device code initiation`
   - Generate device_code + user_code, return verification_uri
   - `GET /oauth/device/verify` — browser page where user enters code and approves
 
-- [ ] `feat(web-ui): POST /oauth/revoke + server metadata`
+- [x] `feat(web-ui): POST /oauth/revoke + server metadata`
   - Token revocation (access or refresh)
   - `GET /.well-known/oauth-authorization-server` — RFC 8414 metadata document
 
-- [ ] `test(web-ui): OAuth2 endpoint integration tests`
+- [x] `test(web-ui): OAuth2 endpoint integration tests`
   - Full authorization code + PKCE flow via HTTP
   - Device code flow via HTTP
   - Token refresh and revocation
   - Invalid client_id, bad PKCE, expired code
 
-- [ ] `feat(web-ui): rewrite auth middleware — JWT + API key + legacy fallback`
+- [x] `feat(web-ui): rewrite auth middleware — JWT + API key + legacy fallback`
   - Replace `crates/web-ui/src/auth.rs` internals
   - Extract `AuthContext` from: Bearer JWT → session cookie → API key → legacy `ASSISTANT_WEB_TOKEN`
   - Legacy token maps to default org admin AuthContext (migration bridge)
   - `AuthContext` available as Axum extractor in all handlers
 
-- [ ] `feat(web-ui): permission guard middleware`
+- [x] `feat(web-ui): permission guard middleware`
   - `RequireScope` layer: checks `ctx.can(space, resource, action)` before handler
   - Returns 403 with scope information on denial
 
-- [ ] `feat(web-ui): session cookie management`
+- [x] `feat(web-ui): session cookie management`
   - On OAuth2 login completion: set `HttpOnly`, `Secure`, `SameSite=Lax` cookie
-  - Cookie contains encrypted reference to refresh token
-  - Silent refresh on access token expiry
+  - Cookie contains JWT access token; Max-Age derived from JwtManager TTL
+  - Server-side cookie plumbing for silent refresh (client-side refresh in PR 10)
 
-- [ ] `feat(web-ui): update CSRF protection for new session model`
+- [x] `feat(web-ui): update CSRF protection for new session model`
 
-- [ ] `test(web-ui): auth middleware with JWT, API key, legacy token, expired JWT, invalid token`
+- [x] `test(web-ui): auth middleware with JWT, API key, legacy token, expired JWT, invalid token`
 
-- [ ] `chore(web-ui): update OpenAPI spec with OAuth2 endpoints`
+- [x] `chore(web-ui): update OpenAPI spec with OAuth2 endpoints`
 
 ---
 
