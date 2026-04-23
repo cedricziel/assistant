@@ -103,7 +103,11 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
         Ok(pair) => {
             // Sign a JWT access token for the user.
             let ctx = stub_auth_context(&pair.user_id, "default", "");
-            let jwt = match state.jwt_manager.sign(&ctx, "default", &pair.user_id) {
+            let ttl = state.jwt_manager.access_ttl_secs();
+            let jwt = match state
+                .jwt_manager
+                .sign(&ctx, ctx.org_id.as_ref(), &pair.user_id)
+            {
                 Ok(t) => t,
                 Err(e) => {
                     return (
@@ -117,11 +121,11 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
                 }
             };
 
-            let cookie = session_cookie(&jwt, state.secure_cookie);
+            let cookie = session_cookie(&jwt, state.secure_cookie, ttl);
             let mut resp = Json(TokenResponse {
                 access_token: jwt,
                 token_type: "Bearer",
-                expires_in: 3600,
+                expires_in: ttl,
                 refresh_token: Some(pair.refresh_token),
             })
             .into_response();
@@ -163,7 +167,11 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
     {
         Ok(pair) => {
             let ctx = stub_auth_context(&pair.user_id, "default", "");
-            let jwt = match state.jwt_manager.sign(&ctx, "default", &pair.user_id) {
+            let ttl = state.jwt_manager.access_ttl_secs();
+            let jwt = match state
+                .jwt_manager
+                .sign(&ctx, ctx.org_id.as_ref(), &pair.user_id)
+            {
                 Ok(t) => t,
                 Err(e) => {
                     return (
@@ -177,11 +185,11 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
                 }
             };
 
-            let cookie = session_cookie(&jwt, state.secure_cookie);
+            let cookie = session_cookie(&jwt, state.secure_cookie, ttl);
             let mut resp = Json(TokenResponse {
                 access_token: jwt,
                 token_type: "Bearer",
-                expires_in: 3600,
+                expires_in: ttl,
                 refresh_token: Some(pair.refresh_token),
             })
             .into_response();
@@ -201,9 +209,11 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
 }
 
 /// Build the `Set-Cookie` value for the `assistant_session` JWT cookie.
-fn session_cookie(jwt: &str, secure: bool) -> String {
+fn session_cookie(jwt: &str, secure: bool, max_age_secs: u64) -> String {
     let secure_attr = if secure { "; Secure" } else { "" };
-    format!("assistant_session={jwt}; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600{secure_attr}")
+    format!(
+        "assistant_session={jwt}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age_secs}{secure_attr}"
+    )
 }
 
 async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::response::Response {
@@ -224,7 +234,8 @@ async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::respo
     match state.device_manager.poll(&device_code).await {
         Ok(PollResult::Authorized { user_id, scopes: _ }) => {
             let ctx = stub_auth_context(&user_id, "default", "");
-            let jwt = match state.jwt_manager.sign(&ctx, "default", &user_id) {
+            let ttl = state.jwt_manager.access_ttl_secs();
+            let jwt = match state.jwt_manager.sign(&ctx, ctx.org_id.as_ref(), &user_id) {
                 Ok(t) => t,
                 Err(e) => {
                     return (
@@ -241,7 +252,7 @@ async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::respo
             Json(TokenResponse {
                 access_token: jwt,
                 token_type: "Bearer",
-                expires_in: 3600,
+                expires_in: ttl,
                 refresh_token: None,
             })
             .into_response()

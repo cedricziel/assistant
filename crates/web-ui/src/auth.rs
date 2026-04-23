@@ -413,16 +413,22 @@ pub(crate) async fn login_submit(
 
     match ctx {
         Some(ctx) => {
-            // Sign a session JWT for the cookie.
-            let jwt = match auth.jwt_manager.sign(&ctx, "default", &ctx.email) {
+            // Sign a session JWT for the cookie using the resolved context's identity.
+            let display = if ctx.email.is_empty() {
+                ctx.user_id.to_string()
+            } else {
+                ctx.email.clone()
+            };
+            let jwt = match auth.jwt_manager.sign(&ctx, ctx.org_id.as_ref(), &display) {
                 Ok(t) => t,
                 Err(_) => return login_html(Some("Internal error.")).into_response(),
             };
 
+            let ttl = auth.jwt_manager.access_ttl_secs();
             let secure = if config.secure_cookie { "; Secure" } else { "" };
             let cookie = format!(
-                "{}={}; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600{}",
-                SESSION_COOKIE, jwt, secure,
+                "{}={}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}{}",
+                SESSION_COOKIE, jwt, ttl, secure,
             );
             Response::builder()
                 .status(StatusCode::SEE_OTHER)

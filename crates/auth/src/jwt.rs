@@ -155,6 +155,11 @@ impl JwtManager {
         self
     }
 
+    /// Return the configured access token TTL in seconds.
+    pub fn access_ttl_secs(&self) -> u64 {
+        self.access_ttl.num_seconds().max(0) as u64
+    }
+
     /// Sign a JWT for the given auth context.
     pub fn sign(&self, ctx: &AuthContext, org_slug: &str, name: &str) -> Result<String> {
         let now = Utc::now();

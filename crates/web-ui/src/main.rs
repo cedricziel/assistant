@@ -646,7 +646,9 @@ async fn run_with_args(args: Args) -> Result<()> {
     // -- JWT + OAuth2 state ---------------------------------------------------
     let jwt_manager = {
         use assistant_auth::jwt::{JwtKeyPair, JwtManager};
-        let jwt_key_pair = JwtKeyPair::generate().context("Failed to generate JWT signing key")?;
+        let jwt_secret_path = db_path.with_file_name("jwt_secret");
+        let jwt_key_pair = JwtKeyPair::load_or_generate(&jwt_secret_path)
+            .context("Failed to load or generate JWT signing key")?;
         Arc::new(JwtManager::new(
             jwt_key_pair,
             base_url.clone(),
@@ -685,13 +687,15 @@ async fn run_with_args(args: Args) -> Result<()> {
     // -- Auth config (JWT + API key + legacy token) --------------------------
     let legacy_context = legacy_token.as_ref().map(|_| {
         use assistant_core::auth::AuthContext;
-        use assistant_core::identity::{OrgId, UserId};
+        use assistant_core::identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
+        let mut space_roles = std::collections::HashMap::new();
+        space_roles.insert(SpaceId::from("default"), Role::OrgAdmin);
         AuthContext {
             user_id: UserId::from("admin"),
             org_id: OrgId::from("default"),
             email: String::new(),
-            space_roles: std::collections::HashMap::new(),
-            scopes: vec![],
+            space_roles,
+            scopes: vec![Scope::new(ResourceKind::Org, Action::Manage)],
             client_id: "legacy".into(),
         }
     });

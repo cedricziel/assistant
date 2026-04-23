@@ -345,8 +345,8 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 - [x] `feat(web-ui): session cookie management`
   - On OAuth2 login completion: set `HttpOnly`, `Secure`, `SameSite=Lax` cookie
-  - Cookie contains encrypted reference to refresh token
-  - Silent refresh on access token expiry
+  - Cookie contains JWT access token; Max-Age derived from JwtManager TTL
+  - Server-side cookie plumbing for silent refresh (client-side refresh in PR 10)
 
 - [x] `feat(web-ui): update CSRF protection for new session model`
 
