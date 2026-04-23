@@ -36,6 +36,8 @@ pub struct OAuthState {
     pub org_storage: Arc<OrgStorageLayer>,
     /// The server's issuer URL (used in metadata and JWTs).
     pub issuer: String,
+    /// When `true`, session cookies get the `Secure` attribute.
+    pub secure_cookie: bool,
 }
 
 /// Build the public OAuth2 router (no auth required on these endpoints).
@@ -206,6 +208,7 @@ mod tests {
             device_manager,
             org_storage,
             issuer: "http://localhost".into(),
+            secure_cookie: false,
         }
     }
 
@@ -515,6 +518,211 @@ mod tests {
         assert!(
             tokens["refresh_token"].is_string(),
             "response should contain refresh_token"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_code_exchange_sets_session_cookie() {
+        let state = test_state().await;
+
+        // Register a client.
+        let app = build_app(state.clone());
+        let reg_body = serde_json::json!({
+            "client_name": "Cookie Test",
+            "redirect_uris": ["http://localhost/cb"],
+            "grant_types": ["authorization_code"]
+        });
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let client_id = client["client_id"].as_str().unwrap();
+
+        // Authorize (get auth code).
+        let app = build_app(state.clone());
+        let form = format!(
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let location = resp.headers().get("location").unwrap().to_str().unwrap();
+        let code = location
+            .split("code=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap();
+
+        // Exchange code for tokens.
+        let app = build_app(state.clone());
+        let token_form = format!(
+            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(token_form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Verify that a session cookie is set.
+        let set_cookie = resp
+            .headers()
+            .get("set-cookie")
+            .expect("token exchange should set a session cookie")
+            .to_str()
+            .unwrap();
+        assert!(
+            set_cookie.contains("assistant_session="),
+            "cookie should be named assistant_session: {set_cookie}"
+        );
+        assert!(
+            set_cookie.contains("HttpOnly"),
+            "cookie should be HttpOnly: {set_cookie}"
+        );
+        assert!(
+            set_cookie.contains("SameSite=Lax"),
+            "cookie should be SameSite=Lax: {set_cookie}"
+        );
+
+        // Verify the JSON body still contains tokens.
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let tokens: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(tokens["access_token"].is_string());
+        assert!(tokens["refresh_token"].is_string());
+    }
+
+    #[tokio::test]
+    async fn refresh_token_exchange_sets_session_cookie() {
+        let state = test_state().await;
+
+        // Register client + get auth code + exchange for tokens (setup).
+        let app = build_app(state.clone());
+        let reg_body = serde_json::json!({
+            "client_name": "Refresh Cookie Test",
+            "redirect_uris": ["http://localhost/cb"],
+            "grant_types": ["authorization_code"]
+        });
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let client_id = client["client_id"].as_str().unwrap();
+
+        let app = build_app(state.clone());
+        let form = format!(
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let location = resp.headers().get("location").unwrap().to_str().unwrap();
+        let code = location
+            .split("code=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap();
+
+        let app = build_app(state.clone());
+        let token_form = format!(
+            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(token_form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let tokens: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let refresh_token = tokens["refresh_token"].as_str().unwrap();
+
+        // Now refresh and check for cookie.
+        let app = build_app(state.clone());
+        let refresh_form =
+            format!("grant_type=refresh_token&refresh_token={refresh_token}&client_id={client_id}");
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(refresh_form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Verify session cookie is also set on refresh.
+        let set_cookie = resp
+            .headers()
+            .get("set-cookie")
+            .expect("refresh should also set a session cookie")
+            .to_str()
+            .unwrap();
+        assert!(
+            set_cookie.contains("assistant_session="),
+            "cookie should be named assistant_session: {set_cookie}"
         );
     }
 }

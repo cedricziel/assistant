@@ -1,9 +1,14 @@
 //! POST /oauth/token — exchange auth codes, refresh tokens, or device codes
 //! for access/refresh token pairs.
+//!
+//! On successful auth-code and refresh-token exchanges the handler also sets
+//! an `HttpOnly` session cookie (`assistant_session`) containing the JWT so
+//! that browser-based clients get an automatic session.
 
 use axum::Form;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::http::header::SET_COOKIE;
 use axum::response::{IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 
@@ -112,13 +117,17 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
                 }
             };
 
-            Json(TokenResponse {
+            let cookie = session_cookie(&jwt, state.secure_cookie);
+            let mut resp = Json(TokenResponse {
                 access_token: jwt,
                 token_type: "Bearer",
                 expires_in: 3600,
                 refresh_token: Some(pair.refresh_token),
             })
-            .into_response()
+            .into_response();
+            resp.headers_mut()
+                .insert(SET_COOKIE, cookie.parse().unwrap());
+            resp
         }
         Err(e) => (
             StatusCode::BAD_REQUEST,
@@ -168,13 +177,17 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
                 }
             };
 
-            Json(TokenResponse {
+            let cookie = session_cookie(&jwt, state.secure_cookie);
+            let mut resp = Json(TokenResponse {
                 access_token: jwt,
                 token_type: "Bearer",
                 expires_in: 3600,
                 refresh_token: Some(pair.refresh_token),
             })
-            .into_response()
+            .into_response();
+            resp.headers_mut()
+                .insert(SET_COOKIE, cookie.parse().unwrap());
+            resp
         }
         Err(e) => (
             StatusCode::BAD_REQUEST,
@@ -185,6 +198,12 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
         )
             .into_response(),
     }
+}
+
+/// Build the `Set-Cookie` value for the `assistant_session` JWT cookie.
+fn session_cookie(jwt: &str, secure: bool) -> String {
+    let secure_attr = if secure { "; Secure" } else { "" };
+    format!("assistant_session={jwt}; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600{secure_attr}")
 }
 
 async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::response::Response {
