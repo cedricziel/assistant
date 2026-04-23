@@ -24,6 +24,7 @@ pub struct RevokeRequest {
     post,
     path = "/oauth/revoke",
     tag = "oauth",
+    security(()),
     request_body(content = RevokeRequest, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "Token revoked (or already invalid)"),
@@ -73,6 +74,7 @@ pub struct ServerMetadata {
     get,
     path = "/.well-known/oauth-authorization-server",
     tag = "oauth",
+    security(()),
     responses(
         (status = 200, description = "Authorization server metadata", body = ServerMetadata),
     )

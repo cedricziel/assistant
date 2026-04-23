@@ -15,6 +15,7 @@ use super::{
     post,
     path = "/oauth/register",
     tag = "oauth",
+    security(()),
     request_body(content = ClientRegistrationSchema, content_type = "application/json"),
     responses(
         (status = 201, description = "Client registered", body = ClientInfoSchema),

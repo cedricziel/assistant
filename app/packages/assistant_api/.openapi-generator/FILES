@@ -281,10 +281,3 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/client_info_schema_test.dart
-test/client_registration_schema_test.dart
-test/device_code_response_schema_test.dart
-test/o_auth_error_response_test.dart
-test/oauth_api_test.dart
-test/server_metadata_test.dart
-test/token_response_test.dart

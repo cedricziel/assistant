@@ -59,7 +59,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/agent/authenticatedExtendedCard": {
@@ -3388,7 +3391,10 @@
           "400": {
             "description": "Invalid parameters"
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       },
       "post": {
         "tags": [
@@ -3416,7 +3422,10 @@
           "401": {
             "description": "Invalid credentials"
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/oauth/device": {
@@ -3457,7 +3466,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/oauth/device/verify": {
@@ -3484,7 +3496,10 @@
           "200": {
             "description": "Device verification form HTML"
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       },
       "post": {
         "tags": [
@@ -3509,7 +3524,10 @@
           "400": {
             "description": "Invalid or expired code"
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/oauth/register": {
@@ -3550,7 +3568,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/oauth/revoke": {
@@ -3584,7 +3605,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/oauth/token": {
@@ -3625,7 +3649,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/tasks": {

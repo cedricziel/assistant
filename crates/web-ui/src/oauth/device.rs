@@ -25,6 +25,7 @@ pub struct DeviceInitiateRequest {
     post,
     path = "/oauth/device",
     tag = "oauth",
+    security(()),
     request_body(content = DeviceInitiateRequest, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "Device code issued", body = DeviceCodeResponseSchema),
@@ -67,6 +68,7 @@ pub struct VerifyQuery {
     get,
     path = "/oauth/device/verify",
     tag = "oauth",
+    security(()),
     params(VerifyQuery),
     responses(
         (status = 200, description = "Device verification form HTML"),
@@ -117,6 +119,7 @@ pub struct DeviceVerifyForm {
     post,
     path = "/oauth/device/verify",
     tag = "oauth",
+    security(()),
     responses(
         (status = 200, description = "Device authorized"),
         (status = 400, description = "Invalid or expired code"),

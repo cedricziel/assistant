@@ -40,6 +40,7 @@ pub struct AuthorizeForm {
     get,
     path = "/oauth/authorize",
     tag = "oauth",
+    security(()),
     params(AuthorizeQuery),
     responses(
         (status = 200, description = "Login form HTML"),
@@ -100,6 +101,7 @@ pub async fn authorize_get(
     post,
     path = "/oauth/authorize",
     tag = "oauth",
+    security(()),
     responses(
         (status = 302, description = "Redirect with authorization code"),
         (status = 400, description = "Invalid request"),

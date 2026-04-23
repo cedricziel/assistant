@@ -42,6 +42,7 @@ pub struct TokenResponse {
     post,
     path = "/oauth/token",
     tag = "oauth",
+    security(()),
     request_body(content = TokenRequest, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "Token issued", body = TokenResponse),
