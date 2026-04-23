@@ -168,6 +168,8 @@ parquet = { version = "57.3", default-features = false, features = ["arrow", "as
 jsonwebtoken = "9"
 argon2 = { version = "0.5", features = ["std"] }
 rand = "0.9"
+# Constant-time comparison (API key verification)
+subtle = "2"
 # Internal crates
 opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
 opentelemetry-exporter-iceberg = { path = "crates/opentelemetry-exporter-iceberg" }

@@ -38,5 +38,13 @@ url = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 
+# HTTP client (OIDC discovery, JWKS fetch)
+reqwest = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true }
