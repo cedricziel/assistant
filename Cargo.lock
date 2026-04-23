@@ -737,6 +737,7 @@ dependencies = [
  "anyhow",
  "arrow-array",
  "assistant-a2a-json-schema",
+ "assistant-auth",
  "assistant-bus-nats",
  "assistant-core",
  "assistant-llm-provider",

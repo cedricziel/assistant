@@ -196,6 +196,16 @@ pub struct ApiErrorResponse {
         crate::api::push::vapid_public_key,
         crate::api::push::subscribe,
         crate::api::push::unsubscribe,
+        // OAuth2 endpoints
+        crate::oauth::authorize::authorize_get,
+        crate::oauth::authorize::authorize_post,
+        crate::oauth::token::token,
+        crate::oauth::register::register,
+        crate::oauth::device::device_initiate,
+        crate::oauth::device::device_verify_page,
+        crate::oauth::device::device_verify_submit,
+        crate::oauth::revoke::revoke,
+        crate::oauth::revoke::metadata,
     ),
     components(
         schemas(
@@ -323,6 +333,18 @@ pub struct ApiErrorResponse {
             SseSubagentThinkingEvent,
             SseSubagentToolResultEvent,
             SseSubagentStatusEvent,
+            // OAuth2 types
+            crate::oauth::OAuthErrorResponse,
+            crate::oauth::token::TokenRequest,
+            crate::oauth::token::TokenResponse,
+            crate::oauth::authorize::AuthorizeForm,
+            crate::oauth::device::DeviceInitiateRequest,
+            crate::oauth::device::DeviceVerifyForm,
+            crate::oauth::revoke::RevokeRequest,
+            crate::oauth::revoke::ServerMetadata,
+            crate::oauth::DeviceCodeResponseSchema,
+            crate::oauth::ClientRegistrationSchema,
+            crate::oauth::ClientInfoSchema,
             // Common error response
             ApiErrorResponse,
         )
@@ -358,6 +380,8 @@ pub struct ApiErrorResponse {
          description = "Image attachments — upload, serve, and resize images linked to messages"),
         (name = "web-push",
          description = "Web Push — VAPID key retrieval and push subscription management for PWA notifications"),
+        (name = "oauth",
+         description = "OAuth2 — authorization, token exchange, device code flow, client registration, and server metadata"),
     ),
     servers(
         (url = "/", description = "Local assistant server")
