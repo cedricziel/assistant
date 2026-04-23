@@ -5,8 +5,9 @@
 //! - Password hashing with argon2id ([`password`])
 //! - OAuth2 server logic ([`oauth2`])
 //! - OIDC federation ([`oidc`])
-//! - API key management (`api_keys`) *(coming next)*
-//! - Axum middleware extractors (`middleware`) *(coming next)*
+//! - Scoped API key management ([`api_keys`])
+//! - Axum middleware extractors ([`middleware`])
+//! - [`AuthProvider`](assistant_core::auth::AuthProvider) implementations ([`providers`])
 
 pub mod api_keys;
 pub mod jwt;
@@ -14,3 +15,4 @@ pub mod middleware;
 pub mod oauth2;
 pub mod oidc;
 pub mod password;
+pub mod providers;

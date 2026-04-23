@@ -279,6 +279,11 @@ impl OidcProvider {
         &self.discovery
     }
 
+    /// Get the client ID registered with this IdP.
+    pub fn client_id(&self) -> &str {
+        &self.config.client_id
+    }
+
     /// Validate an ID token and return the claims.
     ///
     /// Verifies: signature (via JWKS), issuer, audience, and expiry.

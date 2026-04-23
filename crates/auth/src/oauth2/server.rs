@@ -43,6 +43,8 @@ pub struct StoredRefreshToken {
 pub struct TokenPair {
     pub access_token: String,
     pub refresh_token: String,
+    /// The user who authorized the token.
+    pub user_id: String,
 }
 
 // -- AuthCodeStore trait --
@@ -234,6 +236,7 @@ impl OAuth2Server {
         // Generate tokens.
         let access_token = generate_random_token();
         let refresh_token = generate_random_token();
+        let user_id = auth_code.user_id.clone();
 
         // Store refresh token.
         self.refresh_store
@@ -250,6 +253,7 @@ impl OAuth2Server {
         Ok(TokenPair {
             access_token,
             refresh_token,
+            user_id,
         })
     }
 
@@ -289,6 +293,7 @@ impl OAuth2Server {
         // Issue new pair.
         let new_access = generate_random_token();
         let new_refresh = generate_random_token();
+        let user_id = stored.user_id.clone();
 
         self.refresh_store
             .store_token(StoredRefreshToken {
@@ -304,6 +309,7 @@ impl OAuth2Server {
         Ok(TokenPair {
             access_token: new_access,
             refresh_token: new_refresh,
+            user_id,
         })
     }
 }
