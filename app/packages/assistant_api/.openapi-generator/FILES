@@ -26,6 +26,8 @@ doc/AuthorizationCodeOAuthFlow.md
 doc/CancelTaskRequest.md
 doc/CapabilitiesApi.md
 doc/ClientCredentialsOAuthFlow.md
+doc/ClientInfoSchema.md
+doc/ClientRegistrationSchema.md
 doc/CommandArgResponse.md
 doc/CommandDefResponse.md
 doc/CommandEventResponse.md
@@ -39,6 +41,7 @@ doc/CreateSkillRequest.md
 doc/CreateTaskPushNotificationConfigRequest.md
 doc/CreateWebhookRequest.md
 doc/DeviceCodeOAuthFlow.md
+doc/DeviceCodeResponseSchema.md
 doc/ExecuteCommandRequest.md
 doc/HttpAuthSecurityScheme.md
 doc/ImplicitOAuthFlow.md
@@ -53,7 +56,9 @@ doc/ModelPart.md
 doc/ModelUsageResponse.md
 doc/MutualTlsSecurityScheme.md
 doc/OAuth2SecurityScheme.md
+doc/OAuthErrorResponse.md
 doc/OAuthFlows.md
+doc/OauthApi.md
 doc/OpenIdConnectSecurityScheme.md
 doc/PasswordOAuthFlow.md
 doc/PersonaDetail.md
@@ -75,6 +80,7 @@ doc/SendMessageConfiguration.md
 doc/SendMessageRequest.md
 doc/SendMessageResponse.md
 doc/ServerCapabilities.md
+doc/ServerMetadata.md
 doc/SetActivePersonaRequest.md
 doc/SetSkillAccessModeRequest.md
 doc/SkillDetail.md
@@ -103,6 +109,7 @@ doc/TaskStatus.md
 doc/TaskStatusUpdateEvent.md
 doc/TasksApi.md
 doc/TimeSeriesResponse.md
+doc/TokenResponse.md
 doc/ToolCallSummary.md
 doc/ToolUsageResponse.md
 doc/TraceDetailResponse.md
@@ -139,6 +146,7 @@ lib/src/api/commands_api.dart
 lib/src/api/conversations_api.dart
 lib/src/api/logs_api.dart
 lib/src/api/messages_api.dart
+lib/src/api/oauth_api.dart
 lib/src/api/personas_api.dart
 lib/src/api/push_notifications_api.dart
 lib/src/api/skills_api.dart
@@ -174,6 +182,8 @@ lib/src/model/authentication_info.dart
 lib/src/model/authorization_code_o_auth_flow.dart
 lib/src/model/cancel_task_request.dart
 lib/src/model/client_credentials_o_auth_flow.dart
+lib/src/model/client_info_schema.dart
+lib/src/model/client_registration_schema.dart
 lib/src/model/command_arg_response.dart
 lib/src/model/command_def_response.dart
 lib/src/model/command_event_response.dart
@@ -186,6 +196,7 @@ lib/src/model/create_task_push_notification_config_request.dart
 lib/src/model/create_webhook_request.dart
 lib/src/model/date.dart
 lib/src/model/device_code_o_auth_flow.dart
+lib/src/model/device_code_response_schema.dart
 lib/src/model/execute_command_request.dart
 lib/src/model/http_auth_security_scheme.dart
 lib/src/model/implicit_o_auth_flow.dart
@@ -198,6 +209,7 @@ lib/src/model/model_part.dart
 lib/src/model/model_usage_response.dart
 lib/src/model/mutual_tls_security_scheme.dart
 lib/src/model/o_auth2_security_scheme.dart
+lib/src/model/o_auth_error_response.dart
 lib/src/model/o_auth_flows.dart
 lib/src/model/open_id_connect_security_scheme.dart
 lib/src/model/password_o_auth_flow.dart
@@ -218,6 +230,7 @@ lib/src/model/send_message_configuration.dart
 lib/src/model/send_message_request.dart
 lib/src/model/send_message_response.dart
 lib/src/model/server_capabilities.dart
+lib/src/model/server_metadata.dart
 lib/src/model/set_active_persona_request.dart
 lib/src/model/set_skill_access_mode_request.dart
 lib/src/model/skill_detail.dart
@@ -244,6 +257,7 @@ lib/src/model/task_state.dart
 lib/src/model/task_status.dart
 lib/src/model/task_status_update_event.dart
 lib/src/model/time_series_response.dart
+lib/src/model/token_response.dart
 lib/src/model/tool_call_summary.dart
 lib/src/model/tool_usage_response.dart
 lib/src/model/trace_detail_response.dart
@@ -267,13 +281,10 @@ lib/src/model/workflow_webhook_secrets.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
-test/sse_status_event_test.dart
-test/sse_subagent_completed_event_test.dart
-test/sse_subagent_started_event_test.dart
-test/sse_subagent_status_event_test.dart
-test/sse_subagent_thinking_event_test.dart
-test/sse_subagent_token_event_test.dart
-test/sse_subagent_tool_result_event_test.dart
-test/sse_thinking_event_test.dart
-test/sse_token_event_test.dart
-test/sse_tool_result_event_test.dart
+test/client_info_schema_test.dart
+test/client_registration_schema_test.dart
+test/device_code_response_schema_test.dart
+test/o_auth_error_response_test.dart
+test/oauth_api_test.dart
+test/server_metadata_test.dart
+test/token_response_test.dart
