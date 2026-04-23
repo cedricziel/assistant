@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect};
 use serde::Deserialize;
 
-use super::OAuthState;
+use super::{OAuthState, escape_html_attr};
 
 /// Query parameters for GET /oauth/authorize (RFC 6749 §4.1.1).
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -60,11 +60,11 @@ pub async fn authorize_get(
             .into_response();
     }
 
-    let client_id = params.client_id.as_deref().unwrap_or("");
-    let redirect_uri = params.redirect_uri.as_deref().unwrap_or("");
-    let state_param = params.state.as_deref().unwrap_or("");
-    let code_challenge = params.code_challenge.as_deref().unwrap_or("");
-    let scope = params.scope.as_deref().unwrap_or("");
+    let client_id = escape_html_attr(params.client_id.as_deref().unwrap_or(""));
+    let redirect_uri = escape_html_attr(params.redirect_uri.as_deref().unwrap_or(""));
+    let state_param = escape_html_attr(params.state.as_deref().unwrap_or(""));
+    let code_challenge = escape_html_attr(params.code_challenge.as_deref().unwrap_or(""));
+    let scope = escape_html_attr(params.scope.as_deref().unwrap_or(""));
 
     // Render a simple login form.
     let html = format!(
@@ -103,7 +103,7 @@ pub async fn authorize_get(
     tag = "oauth",
     security(()),
     responses(
-        (status = 302, description = "Redirect with authorization code"),
+        (status = 303, description = "Redirect with authorization code"),
         (status = 400, description = "Invalid request"),
         (status = 401, description = "Invalid credentials"),
     )
@@ -152,7 +152,7 @@ pub async fn authorize_post(
     if user.password_hash.is_empty() {
         return (
             StatusCode::UNAUTHORIZED,
-            Html("error: password login not configured for this user".to_string()),
+            Html("error: invalid email or password".to_string()),
         )
             .into_response();
     }
@@ -197,12 +197,12 @@ pub async fn authorize_post(
         }
     };
 
-    // Build redirect URI with code and state.
+    // Build redirect URI with code and state (URL-encoded).
     let mut redirect = form.redirect_uri.clone();
     redirect.push_str(if redirect.contains('?') { "&" } else { "?" });
-    redirect.push_str(&format!("code={code}"));
+    redirect.push_str(&format!("code={}", urlencoding::encode(&code)));
     if let Some(ref st) = form.state {
-        redirect.push_str(&format!("&state={st}"));
+        redirect.push_str(&format!("&state={}", urlencoding::encode(st)));
     }
 
     Redirect::to(&redirect).into_response()

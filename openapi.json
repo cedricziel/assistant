@@ -3413,7 +3413,7 @@
           "required": true
         },
         "responses": {
-          "302": {
+          "303": {
             "description": "Redirect with authorization code"
           },
           "400": {

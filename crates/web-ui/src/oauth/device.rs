@@ -10,7 +10,9 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Json};
 use serde::Deserialize;
 
-use super::{DeviceCodeResponseSchema, OAuthError, OAuthErrorResponse, OAuthState};
+use super::{
+    DeviceCodeResponseSchema, OAuthError, OAuthErrorResponse, OAuthState, escape_html_attr,
+};
 
 /// POST /oauth/device request body.
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -75,7 +77,7 @@ pub struct VerifyQuery {
     )
 )]
 pub async fn device_verify_page(Query(params): Query<VerifyQuery>) -> impl IntoResponse {
-    let prefill = params.user_code.as_deref().unwrap_or("");
+    let prefill = escape_html_attr(params.user_code.as_deref().unwrap_or(""));
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -147,23 +149,25 @@ pub async fn device_verify_submit(
                 .to_string(),
         )
         .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Html(format!(
-                r#"<!DOCTYPE html>
+        Err(e) => {
+            let escaped_err = escape_html_attr(&e.to_string());
+            (
+                StatusCode::BAD_REQUEST,
+                Html(format!(
+                    r#"<!DOCTYPE html>
 <html>
 <head><title>Error</title>
 <style>body {{ font-family: system-ui, sans-serif; max-width: 400px; margin: 80px auto; }}</style>
 </head>
 <body>
 <h2>Error</h2>
-<p>{}</p>
+<p>{escaped_err}</p>
 <a href="/oauth/device/verify">Try again</a>
 </body>
-</html>"#,
-                e
-            )),
-        )
-            .into_response(),
+</html>"#
+                )),
+            )
+                .into_response()
+        }
     }
 }

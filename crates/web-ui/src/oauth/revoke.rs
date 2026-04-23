@@ -80,9 +80,9 @@ pub struct ServerMetadata {
     )
 )]
 pub async fn metadata(State(state): State<OAuthState>) -> Json<ServerMetadata> {
-    let base = &state.issuer;
+    let base = state.issuer.trim_end_matches('/');
     Json(ServerMetadata {
-        issuer: base.clone(),
+        issuer: base.to_string(),
         authorization_endpoint: format!("{base}/oauth/authorize"),
         token_endpoint: format!("{base}/oauth/token"),
         registration_endpoint: format!("{base}/oauth/register"),

@@ -59,6 +59,7 @@ mime_guess = { workspace = true }
 arrow-array = { workspace = true }
 parquet = { workspace = true }
 iceberg = { workspace = true }
+urlencoding.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -63,6 +63,16 @@ pub fn oauth_router() -> Router<OAuthState> {
         )
 }
 
+/// Escape a string for safe inclusion in an HTML attribute value.
+pub(crate) fn escape_html_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 /// Standard OAuth2 error response body.
 #[derive(serde::Serialize)]
 pub(crate) struct OAuthError {

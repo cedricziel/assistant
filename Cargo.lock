@@ -781,6 +781,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "url",
+ "urlencoding",
  "utoipa",
  "utoipa-swagger-ui",
  "uuid",
