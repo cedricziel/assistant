@@ -738,14 +738,28 @@ mod tests {
         // Alice sees only her conversation
         let alice_list = alice_store.list_conversations().await.unwrap();
         assert_eq!(alice_list.len(), 1, "Alice should see 1 conversation");
-        assert_eq!(alice_list[0].id, alice_conv.id);
-        assert_eq!(alice_list[0].user_id.as_deref(), Some("alice"));
+        assert_eq!(
+            alice_list[0].id, alice_conv.id,
+            "Alice's list should contain her conversation"
+        );
+        assert_eq!(
+            alice_list[0].user_id.as_deref(),
+            Some("alice"),
+            "conversation should retain Alice's user_id"
+        );
 
         // Bob sees only his
         let bob_list = bob_store.list_conversations().await.unwrap();
         assert_eq!(bob_list.len(), 1, "Bob should see 1 conversation");
-        assert_eq!(bob_list[0].id, bob_conv.id);
-        assert_eq!(bob_list[0].user_id.as_deref(), Some("bob"));
+        assert_eq!(
+            bob_list[0].id, bob_conv.id,
+            "Bob's list should contain his conversation"
+        );
+        assert_eq!(
+            bob_list[0].user_id.as_deref(),
+            Some("bob"),
+            "conversation should retain Bob's user_id"
+        );
 
         // Alice cannot get Bob's conversation
         let cross = alice_store.get_conversation(bob_conv.id).await.unwrap();
@@ -788,7 +802,7 @@ mod tests {
         store.save_message(&msg).await.unwrap();
 
         let history = store.load_history(conv.id).await.unwrap();
-        assert_eq!(history.len(), 1);
+        assert_eq!(history.len(), 1, "should have exactly one message");
         assert_eq!(
             history[0].sender_user_id.as_deref(),
             Some("alice"),

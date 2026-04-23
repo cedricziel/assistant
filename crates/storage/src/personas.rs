@@ -238,6 +238,8 @@ impl PersonaStore {
     /// List personas accessible to a given user: org-owned (`owner_user_id IS NULL`)
     /// plus those owned by the user (`owner_user_id = ?`).
     pub async fn list_accessible(&self, user_id: &str) -> Result<Vec<PersonaRecord>> {
+        anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
+
         let rows = sqlx::query(
             "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
              FROM personas
@@ -258,6 +260,11 @@ impl PersonaStore {
         name: &str,
         owner_user_id: &str,
     ) -> Result<PersonaRecord> {
+        anyhow::ensure!(
+            !owner_user_id.trim().is_empty(),
+            "owner_user_id must be non-empty"
+        );
+
         sqlx::query(
             "INSERT INTO personas (id, name, is_default, owner_user_id) VALUES (?1, ?2, 0, ?3)",
         )
@@ -488,7 +495,11 @@ mod tests {
             .create_owned("alice-bot", "Alice Bot", "alice")
             .await
             .unwrap();
-        assert_eq!(persona.owner_user_id.as_deref(), Some("alice"));
+        assert_eq!(
+            persona.owner_user_id.as_deref(),
+            Some("alice"),
+            "owned persona should persist owner_user_id"
+        );
     }
 
     #[tokio::test]
@@ -556,8 +567,29 @@ mod tests {
         // 3 = seeded "default" from migration + "shared" + "alice-bot"
         assert_eq!(all.len(), 3, "list() should return all personas");
         let ids: Vec<&str> = all.iter().map(|p| p.id.as_str()).collect();
-        assert!(ids.contains(&"shared"));
-        assert!(ids.contains(&"alice-bot"));
+        assert!(ids.contains(&"shared"), "should include shared persona");
+        assert!(
+            ids.contains(&"alice-bot"),
+            "should include alice-bot persona"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_accessible_rejects_empty_user_id() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let result = store.list_accessible("").await;
+        assert!(result.is_err(), "empty user_id should be rejected");
+    }
+
+    #[tokio::test]
+    async fn create_owned_rejects_empty_owner() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let result = store.create_owned("bot", "Bot", "").await;
+        assert!(result.is_err(), "empty owner_user_id should be rejected");
     }
 }
 
