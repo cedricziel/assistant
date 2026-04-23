@@ -267,12 +267,36 @@ mod tests {
     #[tokio::test]
     async fn authorize_get_renders_form() {
         let state = test_state().await;
-        let app = build_app(state);
 
+        // Register a client first so authorize_get can validate it.
+        let app = build_app(state.clone());
+        let reg_body = serde_json::json!({
+            "client_name": "Form Test",
+            "redirect_uris": ["http://localhost/cb"],
+            "grant_types": ["authorization_code"]
+        });
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri("/oauth/authorize?response_type=code&client_id=test&redirect_uri=http://localhost/cb")
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let client_id = client["client_id"].as_str().unwrap();
+
+        let app = build_app(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(&format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb"))
                     .body(Body::empty())
                     .unwrap(),
             )

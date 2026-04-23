@@ -350,8 +350,9 @@ class OauthApi {
   ///
   ///
   /// Parameters:
+  /// * [email] - Email for authentication.
+  /// * [password] - Password for authentication.
   /// * [userCode]
-  /// * [userId] - In a real deployment, user_id comes from the authenticated session. For now, accept it as a form field or default to \\\"anonymous\\\".
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -362,8 +363,9 @@ class OauthApi {
   /// Returns a [Future]
   /// Throws [DioException] if API call or serialization fails
   Future<Response<void>> deviceVerifySubmit({
+    required String email,
+    required String password,
     required String userCode,
-    String? userId,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -389,10 +391,12 @@ class OauthApi {
 
     try {
       _bodyData = <String, dynamic>{
+        r'email':
+            encodeQueryParameter(_serializers, email, const FullType(String)),
+        r'password': encodeQueryParameter(
+            _serializers, password, const FullType(String)),
         r'user_code': encodeQueryParameter(
             _serializers, userCode, const FullType(String)),
-        r'user_id':
-            encodeQueryParameter(_serializers, userId, const FullType(String)),
       };
     } catch (error, stackTrace) {
       throw DioException(

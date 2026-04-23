@@ -208,7 +208,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deviceVerifySubmit**
-> deviceVerifySubmit(userCode, userId)
+> deviceVerifySubmit(email, password, userCode)
 
 POST /oauth/device/verify — user approves the device code.
 
@@ -217,11 +217,12 @@ POST /oauth/device/verify — user approves the device code.
 import 'package:assistant_api/api.dart';
 
 final api = AssistantApi().getOauthApi();
+final String email = email_example; // String | Email for authentication.
+final String password = password_example; // String | Password for authentication.
 final String userCode = userCode_example; // String | 
-final String userId = userId_example; // String | In a real deployment, user_id comes from the authenticated session. For now, accept it as a form field or default to \\\"anonymous\\\".
 
 try {
-    api.deviceVerifySubmit(userCode, userId);
+    api.deviceVerifySubmit(email, password, userCode);
 } on DioException catch (e) {
     print('Exception when calling OauthApi->deviceVerifySubmit: $e\n');
 }
@@ -231,8 +232,9 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **email** | **String**| Email for authentication. | 
+ **password** | **String**| Password for authentication. | 
  **userCode** | **String**|  | 
- **userId** | **String**| In a real deployment, user_id comes from the authenticated session. For now, accept it as a form field or default to \\\"anonymous\\\". | [optional] 
 
 ### Return type
 

@@ -48,7 +48,7 @@ pub struct AuthorizeForm {
     )
 )]
 pub async fn authorize_get(
-    State(_state): State<OAuthState>,
+    State(state): State<OAuthState>,
     Query(params): Query<AuthorizeQuery>,
 ) -> impl IntoResponse {
     let response_type = params.response_type.as_deref().unwrap_or("");
@@ -60,8 +60,16 @@ pub async fn authorize_get(
             .into_response();
     }
 
-    let client_id = escape_html_attr(params.client_id.as_deref().unwrap_or(""));
-    let redirect_uri = escape_html_attr(params.redirect_uri.as_deref().unwrap_or(""));
+    let raw_client_id = params.client_id.as_deref().unwrap_or("");
+    let raw_redirect_uri = params.redirect_uri.as_deref().unwrap_or("");
+
+    // Validate client_id and redirect_uri against registered clients.
+    if let Err(resp) = validate_client(&state, raw_client_id, raw_redirect_uri).await {
+        return resp;
+    }
+
+    let client_id = escape_html_attr(raw_client_id);
+    let redirect_uri = escape_html_attr(raw_redirect_uri);
     let state_param = escape_html_attr(params.state.as_deref().unwrap_or(""));
     let code_challenge = escape_html_attr(params.code_challenge.as_deref().unwrap_or(""));
     let scope = escape_html_attr(params.scope.as_deref().unwrap_or(""));
@@ -112,6 +120,11 @@ pub async fn authorize_post(
     State(state): State<OAuthState>,
     Form(form): Form<AuthorizeForm>,
 ) -> impl IntoResponse {
+    // Validate client_id and redirect_uri against registered clients.
+    if let Err(resp) = validate_client(&state, &form.client_id, &form.redirect_uri).await {
+        return resp;
+    }
+
     let email = form.email.unwrap_or_default();
     let password = form.password.unwrap_or_default();
 
@@ -206,4 +219,49 @@ pub async fn authorize_post(
     }
 
     Redirect::to(&redirect).into_response()
+}
+
+/// Validate that `client_id` is a registered client and `redirect_uri` is
+/// in its allowed redirect URIs. Returns `Err(response)` on failure.
+async fn validate_client(
+    state: &OAuthState,
+    client_id: &str,
+    redirect_uri: &str,
+) -> Result<(), axum::response::Response> {
+    if client_id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Html("error: missing client_id".to_string()),
+        )
+            .into_response());
+    }
+
+    let client = match state.client_registrar.get(client_id).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Html("error: unknown client_id".to_string()),
+            )
+                .into_response());
+        }
+        Err(e) => {
+            tracing::error!("client lookup failed: {e}");
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Html("error: internal server error".to_string()),
+            )
+                .into_response());
+        }
+    };
+
+    if !redirect_uri.is_empty() && !client.redirect_uris.contains(&redirect_uri.to_string()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Html("error: redirect_uri not registered for this client".to_string()),
+        )
+            .into_response());
+    }
+
+    Ok(())
 }

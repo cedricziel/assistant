@@ -5424,18 +5424,21 @@
         "type": "object",
         "description": "Form fields for POST /oauth/device/verify.",
         "required": [
-          "user_code"
+          "user_code",
+          "email",
+          "password"
         ],
         "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email for authentication."
+          },
+          "password": {
+            "type": "string",
+            "description": "Password for authentication."
+          },
           "user_code": {
             "type": "string"
-          },
-          "user_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "In a real deployment, user_id comes from the authenticated session.\nFor now, accept it as a form field or default to \"anonymous\"."
           }
         }
       },

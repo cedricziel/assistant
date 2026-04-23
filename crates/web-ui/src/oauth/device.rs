@@ -14,6 +14,8 @@ use super::{
     DeviceCodeResponseSchema, OAuthError, OAuthErrorResponse, OAuthState, escape_html_attr,
 };
 
+use assistant_auth::password::verify_password;
+
 /// POST /oauth/device request body.
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct DeviceInitiateRequest {
@@ -95,8 +97,13 @@ pub async fn device_verify_page(Query(params): Query<VerifyQuery>) -> impl IntoR
 <p>Enter the code displayed on your device:</p>
 <form method="POST" action="/oauth/device/verify">
   <input type="text" name="user_code" placeholder="ABCD-EFGH" value="{prefill}" required
-         pattern="[A-Za-z]{{4}}-[A-Za-z]{{4}}" maxlength="9" autocomplete="off">
-  <input type="hidden" name="user_id" value="">
+         pattern="[A-Za-z]{{4}}-[A-Za-z]{{4}}" maxlength="9" autocomplete="off"
+         style="text-transform: uppercase; font-size: 1.5em; text-align: center; letter-spacing: 0.2em;">
+  <p style="margin-top: 16px;">Sign in to authorize:</p>
+  <input type="email" name="email" placeholder="Email" required
+         style="text-transform: none; font-size: 1em; text-align: left; letter-spacing: normal;">
+  <input type="password" name="password" placeholder="Password" required
+         style="text-transform: none; font-size: 1em; text-align: left; letter-spacing: normal;">
   <button type="submit">Authorize</button>
 </form>
 </body>
@@ -110,10 +117,10 @@ pub async fn device_verify_page(Query(params): Query<VerifyQuery>) -> impl IntoR
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct DeviceVerifyForm {
     pub user_code: String,
-    /// In a real deployment, user_id comes from the authenticated session.
-    /// For now, accept it as a form field or default to "anonymous".
-    #[serde(default)]
-    pub user_id: Option<String>,
+    /// Email for authentication.
+    pub email: String,
+    /// Password for authentication.
+    pub password: String,
 }
 
 /// POST /oauth/device/verify — user approves the device code.
@@ -131,10 +138,45 @@ pub async fn device_verify_submit(
     State(state): State<OAuthState>,
     Form(form): Form<DeviceVerifyForm>,
 ) -> impl IntoResponse {
-    let user_code = form.user_code.trim().to_uppercase();
-    let user_id = form.user_id.unwrap_or_else(|| "anonymous".to_string());
+    // Authenticate the user before approving the device code.
+    let user = match state
+        .org_storage
+        .user_store()
+        .get_user_by_email_any(&form.email)
+        .await
+    {
+        Ok(Some(u)) => u,
+        _ => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Html("error: invalid email or password".to_string()),
+            )
+                .into_response();
+        }
+    };
 
-    match state.device_manager.complete(&user_code, &user_id).await {
+    if user.password_hash.is_empty() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Html("error: invalid email or password".to_string()),
+        )
+            .into_response();
+    }
+
+    match verify_password(&form.password, &user.password_hash) {
+        Ok(true) => {}
+        _ => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Html("error: invalid email or password".to_string()),
+            )
+                .into_response();
+        }
+    }
+
+    let user_code = form.user_code.trim().to_uppercase();
+
+    match state.device_manager.complete(&user_code, &user.id.0).await {
         Ok(()) => Html(
             r#"<!DOCTYPE html>
 <html>
