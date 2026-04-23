@@ -69,6 +69,26 @@ impl OrgStorageLayer {
     pub fn membership_store(&self) -> super::space_store::SqliteMembershipStore {
         super::space_store::SqliteMembershipStore::new(self.pool.clone())
     }
+
+    /// Build a [`SqliteClientStore`](super::auth_state_store::SqliteClientStore).
+    pub fn client_store(&self) -> super::auth_state_store::SqliteClientStore {
+        super::auth_state_store::SqliteClientStore::new(self.pool.clone())
+    }
+
+    /// Build a [`SqliteAuthCodeStore`](super::auth_state_store::SqliteAuthCodeStore).
+    pub fn auth_code_store(&self) -> super::auth_state_store::SqliteAuthCodeStore {
+        super::auth_state_store::SqliteAuthCodeStore::new(self.pool.clone())
+    }
+
+    /// Build a [`SqliteRefreshTokenStore`](super::auth_state_store::SqliteRefreshTokenStore).
+    pub fn refresh_token_store(&self) -> super::auth_state_store::SqliteRefreshTokenStore {
+        super::auth_state_store::SqliteRefreshTokenStore::new(self.pool.clone())
+    }
+
+    /// Build a [`SqliteDeviceCodeStore`](super::auth_state_store::SqliteDeviceCodeStore).
+    pub fn device_code_store(&self) -> super::auth_state_store::SqliteDeviceCodeStore {
+        super::auth_state_store::SqliteDeviceCodeStore::new(self.pool.clone())
+    }
 }
 
 /// Run all org.db migrations in order.

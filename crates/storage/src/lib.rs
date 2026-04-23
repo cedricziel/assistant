@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod attachments;
+pub mod auth_state_store;
 pub mod command_events;
 pub mod conversation_broadcaster;
 pub mod conversation_events;
@@ -12,6 +13,7 @@ pub mod org_storage;
 pub mod org_store;
 pub mod persona_skill_access;
 pub mod personas;
+pub mod pool_factory;
 pub mod push_subscriptions;
 pub mod refinements;
 pub mod registry;
@@ -25,6 +27,9 @@ pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
 pub use attachments::AttachmentStore;
+pub use auth_state_store::{
+    SqliteAuthCodeStore, SqliteClientStore, SqliteDeviceCodeStore, SqliteRefreshTokenStore,
+};
 pub use command_events::{CommandEventRow, CommandEventStore};
 pub use conversation_broadcaster::{
     ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
@@ -43,6 +48,7 @@ pub use org_storage::OrgStorageLayer;
 pub use org_store::SqliteOrgStore;
 pub use persona_skill_access::PersonaSkillAccessStore;
 pub use personas::{PersonaRecord, PersonaStore};
+pub use pool_factory::OrgPoolFactory;
 pub use push_subscriptions::{PushSubscription, PushSubscriptionStore};
 pub use refinements::{RefinementStatus, RefinementsStore, SkillRefinement};
 pub use registry::SkillRegistry;
