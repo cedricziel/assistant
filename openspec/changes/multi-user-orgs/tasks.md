@@ -218,51 +218,24 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 **Commits:**
 
-- [ ] `feat(storage): org.db migration — organizations and users tables`
-  - New migration files for org database
-  - Tables: `organizations` (id, name, slug, auth_mode, created_at, updated_at), `users` (id, org_id, email, name, password_hash, idp_issuer, idp_subject, created_at, updated_at)
+- [x] `feat(core): add multi-tenant store traits and in-memory implementations`
+  - Domain types: `Organization`, `User`, `Space`, `SpaceMembership` in `crates/core/src/store.rs`
+  - Traits: `OrgStore`, `UserStore`, `SpaceStore`, `MembershipStore`
+  - In-memory implementations for tests, 25 tests
 
-- [ ] `feat(storage): org.db migration — memberships, API keys, OAuth clients`
-  - Tables: `space_memberships` (user_id, space_id, role, max_personas, allowed_templates_json, created_at), `api_keys` (id, user_id, name, key_hash, key_prefix, scopes_json, resource_restrictions_json, expires_at, created_at), `oauth_clients` (client_id, client_name, redirect_uris_json, grant_types_json, token_endpoint_auth_method, client_secret_hash, created_at)
+- [x] `feat(storage): org.db migrations and OrgStorageLayer`
+  - `migrations/org/001_org_tables.sql`: organizations, users, spaces, space_memberships
+  - `migrations/org/002_auth_tables.sql`: api_keys, oauth_clients, auth_codes, refresh_tokens, device_codes
+  - `OrgStorageLayer`: pool management, PRAGMA setup, migration tracking
 
-- [ ] `feat(storage): org.db migration — auth state tables`
-  - Tables: `auth_codes` (code_hash, user_id, client_id, redirect_uri, pkce_challenge, scopes_json, expires_at), `refresh_tokens` (token_hash, user_id, client_id, scopes_json, expires_at, revoked_at), `device_codes` (device_code_hash, user_code, client_id, user_id, scopes_json, status, expires_at), `catalog_subscriptions` (space_id, resource_type, resource_id, subscribed_at)
+- [x] `feat(storage): SQLite-backed org, user, space, and membership stores`
+  - `SqliteOrgStore`, `SqliteUserStore`, `SqliteSpaceStore`, `SqliteMembershipStore`
+  - Full CRUD against org.db, 26 tests
 
-- [ ] `feat(storage): OrgStore — organization and user CRUD`
-  - Create `crates/storage/src/org.rs`
-  - `OrgStore::new(pool)` — takes org.db pool
-  - CRUD: `create_org`, `get_org`, `update_org`, `create_user`, `get_user_by_email`, `get_user_by_idp`, `list_users`, `update_user`, `delete_user`
-
-- [ ] `test(storage): OrgStore organization and user CRUD`
-  - In-memory org.db, create org, create users, query, update, delete
-
-- [ ] `feat(storage): OrgStore — space memberships and API keys`
-  - Add to `crates/storage/src/org.rs`
-  - `add_space_membership`, `remove_space_membership`, `get_memberships_for_user`, `get_members_of_space`
-  - `create_api_key`, `list_api_keys`, `get_api_key_by_hash`, `revoke_api_key`
-
-- [ ] `test(storage): space memberships and API key CRUD`
-
-- [ ] `feat(storage): OrgStore — OAuth client and auth state storage`
-  - `register_client`, `get_client`, `list_clients`
-  - `store_auth_code`, `consume_auth_code`, `store_refresh_token`, `consume_refresh_token`, `revoke_refresh_token`
-  - `store_device_code`, `get_device_code`, `complete_device_code`
-
-- [ ] `test(storage): OAuth client registration and auth code lifecycle`
-
-- [ ] `feat(storage): SpaceStore — space CRUD and catalog subscriptions`
-  - Create `crates/storage/src/spaces.rs`
-  - Operates on org.db (spaces table) + creates/opens space.db files
-  - `create_space`, `list_spaces`, `get_space`, `delete_space`
-  - `subscribe_catalog_resource`, `unsubscribe`, `list_subscriptions`
-
-- [ ] `test(storage): SpaceStore CRUD and catalog subscriptions`
-
-- [ ] `feat(storage): database pool factory for org/space resolution`
-  - Modify `crates/storage/src/lib.rs`
-  - `OrgPoolFactory::org_pool(org_slug) -> Result<SqlitePool>` — resolves `~/.assistant/orgs/{slug}/org.db`
-  - `OrgPoolFactory::space_pool(org_slug, space_slug) -> Result<SqlitePool>` — resolves `~/.assistant/orgs/{slug}/spaces/{space}/space.db`
-  - Directory creation on first access
+- [x] `feat(storage): SQLite auth state stores and org pool factory`
+  - `SqliteClientStore`, `SqliteAuthCodeStore`, `SqliteRefreshTokenStore`, `SqliteDeviceCodeStore`
+  - `OrgPoolFactory` resolves `~/.assistant/orgs/{slug}/org.db` paths
+  - 14 tests
 
 ---
 
@@ -273,41 +246,42 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 **Commits:**
 
-- [ ] `feat(storage): add user_id scoping to ConversationStore`
-  - Modify `crates/storage/src/conversations.rs`
-  - Add `user_id: Option<String>` field to `ConversationStore` (Option for backward compat during migration)
+- [x] `feat(storage): add user_id scoping to ConversationStore`
+  - Modified `crates/storage/src/conversations.rs`
+  - Added `user_id: Option<String>` field to `ConversationStore` and `ConversationRecord`
   - When `user_id` is set, all queries add `AND user_id = ?` filter
   - `create_conversation` writes `user_id` into the row
-  - New space.db migration: `ALTER TABLE conversations ADD COLUMN user_id TEXT`
+  - Migration 038: `ALTER TABLE conversations ADD COLUMN user_id TEXT` + index
 
-- [ ] `test(storage): conversation user isolation`
-  - Create conversations as user A and user B on same persona
+- [x] `test(storage): conversation user isolation`
+  - Create conversations as user A and user B
   - Assert user A's store only returns user A's conversations
   - Assert user B cannot access user A's conversation by ID
+  - Assert unscoped store sees all conversations
 
-- [ ] `feat(storage): add owner_user_id to personas, remove is_default`
-  - Modify `crates/storage/src/personas.rs`
-  - New migration: `ALTER TABLE personas ADD COLUMN owner_user_id TEXT` (null = org-owned)
-  - Remove `is_default` column (migration: `ALTER TABLE personas DROP COLUMN is_default` or mark deprecated)
-  - Remove `get_default_persona`, `set_default_persona` methods
-  - Add `list_accessible_personas(user_id, role)` — returns org personas the user has access to + user's private personas
+- [x] `feat(storage): add owner_user_id to personas`
+  - Modified `crates/storage/src/personas.rs`
+  - Migration 039: `ALTER TABLE personas ADD COLUMN owner_user_id TEXT` (null = org-owned)
+  - Added `list_accessible(user_id)` — returns org-owned + user-owned personas
+  - Added `create_owned(id, name, owner_user_id)` for user-scoped personas
+  - Deferred: `is_default` removal to PR 9 (when runtime replaces default persona system)
 
-- [ ] `test(storage): persona ownership and access filtering`
-  - Org-owned persona visible to granted users
+- [x] `test(storage): persona ownership and access filtering`
+  - Org-owned persona visible to all users via `list_accessible`
   - User-private persona visible only to owner
-  - Admin sees all personas in space
+  - `list()` returns all personas regardless of owner
 
 - [ ] `refactor(storage): update callers of removed default persona API`
-  - Grep for `is_default`, `get_default_persona`, `set_default_persona`
-  - Update runtime bootstrap, web-ui persona endpoints, CLI persona selection
-  - Where a default was assumed, require explicit persona selection
+  - Deferred to PR 9 — is_default not yet removed, existing callers unchanged
 
-- [ ] `feat(storage): add sender_user_id to messages`
-  - New migration: `ALTER TABLE messages ADD COLUMN sender_user_id TEXT`
-  - Modify `crates/storage/src/conversations.rs` message insertion to accept optional `sender_user_id`
-  - For `role = 'user'` messages, populate sender_user_id from AuthContext
+- [x] `feat(storage): add sender_user_id to messages`
+  - Migration 040: `ALTER TABLE messages ADD COLUMN sender_user_id TEXT`
+  - Modified `crates/core/src/types.rs`: `Message.sender_user_id: Option<String>`
+  - Modified `crates/storage/src/conversations.rs`: save_message includes sender_user_id, all reads extract it
 
-- [ ] `test(storage): messages carry sender identity`
+- [x] `test(storage): messages carry sender identity`
+  - sender_user_id round-trips through save/load
+  - Defaults to None when not set
 
 ---
 
