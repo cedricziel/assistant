@@ -45,6 +45,9 @@ reqwest = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
+# HTTP server (middleware extractors)
+axum = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 wiremock = { workspace = true }

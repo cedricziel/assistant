@@ -391,6 +391,7 @@ dependencies = [
  "argon2",
  "assistant-core",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "chrono",
  "hex",
