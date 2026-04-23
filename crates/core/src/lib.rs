@@ -1,11 +1,14 @@
 pub mod allowlist;
 pub mod attachment;
+pub mod auth;
 pub mod bus;
 pub mod bus_messages;
+pub mod catalog;
 pub mod channel;
 pub mod command;
 pub mod config;
 pub mod context;
+pub mod identity;
 pub mod llm;
 pub mod memory;
 pub mod subagent;
@@ -19,11 +22,17 @@ pub use attachment::{
     AttachmentMeta, MAX_ATTACHMENT_SIZE, RESIZABLE_MIME_TYPES, SUPPORTED_MIME_TYPES,
     extension_for_mime, is_resizable_mime_type, is_supported_mime_type, is_text_mime_type,
 };
+// -- Auth & identity (multi-user) --
+pub use auth::{
+    AuthContext, AuthProvider, AuthorizeRequest, AuthorizeResponse, ClientInfo, ClientRegistration,
+    IdentityResolver, TokenGrant, TokenResponse,
+};
 pub use bus::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
 pub use bus_messages::{
     AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase, TurnRequest,
     TurnResult, TurnStatus, topic,
 };
+pub use catalog::{CatalogEntry, CatalogResolver, CatalogResourceType};
 pub use channel::{ChannelAdapter, ChannelContent, ChannelMessage, ChannelUser};
 pub use command::{CommandArg, CommandDef, CommandResult, ConversationConfig};
 pub use config::{default_config_path, load_config};
@@ -32,6 +41,7 @@ pub use context::{
     runtime_agent_root, runtime_workspace_dir, set_runtime_agent_root, set_runtime_workspace_dir,
     validate_agent_id,
 };
+pub use identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
 // -- LLM abstractions (types, traits, streaming) --
 pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};
 pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport};

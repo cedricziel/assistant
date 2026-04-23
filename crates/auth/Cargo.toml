@@ -1,0 +1,31 @@
+[package]
+name = "assistant-auth"
+version = "0.1.135"
+license.workspace = true
+edition.workspace = true
+description = "Authentication and authorization: OAuth2 server, JWT, password hashing, OIDC, API keys"
+
+[dependencies]
+assistant-core = { path = "../core" }
+
+# Serialization
+serde = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# IDs and time
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# JWT signing and validation
+jsonwebtoken = { workspace = true }
+
+# Password hashing (argon2id)
+argon2 = { workspace = true }
+
+# Cryptographic randomness
+rand = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

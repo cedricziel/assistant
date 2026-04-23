@@ -8,6 +8,7 @@ publish = false
 
 [workspace]
 members = [
+    "crates/auth",
     "crates/core",
     "crates/skills",
     "crates/llm-provider",
@@ -163,10 +164,15 @@ iceberg-catalog-rest = "0.9"
 arrow-array = "57.3"
 arrow-schema = "57.3"
 parquet = { version = "57.3", default-features = false, features = ["arrow", "async"] }
+# Authentication
+jsonwebtoken = "9"
+argon2 = { version = "0.5", features = ["std"] }
+rand = "0.9"
 # Internal crates
 opentelemetry-exporter-sqlite = { path = "crates/opentelemetry-exporter-sqlite" }
 opentelemetry-exporter-iceberg = { path = "crates/opentelemetry-exporter-iceberg" }
-core = { path = "crates/core" }
+core = { path = "crates/core", package = "assistant-core" }
+auth = { path = "crates/auth", package = "assistant-auth" }
 skills = { path = "crates/skills" }
 storage = { path = "crates/storage" }
 runtime = { path = "crates/runtime" }
