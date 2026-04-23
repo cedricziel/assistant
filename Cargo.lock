@@ -391,16 +391,22 @@ dependencies = [
  "argon2",
  "assistant-core",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "chrono",
+ "hex",
  "jsonwebtoken",
  "rand 0.9.4",
+ "reqwest 0.12.28",
  "serde",
  "sha2 0.11.0",
  "tempfile",
  "tokio",
+ "tracing",
  "url",
+ "urlencoding",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
