@@ -11,6 +11,7 @@ pub mod context;
 pub mod identity;
 pub mod llm;
 pub mod memory;
+pub mod store;
 pub mod subagent;
 pub mod text;
 pub mod tool;
@@ -42,6 +43,11 @@ pub use context::{
     validate_agent_id,
 };
 pub use identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
+// -- Multi-tenant stores --
+pub use store::{
+    InMemoryMembershipStore, InMemoryOrgStore, InMemorySpaceStore, InMemoryUserStore,
+    MembershipStore, OrgStore, Organization, Space, SpaceMembership, SpaceStore, User, UserStore,
+};
 // -- LLM abstractions (types, traits, streaming) --
 pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};
 pub use llm::provider::{Capabilities, HostedTool, LlmProvider, ToolSupport};
