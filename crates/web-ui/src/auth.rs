@@ -223,7 +223,7 @@ pub async fn require_same_origin_mutation(request: Request, next: Next) -> Respo
             .unwrap();
     };
 
-    if origin_host.as_bytes() != host.as_bytes() {
+    if !origin_host.eq_ignore_ascii_case(host) {
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Body::from("Forbidden"))
@@ -1108,6 +1108,28 @@ mod tests {
             resp.status(),
             StatusCode::FORBIDDEN,
             "POST with mismatched Origin should be blocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn csrf_allows_mixed_case_origin() {
+        let app = csrf_app();
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/action")
+                    .header("host", "Example.COM")
+                    .header("origin", "https://example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "POST with case-different but matching Origin should pass"
         );
     }
 
