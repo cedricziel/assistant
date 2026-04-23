@@ -3,19 +3,23 @@
 //! Builds the full system prompt from memory files and skill metadata,
 //! optionally appending extension-tool instructions for messaging interfaces.
 
-use assistant_core::ToolSpec;
+use assistant_core::{Interface, ToolSpec};
 use assistant_skills::SkillDef as SpecSkillDef;
 
 use super::Orchestrator;
 
 impl Orchestrator {
-    /// Compose the full system prompt from memory files and available skills.
-    pub(crate) async fn compose_system_prompt(&self) -> String {
+    /// Compose the full system prompt from memory files, available skills,
+    /// and interface-specific output capabilities.
+    pub(crate) async fn compose_system_prompt(&self, interface: &Interface) -> String {
         let mut prompt = self.memory_loader.load_system_prompt();
         if let Some(skills_xml) = self.available_skills_xml().await {
             prompt.push_str("\n\n");
             prompt.push_str(&skills_xml);
         }
+        let caps = output_capabilities(interface);
+        prompt.push_str("\n\n");
+        prompt.push_str(caps);
         prompt
     }
 
@@ -145,6 +149,81 @@ impl Orchestrator {
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
 
+/// Return a static output-capabilities block tailored to the connected interface.
+///
+/// This text is compiled into the binary — the model cannot edit or delete it.
+/// It tells the model what rich output formats the connected client can render.
+fn output_capabilities(interface: &Interface) -> &'static str {
+    match interface {
+        Interface::Web => {
+            "## Output capabilities\n\
+             \n\
+             Your responses render in a rich client that supports:\n\
+             - Markdown (headings, bold, italic, lists, links, blockquotes, tables)\n\
+             - Fenced code blocks with syntax highlighting\n\
+             - ```mermaid — rendered as a visual diagram (flowchart, sequence, state, ER, Gantt, etc.)\n\
+             - ```svg — rendered as an inline SVG graphic\n\
+             \n\
+             Use visual formats when they genuinely aid understanding. Prefer Mermaid for \
+             structured diagrams (flows, sequences, ERs). Use SVG for custom visuals, charts, \
+             illustrations, or layouts that Mermaid cannot express."
+        }
+        Interface::Cli => {
+            "## Output capabilities\n\
+             \n\
+             Your responses render in a terminal. Markdown formatting (bold, italic, lists, \
+             code blocks) is supported. Fenced ```mermaid blocks are rendered as diagrams \
+             when the terminal supports it. Prefer text-based explanations."
+        }
+        Interface::Slack => {
+            "## Output capabilities\n\
+             \n\
+             Your responses render in Slack. Use mrkdwn formatting (bold, italic, code blocks, \
+             lists, links). Do not use ```svg or ```mermaid — they will appear as raw code. \
+             Use emoji where appropriate."
+        }
+        Interface::Matrix => {
+            "## Output capabilities\n\
+             \n\
+             Your responses render in a Matrix client. Basic HTML formatting is supported \
+             (bold, italic, code blocks, lists, links). Images can be sent as attachments. \
+             Do not use ```svg or ```mermaid — they will appear as raw code."
+        }
+        Interface::Signal => {
+            "## Output capabilities\n\
+             \n\
+             Your responses render as plain text in a mobile messaging app. No markdown, \
+             no images, no diagrams. Keep responses concise and text-only."
+        }
+        Interface::Mattermost => {
+            "## Output capabilities\n\
+             \n\
+             Your responses render in Mattermost. Use Markdown formatting (bold, italic, \
+             code blocks, lists, links, tables). Do not use ```svg or ```mermaid — they \
+             will appear as raw code."
+        }
+        Interface::Nextcloud => {
+            "## Output capabilities\n\
+             \n\
+             Your responses render in Nextcloud Talk. Use Markdown formatting (bold, italic, \
+             code blocks, lists, links). Do not use ```svg or ```mermaid — they will appear \
+             as raw code."
+        }
+        Interface::Mcp => {
+            "## Output capabilities\n\
+             \n\
+             Your responses are consumed programmatically via the MCP protocol. Return \
+             structured, well-formatted text. Do not use ```svg or ```mermaid."
+        }
+        Interface::Scheduler => {
+            "## Output capabilities\n\
+             \n\
+             You are running as a background scheduled task. Your output may be logged or \
+             forwarded. Use plain text. Do not use ```svg or ```mermaid."
+        }
+    }
+}
+
 fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {
     let path = skill.dir.join("SKILL.md");
     if path.exists() {
@@ -167,4 +246,65 @@ fn escape_xml(input: &str) -> String {
         }
     }
     escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use assistant_core::Interface;
+
+    use super::output_capabilities;
+
+    #[test]
+    fn web_mentions_svg_and_mermaid() {
+        let caps = output_capabilities(&Interface::Web);
+        assert!(caps.contains("svg"), "Web capabilities should mention svg");
+        assert!(
+            caps.contains("mermaid"),
+            "Web capabilities should mention mermaid"
+        );
+    }
+
+    #[test]
+    fn signal_omits_svg_and_mermaid() {
+        let caps = output_capabilities(&Interface::Signal);
+        assert!(
+            !caps.contains("svg"),
+            "Signal capabilities should not mention svg"
+        );
+        assert!(
+            !caps.contains("mermaid"),
+            "Signal capabilities should not mention mermaid"
+        );
+    }
+
+    #[test]
+    fn slack_mentions_mrkdwn() {
+        let caps = output_capabilities(&Interface::Slack);
+        assert!(
+            caps.contains("mrkdwn"),
+            "Slack capabilities should mention mrkdwn"
+        );
+    }
+
+    #[test]
+    fn every_variant_is_non_empty() {
+        let interfaces = [
+            Interface::Cli,
+            Interface::Signal,
+            Interface::Mcp,
+            Interface::Slack,
+            Interface::Mattermost,
+            Interface::Nextcloud,
+            Interface::Web,
+            Interface::Scheduler,
+            Interface::Matrix,
+        ];
+        for iface in &interfaces {
+            let caps = output_capabilities(iface);
+            assert!(
+                !caps.is_empty(),
+                "output_capabilities for {iface:?} should not be empty"
+            );
+        }
+    }
 }
