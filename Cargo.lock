@@ -668,6 +668,7 @@ name = "assistant-storage"
 version = "0.1.135"
 dependencies = [
  "anyhow",
+ "assistant-auth",
  "assistant-core",
  "assistant-skills",
  "async-trait",
