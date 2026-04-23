@@ -73,8 +73,8 @@ struct Args {
     #[arg(long)]
     db_path: Option<PathBuf>,
 
-    /// Authentication token.  Falls back to ASSISTANT_WEB_TOKEN env var.
-    /// The server will refuse to start without a token.
+    /// Optional legacy authentication token.  Falls back to ASSISTANT_WEB_TOKEN env var.
+    /// When empty or absent the server starts without legacy-token auth.
     #[arg(long, env = "ASSISTANT_WEB_TOKEN")]
     auth_token: Option<String>,
 

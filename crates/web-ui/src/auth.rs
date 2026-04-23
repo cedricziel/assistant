@@ -806,11 +806,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn expired_session_cookie_returns_401() {
+    async fn invalid_session_cookie_returns_401() {
         let (config, _jwt_sign) = test_config();
         let app = test_app(config);
 
-        // Sign a JWT with a different secret so it fails validation.
+        // Sign a JWT with a different secret so it fails signature validation.
         let other_kp = JwtKeyPair::from_secret(b"other-secret-that-is-long-enough");
         let other_mgr = JwtManager::new(
             other_kp,
@@ -834,7 +834,53 @@ mod tests {
         assert_eq!(
             resp.status(),
             StatusCode::UNAUTHORIZED,
-            "invalid session cookie should return 401"
+            "session cookie signed with wrong secret should return 401"
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_session_cookie_returns_401() {
+        // Build a JwtManager with a negative TTL so the token is already expired.
+        let kp = JwtKeyPair::from_secret(b"test-secret-key-for-unit-tests!");
+        let expired_mgr =
+            JwtManager::new(kp, "https://test.local".into(), "https://test.local".into())
+                .with_access_ttl(chrono::Duration::seconds(-120));
+
+        let ctx = make_user_context();
+        let expired_jwt = expired_mgr.sign(&ctx, "acme", "Alice").unwrap();
+
+        // The auth config uses the same secret so signature is valid, but the
+        // token is expired.
+        let verify_kp = JwtKeyPair::from_secret(b"test-secret-key-for-unit-tests!");
+        let verify_mgr = Arc::new(JwtManager::new(
+            verify_kp,
+            "https://test.local".into(),
+            "https://test.local".into(),
+        ));
+        let config = WebAuthConfig::new(
+            verify_mgr,
+            Arc::new(InMemoryApiKeyStore::new()),
+            None,
+            None,
+            false,
+        );
+        let app = test_app(config);
+
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/whoami")
+                    .header("cookie", format!("{}={}", SESSION_COOKIE, expired_jwt))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "expired session cookie should return 401"
         );
     }
 
