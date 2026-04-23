@@ -76,7 +76,9 @@ rules:
   proposal:
     - Keep proposals under 500 words
     - Always include a "Non-goals" section
+    - Always include a verdict whether we need user facing documentation
   tasks:
     - Break tasks into chunks of max 2 hours
     - No lingering backwards compatibility code
     - Ensure adding http api routes includes OpenAPI docs
+    - Ensure user-facing features are well documented in the docs/ directory
