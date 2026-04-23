@@ -168,42 +168,42 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 **Commits:**
 
-- [ ] `feat(auth): OIDC discovery and id_token validation`
+- [x] `feat(auth): OIDC discovery and id_token validation`
   - Create `crates/auth/src/oidc.rs`
   - Add `openidconnect` to crate deps
   - `OidcProvider::discover(issuer_url) -> Result<Self>` — fetch .well-known/openid-configuration
   - `validate_id_token(token: &str) -> Result<IdTokenClaims>` — verify signature, issuer, audience, expiry
   - `extract_user_info(claims: &IdTokenClaims) -> (sub, email, name)`
 
-- [ ] `feat(auth): OIDC user provisioning logic`
+- [x] `feat(auth): OIDC user provisioning logic`
   - Add to `crates/auth/src/oidc.rs`
   - `provision_or_lookup(idp_issuer, idp_subject, email, name) -> Result<UserId>` — find existing user by (issuer, subject) or create new one
   - Auto-provision setting (org-level): auto-create or require admin pre-approval
   - Email domain matching for org assignment
 
-- [ ] `test(auth): OIDC token validation with mocked provider (wiremock)`
+- [x] `test(auth): OIDC token validation with mocked provider (wiremock)`
 
-- [ ] `feat(auth): scoped API key generation and resolution`
+- [x] `feat(auth): scoped API key generation and resolution`
   - Create `crates/auth/src/api_keys.rs`
   - `generate_key(user_id, name, scopes, resource_restrictions, expires_at) -> (key_plaintext, key_hash, key_prefix)`
   - Key format: `ask_live_{32 random chars}` (prefix `ask_live_` for identification)
   - `resolve_key(key_plaintext) -> Result<AuthContext>` — hash, lookup, check expiry, build AuthContext from stored scopes
   - Constant-time comparison for key hash
 
-- [ ] `test(auth): API key generation, scoping, and resolution`
+- [x] `test(auth): API key generation, scoping, and resolution`
   - Create key with limited scopes → resolve → AuthContext has those scopes
   - Expired key → rejection
   - Resource restrictions honored
 
-- [ ] `feat(auth): Axum auth middleware extractors`
+- [x] `feat(auth): Axum auth middleware extractors`
   - Create `crates/auth/src/middleware.rs`
   - `AuthExtractor` implements `FromRequestParts`: checks `Authorization: Bearer <jwt>`, falls back to session cookie, falls back to API key prefix detection
   - Returns `AuthContext` or 401
   - `RequireScope(resource, action)` — Axum layer that checks `ctx.can()` after extraction
 
-- [ ] `test(auth): middleware extraction from various token types`
+- [x] `test(auth): middleware extraction from various token types`
 
-- [ ] `feat(auth): AuthProvider implementations (password + OIDC)`
+- [x] `feat(auth): AuthProvider implementations (password + OIDC)`
   - Implement `AuthProvider` trait in `crates/auth/src/lib.rs`
   - `PasswordAuthProvider`: delegates to password.rs + jwt.rs + oauth2/server.rs
   - `OidcAuthProvider`: delegates to oidc.rs + jwt.rs + oauth2/server.rs
