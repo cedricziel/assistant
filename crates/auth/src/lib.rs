@@ -8,6 +8,7 @@
 //! - API key management (`api_keys`) *(coming next)*
 //! - Axum middleware extractors (`middleware`) *(coming next)*
 
+pub mod api_keys;
 pub mod jwt;
 pub mod oauth2;
 pub mod oidc;
