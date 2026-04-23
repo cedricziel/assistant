@@ -43,6 +43,7 @@ dependencies:
   super_clipboard: ^0.9.1
   connectivity_plus: ^7.1.1
   share_plus: ^12.0.2
+  flutter_svg: ^2.2.4
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -55,8 +56,8 @@ flutter_launcher_icons:
   web:
     generate: true
     image_path: macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png
-    background_color: '#080C1A'
-    theme_color: '#080C1A'
+    background_color: "#080C1A"
+    theme_color: "#080C1A"
 flutter:
   uses-material-design: true
   assets:

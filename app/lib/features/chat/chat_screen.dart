@@ -11,6 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smooth_markdown/flutter_smooth_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'svg_builder.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../shared/platform/adaptive_context_menu.dart';
@@ -756,9 +758,11 @@ class _MessageBubble extends StatelessWidget {
                               ),
                           useEnhancedComponents: true,
                           plugins: ParserPluginRegistry()
-                            ..registerBlock(MermaidPlugin()),
+                            ..registerBlock(MermaidPlugin())
+                            ..registerBlock(const SvgPlugin()),
                           builderRegistry: BuilderRegistry()
-                            ..register('mermaid', const MermaidBuilder()),
+                            ..register('mermaid', const MermaidBuilder())
+                            ..register('svg', const SvgBuilder()),
                         )
                       else if (message.content.isNotEmpty)
                         SmoothMarkdown(
@@ -779,9 +783,11 @@ class _MessageBubble extends StatelessWidget {
                           selectable: true,
                           useEnhancedComponents: true,
                           plugins: ParserPluginRegistry()
-                            ..registerBlock(MermaidPlugin()),
+                            ..registerBlock(MermaidPlugin())
+                            ..registerBlock(const SvgPlugin()),
                           builderRegistry: BuilderRegistry()
-                            ..register('mermaid', const MermaidBuilder()),
+                            ..register('mermaid', const MermaidBuilder())
+                            ..register('svg', const SvgBuilder()),
                         ),
                       // Attachment thumbnails (assistant-produced images).
                       if (message.attachments.isNotEmpty)

@@ -146,7 +146,7 @@ impl SubagentRunner for Orchestrator {
         // otherwise fall back to the default composed prompt.
         let system_prompt = match spawn.system_prompt {
             Some(ref prompt) if !prompt.is_empty() => prompt.clone(),
-            _ => self.compose_system_prompt().await,
+            _ => self.compose_system_prompt(&Interface::Scheduler).await,
         };
 
         // Set up the conversation and history with the task as the user message.
