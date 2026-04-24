@@ -83,7 +83,7 @@ pub fn api_keys_router() -> Router<ApiKeysApiState> {
     get,
     path = "/api/users/me/api-keys",
     tag = "api-keys",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["api_keys:read"])),
     responses(
         (status = 200, description = "List of API keys", body = Vec<ApiKeySummary>),
     )
@@ -123,7 +123,7 @@ pub async fn list_api_keys(
     post,
     path = "/api/users/me/api-keys",
     tag = "api-keys",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["api_keys:write"])),
     request_body = CreateApiKeyRequest,
     responses(
         (status = 201, description = "API key created (plaintext shown once)", body = CreateApiKeyResponse),
@@ -197,7 +197,7 @@ pub async fn create_api_key(
     delete,
     path = "/api/users/me/api-keys/{id}",
     tag = "api-keys",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["api_keys:write"])),
     params(("id" = String, Path, description = "API key ID")),
     responses(
         (status = 204, description = "API key revoked"),

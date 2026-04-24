@@ -1412,7 +1412,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "org:manage"
+            ]
           }
         ]
       }
@@ -1512,7 +1514,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "org:manage"
+            ]
           }
         ]
       }
@@ -1558,7 +1562,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:read"
+            ]
           }
         ]
       },
@@ -1612,7 +1618,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:write"
+            ]
           }
         ]
       }
@@ -1667,7 +1675,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:read"
+            ]
           }
         ]
       },
@@ -1713,7 +1723,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:write"
+            ]
           }
         ]
       },
@@ -1776,7 +1788,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:write"
+            ]
           }
         ]
       }
@@ -1831,7 +1845,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:read"
+            ]
           }
         ]
       },
@@ -1894,7 +1910,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:write"
+            ]
           }
         ]
       }
@@ -1951,7 +1969,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:write"
+            ]
           }
         ]
       },
@@ -2023,7 +2043,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "spaces:write"
+            ]
           }
         ]
       }
@@ -2069,7 +2091,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "users:read"
+            ]
           }
         ]
       },
@@ -2126,7 +2150,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "users:write"
+            ]
           }
         ]
       }
@@ -2181,7 +2207,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "users:read"
+            ]
           }
         ]
       },
@@ -2227,7 +2255,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "users:write"
+            ]
           }
         ]
       },
@@ -2290,7 +2320,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "users:write"
+            ]
           }
         ]
       }
@@ -3363,7 +3395,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "api_keys:read"
+            ]
           }
         ]
       },
@@ -3403,7 +3437,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "api_keys:write"
+            ]
           }
         ]
       }
@@ -3439,7 +3475,9 @@
             "bearer_token": []
           },
           {
-            "oauth2": []
+            "oauth2": [
+              "api_keys:write"
+            ]
           }
         ]
       }
@@ -9365,6 +9403,7 @@
             "tokenUrl": "/oauth/token",
             "refreshUrl": "/oauth/token",
             "scopes": {
+              "api_keys:read": "List API keys",
               "api_keys:write": "Create and revoke API keys",
               "conversations:read": "Read conversations",
               "conversations:write": "Create and send messages",
@@ -9382,6 +9421,7 @@
           "clientCredentials": {
             "tokenUrl": "/oauth/token",
             "scopes": {
+              "api_keys:read": "List API keys",
               "api_keys:write": "Create and revoke API keys",
               "conversations:read": "Read conversations",
               "conversations:write": "Create and send messages",

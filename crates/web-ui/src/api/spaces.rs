@@ -87,7 +87,7 @@ pub fn spaces_api_router() -> Router<SpacesApiState> {
     get,
     path = "/api/orgs/{org_id}/spaces",
     tag = "spaces",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["spaces:read"])),
     params(("org_id" = String, Path, description = "Organization ID")),
     responses(
         (status = 200, description = "List of spaces", body = Vec<SpaceSummary>),
@@ -159,7 +159,7 @@ pub async fn list_spaces(
     post,
     path = "/api/orgs/{org_id}/spaces",
     tag = "spaces",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["spaces:write"])),
     params(("org_id" = String, Path, description = "Organization ID")),
     request_body = CreateSpaceRequest,
     responses(
@@ -215,7 +215,7 @@ pub async fn create_space(
     get,
     path = "/api/orgs/{org_id}/spaces/{id}",
     tag = "spaces",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["spaces:read"])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("id" = String, Path, description = "Space ID"),
@@ -263,7 +263,7 @@ pub async fn get_space(
     patch,
     path = "/api/orgs/{org_id}/spaces/{id}",
     tag = "spaces",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["spaces:write"])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("id" = String, Path, description = "Space ID"),
@@ -321,7 +321,7 @@ pub async fn update_space(
     delete,
     path = "/api/orgs/{org_id}/spaces/{id}",
     tag = "spaces",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["spaces:write"])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("id" = String, Path, description = "Space ID"),

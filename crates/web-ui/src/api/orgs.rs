@@ -122,7 +122,7 @@ pub async fn list_orgs(
     post,
     path = "/api/orgs",
     tag = "orgs",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["org:manage"])),
     request_body = CreateOrgRequest,
     responses(
         (status = 201, description = "Organization created", body = OrgDetail),
@@ -221,7 +221,7 @@ pub async fn get_org(
     patch,
     path = "/api/orgs/{id}",
     tag = "orgs",
-    security(("bearer_token" = []), ("oauth2" = [])),
+    security(("bearer_token" = []), ("oauth2" = ["org:manage"])),
     params(("id" = String, Path, description = "Organization ID")),
     request_body = UpdateOrgRequest,
     responses(

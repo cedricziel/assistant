@@ -330,6 +330,7 @@ Authentication schemes defined for the API:
 - **Flow**: application
 - **Authorization URL**: 
 - **Scopes**: 
+ - **api_keys:read**: List API keys
  - **api_keys:write**: Create and revoke API keys
  - **conversations:read**: Read conversations
  - **conversations:write**: Create and send messages
@@ -349,6 +350,7 @@ Authentication schemes defined for the API:
 - **Flow**: accessCode
 - **Authorization URL**: /oauth/authorize
 - **Scopes**: 
+ - **api_keys:read**: List API keys
  - **api_keys:write**: Create and revoke API keys
  - **conversations:read**: Read conversations
  - **conversations:write**: Create and send messages

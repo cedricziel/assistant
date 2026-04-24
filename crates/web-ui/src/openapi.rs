@@ -108,6 +108,7 @@ impl Modify for SecuritySchemesAddon {
                 ("spaces:read", "Read spaces"),
                 ("spaces:write", "Create and update spaces"),
                 ("org:manage", "Full organization management"),
+                ("api_keys:read", "List API keys"),
                 ("api_keys:write", "Create and revoke API keys"),
             ]
             .into_iter()
