@@ -76,6 +76,9 @@ Class | Method | HTTP request | Description
 [*AgentsApi*](doc/AgentsApi.md) | [**setDefaultAgent**](doc/AgentsApi.md#setdefaultagent) | **POST** /api/agents/{id}/set-default | &#x60;POST /api/agents/{id}/set-default&#x60; — set an agent as the default.
 [*AgentsApi*](doc/AgentsApi.md) | [**updateAgent**](doc/AgentsApi.md#updateagent) | **PUT** /api/agents/{id} | &#x60;PUT /api/agents/{id}&#x60; — update an agent&#39;s card.
 [*AnalyticsApi*](doc/AnalyticsApi.md) | [**getAnalytics**](doc/AnalyticsApi.md#getanalytics) | **GET** /api/analytics | &#x60;GET /api/analytics&#x60; — get aggregated usage analytics for a time window.
+[*ApiKeysApi*](doc/ApiKeysApi.md) | [**createApiKey**](doc/ApiKeysApi.md#createapikey) | **POST** /api/users/me/api-keys | &#x60;POST /api/users/me/api-keys&#x60; — create a new scoped API key.
+[*ApiKeysApi*](doc/ApiKeysApi.md) | [**deleteApiKey**](doc/ApiKeysApi.md#deleteapikey) | **DELETE** /api/users/me/api-keys/{id} | &#x60;DELETE /api/users/me/api-keys/{id}&#x60; — revoke an API key.
+[*ApiKeysApi*](doc/ApiKeysApi.md) | [**listApiKeys**](doc/ApiKeysApi.md#listapikeys) | **GET** /api/users/me/api-keys | &#x60;GET /api/users/me/api-keys&#x60; — list the caller&#39;s API keys.
 [*AttachmentsApi*](doc/AttachmentsApi.md) | [**serveAttachment**](doc/AttachmentsApi.md#serveattachment) | **GET** /api/attachments/{id} | &#x60;GET /api/attachments/{id}&#x60; — serve an attachment, optionally resized.
 [*AttachmentsApi*](doc/AttachmentsApi.md) | [**uploadAttachment**](doc/AttachmentsApi.md#uploadattachment) | **POST** /api/conversations/{id}/attachments | &#x60;POST /api/conversations/{id}/attachments&#x60; — upload an image attachment.
 [*CapabilitiesApi*](doc/CapabilitiesApi.md) | [**getCapabilities**](doc/CapabilitiesApi.md#getcapabilities) | **GET** /api/capabilities | &#x60;GET /api/capabilities&#x60; — return server capability flags.
@@ -95,6 +98,10 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
 [*LogsApi*](doc/LogsApi.md) | [**listLogs**](doc/LogsApi.md#listlogs) | **GET** /api/logs | &#x60;GET /api/logs&#x60; — list recent log entries, newest first.
+[*MembersApi*](doc/MembersApi.md) | [**addMember**](doc/MembersApi.md#addmember) | **POST** /api/orgs/{org_id}/spaces/{space_id}/members | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/members&#x60; — add a member.
+[*MembersApi*](doc/MembersApi.md) | [**listMembers**](doc/MembersApi.md#listmembers) | **GET** /api/orgs/{org_id}/spaces/{space_id}/members | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/members&#x60; — list space members.
+[*MembersApi*](doc/MembersApi.md) | [**removeMember**](doc/MembersApi.md#removemember) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/members/{user_id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}&#x60; — remove member.
+[*MembersApi*](doc/MembersApi.md) | [**updateMember**](doc/MembersApi.md#updatemember) | **PATCH** /api/orgs/{org_id}/spaces/{space_id}/members/{user_id} | &#x60;PATCH /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}&#x60; — change role.
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessage**](doc/MessagesApi.md#a2asendmessage) | **POST** /message/send | &#x60;POST /message/send&#x60; -- Sends a message to the agent (unary).
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessageStreaming**](doc/MessagesApi.md#a2asendmessagestreaming) | **POST** /message/stream | &#x60;POST /message/stream&#x60; -- Sends a message with streaming response (SSE).
 [*OauthApi*](doc/OauthApi.md) | [**authorizeGet**](doc/OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render login form.
@@ -107,6 +114,10 @@ Class | Method | HTTP request | Description
 [*OauthApi*](doc/OauthApi.md) | [**register**](doc/OauthApi.md#register) | **POST** /oauth/register | POST /oauth/register — register a new OAuth2 client.
 [*OauthApi*](doc/OauthApi.md) | [**revoke**](doc/OauthApi.md#revoke) | **POST** /oauth/revoke | POST /oauth/revoke — revoke a refresh token.
 [*OauthApi*](doc/OauthApi.md) | [**token**](doc/OauthApi.md#token) | **POST** /oauth/token | POST /oauth/token
+[*OrgsApi*](doc/OrgsApi.md) | [**createOrg**](doc/OrgsApi.md#createorg) | **POST** /api/orgs | &#x60;POST /api/orgs&#x60; — create a new organization.
+[*OrgsApi*](doc/OrgsApi.md) | [**getOrg**](doc/OrgsApi.md#getorg) | **GET** /api/orgs/{id} | &#x60;GET /api/orgs/{id}&#x60; — get organization detail.
+[*OrgsApi*](doc/OrgsApi.md) | [**listOrgs**](doc/OrgsApi.md#listorgs) | **GET** /api/orgs | &#x60;GET /api/orgs&#x60; — list organizations the user has access to.
+[*OrgsApi*](doc/OrgsApi.md) | [**updateOrg**](doc/OrgsApi.md#updateorg) | **PATCH** /api/orgs/{id} | &#x60;PATCH /api/orgs/{id}&#x60; — update organization settings.
 [*PersonasApi*](doc/PersonasApi.md) | [**addSkillAccess**](doc/PersonasApi.md#addskillaccess) | **POST** /api/personas/{id}/skill-access/skills | &#x60;POST /api/personas/{id}/skill-access/skills&#x60; — add a skill to the access list.
 [*PersonasApi*](doc/PersonasApi.md) | [**createPersona**](doc/PersonasApi.md#createpersona) | **POST** /api/personas | &#x60;POST /api/personas&#x60; — create a new persona.
 [*PersonasApi*](doc/PersonasApi.md) | [**deleteSkillAccess**](doc/PersonasApi.md#deleteskillaccess) | **DELETE** /api/personas/{id}/skill-access/skills/{skill_name} | &#x60;DELETE /api/personas/{id}/skill-access/skills/{skill_name}&#x60; — remove a skill from the access list.
@@ -127,12 +138,22 @@ Class | Method | HTTP request | Description
 [*SkillsApi*](doc/SkillsApi.md) | [**listPersonaSkills**](doc/SkillsApi.md#listpersonaskills) | **GET** /api/personas/{persona_id}/skills | &#x60;GET /api/personas/{persona_id}/skills&#x60; — list skills for a persona.
 [*SkillsApi*](doc/SkillsApi.md) | [**listSkills**](doc/SkillsApi.md#listskills) | **GET** /api/skills | &#x60;GET /api/skills&#x60; — list all skills.
 [*SkillsApi*](doc/SkillsApi.md) | [**updateSkill**](doc/SkillsApi.md#updateskill) | **PUT** /api/skills/{name} | &#x60;PUT /api/skills/{name}&#x60; — update a user skill.
+[*SpacesApi*](doc/SpacesApi.md) | [**createSpace**](doc/SpacesApi.md#createspace) | **POST** /api/orgs/{org_id}/spaces | &#x60;POST /api/orgs/{org_id}/spaces&#x60; — create a space (org-admin only).
+[*SpacesApi*](doc/SpacesApi.md) | [**deleteSpace**](doc/SpacesApi.md#deletespace) | **DELETE** /api/orgs/{org_id}/spaces/{id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{id}&#x60; — delete a space (org-admin only).
+[*SpacesApi*](doc/SpacesApi.md) | [**getSpace**](doc/SpacesApi.md#getspace) | **GET** /api/orgs/{org_id}/spaces/{id} | &#x60;GET /api/orgs/{org_id}/spaces/{id}&#x60; — get space detail.
+[*SpacesApi*](doc/SpacesApi.md) | [**listSpaces**](doc/SpacesApi.md#listspaces) | **GET** /api/orgs/{org_id}/spaces | &#x60;GET /api/orgs/{org_id}/spaces&#x60; — list spaces filtered by membership.
+[*SpacesApi*](doc/SpacesApi.md) | [**updateSpace**](doc/SpacesApi.md#updatespace) | **PATCH** /api/orgs/{org_id}/spaces/{id} | &#x60;PATCH /api/orgs/{org_id}/spaces/{id}&#x60; — update space name.
 [*TasksApi*](doc/TasksApi.md) | [**cancelTask**](doc/TasksApi.md#canceltask) | **POST** /tasks/{id}/cancel | &#x60;POST /tasks/:id/cancel&#x60; -- Cancels a task.
 [*TasksApi*](doc/TasksApi.md) | [**getTask**](doc/TasksApi.md#gettask) | **GET** /tasks/{id} | &#x60;GET /tasks/:id&#x60; -- Gets the latest state of a task.
 [*TasksApi*](doc/TasksApi.md) | [**listTasks**](doc/TasksApi.md#listtasks) | **GET** /tasks | &#x60;GET /tasks&#x60; -- Lists tasks matching optional filters.
 [*TasksApi*](doc/TasksApi.md) | [**subscribeToTask**](doc/TasksApi.md#subscribetotask) | **GET** /tasks/{id}/subscribe | &#x60;GET /tasks/:id/subscribe&#x60; -- Subscribes to task updates (SSE).
 [*TracesApi*](doc/TracesApi.md) | [**getTrace**](doc/TracesApi.md#gettrace) | **GET** /api/traces/{trace_id} | &#x60;GET /api/traces/{trace_id}&#x60; — get a single trace with span breakdown.
 [*TracesApi*](doc/TracesApi.md) | [**listTraces**](doc/TracesApi.md#listtraces) | **GET** /api/traces | &#x60;GET /api/traces&#x60; — list recent traces, newest first.
+[*UsersApi*](doc/UsersApi.md) | [**createUser**](doc/UsersApi.md#createuser) | **POST** /api/orgs/{org_id}/users | &#x60;POST /api/orgs/{org_id}/users&#x60; — create/invite a user.
+[*UsersApi*](doc/UsersApi.md) | [**deleteUser**](doc/UsersApi.md#deleteuser) | **DELETE** /api/orgs/{org_id}/users/{id} | &#x60;DELETE /api/orgs/{org_id}/users/{id}&#x60; — remove a user (org-admin only).
+[*UsersApi*](doc/UsersApi.md) | [**getUser**](doc/UsersApi.md#getuser) | **GET** /api/orgs/{org_id}/users/{id} | &#x60;GET /api/orgs/{org_id}/users/{id}&#x60; — get user detail.
+[*UsersApi*](doc/UsersApi.md) | [**listUsers**](doc/UsersApi.md#listusers) | **GET** /api/orgs/{org_id}/users | &#x60;GET /api/orgs/{org_id}/users&#x60; — list users in an org.
+[*UsersApi*](doc/UsersApi.md) | [**updateUser**](doc/UsersApi.md#updateuser) | **PATCH** /api/orgs/{org_id}/users/{id} | &#x60;PATCH /api/orgs/{org_id}/users/{id}&#x60; — update user name or email.
 [*WebPushApi*](doc/WebPushApi.md) | [**subscribe**](doc/WebPushApi.md#subscribe) | **POST** /api/push/subscribe | &#x60;POST /api/push/subscribe&#x60;
 [*WebPushApi*](doc/WebPushApi.md) | [**unsubscribe**](doc/WebPushApi.md#unsubscribe) | **DELETE** /api/push/subscribe | &#x60;DELETE /api/push/subscribe&#x60;
 [*WebPushApi*](doc/WebPushApi.md) | [**vapidPublicKey**](doc/WebPushApi.md#vapidpublickey) | **GET** /api/push/vapid-public-key | &#x60;GET /api/push/vapid-public-key&#x60;
@@ -159,6 +180,7 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
+ - [AddMemberRequest](doc/AddMemberRequest.md)
  - [AddSkillAccessRequest](doc/AddSkillAccessRequest.md)
  - [AgentCapabilities](doc/AgentCapabilities.md)
  - [AgentCard](doc/AgentCard.md)
@@ -172,6 +194,7 @@ Class | Method | HTTP request | Description
  - [AnalyticsSummaryResponse](doc/AnalyticsSummaryResponse.md)
  - [ApiErrorResponse](doc/ApiErrorResponse.md)
  - [ApiKeySecurityScheme](doc/ApiKeySecurityScheme.md)
+ - [ApiKeySummary](doc/ApiKeySummary.md)
  - [ApiSendMessageRequest](doc/ApiSendMessageRequest.md)
  - [Artifact](doc/Artifact.md)
  - [AttachmentMetaResponse](doc/AttachmentMetaResponse.md)
@@ -186,10 +209,15 @@ Class | Method | HTTP request | Description
  - [CommandEventResponse](doc/CommandEventResponse.md)
  - [ConversationDetail](doc/ConversationDetail.md)
  - [ConversationSummary](doc/ConversationSummary.md)
+ - [CreateApiKeyRequest](doc/CreateApiKeyRequest.md)
+ - [CreateApiKeyResponse](doc/CreateApiKeyResponse.md)
  - [CreateConversationRequest](doc/CreateConversationRequest.md)
+ - [CreateOrgRequest](doc/CreateOrgRequest.md)
  - [CreatePersonaRequest](doc/CreatePersonaRequest.md)
  - [CreateSkillRequest](doc/CreateSkillRequest.md)
+ - [CreateSpaceRequest](doc/CreateSpaceRequest.md)
  - [CreateTaskPushNotificationConfigRequest](doc/CreateTaskPushNotificationConfigRequest.md)
+ - [CreateUserRequest](doc/CreateUserRequest.md)
  - [CreateWebhookRequest](doc/CreateWebhookRequest.md)
  - [DeviceCodeOAuthFlow](doc/DeviceCodeOAuthFlow.md)
  - [DeviceCodeResponseSchema](doc/DeviceCodeResponseSchema.md)
@@ -199,6 +227,7 @@ Class | Method | HTTP request | Description
  - [ListTaskPushNotificationConfigsResponse](doc/ListTaskPushNotificationConfigsResponse.md)
  - [ListTasksResponse](doc/ListTasksResponse.md)
  - [LogEntryResponse](doc/LogEntryResponse.md)
+ - [MemberEntry](doc/MemberEntry.md)
  - [Message](doc/Message.md)
  - [MessageSummary](doc/MessageSummary.md)
  - [ModelPart](doc/ModelPart.md)
@@ -208,6 +237,8 @@ Class | Method | HTTP request | Description
  - [OAuthErrorResponse](doc/OAuthErrorResponse.md)
  - [OAuthFlows](doc/OAuthFlows.md)
  - [OpenIdConnectSecurityScheme](doc/OpenIdConnectSecurityScheme.md)
+ - [OrgDetail](doc/OrgDetail.md)
+ - [OrgSummary](doc/OrgSummary.md)
  - [PasswordOAuthFlow](doc/PasswordOAuthFlow.md)
  - [PersonaDetail](doc/PersonaDetail.md)
  - [PersonaFileContent](doc/PersonaFileContent.md)
@@ -231,6 +262,8 @@ Class | Method | HTTP request | Description
  - [SetSkillAccessModeRequest](doc/SetSkillAccessModeRequest.md)
  - [SkillDetail](doc/SkillDetail.md)
  - [SkillEntryResponse](doc/SkillEntryResponse.md)
+ - [SpaceDetail](doc/SpaceDetail.md)
+ - [SpaceSummary](doc/SpaceSummary.md)
  - [SpanEntryResponse](doc/SpanEntryResponse.md)
  - [SseStatusEvent](doc/SseStatusEvent.md)
  - [SseSubagentCompletedEvent](doc/SseSubagentCompletedEvent.md)
@@ -261,8 +294,14 @@ Class | Method | HTTP request | Description
  - [UnsubscribeRequest](doc/UnsubscribeRequest.md)
  - [UpdateAgentRequest](doc/UpdateAgentRequest.md)
  - [UpdateConversationRequest](doc/UpdateConversationRequest.md)
+ - [UpdateMemberRequest](doc/UpdateMemberRequest.md)
+ - [UpdateOrgRequest](doc/UpdateOrgRequest.md)
  - [UpdateSkillRequest](doc/UpdateSkillRequest.md)
+ - [UpdateSpaceRequest](doc/UpdateSpaceRequest.md)
+ - [UpdateUserRequest](doc/UpdateUserRequest.md)
  - [UpdateWebhookRequest](doc/UpdateWebhookRequest.md)
+ - [UserDetail](doc/UserDetail.md)
+ - [UserSummary](doc/UserSummary.md)
  - [VapidKeyResponse](doc/VapidKeyResponse.md)
  - [VerifyWebhookResponse](doc/VerifyWebhookResponse.md)
  - [WebhookResponse](doc/WebhookResponse.md)
@@ -284,6 +323,46 @@ Authentication schemes defined for the API:
 ### bearer_token
 
 - **Type**: HTTP Bearer Token authentication
+
+### oauth2
+
+- **Type**: OAuth
+- **Flow**: application
+- **Authorization URL**: 
+- **Scopes**: 
+ - **api_keys:read**: List API keys
+ - **api_keys:write**: Create and revoke API keys
+ - **conversations:read**: Read conversations
+ - **conversations:write**: Create and send messages
+ - **org:manage**: Full organization management
+ - **personas:read**: Read personas
+ - **personas:write**: Create and update personas
+ - **skills:read**: Read skills
+ - **skills:write**: Create and update skills
+ - **spaces:read**: Read spaces
+ - **spaces:write**: Create and update spaces
+ - **users:read**: Read users
+ - **users:write**: Create and update users
+
+### oauth2
+
+- **Type**: OAuth
+- **Flow**: accessCode
+- **Authorization URL**: /oauth/authorize
+- **Scopes**: 
+ - **api_keys:read**: List API keys
+ - **api_keys:write**: Create and revoke API keys
+ - **conversations:read**: Read conversations
+ - **conversations:write**: Create and send messages
+ - **org:manage**: Full organization management
+ - **personas:read**: Read personas
+ - **personas:write**: Create and update personas
+ - **skills:read**: Read skills
+ - **skills:write**: Create and update skills
+ - **spaces:read**: Read spaces
+ - **spaces:write**: Create and update spaces
+ - **users:read**: Read users
+ - **users:write**: Create and update users
 
 
 ## Author

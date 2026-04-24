@@ -9,12 +9,17 @@
 
 pub mod agents;
 pub mod analytics;
+pub mod api_keys;
 pub mod commands;
 pub mod logs;
+pub mod members;
+pub mod orgs;
 pub mod personas;
 pub mod push;
 pub mod skills;
+pub mod spaces;
 pub mod traces;
+pub mod users;
 pub mod webhooks;
 pub mod workflows;
 

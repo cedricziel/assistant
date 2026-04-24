@@ -12,18 +12,23 @@ import 'package:assistant_api/src/auth/oauth.dart';
 import 'package:assistant_api/src/api/agent_card_api.dart';
 import 'package:assistant_api/src/api/agents_api.dart';
 import 'package:assistant_api/src/api/analytics_api.dart';
+import 'package:assistant_api/src/api/api_keys_api.dart';
 import 'package:assistant_api/src/api/attachments_api.dart';
 import 'package:assistant_api/src/api/capabilities_api.dart';
 import 'package:assistant_api/src/api/commands_api.dart';
 import 'package:assistant_api/src/api/conversations_api.dart';
 import 'package:assistant_api/src/api/logs_api.dart';
+import 'package:assistant_api/src/api/members_api.dart';
 import 'package:assistant_api/src/api/messages_api.dart';
 import 'package:assistant_api/src/api/oauth_api.dart';
+import 'package:assistant_api/src/api/orgs_api.dart';
 import 'package:assistant_api/src/api/personas_api.dart';
 import 'package:assistant_api/src/api/push_notifications_api.dart';
 import 'package:assistant_api/src/api/skills_api.dart';
+import 'package:assistant_api/src/api/spaces_api.dart';
 import 'package:assistant_api/src/api/tasks_api.dart';
 import 'package:assistant_api/src/api/traces_api.dart';
+import 'package:assistant_api/src/api/users_api.dart';
 import 'package:assistant_api/src/api/web_push_api.dart';
 import 'package:assistant_api/src/api/webhooks_api.dart';
 import 'package:assistant_api/src/api/workflows_api.dart';
@@ -111,6 +116,12 @@ class AssistantApi {
     return AnalyticsApi(dio, serializers);
   }
 
+  /// Get ApiKeysApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  ApiKeysApi getApiKeysApi() {
+    return ApiKeysApi(dio, serializers);
+  }
+
   /// Get AttachmentsApi instance, base route and serializer can be overridden by a given but be careful,
   /// by doing that all interceptors will not be executed
   AttachmentsApi getAttachmentsApi() {
@@ -141,6 +152,12 @@ class AssistantApi {
     return LogsApi(dio, serializers);
   }
 
+  /// Get MembersApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  MembersApi getMembersApi() {
+    return MembersApi(dio, serializers);
+  }
+
   /// Get MessagesApi instance, base route and serializer can be overridden by a given but be careful,
   /// by doing that all interceptors will not be executed
   MessagesApi getMessagesApi() {
@@ -151,6 +168,12 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   OauthApi getOauthApi() {
     return OauthApi(dio, serializers);
+  }
+
+  /// Get OrgsApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  OrgsApi getOrgsApi() {
+    return OrgsApi(dio, serializers);
   }
 
   /// Get PersonasApi instance, base route and serializer can be overridden by a given but be careful,
@@ -171,6 +194,12 @@ class AssistantApi {
     return SkillsApi(dio, serializers);
   }
 
+  /// Get SpacesApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  SpacesApi getSpacesApi() {
+    return SpacesApi(dio, serializers);
+  }
+
   /// Get TasksApi instance, base route and serializer can be overridden by a given but be careful,
   /// by doing that all interceptors will not be executed
   TasksApi getTasksApi() {
@@ -181,6 +210,12 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   TracesApi getTracesApi() {
     return TracesApi(dio, serializers);
+  }
+
+  /// Get UsersApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  UsersApi getUsersApi() {
+    return UsersApi(dio, serializers);
   }
 
   /// Get WebPushApi instance, base route and serializer can be overridden by a given but be careful,

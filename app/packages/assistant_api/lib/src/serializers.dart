@@ -14,6 +14,7 @@ import 'package:built_value/iso_8601_date_time_serializer.dart';
 import 'package:assistant_api/src/date_serializer.dart';
 import 'package:assistant_api/src/model/date.dart';
 
+import 'package:assistant_api/src/model/add_member_request.dart';
 import 'package:assistant_api/src/model/add_skill_access_request.dart';
 import 'package:assistant_api/src/model/agent_capabilities.dart';
 import 'package:assistant_api/src/model/agent_card.dart';
@@ -27,6 +28,7 @@ import 'package:assistant_api/src/model/agent_summary.dart';
 import 'package:assistant_api/src/model/analytics_summary_response.dart';
 import 'package:assistant_api/src/model/api_error_response.dart';
 import 'package:assistant_api/src/model/api_key_security_scheme.dart';
+import 'package:assistant_api/src/model/api_key_summary.dart';
 import 'package:assistant_api/src/model/api_send_message_request.dart';
 import 'package:assistant_api/src/model/artifact.dart';
 import 'package:assistant_api/src/model/attachment_meta_response.dart';
@@ -41,10 +43,15 @@ import 'package:assistant_api/src/model/command_def_response.dart';
 import 'package:assistant_api/src/model/command_event_response.dart';
 import 'package:assistant_api/src/model/conversation_detail.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
+import 'package:assistant_api/src/model/create_api_key_request.dart';
+import 'package:assistant_api/src/model/create_api_key_response.dart';
 import 'package:assistant_api/src/model/create_conversation_request.dart';
+import 'package:assistant_api/src/model/create_org_request.dart';
 import 'package:assistant_api/src/model/create_persona_request.dart';
 import 'package:assistant_api/src/model/create_skill_request.dart';
+import 'package:assistant_api/src/model/create_space_request.dart';
 import 'package:assistant_api/src/model/create_task_push_notification_config_request.dart';
+import 'package:assistant_api/src/model/create_user_request.dart';
 import 'package:assistant_api/src/model/create_webhook_request.dart';
 import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/device_code_response_schema.dart';
@@ -54,6 +61,7 @@ import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
 import 'package:assistant_api/src/model/list_task_push_notification_configs_response.dart';
 import 'package:assistant_api/src/model/list_tasks_response.dart';
 import 'package:assistant_api/src/model/log_entry_response.dart';
+import 'package:assistant_api/src/model/member_entry.dart';
 import 'package:assistant_api/src/model/message.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
@@ -63,6 +71,8 @@ import 'package:assistant_api/src/model/o_auth2_security_scheme.dart';
 import 'package:assistant_api/src/model/o_auth_error_response.dart';
 import 'package:assistant_api/src/model/o_auth_flows.dart';
 import 'package:assistant_api/src/model/open_id_connect_security_scheme.dart';
+import 'package:assistant_api/src/model/org_detail.dart';
+import 'package:assistant_api/src/model/org_summary.dart';
 import 'package:assistant_api/src/model/password_o_auth_flow.dart';
 import 'package:assistant_api/src/model/persona_detail.dart';
 import 'package:assistant_api/src/model/persona_file_content.dart';
@@ -86,6 +96,8 @@ import 'package:assistant_api/src/model/set_active_persona_request.dart';
 import 'package:assistant_api/src/model/set_skill_access_mode_request.dart';
 import 'package:assistant_api/src/model/skill_detail.dart';
 import 'package:assistant_api/src/model/skill_entry_response.dart';
+import 'package:assistant_api/src/model/space_detail.dart';
+import 'package:assistant_api/src/model/space_summary.dart';
 import 'package:assistant_api/src/model/span_entry_response.dart';
 import 'package:assistant_api/src/model/sse_status_event.dart';
 import 'package:assistant_api/src/model/sse_subagent_completed_event.dart';
@@ -116,8 +128,14 @@ import 'package:assistant_api/src/model/trace_summary_response.dart';
 import 'package:assistant_api/src/model/unsubscribe_request.dart';
 import 'package:assistant_api/src/model/update_agent_request.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
+import 'package:assistant_api/src/model/update_member_request.dart';
+import 'package:assistant_api/src/model/update_org_request.dart';
 import 'package:assistant_api/src/model/update_skill_request.dart';
+import 'package:assistant_api/src/model/update_space_request.dart';
+import 'package:assistant_api/src/model/update_user_request.dart';
 import 'package:assistant_api/src/model/update_webhook_request.dart';
+import 'package:assistant_api/src/model/user_detail.dart';
+import 'package:assistant_api/src/model/user_summary.dart';
 import 'package:assistant_api/src/model/vapid_key_response.dart';
 import 'package:assistant_api/src/model/verify_webhook_response.dart';
 import 'package:assistant_api/src/model/webhook_response.dart';
@@ -134,6 +152,7 @@ import 'package:assistant_api/src/model/write_persona_file_request.dart';
 part 'serializers.g.dart';
 
 @SerializersFor([
+  AddMemberRequest,
   AddSkillAccessRequest,
   AgentCapabilities,
   AgentCard,
@@ -147,6 +166,7 @@ part 'serializers.g.dart';
   AnalyticsSummaryResponse,
   ApiErrorResponse,
   ApiKeySecurityScheme,
+  ApiKeySummary,
   ApiSendMessageRequest,
   Artifact,
   AttachmentMetaResponse,
@@ -161,10 +181,15 @@ part 'serializers.g.dart';
   CommandEventResponse,
   ConversationDetail,
   ConversationSummary,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
   CreateConversationRequest,
+  CreateOrgRequest,
   CreatePersonaRequest,
   CreateSkillRequest,
+  CreateSpaceRequest,
   CreateTaskPushNotificationConfigRequest,
+  CreateUserRequest,
   CreateWebhookRequest,
   DeviceCodeOAuthFlow,
   DeviceCodeResponseSchema,
@@ -174,6 +199,7 @@ part 'serializers.g.dart';
   ListTaskPushNotificationConfigsResponse,
   ListTasksResponse,
   LogEntryResponse,
+  MemberEntry,
   Message,
   MessageSummary,
   ModelPart,
@@ -183,6 +209,8 @@ part 'serializers.g.dart';
   OAuthErrorResponse,
   OAuthFlows,
   OpenIdConnectSecurityScheme,
+  OrgDetail,
+  OrgSummary,
   PasswordOAuthFlow,
   PersonaDetail,
   PersonaFileContent,
@@ -206,6 +234,8 @@ part 'serializers.g.dart';
   SetSkillAccessModeRequest,
   SkillDetail,
   SkillEntryResponse,
+  SpaceDetail,
+  SpaceSummary,
   SpanEntryResponse,
   SseStatusEvent,
   SseSubagentCompletedEvent,
@@ -236,8 +266,14 @@ part 'serializers.g.dart';
   UnsubscribeRequest,
   UpdateAgentRequest,
   UpdateConversationRequest,
+  UpdateMemberRequest,
+  UpdateOrgRequest,
   UpdateSkillRequest,
+  UpdateSpaceRequest,
+  UpdateUserRequest,
   UpdateWebhookRequest,
+  UserDetail,
+  UserSummary,
   VapidKeyResponse,
   VerifyWebhookResponse,
   WebhookResponse,
@@ -261,8 +297,20 @@ Serializers serializers = (_$serializers.toBuilder()
         () => ListBuilder<CommandEventResponse>(),
       )
       ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(ApiKeySummary)]),
+        () => ListBuilder<ApiKeySummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(OrgSummary)]),
+        () => ListBuilder<OrgSummary>(),
+      )
+      ..addBuilderFactory(
         const FullType(BuiltList, [FullType(WorkflowSummary)]),
         () => ListBuilder<WorkflowSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(MemberEntry)]),
+        () => ListBuilder<MemberEntry>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(LogEntryResponse)]),
@@ -291,6 +339,14 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(WorkflowRunSummary)]),
         () => ListBuilder<WorkflowRunSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(UserSummary)]),
+        () => ListBuilder<UserSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(SpaceSummary)]),
+        () => ListBuilder<SpaceSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(AgentSummary)]),

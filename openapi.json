@@ -1339,6 +1339,994 @@
         ]
       }
     },
+    "/api/orgs": {
+      "get": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`GET /api/orgs` — list organizations the user has access to.",
+        "operationId": "list_orgs",
+        "responses": {
+          "200": {
+            "description": "List of organizations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrgSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`POST /api/orgs` — create a new organization.",
+        "operationId": "create_org",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrgRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Organization created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{id}": {
+      "get": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`GET /api/orgs/{id}` — get organization detail.",
+        "operationId": "get_org",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "orgs"
+        ],
+        "summary": "`PATCH /api/orgs/{id}` — update organization settings.",
+        "operationId": "update_org",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrgRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Organization updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces": {
+      "get": {
+        "tags": [
+          "spaces"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/spaces` — list spaces filtered by membership.",
+        "operationId": "list_spaces",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of spaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpaceSummary"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:read"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "spaces"
+        ],
+        "summary": "`POST /api/orgs/{org_id}/spaces` — create a space (org-admin only).",
+        "operationId": "create_space",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Space created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{id}": {
+      "get": {
+        "tags": [
+          "spaces"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/spaces/{id}` — get space detail.",
+        "operationId": "get_space",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Space detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:read"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "spaces"
+        ],
+        "summary": "`DELETE /api/orgs/{org_id}/spaces/{id}` — delete a space (org-admin only).",
+        "operationId": "delete_space",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Space deleted"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "spaces"
+        ],
+        "summary": "`PATCH /api/orgs/{org_id}/spaces/{id}` — update space name.",
+        "operationId": "update_space",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSpaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Space updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{space_id}/members": {
+      "get": {
+        "tags": [
+          "members"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/spaces/{space_id}/members` — list space members.",
+        "operationId": "list_members",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemberEntry"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:read"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "members"
+        ],
+        "summary": "`POST /api/orgs/{org_id}/spaces/{space_id}/members` — add a member.",
+        "operationId": "add_member",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMemberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Member added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid role"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{space_id}/members/{user_id}": {
+      "delete": {
+        "tags": [
+          "members"
+        ],
+        "summary": "`DELETE /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}` — remove member.",
+        "operationId": "remove_member",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Member removed"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "members"
+        ],
+        "summary": "`PATCH /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}` — change role.",
+        "operationId": "update_member",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Role updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid role"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/users` — list users in an org.",
+        "operationId": "list_users",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserSummary"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "users:read"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "`POST /api/orgs/{org_id}/users` — create/invite a user.",
+        "operationId": "create_user",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "User created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Duplicate email"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "users:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/users/{id}": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/users/{id}` — get user detail.",
+        "operationId": "get_user",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "users:read"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "`DELETE /api/orgs/{org_id}/users/{id}` — remove a user (org-admin only).",
+        "operationId": "delete_user",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "User deleted"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "users:write"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "summary": "`PATCH /api/orgs/{org_id}/users/{id}` — update user name or email.",
+        "operationId": "update_user",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "User updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "users:write"
+            ]
+          }
+        ]
+      }
+    },
     "/api/personas": {
       "get": {
         "tags": [
@@ -2376,6 +3364,120 @@
         "security": [
           {
             "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/users/me/api-keys": {
+      "get": {
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "`GET /api/users/me/api-keys` — list the caller's API keys.",
+        "operationId": "list_api_keys",
+        "responses": {
+          "200": {
+            "description": "List of API keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeySummary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "api_keys:read"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "`POST /api/users/me/api-keys` — create a new scoped API key.",
+        "operationId": "create_api_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "API key created (plaintext shown once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateApiKeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "api_keys:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/users/me/api-keys/{id}": {
+      "delete": {
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "`DELETE /api/users/me/api-keys/{id}` — revoke an API key.",
+        "operationId": "delete_api_key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "API key ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "API key revoked"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "api_keys:write"
+            ]
           }
         ]
       }
@@ -4291,6 +5393,23 @@
   },
   "components": {
     "schemas": {
+      "AddMemberRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/orgs/{org_id}/spaces/{space_id}/members`.",
+        "required": [
+          "user_id",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "Role: `\"org-admin\"`, `\"space-admin\"`, `\"member\"`, or `\"viewer\"`."
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
       "AddSkillAccessRequest": {
         "type": "object",
         "description": "Body for `POST /api/personas/{id}/skill-access/skills`.",
@@ -4789,6 +5908,43 @@
           "name": {
             "type": "string",
             "description": "The name of the header, query, or cookie parameter to be used."
+          }
+        }
+      },
+      "ApiKeySummary": {
+        "type": "object",
+        "description": "Summary of an API key (no secret).",
+        "required": [
+          "id",
+          "name",
+          "key_prefix",
+          "scopes",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -5303,6 +6459,60 @@
           }
         }
       },
+      "CreateApiKeyRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/users/me/api-keys`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Scopes in `\"resource:action\"` format."
+          }
+        }
+      },
+      "CreateApiKeyResponse": {
+        "type": "object",
+        "description": "Response for `POST /api/users/me/api-keys` — includes plaintext key (shown once).",
+        "required": [
+          "id",
+          "name",
+          "key_prefix",
+          "plaintext",
+          "scopes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key_prefix": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "plaintext": {
+            "type": "string",
+            "description": "The full API key — shown only on creation."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "CreateConversationRequest": {
         "type": "object",
         "description": "Body for `POST /api/conversations`.",
@@ -5313,6 +6523,29 @@
               "null"
             ],
             "description": "Optional title for the new conversation."
+          }
+        }
+      },
+      "CreateOrgRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/orgs`.",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "auth_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Auth mode: `\"password\"` or `\"oidc\"`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
           }
         }
       },
@@ -5352,6 +6585,22 @@
           }
         }
       },
+      "CreateSpaceRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/orgs/{org_id}/spaces`.",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        }
+      },
       "CreateTaskPushNotificationConfigRequest": {
         "type": "object",
         "description": "Request for the `CreateTaskPushNotificationConfig` method.",
@@ -5374,6 +6623,29 @@
               "null"
             ],
             "description": "Optional tenant ID."
+          }
+        }
+      },
+      "CreateUserRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/orgs/{org_id}/users`.",
+        "required": [
+          "email",
+          "name"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Initial password (required in password auth mode)."
           }
         }
       },
@@ -5691,6 +6963,30 @@
           }
         }
       },
+      "MemberEntry": {
+        "type": "object",
+        "description": "A space member entry.",
+        "required": [
+          "user_id",
+          "space_id",
+          "role",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
       "Message": {
         "type": "object",
         "description": "`Message` is one unit of communication between client and server.",
@@ -5981,6 +7277,62 @@
           "openIdConnectUrl": {
             "type": "string",
             "description": "The OpenID Connect Discovery URL."
+          }
+        }
+      },
+      "OrgDetail": {
+        "type": "object",
+        "description": "Full organization detail.",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "auth_mode",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "auth_mode": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "OrgSummary": {
+        "type": "object",
+        "description": "Summary of an organization.",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "auth_mode"
+        ],
+        "properties": {
+          "auth_mode": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
           }
         }
       },
@@ -6680,6 +8032,58 @@
             "type": "boolean"
           },
           "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SpaceDetail": {
+        "type": "object",
+        "description": "Full space detail.",
+        "required": [
+          "id",
+          "org_id",
+          "name",
+          "slug",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "SpaceSummary": {
+        "type": "object",
+        "description": "Summary of a space.",
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
             "type": "string"
           }
         }
@@ -7444,6 +8848,37 @@
           }
         }
       },
+      "UpdateMemberRequest": {
+        "type": "object",
+        "description": "Body for `PATCH /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}`.",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "New role for the member."
+          }
+        }
+      },
+      "UpdateOrgRequest": {
+        "type": "object",
+        "description": "Body for `PATCH /api/orgs/{id}`.",
+        "properties": {
+          "auth_mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "UpdateSkillRequest": {
         "type": "object",
         "description": "Body for `PUT /api/skills/{name}`.",
@@ -7457,6 +8892,36 @@
           },
           "description": {
             "type": "string"
+          }
+        }
+      },
+      "UpdateSpaceRequest": {
+        "type": "object",
+        "description": "Body for `PATCH /api/orgs/{org_id}/spaces/{id}`.",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UpdateUserRequest": {
+        "type": "object",
+        "description": "Body for `PATCH /api/orgs/{org_id}/users/{id}`.",
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -7490,6 +8955,58 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "UserDetail": {
+        "type": "object",
+        "description": "Full user detail (no password hash).",
+        "required": [
+          "id",
+          "org_id",
+          "email",
+          "name",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "UserSummary": {
+        "type": "object",
+        "description": "Summary of a user (no sensitive fields).",
+        "required": [
+          "id",
+          "email",
+          "name"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -7877,6 +9394,50 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Bearer token. Pass the token issued by the server via `Authorization: Bearer <token>`. Configure it with `--auth-token` / `ASSISTANT_WEB_TOKEN`."
+      },
+      "oauth2": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "/oauth/authorize",
+            "tokenUrl": "/oauth/token",
+            "refreshUrl": "/oauth/token",
+            "scopes": {
+              "api_keys:read": "List API keys",
+              "api_keys:write": "Create and revoke API keys",
+              "conversations:read": "Read conversations",
+              "conversations:write": "Create and send messages",
+              "org:manage": "Full organization management",
+              "personas:read": "Read personas",
+              "personas:write": "Create and update personas",
+              "skills:read": "Read skills",
+              "skills:write": "Create and update skills",
+              "spaces:read": "Read spaces",
+              "spaces:write": "Create and update spaces",
+              "users:read": "Read users",
+              "users:write": "Create and update users"
+            }
+          },
+          "clientCredentials": {
+            "tokenUrl": "/oauth/token",
+            "scopes": {
+              "api_keys:read": "List API keys",
+              "api_keys:write": "Create and revoke API keys",
+              "conversations:read": "Read conversations",
+              "conversations:write": "Create and send messages",
+              "org:manage": "Full organization management",
+              "personas:read": "Read personas",
+              "personas:write": "Create and update personas",
+              "skills:read": "Read skills",
+              "skills:write": "Create and update skills",
+              "spaces:read": "Read spaces",
+              "spaces:write": "Create and update spaces",
+              "users:read": "Read users",
+              "users:write": "Create and update users"
+            }
+          }
+        },
+        "description": "OAuth2 authentication. Use authorization code flow (interactive) or client credentials flow (machine-to-machine). Tokens are issued as JWTs via the `/oauth/token` endpoint."
       }
     }
   },
@@ -7944,6 +9505,26 @@
     {
       "name": "oauth",
       "description": "OAuth2 — authorization, token exchange, device code flow, client registration, and server metadata"
+    },
+    {
+      "name": "orgs",
+      "description": "Organization management — list, create, update organizations"
+    },
+    {
+      "name": "users",
+      "description": "User management — list, create, update, delete users within an organization"
+    },
+    {
+      "name": "spaces",
+      "description": "Space management — list, create, update, delete spaces within an organization"
+    },
+    {
+      "name": "members",
+      "description": "Membership management — add, update, remove space members"
+    },
+    {
+      "name": "api-keys",
+      "description": "API key management — create, list, revoke API keys"
     }
   ]
 }

@@ -739,13 +739,30 @@ async fn run_with_args(args: Args) -> Result<()> {
             client_id: "legacy".into(),
         }
     });
+    let api_key_store: Arc<dyn assistant_auth::api_keys::ApiKeyStore> =
+        Arc::new(org_storage.api_key_store());
     let auth_config = WebAuthConfig::new(
         jwt_manager,
-        Arc::new(assistant_auth::api_keys::InMemoryApiKeyStore::new()),
+        api_key_store.clone(),
         legacy_token,
         legacy_context,
         secure_cookie,
     );
+
+    // -- Management API states (orgs, users, spaces, members, API keys) ------
+    let orgs_api_state = api::orgs::OrgsApiState {
+        org_storage: org_storage.clone(),
+    };
+    let users_api_state = api::users::UsersApiState {
+        org_storage: org_storage.clone(),
+    };
+    let spaces_api_state = api::spaces::SpacesApiState {
+        org_storage: org_storage.clone(),
+    };
+    let members_api_state = api::members::MembersApiState {
+        org_storage: org_storage.clone(),
+    };
+    let api_keys_api_state = api::api_keys::ApiKeysApiState { api_key_store };
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
@@ -781,6 +798,11 @@ async fn run_with_args(args: Args) -> Result<()> {
                 .merge(api::agents::agents_api_router().with_state(agents_api_state))
                 .merge(api::analytics::analytics_api_router().with_state(analytics_api_state))
                 .merge(api::workflows::workflows_api_router().with_state(workflows_api_state))
+                .merge(api::orgs::orgs_api_router().with_state(orgs_api_state))
+                .merge(api::users::users_api_router().with_state(users_api_state))
+                .merge(api::spaces::spaces_api_router().with_state(spaces_api_state))
+                .merge(api::members::members_api_router().with_state(members_api_state))
+                .merge(api::api_keys::api_keys_router().with_state(api_keys_api_state))
                 .merge(
                     push_api_state
                         .map(|s| push_api_router().with_state(s))

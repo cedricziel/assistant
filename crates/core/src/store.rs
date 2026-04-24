@@ -100,6 +100,7 @@ pub trait SpaceStore: Send + Sync {
     async fn create_space(&self, space: &Space) -> Result<()>;
     async fn get_space(&self, id: &SpaceId) -> Result<Option<Space>>;
     async fn list_spaces(&self, org_id: &OrgId) -> Result<Vec<Space>>;
+    async fn update_space(&self, space: &Space) -> Result<()>;
     async fn delete_space(&self, id: &SpaceId) -> Result<bool>;
 }
 
@@ -299,6 +300,16 @@ impl SpaceStore for InMemorySpaceStore {
             .filter(|s| s.org_id == *org_id)
             .cloned()
             .collect())
+    }
+
+    async fn update_space(&self, space: &Space) -> Result<()> {
+        let mut spaces = self.spaces.lock().unwrap();
+        if let Some(existing) = spaces.iter_mut().find(|s| s.id == space.id) {
+            *existing = space.clone();
+            Ok(())
+        } else {
+            bail!("space not found: {}", space.id)
+        }
     }
 
     async fn delete_space(&self, id: &SpaceId) -> Result<bool> {

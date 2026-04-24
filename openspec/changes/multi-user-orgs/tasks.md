@@ -363,39 +363,39 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 **Commits:**
 
-- [ ] `feat(web-ui): organization management endpoints`
+- [x] `feat(web-ui): organization management endpoints`
   - `POST /api/orgs` — create org (bootstrapping / super-admin)
   - `GET /api/orgs` — list orgs (filtered by user access)
   - `GET /api/orgs/{org_id}` — read org details
   - `PATCH /api/orgs/{org_id}` — update org settings (auth mode, LLM config)
   - Requires `org:manage` scope or org-admin role
 
-- [ ] `feat(web-ui): space management endpoints`
+- [x] `feat(web-ui): space management endpoints`
   - `POST /api/orgs/{org_id}/spaces` — create space
   - `GET /api/orgs/{org_id}/spaces` — list spaces (filtered by membership)
   - `GET /api/orgs/{org_id}/spaces/{space_id}` — read space
   - `PATCH /api/orgs/{org_id}/spaces/{space_id}` — update space
   - `DELETE /api/orgs/{org_id}/spaces/{space_id}` — delete space (org-admin only)
 
-- [ ] `feat(web-ui): user management endpoints`
+- [x] `feat(web-ui): user management endpoints`
   - `POST /api/orgs/{org_id}/users` — invite user (creates account, sends invite or returns credentials)
   - `GET /api/orgs/{org_id}/users` — list users
   - `GET /api/orgs/{org_id}/users/{user_id}` — read user
   - `PATCH /api/orgs/{org_id}/users/{user_id}` — update user (name, role)
   - `DELETE /api/orgs/{org_id}/users/{user_id}` — remove user
 
-- [ ] `feat(web-ui): space membership endpoints`
+- [x] `feat(web-ui): space membership endpoints`
   - `POST /api/orgs/{org_id}/spaces/{space_id}/members` — add user to space with role
   - `GET /api/orgs/{org_id}/spaces/{space_id}/members` — list space members
   - `PATCH /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}` — change role
   - `DELETE /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}` — remove from space
 
-- [ ] `feat(web-ui): API key management endpoints`
+- [x] `feat(web-ui): API key management endpoints`
   - `POST /api/users/me/api-keys` — create scoped API key (returns plaintext once)
   - `GET /api/users/me/api-keys` — list keys (prefix + name + scopes, no secrets)
   - `DELETE /api/users/me/api-keys/{key_id}` — revoke key
 
-- [ ] `test(web-ui): org/space/user/membership/api-key endpoint tests`
+- [x] `test(web-ui): org/space/user/membership/api-key endpoint tests`
   - CRUD happy paths
   - Permission enforcement: member can't create spaces, viewer can't invite users
 
@@ -432,7 +432,7 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - Scope queries by user_id + space from AuthContext
   - Return 403 when user lacks access
 
-- [ ] `chore(web-ui): update OpenAPI spec with management endpoints`
+- [x] `chore(web-ui): update OpenAPI spec with management endpoints`
 
 ---
 

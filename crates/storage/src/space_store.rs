@@ -101,6 +101,18 @@ impl SpaceStore for SqliteSpaceStore {
         Ok(rows.into_iter().map(row_to_space).collect())
     }
 
+    async fn update_space(&self, space: &Space) -> Result<()> {
+        sqlx::query("UPDATE spaces SET name = ?, slug = ?, updated_at = ? WHERE id = ?")
+            .bind(&space.name)
+            .bind(&space.slug)
+            .bind(space.updated_at)
+            .bind(&space.id.0)
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("updating space: {}", space.id))?;
+        Ok(())
+    }
+
     async fn delete_space(&self, id: &SpaceId) -> Result<bool> {
         let result = sqlx::query("DELETE FROM spaces WHERE id = ?")
             .bind(&id.0)
