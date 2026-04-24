@@ -162,6 +162,26 @@ pub enum ResourceKind {
     Spaces,
 }
 
+impl std::str::FromStr for ResourceKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "personas" => Ok(Self::Personas),
+            "conversations" => Ok(Self::Conversations),
+            "messages" => Ok(Self::Messages),
+            "skills" => Ok(Self::Skills),
+            "interfaces" => Ok(Self::Interfaces),
+            "bindings" => Ok(Self::Bindings),
+            "users" => Ok(Self::Users),
+            "org" => Ok(Self::Org),
+            "api_keys" => Ok(Self::ApiKeys),
+            "spaces" => Ok(Self::Spaces),
+            _ => Err(format!("unknown resource kind: {s}")),
+        }
+    }
+}
+
 impl fmt::Display for ResourceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
@@ -189,6 +209,21 @@ pub enum Action {
     Delete,
     Execute,
     Manage,
+}
+
+impl std::str::FromStr for Action {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "read" => Ok(Self::Read),
+            "write" => Ok(Self::Write),
+            "delete" => Ok(Self::Delete),
+            "execute" => Ok(Self::Execute),
+            "manage" => Ok(Self::Manage),
+            _ => Err(format!("unknown action: {s}")),
+        }
+    }
 }
 
 impl fmt::Display for Action {
