@@ -87,6 +87,7 @@ pub fn orgs_api_router() -> Router<OrgsApiState> {
     get,
     path = "/api/orgs",
     tag = "orgs",
+    security(("bearer_token" = [])),
     responses(
         (status = 200, description = "List of organizations", body = Vec<OrgSummary>),
         (status = 401, description = "Unauthorized"),
@@ -121,6 +122,7 @@ pub async fn list_orgs(
     post,
     path = "/api/orgs",
     tag = "orgs",
+    security(("bearer_token" = [])),
     request_body = CreateOrgRequest,
     responses(
         (status = 201, description = "Organization created", body = OrgDetail),
@@ -173,6 +175,7 @@ pub async fn create_org(
     get,
     path = "/api/orgs/{id}",
     tag = "orgs",
+    security(("bearer_token" = [])),
     params(("id" = String, Path, description = "Organization ID")),
     responses(
         (status = 200, description = "Organization detail", body = OrgDetail),
@@ -218,6 +221,7 @@ pub async fn get_org(
     patch,
     path = "/api/orgs/{id}",
     tag = "orgs",
+    security(("bearer_token" = [])),
     params(("id" = String, Path, description = "Organization ID")),
     request_body = UpdateOrgRequest,
     responses(

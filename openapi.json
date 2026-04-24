@@ -1363,7 +1363,12 @@
           "401": {
             "description": "Unauthorized"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1398,7 +1403,12 @@
           "403": {
             "description": "Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/orgs/{id}": {
@@ -1436,7 +1446,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -1482,7 +1497,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/orgs/{org_id}/spaces": {
@@ -1520,7 +1540,12 @@
           "403": {
             "description": "Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1566,7 +1591,12 @@
           "403": {
             "description": "Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/orgs/{org_id}/spaces/{id}": {
@@ -1613,7 +1643,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -1651,7 +1686,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -1706,7 +1746,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/orgs/{org_id}/spaces/{space_id}/members": {
@@ -1753,7 +1798,12 @@
           "403": {
             "description": "Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1808,7 +1858,12 @@
           "403": {
             "description": "Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/orgs/{org_id}/spaces/{space_id}/members/{user_id}": {
@@ -1857,7 +1912,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -1921,7 +1981,12 @@
           "403": {
             "description": "Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/orgs/{org_id}/users": {
@@ -1959,7 +2024,12 @@
           "403": {
             "description": "Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -2008,7 +2078,12 @@
           "409": {
             "description": "Duplicate email"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/orgs/{org_id}/users/{id}": {
@@ -2055,7 +2130,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -2093,7 +2173,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -2148,7 +2233,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/personas": {
@@ -3213,7 +3303,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -3245,7 +3340,12 @@
           "400": {
             "description": "Invalid request"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/users/me/api-keys/{id}": {
@@ -3273,7 +3373,12 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     },
     "/api/webhooks": {

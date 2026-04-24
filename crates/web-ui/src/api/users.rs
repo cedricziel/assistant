@@ -90,6 +90,7 @@ pub fn users_api_router() -> Router<UsersApiState> {
     get,
     path = "/api/orgs/{org_id}/users",
     tag = "users",
+    security(("bearer_token" = [])),
     params(("org_id" = String, Path, description = "Organization ID")),
     responses(
         (status = 200, description = "List of users", body = Vec<UserSummary>),
@@ -131,6 +132,7 @@ pub async fn list_users(
     post,
     path = "/api/orgs/{org_id}/users",
     tag = "users",
+    security(("bearer_token" = [])),
     params(("org_id" = String, Path, description = "Organization ID")),
     request_body = CreateUserRequest,
     responses(
@@ -216,6 +218,7 @@ pub async fn create_user(
     get,
     path = "/api/orgs/{org_id}/users/{id}",
     tag = "users",
+    security(("bearer_token" = [])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("id" = String, Path, description = "User ID"),
@@ -264,6 +267,7 @@ pub async fn get_user(
     patch,
     path = "/api/orgs/{org_id}/users/{id}",
     tag = "users",
+    security(("bearer_token" = [])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("id" = String, Path, description = "User ID"),
@@ -327,6 +331,7 @@ pub async fn update_user(
     delete,
     path = "/api/orgs/{org_id}/users/{id}",
     tag = "users",
+    security(("bearer_token" = [])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("id" = String, Path, description = "User ID"),

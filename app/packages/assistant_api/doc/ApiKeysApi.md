@@ -46,7 +46,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[bearer_token](../README.md#bearer_token)
 
 ### HTTP request headers
 
@@ -86,7 +86,7 @@ void (empty response body)
 
 ### Authorization
 
-No authorization required
+[bearer_token](../README.md#bearer_token)
 
 ### HTTP request headers
 
@@ -123,7 +123,7 @@ This endpoint does not need any parameter.
 
 ### Authorization
 
-No authorization required
+[bearer_token](../README.md#bearer_token)
 
 ### HTTP request headers
 

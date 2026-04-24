@@ -125,7 +125,7 @@ This endpoint does not need any parameter.
 
 ### Authorization
 
-No authorization required
+[bearer_token](../README.md#bearer_token)
 
 ### HTTP request headers
 
