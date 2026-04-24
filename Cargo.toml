@@ -165,7 +165,7 @@ arrow-array = "57.3"
 arrow-schema = "57.3"
 parquet = { version = "57.3", default-features = false, features = ["arrow", "async"] }
 # Authentication
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 argon2 = { version = "0.5", features = ["std"] }
 rand = "0.9"
 # Constant-time comparison (API key verification)
