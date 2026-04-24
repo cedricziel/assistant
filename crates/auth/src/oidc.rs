@@ -196,6 +196,9 @@ pub struct OidcConfig {
     pub issuer_url: String,
     /// Our OAuth2 client_id registered with this IdP.
     pub client_id: String,
+    /// Client secret for confidential clients (server-side flows).
+    /// `None` for public clients using PKCE.
+    pub client_secret: Option<String>,
     /// Whether to auto-provision users on first login.
     pub auto_provision: bool,
     /// If set, only allow emails matching these domains.
@@ -399,6 +402,48 @@ impl OidcProvider {
         );
     }
 
+    /// Exchange an authorization code at the IdP's token endpoint for an ID token.
+    ///
+    /// Sends a `POST` to the IdP `token_endpoint` with `grant_type=authorization_code`,
+    /// validates the returned `id_token`, and returns the claims.
+    pub async fn exchange_code(&self, code: &str, redirect_uri: &str) -> Result<IdTokenClaims> {
+        let mut params = vec![
+            ("grant_type", "authorization_code".to_string()),
+            ("code", code.to_string()),
+            ("redirect_uri", redirect_uri.to_string()),
+            ("client_id", self.config.client_id.clone()),
+        ];
+        if let Some(ref secret) = self.config.client_secret {
+            params.push(("client_secret", secret.clone()));
+        }
+
+        let resp = self
+            .http_client
+            .post(&self.discovery.token_endpoint)
+            .form(&params)
+            .send()
+            .await
+            .context("failed to POST to IdP token endpoint")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("IdP token endpoint returned {status}: {body}");
+        }
+
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            id_token: String,
+        }
+
+        let token_resp: TokenResponse = resp
+            .json()
+            .await
+            .context("failed to parse IdP token response")?;
+
+        self.validate_id_token(&token_resp.id_token, None)
+    }
+
     /// Find a JWK by key ID. Falls back to the first signing key if no kid is specified.
     fn find_key(&self, kid: &Option<String>) -> Result<&Jwk> {
         if let Some(kid) = kid {
@@ -541,6 +586,7 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
         let config = OidcConfig {
             issuer_url: issuer,
             client_id: "test-client".into(),
+            client_secret: None,
             auto_provision: true,
             allowed_email_domains: None,
         };
@@ -675,6 +721,7 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
         let config = OidcConfig {
             issuer_url: issuer,
             client_id: "test-client".into(),
+            client_secret: None,
             auto_provision: true,
             allowed_email_domains: None,
         };
@@ -850,6 +897,7 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
         let config = OidcConfig {
             issuer_url: issuer.clone(),
             client_id: "test-client".into(),
+            client_secret: None,
             auto_provision: true,
             allowed_email_domains: Some(vec!["acme.com".into()]),
         };
@@ -903,6 +951,7 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
         let config = OidcConfig {
             issuer_url: issuer.clone(),
             client_id: "test-client".into(),
+            client_secret: None,
             auto_provision: false,
             allowed_email_domains: None,
         };
@@ -939,6 +988,7 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
             config: OidcConfig {
                 issuer_url: "https://idp.example.com".into(),
                 client_id: "client".into(),
+                client_secret: None,
                 auto_provision: false,
                 allowed_email_domains: None,
             },
@@ -976,5 +1026,134 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
         assert!(aud.contains("client-a"));
         assert!(aud.contains("client-b"));
         assert!(!aud.contains("client-c"));
+    }
+
+    // -- exchange_code tests --
+
+    #[tokio::test]
+    async fn exchange_code_returns_id_token_claims() {
+        let server = MockServer::start().await;
+        let issuer = server.uri();
+
+        // Set up discovery + JWKS (reuse helper).
+        let provider = setup_mock_provider(&server).await;
+
+        // Sign a test ID token that the IdP's token endpoint will return.
+        let claims = make_test_claims(&issuer, "test-client");
+        let id_token = sign_test_id_token(&claims);
+
+        // Mock the IdP token endpoint.
+        let token_response = serde_json::json!({
+            "access_token": "idp-access-token",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "id_token": id_token,
+        });
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&token_response))
+            .mount(&server)
+            .await;
+
+        let result = provider
+            .exchange_code("auth-code-123", "http://localhost/oauth/callback")
+            .await
+            .unwrap();
+
+        assert_eq!(result.sub, "idp-user-123");
+        assert_eq!(result.email.as_deref(), Some("alice@example.com"));
+    }
+
+    #[tokio::test]
+    async fn exchange_code_with_client_secret() {
+        let server = MockServer::start().await;
+        let issuer = server.uri();
+        let jwks_uri = format!("{issuer}/jwks");
+
+        let discovery = OidcDiscovery {
+            issuer: issuer.clone(),
+            authorization_endpoint: format!("{issuer}/authorize"),
+            token_endpoint: format!("{issuer}/token"),
+            userinfo_endpoint: None,
+            jwks_uri: jwks_uri.clone(),
+            response_types_supported: vec!["code".into()],
+            subject_types_supported: vec!["public".into()],
+            id_token_signing_alg_values_supported: vec!["RS256".into()],
+        };
+
+        let jwks = JwksResponse {
+            keys: vec![test_jwk()],
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/.well-known/openid-configuration"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&discovery))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/jwks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&jwks))
+            .mount(&server)
+            .await;
+
+        let config = OidcConfig {
+            issuer_url: issuer.clone(),
+            client_id: "test-client".into(),
+            client_secret: Some("super-secret".into()),
+            auto_provision: true,
+            allowed_email_domains: None,
+        };
+
+        let provider = OidcProvider::discover(config).await.unwrap();
+
+        let claims = make_test_claims(&issuer, "test-client");
+        let id_token = sign_test_id_token(&claims);
+
+        let token_response = serde_json::json!({
+            "access_token": "idp-access-token",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "id_token": id_token,
+        });
+
+        // Verify that the client_secret is included in the request body.
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(wiremock::matchers::body_string_contains(
+                "client_secret=super-secret",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&token_response))
+            .mount(&server)
+            .await;
+
+        let result = provider
+            .exchange_code("auth-code-456", "http://localhost/oauth/callback")
+            .await
+            .unwrap();
+
+        assert_eq!(result.sub, "idp-user-123");
+    }
+
+    #[tokio::test]
+    async fn exchange_code_rejects_error_response() {
+        let server = MockServer::start().await;
+        let provider = setup_mock_provider(&server).await;
+
+        // Mock a token endpoint error.
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": "invalid_grant",
+                "error_description": "code expired"
+            })))
+            .mount(&server)
+            .await;
+
+        let err = provider
+            .exchange_code("bad-code", "http://localhost/oauth/callback")
+            .await;
+
+        assert!(err.is_err(), "should reject error response from IdP");
     }
 }

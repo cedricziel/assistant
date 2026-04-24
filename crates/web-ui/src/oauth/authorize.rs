@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect};
 use serde::Deserialize;
 
+use super::oidc_sessions::PendingOidcSession;
 use super::{OAuthState, escape_html_attr};
 
 /// Query parameters for GET /oauth/authorize (RFC 6749 §4.1.1).
@@ -68,6 +69,29 @@ pub async fn authorize_get(
         return resp;
     }
 
+    // -- OIDC mode: redirect to external IdP instead of rendering login form --
+    if let (Some(oidc), Some(sessions)) = (&state.oidc_provider, &state.oidc_sessions) {
+        let pending = PendingOidcSession::new(
+            raw_client_id.to_owned(),
+            raw_redirect_uri.to_owned(),
+            params.code_challenge.clone(),
+            params.state.clone(),
+            params.scope.clone(),
+        );
+        let oidc_state = sessions.insert(pending).await;
+
+        let our_callback = format!("{}/oauth/callback", state.issuer);
+        let idp_auth_url = format!(
+            "{}?response_type=code&client_id={}&redirect_uri={}&state={}&scope=openid%20email%20profile",
+            oidc.discovery().authorization_endpoint,
+            urlencoding::encode(oidc.client_id()),
+            urlencoding::encode(&our_callback),
+            urlencoding::encode(&oidc_state),
+        );
+        return Redirect::to(&idp_auth_url).into_response();
+    }
+
+    // -- Password mode: render login form --
     let client_id = escape_html_attr(raw_client_id);
     let redirect_uri = escape_html_attr(raw_redirect_uri);
     let state_param = escape_html_attr(params.state.as_deref().unwrap_or(""));
