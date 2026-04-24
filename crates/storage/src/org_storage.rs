@@ -70,6 +70,11 @@ impl OrgStorageLayer {
         super::space_store::SqliteMembershipStore::new(self.pool.clone())
     }
 
+    /// Build a [`SqliteApiKeyStore`](super::api_key_store::SqliteApiKeyStore).
+    pub fn api_key_store(&self) -> super::api_key_store::SqliteApiKeyStore {
+        super::api_key_store::SqliteApiKeyStore::new(self.pool.clone())
+    }
+
     /// Build a [`SqliteClientStore`](super::auth_state_store::SqliteClientStore).
     pub fn client_store(&self) -> super::auth_state_store::SqliteClientStore {
         super::auth_state_store::SqliteClientStore::new(self.pool.clone())
@@ -118,6 +123,10 @@ async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "002_auth_tables",
             include_str!("../../../migrations/org/002_auth_tables.sql"),
+        ),
+        (
+            "003_api_keys",
+            include_str!("../../../migrations/org/003_api_keys.sql"),
         ),
     ];
 

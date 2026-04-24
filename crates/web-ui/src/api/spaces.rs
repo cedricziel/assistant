@@ -100,7 +100,7 @@ pub async fn list_spaces(
     Path(org_id): Path<String>,
 ) -> Response {
     let org_id = OrgId::from(org_id);
-    if ctx.org_id != org_id && !ctx.is_org_admin() {
+    if ctx.org_id != org_id {
         return (StatusCode::FORBIDDEN, "access denied").into_response();
     }
 
@@ -143,6 +143,10 @@ pub async fn list_spaces(
         let mut summaries = Vec::new();
         for m in memberships {
             if let Ok(Some(space)) = space_store.get_space(&m.space_id).await {
+                // Only include spaces belonging to the requested org.
+                if space.org_id != org_id {
+                    continue;
+                }
                 summaries.push(SpaceSummary {
                     id: space.id.0,
                     name: space.name,
@@ -174,6 +178,10 @@ pub async fn create_space(
     Path(org_id): Path<String>,
     Json(body): Json<CreateSpaceRequest>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
     if !ctx.is_org_admin() {
         return (StatusCode::FORBIDDEN, "org admin required").into_response();
     }
@@ -181,8 +189,6 @@ pub async fn create_space(
     if body.name.is_empty() || body.slug.is_empty() {
         return (StatusCode::BAD_REQUEST, "name and slug are required").into_response();
     }
-
-    let org_id = OrgId::from(org_id);
     let now = Utc::now();
     let space = Space {
         id: SpaceId::from(format!("spc_{}", uuid::Uuid::new_v4())),
@@ -229,8 +235,13 @@ pub async fn create_space(
 pub async fn get_space(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<SpacesApiState>,
-    Path((_org_id, id)): Path<(String, String)>,
+    Path((org_id, id)): Path<(String, String)>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let space_id = SpaceId::from(id);
 
     if !ctx.is_org_admin() && ctx.role_in(&space_id).is_none() {
@@ -239,7 +250,7 @@ pub async fn get_space(
 
     let store = state.org_storage.space_store();
     match store.get_space(&space_id).await {
-        Ok(Some(space)) => {
+        Ok(Some(space)) if space.org_id == org_id => {
             let detail = SpaceDetail {
                 id: space.id.0,
                 org_id: space.org_id.0,
@@ -250,6 +261,7 @@ pub async fn get_space(
             };
             Json(detail).into_response()
         }
+        Ok(Some(_)) => (StatusCode::NOT_FOUND, "space not found").into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "space not found").into_response(),
         Err(e) => {
             tracing::error!("failed to get space: {e}");
@@ -278,9 +290,14 @@ pub async fn get_space(
 pub async fn update_space(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<SpacesApiState>,
-    Path((_org_id, id)): Path<(String, String)>,
+    Path((org_id, id)): Path<(String, String)>,
     Json(body): Json<UpdateSpaceRequest>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let space_id = SpaceId::from(id);
 
     // Space-admins or org-admins can update.
@@ -293,7 +310,8 @@ pub async fn update_space(
 
     let store = state.org_storage.space_store();
     let space = match store.get_space(&space_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(s)) if s.org_id == org_id => s,
+        Ok(Some(_)) => return (StatusCode::NOT_FOUND, "space not found").into_response(),
         Ok(None) => return (StatusCode::NOT_FOUND, "space not found").into_response(),
         Err(e) => {
             tracing::error!("failed to get space: {e}");
@@ -301,17 +319,24 @@ pub async fn update_space(
         }
     };
 
-    // SpaceStore doesn't have an update method; we delete and re-create.
-    // For now, return the space as-is with the updated name (the name is
-    // the only mutable field, and SpaceStore is read-heavy).
-    // TODO: add update_space to SpaceStore trait.
+    let mut space = space;
+    if let Some(name) = body.name {
+        space.name = name;
+    }
+    space.updated_at = Utc::now();
+
+    if let Err(e) = store.update_space(&space).await {
+        tracing::error!("failed to update space: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to update space").into_response();
+    }
+
     let detail = SpaceDetail {
         id: space.id.0,
         org_id: space.org_id.0,
-        name: body.name.unwrap_or(space.name),
+        name: space.name,
         slug: space.slug,
         created_at: space.created_at.to_rfc3339(),
-        updated_at: Utc::now().to_rfc3339(),
+        updated_at: space.updated_at.to_rfc3339(),
     };
     Json(detail).into_response()
 }
@@ -335,14 +360,31 @@ pub async fn update_space(
 pub async fn delete_space(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<SpacesApiState>,
-    Path((_org_id, id)): Path<(String, String)>,
+    Path((org_id, id)): Path<(String, String)>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
     if !ctx.is_org_admin() {
         return (StatusCode::FORBIDDEN, "org admin required").into_response();
     }
 
     let space_id = SpaceId::from(id);
     let store = state.org_storage.space_store();
+
+    // Verify space belongs to this org before deleting.
+    match store.get_space(&space_id).await {
+        Ok(Some(s)) if s.org_id != org_id => {
+            return (StatusCode::NOT_FOUND, "space not found").into_response();
+        }
+        Ok(None) => return (StatusCode::NOT_FOUND, "space not found").into_response(),
+        Err(e) => {
+            tracing::error!("failed to get space: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+        }
+        _ => {}
+    }
 
     match store.delete_space(&space_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),

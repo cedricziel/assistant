@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use assistant_core::MembershipStore;
 use assistant_core::auth::AuthContext;
-use assistant_core::identity::{Role, SpaceId, UserId};
+use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 use assistant_core::store::SpaceMembership;
 use assistant_storage::OrgStorageLayer;
 
@@ -78,7 +78,6 @@ pub fn members_api_router() -> Router<MembersApiState> {
 
 fn parse_role(s: &str) -> Option<Role> {
     match s {
-        "org-admin" | "OrgAdmin" => Some(Role::OrgAdmin),
         "space-admin" | "SpaceAdmin" => Some(Role::SpaceAdmin),
         "member" | "Member" => Some(Role::Member),
         "viewer" | "Viewer" => Some(Role::Viewer),
@@ -123,8 +122,13 @@ fn can_manage_members(ctx: &AuthContext, space_id: &SpaceId) -> bool {
 pub async fn list_members(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<MembersApiState>,
-    Path((_org_id, space_id)): Path<(String, String)>,
+    Path((org_id, space_id)): Path<(String, String)>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let space_id = SpaceId::from(space_id);
 
     if !ctx.is_org_admin() && ctx.role_in(&space_id).is_none() {
@@ -172,9 +176,14 @@ pub async fn list_members(
 pub async fn add_member(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<MembersApiState>,
-    Path((_org_id, space_id)): Path<(String, String)>,
+    Path((org_id, space_id)): Path<(String, String)>,
     Json(body): Json<AddMemberRequest>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let space_id = SpaceId::from(space_id);
 
     if !can_manage_members(&ctx, &space_id) {
@@ -185,6 +194,15 @@ pub async fn add_member(
         Some(r) => r,
         None => return (StatusCode::BAD_REQUEST, "invalid role").into_response(),
     };
+
+    // Only org admins can grant SpaceAdmin.
+    if role == Role::SpaceAdmin && !ctx.is_org_admin() {
+        return (
+            StatusCode::FORBIDDEN,
+            "only org admins can grant space-admin",
+        )
+            .into_response();
+    }
 
     let now = Utc::now();
     let membership = SpaceMembership {
@@ -230,9 +248,14 @@ pub async fn add_member(
 pub async fn update_member(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<MembersApiState>,
-    Path((_org_id, space_id, user_id)): Path<(String, String, String)>,
+    Path((org_id, space_id, user_id)): Path<(String, String, String)>,
     Json(body): Json<UpdateMemberRequest>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let space_id = SpaceId::from(space_id);
     let user_id = UserId::from(user_id);
 
@@ -245,17 +268,41 @@ pub async fn update_member(
         None => return (StatusCode::BAD_REQUEST, "invalid role").into_response(),
     };
 
+    // Only org admins can grant SpaceAdmin.
+    if role == Role::SpaceAdmin && !ctx.is_org_admin() {
+        return (
+            StatusCode::FORBIDDEN,
+            "only org admins can grant space-admin",
+        )
+            .into_response();
+    }
+
     let store = state.org_storage.membership_store();
 
-    // Remove old membership and add new one with updated role.
-    let _ = store.remove_membership(&user_id, &space_id).await;
+    // Fetch existing membership to preserve created_at and verify it exists.
+    let existing = match store.get_members_of_space(&space_id).await {
+        Ok(members) => members.into_iter().find(|m| m.user_id == user_id),
+        Err(e) => {
+            tracing::error!("failed to look up membership: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+        }
+    };
+    let original_created_at = match existing {
+        Some(m) => m.created_at,
+        None => return (StatusCode::NOT_FOUND, "membership not found").into_response(),
+    };
 
-    let now = Utc::now();
+    // Remove old membership and add new one with updated role.
+    if let Err(e) = store.remove_membership(&user_id, &space_id).await {
+        tracing::error!("failed to remove old membership: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to update role").into_response();
+    }
+
     let membership = SpaceMembership {
         user_id: user_id.clone(),
         space_id: space_id.clone(),
         role: role.clone(),
-        created_at: now,
+        created_at: original_created_at,
     };
 
     if let Err(e) = store.add_membership(&membership).await {
@@ -267,7 +314,7 @@ pub async fn update_member(
         user_id: user_id.0,
         space_id: space_id.0,
         role: role_to_str(&role).into(),
-        created_at: now.to_rfc3339(),
+        created_at: original_created_at.to_rfc3339(),
     };
     Json(entry).into_response()
 }
@@ -292,8 +339,13 @@ pub async fn update_member(
 pub async fn remove_member(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<MembersApiState>,
-    Path((_org_id, space_id, user_id)): Path<(String, String, String)>,
+    Path((org_id, space_id, user_id)): Path<(String, String, String)>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let space_id = SpaceId::from(space_id);
     let user_id = UserId::from(user_id);
 

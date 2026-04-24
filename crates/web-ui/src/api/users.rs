@@ -102,11 +102,13 @@ pub async fn list_users(
     State(state): State<UsersApiState>,
     Path(org_id): Path<String>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
     if !ctx.is_org_admin() {
         return (StatusCode::FORBIDDEN, "org admin required").into_response();
     }
-
-    let org_id = OrgId::from(org_id);
     let store = state.org_storage.user_store();
     match store.list_users(&org_id).await {
         Ok(users) => {
@@ -148,6 +150,10 @@ pub async fn create_user(
     Path(org_id): Path<String>,
     Json(body): Json<CreateUserRequest>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
     if !ctx.is_org_admin() {
         return (StatusCode::FORBIDDEN, "org admin required").into_response();
     }
@@ -155,8 +161,6 @@ pub async fn create_user(
     if body.email.is_empty() || body.name.is_empty() {
         return (StatusCode::BAD_REQUEST, "email and name are required").into_response();
     }
-
-    let org_id = OrgId::from(org_id);
 
     // Check for duplicate email in this org.
     let store = state.org_storage.user_store();
@@ -232,11 +236,16 @@ pub async fn create_user(
 pub async fn get_user(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<UsersApiState>,
-    Path((_org_id, id)): Path<(String, String)>,
+    Path((org_id, id)): Path<(String, String)>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let user_id = UserId::from(id);
 
-    // Users can see their own profile; org admins can see anyone.
+    // Users can see their own profile; org admins can see anyone in the same org.
     if ctx.user_id != user_id && !ctx.is_org_admin() {
         return (StatusCode::FORBIDDEN, "access denied").into_response();
     }
@@ -282,12 +291,17 @@ pub async fn get_user(
 pub async fn update_user(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<UsersApiState>,
-    Path((_org_id, id)): Path<(String, String)>,
+    Path((org_id, id)): Path<(String, String)>,
     Json(body): Json<UpdateUserRequest>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let user_id = UserId::from(id);
 
-    // Users can update their own profile; org admins can update anyone.
+    // Users can update their own profile; org admins can update anyone in the same org.
     if ctx.user_id != user_id && !ctx.is_org_admin() {
         return (StatusCode::FORBIDDEN, "access denied").into_response();
     }
@@ -345,8 +359,12 @@ pub async fn update_user(
 pub async fn delete_user(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<UsersApiState>,
-    Path((_org_id, id)): Path<(String, String)>,
+    Path((org_id, id)): Path<(String, String)>,
 ) -> Response {
+    let org_id = OrgId::from(org_id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
     if !ctx.is_org_admin() {
         return (StatusCode::FORBIDDEN, "org admin required").into_response();
     }

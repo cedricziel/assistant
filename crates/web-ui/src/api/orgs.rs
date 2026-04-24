@@ -190,8 +190,8 @@ pub async fn get_org(
 ) -> Response {
     let org_id = OrgId::from(id);
 
-    // Users can only see their own org; org admins can see any.
-    if ctx.org_id != org_id && !ctx.is_org_admin() {
+    // Users can only see their own org.
+    if ctx.org_id != org_id {
         return (StatusCode::FORBIDDEN, "access denied").into_response();
     }
 
@@ -241,6 +241,10 @@ pub async fn update_org(
     }
 
     let org_id = OrgId::from(id);
+    if ctx.org_id != org_id {
+        return (StatusCode::FORBIDDEN, "access denied").into_response();
+    }
+
     let store = state.org_storage.org_store();
 
     let mut org = match store.get_org(&org_id).await {
@@ -356,17 +360,57 @@ mod tests {
         assert_eq!(detail.name, "Acme Corp");
         assert_eq!(detail.slug, "acme");
 
-        // Get
+        // Seed the caller's own org so we can GET it.
+        let now = Utc::now();
+        let own_org = Organization {
+            id: OrgId::from("org_1"),
+            name: "Own Org".into(),
+            slug: "own".into(),
+            auth_mode: "password".into(),
+            created_at: now,
+            updated_at: now,
+        };
+        state
+            .org_storage
+            .org_store()
+            .create_org(&own_org)
+            .await
+            .unwrap();
+
+        // Get own org
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/orgs/{}", detail.id))
+                    .uri("/orgs/org_1")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let detail: OrgDetail = serde_json::from_slice(&body).unwrap();
+        assert_eq!(detail.name, "Own Org");
+    }
+
+    #[tokio::test]
+    async fn get_org_cross_tenant_denied() {
+        let state = setup_state().await;
+        let app = test_app(state, make_admin_ctx());
+
+        // Try to get a different org — should be denied.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/orgs/org_other")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

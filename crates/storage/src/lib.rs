@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod api_key_store;
 pub mod attachments;
 pub mod auth_state_store;
 pub mod command_events;
@@ -26,6 +27,7 @@ pub mod webhooks;
 pub mod workflows;
 
 pub use agents::{AgentRecord, AgentStatus, AgentStore};
+pub use api_key_store::SqliteApiKeyStore;
 pub use attachments::AttachmentStore;
 pub use auth_state_store::{
     SqliteAuthCodeStore, SqliteClientStore, SqliteDeviceCodeStore, SqliteRefreshTokenStore,

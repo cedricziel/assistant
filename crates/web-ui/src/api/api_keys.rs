@@ -141,24 +141,31 @@ pub async fn create_api_key(
 
     let generated = api_keys::generate_key();
 
-    let scopes: Vec<Scope> = body
+    let scopes: Vec<Scope> = match body
         .scopes
         .unwrap_or_default()
         .iter()
-        .filter_map(|s| {
-            let parts: Vec<&str> = s.splitn(2, ':').collect();
-            if parts.len() == 2 {
-                let resource = parts[0].parse().ok()?;
-                let action = parts[1].parse().ok()?;
-                Some(Scope::new(resource, action))
-            } else {
-                None
-            }
+        .map(|s| {
+            let (r, a) = s
+                .split_once(':')
+                .ok_or_else(|| format!("invalid scope format: {s}"))?;
+            let resource = r
+                .parse()
+                .map_err(|_| format!("invalid resource in scope: {s}"))?;
+            let action = a
+                .parse()
+                .map_err(|_| format!("invalid action in scope: {s}"))?;
+            Ok::<_, String>(Scope::new(resource, action))
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
 
+    let key_id = format!("key_{}", uuid::Uuid::new_v4());
     let record = ApiKeyRecord {
-        id: format!("key_{}", uuid::Uuid::new_v4()),
+        id: key_id.clone(),
         user_id: ctx.user_id.clone(),
         name: body.name.clone(),
         key_hash: generated.key_hash.clone(),
@@ -180,7 +187,7 @@ pub async fn create_api_key(
     }
 
     let resp = CreateApiKeyResponse {
-        id: format!("key_{}", uuid::Uuid::new_v4()),
+        id: key_id,
         name: body.name,
         key_prefix: generated.key_prefix,
         plaintext: generated.plaintext,

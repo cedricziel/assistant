@@ -740,7 +740,7 @@ async fn run_with_args(args: Args) -> Result<()> {
         }
     });
     let api_key_store: Arc<dyn assistant_auth::api_keys::ApiKeyStore> =
-        Arc::new(assistant_auth::api_keys::InMemoryApiKeyStore::new());
+        Arc::new(org_storage.api_key_store());
     let auth_config = WebAuthConfig::new(
         jwt_manager,
         api_key_store.clone(),
