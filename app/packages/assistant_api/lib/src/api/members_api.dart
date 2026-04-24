@@ -69,6 +69,14 @@ class MembersApi {
             'scheme': 'bearer',
             'name': 'bearer_token',
           },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
         ],
         ...?extra,
       },
@@ -181,6 +189,14 @@ class MembersApi {
             'scheme': 'bearer',
             'name': 'bearer_token',
           },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
         ],
         ...?extra,
       },
@@ -279,6 +295,14 @@ class MembersApi {
             'scheme': 'bearer',
             'name': 'bearer_token',
           },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
         ],
         ...?extra,
       },
@@ -349,6 +373,14 @@ class MembersApi {
             'type': 'http',
             'scheme': 'bearer',
             'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
           },
         ],
         ...?extra,

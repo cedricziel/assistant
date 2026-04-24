@@ -28,7 +28,10 @@ use assistant_a2a_json_schema::{
 };
 use utoipa::{
     Modify, OpenApi,
-    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+    openapi::security::{
+        AuthorizationCode, ClientCredentials, Flow, HttpAuthScheme, HttpBuilder, OAuth2, Scopes,
+        SecurityScheme,
+    },
 };
 
 use crate::a2a::handlers;
@@ -71,12 +74,13 @@ use crate::api::{
     },
 };
 
-/// Adds the Bearer token security scheme to the OpenAPI components.
-struct BearerTokenSecurityAddon;
+/// Adds the Bearer token and OAuth2 security schemes to the OpenAPI components.
+struct SecuritySchemesAddon;
 
-impl Modify for BearerTokenSecurityAddon {
+impl Modify for SecuritySchemesAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         if let Some(components) = openapi.components.as_mut() {
+            // HTTP Bearer — legacy token or JWT issued by any flow.
             components.add_security_scheme(
                 "bearer_token",
                 SecurityScheme::Http(
@@ -89,6 +93,42 @@ impl Modify for BearerTokenSecurityAddon {
                         ))
                         .build(),
                 ),
+            );
+
+            // OAuth2 — authorization code + client credentials flows.
+            let scopes: Scopes = [
+                ("conversations:read", "Read conversations"),
+                ("conversations:write", "Create and send messages"),
+                ("personas:read", "Read personas"),
+                ("personas:write", "Create and update personas"),
+                ("skills:read", "Read skills"),
+                ("skills:write", "Create and update skills"),
+                ("users:read", "Read users"),
+                ("users:write", "Create and update users"),
+                ("spaces:read", "Read spaces"),
+                ("spaces:write", "Create and update spaces"),
+                ("org:manage", "Full organization management"),
+                ("api_keys:write", "Create and revoke API keys"),
+            ]
+            .into_iter()
+            .collect();
+
+            components.add_security_scheme(
+                "oauth2",
+                SecurityScheme::OAuth2(OAuth2::with_description(
+                    [
+                        Flow::AuthorizationCode(AuthorizationCode::with_refresh_url(
+                            "/oauth/authorize",
+                            "/oauth/token",
+                            scopes.clone(),
+                            "/oauth/token", // refresh URL = token URL
+                        )),
+                        Flow::ClientCredentials(ClientCredentials::new("/oauth/token", scopes)),
+                    ],
+                    "OAuth2 authentication. Use authorization code flow (interactive) \
+                     or client credentials flow (machine-to-machine). \
+                     Tokens are issued as JWTs via the `/oauth/token` endpoint.",
+                )),
             );
         }
     }
@@ -121,7 +161,7 @@ pub struct ApiErrorResponse {
                        The token is set via `--auth-token` / `ASSISTANT_WEB_TOKEN` on the server.",
         license(name = "MIT", identifier = "MIT"),
     ),
-    modifiers(&BearerTokenSecurityAddon),
+    modifiers(&SecuritySchemesAddon),
     paths(
         crate::api::get_capabilities,
         crate::api::list_conversations,

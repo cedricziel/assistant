@@ -110,7 +110,7 @@ fn can_manage_members(ctx: &AuthContext, space_id: &SpaceId) -> bool {
     get,
     path = "/api/orgs/{org_id}/spaces/{space_id}/members",
     tag = "members",
-    security(("bearer_token" = [])),
+    security(("bearer_token" = []), ("oauth2" = [])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("space_id" = String, Path, description = "Space ID"),
@@ -157,7 +157,7 @@ pub async fn list_members(
     post,
     path = "/api/orgs/{org_id}/spaces/{space_id}/members",
     tag = "members",
-    security(("bearer_token" = [])),
+    security(("bearer_token" = []), ("oauth2" = [])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("space_id" = String, Path, description = "Space ID"),
@@ -214,7 +214,7 @@ pub async fn add_member(
     patch,
     path = "/api/orgs/{org_id}/spaces/{space_id}/members/{user_id}",
     tag = "members",
-    security(("bearer_token" = [])),
+    security(("bearer_token" = []), ("oauth2" = [])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("space_id" = String, Path, description = "Space ID"),
@@ -277,7 +277,7 @@ pub async fn update_member(
     delete,
     path = "/api/orgs/{org_id}/spaces/{space_id}/members/{user_id}",
     tag = "members",
-    security(("bearer_token" = [])),
+    security(("bearer_token" = []), ("oauth2" = [])),
     params(
         ("org_id" = String, Path, description = "Organization ID"),
         ("space_id" = String, Path, description = "Space ID"),

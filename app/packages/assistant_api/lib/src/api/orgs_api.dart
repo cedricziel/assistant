@@ -52,7 +52,21 @@ class OrgsApi {
         ...?headers,
       },
       extra: <String, dynamic>{
-        'secure': <Map<String, String>>[],
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+        ],
         ...?extra,
       },
       contentType: 'application/json',
@@ -151,7 +165,21 @@ class OrgsApi {
         ...?headers,
       },
       extra: <String, dynamic>{
-        'secure': <Map<String, String>>[],
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+        ],
         ...?extra,
       },
       validateStatus: validateStatus,
@@ -230,6 +258,14 @@ class OrgsApi {
             'type': 'http',
             'scheme': 'bearer',
             'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
           },
         ],
         ...?extra,
@@ -312,7 +348,21 @@ class OrgsApi {
         ...?headers,
       },
       extra: <String, dynamic>{
-        'secure': <Map<String, String>>[],
+        'secure': <Map<String, String>>[
+          {
+            'type': 'http',
+            'scheme': 'bearer',
+            'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+        ],
         ...?extra,
       },
       contentType: 'application/json',

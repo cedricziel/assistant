@@ -57,6 +57,14 @@ class ApiKeysApi {
             'scheme': 'bearer',
             'name': 'bearer_token',
           },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
         ],
         ...?extra,
       },
@@ -162,6 +170,14 @@ class ApiKeysApi {
             'scheme': 'bearer',
             'name': 'bearer_token',
           },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
         ],
         ...?extra,
       },
@@ -212,6 +228,14 @@ class ApiKeysApi {
             'type': 'http',
             'scheme': 'bearer',
             'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
           },
         ],
         ...?extra,

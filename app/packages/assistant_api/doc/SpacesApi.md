@@ -24,6 +24,10 @@ Method | HTTP request | Description
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getSpacesApi();
 final String orgId = orgId_example; // String | Organization ID
@@ -50,7 +54,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -67,6 +71,10 @@ Name | Type | Description  | Notes
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getSpacesApi();
 final String orgId = orgId_example; // String | Organization ID
@@ -92,7 +100,7 @@ void (empty response body)
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -109,6 +117,10 @@ void (empty response body)
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getSpacesApi();
 final String orgId = orgId_example; // String | Organization ID
@@ -135,7 +147,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -152,6 +164,10 @@ Name | Type | Description  | Notes
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getSpacesApi();
 final String orgId = orgId_example; // String | Organization ID
@@ -176,7 +192,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -193,6 +209,10 @@ Name | Type | Description  | Notes
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getSpacesApi();
 final String orgId = orgId_example; // String | Organization ID
@@ -221,7 +241,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 

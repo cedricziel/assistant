@@ -63,6 +63,14 @@ class UsersApi {
             'scheme': 'bearer',
             'name': 'bearer_token',
           },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
         ],
         ...?extra,
       },
@@ -175,6 +183,14 @@ class UsersApi {
             'scheme': 'bearer',
             'name': 'bearer_token',
           },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
         ],
         ...?extra,
       },
@@ -237,6 +253,14 @@ class UsersApi {
             'type': 'http',
             'scheme': 'bearer',
             'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
           },
         ],
         ...?extra,
@@ -322,6 +346,14 @@ class UsersApi {
             'type': 'http',
             'scheme': 'bearer',
             'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
           },
         ],
         ...?extra,
@@ -416,6 +448,14 @@ class UsersApi {
             'type': 'http',
             'scheme': 'bearer',
             'name': 'bearer_token',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
+          },
+          {
+            'type': 'oauth2',
+            'name': 'oauth2',
           },
         ],
         ...?extra,

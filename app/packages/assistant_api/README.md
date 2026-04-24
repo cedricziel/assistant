@@ -324,6 +324,44 @@ Authentication schemes defined for the API:
 
 - **Type**: HTTP Bearer Token authentication
 
+### oauth2
+
+- **Type**: OAuth
+- **Flow**: application
+- **Authorization URL**: 
+- **Scopes**: 
+ - **api_keys:write**: Create and revoke API keys
+ - **conversations:read**: Read conversations
+ - **conversations:write**: Create and send messages
+ - **org:manage**: Full organization management
+ - **personas:read**: Read personas
+ - **personas:write**: Create and update personas
+ - **skills:read**: Read skills
+ - **skills:write**: Create and update skills
+ - **spaces:read**: Read spaces
+ - **spaces:write**: Create and update spaces
+ - **users:read**: Read users
+ - **users:write**: Create and update users
+
+### oauth2
+
+- **Type**: OAuth
+- **Flow**: accessCode
+- **Authorization URL**: /oauth/authorize
+- **Scopes**: 
+ - **api_keys:write**: Create and revoke API keys
+ - **conversations:read**: Read conversations
+ - **conversations:write**: Create and send messages
+ - **org:manage**: Full organization management
+ - **personas:read**: Read personas
+ - **personas:write**: Create and update personas
+ - **skills:read**: Read skills
+ - **skills:write**: Create and update skills
+ - **spaces:read**: Read spaces
+ - **spaces:write**: Create and update spaces
+ - **users:read**: Read users
+ - **users:write**: Create and update users
+
 
 ## Author
 

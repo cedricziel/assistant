@@ -1367,6 +1367,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -1407,6 +1410,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -1450,6 +1456,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -1501,6 +1510,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -1544,6 +1556,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -1595,6 +1610,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -1647,6 +1665,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -1690,6 +1711,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -1750,6 +1774,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -1802,6 +1829,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -1862,6 +1892,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -1916,6 +1949,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -1985,6 +2021,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -2028,6 +2067,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -2082,6 +2124,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -2134,6 +2179,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -2177,6 +2225,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -2237,6 +2288,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -3307,6 +3361,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       },
@@ -3344,6 +3401,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -3377,6 +3437,9 @@
         "security": [
           {
             "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -9293,6 +9356,48 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Bearer token. Pass the token issued by the server via `Authorization: Bearer <token>`. Configure it with `--auth-token` / `ASSISTANT_WEB_TOKEN`."
+      },
+      "oauth2": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "/oauth/authorize",
+            "tokenUrl": "/oauth/token",
+            "refreshUrl": "/oauth/token",
+            "scopes": {
+              "api_keys:write": "Create and revoke API keys",
+              "conversations:read": "Read conversations",
+              "conversations:write": "Create and send messages",
+              "org:manage": "Full organization management",
+              "personas:read": "Read personas",
+              "personas:write": "Create and update personas",
+              "skills:read": "Read skills",
+              "skills:write": "Create and update skills",
+              "spaces:read": "Read spaces",
+              "spaces:write": "Create and update spaces",
+              "users:read": "Read users",
+              "users:write": "Create and update users"
+            }
+          },
+          "clientCredentials": {
+            "tokenUrl": "/oauth/token",
+            "scopes": {
+              "api_keys:write": "Create and revoke API keys",
+              "conversations:read": "Read conversations",
+              "conversations:write": "Create and send messages",
+              "org:manage": "Full organization management",
+              "personas:read": "Read personas",
+              "personas:write": "Create and update personas",
+              "skills:read": "Read skills",
+              "skills:write": "Create and update skills",
+              "spaces:read": "Read spaces",
+              "spaces:write": "Create and update spaces",
+              "users:read": "Read users",
+              "users:write": "Create and update users"
+            }
+          }
+        },
+        "description": "OAuth2 authentication. Use authorization code flow (interactive) or client credentials flow (machine-to-machine). Tokens are issued as JWTs via the `/oauth/token` endpoint."
       }
     }
   },

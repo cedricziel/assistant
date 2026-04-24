@@ -23,6 +23,10 @@ Method | HTTP request | Description
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getOrgsApi();
 final CreateOrgRequest createOrgRequest = ; // CreateOrgRequest | 
@@ -47,7 +51,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -64,6 +68,10 @@ No authorization required
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getOrgsApi();
 final String id = id_example; // String | Organization ID
@@ -88,7 +96,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -105,6 +113,10 @@ No authorization required
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getOrgsApi();
 
@@ -125,7 +137,7 @@ This endpoint does not need any parameter.
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -142,6 +154,10 @@ This endpoint does not need any parameter.
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getOrgsApi();
 final String id = id_example; // String | Organization ID
@@ -168,7 +184,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 

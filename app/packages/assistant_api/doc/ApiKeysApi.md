@@ -22,6 +22,10 @@ Method | HTTP request | Description
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getApiKeysApi();
 final CreateApiKeyRequest createApiKeyRequest = ; // CreateApiKeyRequest | 
@@ -46,7 +50,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -63,6 +67,10 @@ Name | Type | Description  | Notes
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getApiKeysApi();
 final String id = id_example; // String | API key ID
@@ -86,7 +94,7 @@ void (empty response body)
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
@@ -103,6 +111,10 @@ void (empty response body)
 ### Example
 ```dart
 import 'package:assistant_api/api.dart';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
+// TODO Configure OAuth2 access token for authorization: oauth2
+//defaultApiClient.getAuthentication<OAuth>('oauth2').accessToken = 'YOUR_ACCESS_TOKEN';
 
 final api = AssistantApi().getApiKeysApi();
 
@@ -123,7 +135,7 @@ This endpoint does not need any parameter.
 
 ### Authorization
 
-[bearer_token](../README.md#bearer_token)
+[bearer_token](../README.md#bearer_token), [oauth2](../README.md#oauth2), [oauth2](../README.md#oauth2)
 
 ### HTTP request headers
 
