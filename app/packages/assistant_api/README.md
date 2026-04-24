@@ -99,6 +99,7 @@ Class | Method | HTTP request | Description
 [*MessagesApi*](doc/MessagesApi.md) | [**a2aSendMessageStreaming**](doc/MessagesApi.md#a2asendmessagestreaming) | **POST** /message/stream | &#x60;POST /message/stream&#x60; -- Sends a message with streaming response (SSE).
 [*OauthApi*](doc/OauthApi.md) | [**authorizeGet**](doc/OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render login form.
 [*OauthApi*](doc/OauthApi.md) | [**authorizePost**](doc/OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate credentials, generate auth code, redirect.
+[*OauthApi*](doc/OauthApi.md) | [**callback**](doc/OauthApi.md#callback) | **GET** /oauth/callback | GET /oauth/callback — handle the IdP redirect.
 [*OauthApi*](doc/OauthApi.md) | [**deviceInitiate**](doc/OauthApi.md#deviceinitiate) | **POST** /oauth/device | POST /oauth/device — initiate the device authorization flow.
 [*OauthApi*](doc/OauthApi.md) | [**deviceVerifyPage**](doc/OauthApi.md#deviceverifypage) | **GET** /oauth/device/verify | GET /oauth/device/verify — render page where user enters the code.
 [*OauthApi*](doc/OauthApi.md) | [**deviceVerifySubmit**](doc/OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
