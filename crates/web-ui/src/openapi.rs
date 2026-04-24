@@ -45,17 +45,22 @@ use crate::api::{
     analytics::{
         AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
     },
+    api_keys::{ApiKeySummary, CreateApiKeyRequest, CreateApiKeyResponse},
     commands::{
         CommandArgResponse, CommandDefResponse, CommandEventResponse, ExecuteCommandRequest,
     },
     logs::LogEntryResponse,
+    members::{AddMemberRequest, MemberEntry, UpdateMemberRequest},
+    orgs::{CreateOrgRequest, OrgDetail, OrgSummary, UpdateOrgRequest},
     personas::{
         AddSkillAccessRequest, CreatePersonaRequest, PersonaDetail, PersonaFileContent,
         PersonaFileSlot, PersonaSkillAccess, PersonaSummary, SetActivePersonaRequest,
         SetSkillAccessModeRequest, WritePersonaFileRequest,
     },
     skills::{CreateSkillRequest, SkillDetail, SkillEntryResponse, UpdateSkillRequest},
+    spaces::{CreateSpaceRequest, SpaceDetail, SpaceSummary, UpdateSpaceRequest},
     traces::{SpanEntryResponse, TraceDetailResponse, TraceSummaryResponse},
+    users::{CreateUserRequest, UpdateUserRequest, UserDetail, UserSummary},
     webhooks::{
         CreateWebhookRequest, RotateSecretResponse, UpdateWebhookRequest, VerifyWebhookResponse,
         WebhookResponse,
@@ -207,6 +212,32 @@ pub struct ApiErrorResponse {
         crate::oauth::callback::callback,
         crate::oauth::revoke::revoke,
         crate::oauth::revoke::metadata,
+        // Organization management
+        crate::api::orgs::list_orgs,
+        crate::api::orgs::create_org,
+        crate::api::orgs::get_org,
+        crate::api::orgs::update_org,
+        // User management
+        crate::api::users::list_users,
+        crate::api::users::create_user,
+        crate::api::users::get_user,
+        crate::api::users::update_user,
+        crate::api::users::delete_user,
+        // Space management
+        crate::api::spaces::list_spaces,
+        crate::api::spaces::create_space,
+        crate::api::spaces::get_space,
+        crate::api::spaces::update_space,
+        crate::api::spaces::delete_space,
+        // Membership management
+        crate::api::members::list_members,
+        crate::api::members::add_member,
+        crate::api::members::update_member,
+        crate::api::members::remove_member,
+        // API key management
+        crate::api::api_keys::list_api_keys,
+        crate::api::api_keys::create_api_key,
+        crate::api::api_keys::delete_api_key,
     ),
     components(
         schemas(
@@ -348,6 +379,29 @@ pub struct ApiErrorResponse {
             crate::oauth::ClientInfoSchema,
             // Common error response
             ApiErrorResponse,
+            // Organization management types
+            OrgSummary,
+            OrgDetail,
+            CreateOrgRequest,
+            UpdateOrgRequest,
+            // User management types
+            UserSummary,
+            UserDetail,
+            CreateUserRequest,
+            UpdateUserRequest,
+            // Space management types
+            SpaceSummary,
+            SpaceDetail,
+            CreateSpaceRequest,
+            UpdateSpaceRequest,
+            // Membership management types
+            MemberEntry,
+            AddMemberRequest,
+            UpdateMemberRequest,
+            // API key management types
+            ApiKeySummary,
+            CreateApiKeyRequest,
+            CreateApiKeyResponse,
         )
     ),
     tags(
@@ -383,6 +437,16 @@ pub struct ApiErrorResponse {
          description = "Web Push — VAPID key retrieval and push subscription management for PWA notifications"),
         (name = "oauth",
          description = "OAuth2 — authorization, token exchange, device code flow, client registration, and server metadata"),
+        (name = "orgs",
+         description = "Organization management — list, create, update organizations"),
+        (name = "users",
+         description = "User management — list, create, update, delete users within an organization"),
+        (name = "spaces",
+         description = "Space management — list, create, update, delete spaces within an organization"),
+        (name = "members",
+         description = "Membership management — add, update, remove space members"),
+        (name = "api-keys",
+         description = "API key management — create, list, revoke API keys"),
     ),
     servers(
         (url = "/", description = "Local assistant server")
