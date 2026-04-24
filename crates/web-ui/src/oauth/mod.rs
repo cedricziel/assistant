@@ -4,7 +4,10 @@
 //! and client registration into Axum HTTP handlers.
 
 pub mod authorize;
+pub mod callback;
 pub mod device;
+pub mod oidc_bridge;
+pub mod oidc_sessions;
 pub mod register;
 pub mod revoke;
 pub mod token;
@@ -18,8 +21,11 @@ use assistant_auth::jwt::JwtManager;
 use assistant_auth::oauth2::clients::ClientRegistrar;
 use assistant_auth::oauth2::device::DeviceCodeManager;
 use assistant_auth::oauth2::server::OAuth2Server;
+use assistant_auth::oidc::OidcProvider;
 use assistant_core::auth::AuthContext;
 use assistant_storage::OrgStorageLayer;
+
+use self::oidc_sessions::PendingOidcSessionStore;
 
 /// Shared state for all OAuth2 endpoints.
 #[derive(Clone)]
@@ -38,6 +44,10 @@ pub struct OAuthState {
     pub issuer: String,
     /// When `true`, session cookies get the `Secure` attribute.
     pub secure_cookie: bool,
+    /// OIDC provider (present when `auth_mode = "oidc"`).
+    pub oidc_provider: Option<Arc<OidcProvider>>,
+    /// Pending OIDC authorization sessions (state → original params).
+    pub oidc_sessions: Option<Arc<PendingOidcSessionStore>>,
 }
 
 /// Build the public OAuth2 router (no auth required on these endpoints).
@@ -48,6 +58,8 @@ pub fn oauth_router() -> Router<OAuthState> {
         // Authorization endpoint.
         .route("/oauth/authorize", get(authorize::authorize_get))
         .route("/oauth/authorize", post(authorize::authorize_post))
+        // OIDC IdP callback (receives code from external IdP).
+        .route("/oauth/callback", get(callback::callback))
         // Token endpoint.
         .route("/oauth/token", post(token::token))
         // Dynamic client registration.
@@ -209,6 +221,8 @@ mod tests {
             org_storage,
             issuer: "http://localhost".into(),
             secure_cookie: false,
+            oidc_provider: None,
+            oidc_sessions: None,
         }
     }
 
@@ -322,6 +336,121 @@ mod tests {
         assert!(
             html.contains("client_id"),
             "form should contain client_id hidden field"
+        );
+    }
+
+    #[tokio::test]
+    async fn authorize_get_redirects_to_idp_in_oidc_mode() {
+        use assistant_auth::oidc::{Jwk, JwksResponse, OidcConfig, OidcDiscovery, OidcProvider};
+        use oidc_sessions::PendingOidcSessionStore;
+        use std::time::Duration;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // Stand up a mock IdP for OIDC discovery.
+        let server = MockServer::start().await;
+        let issuer = server.uri();
+        let discovery = OidcDiscovery {
+            issuer: issuer.clone(),
+            authorization_endpoint: format!("{issuer}/authorize"),
+            token_endpoint: format!("{issuer}/token"),
+            userinfo_endpoint: None,
+            jwks_uri: format!("{issuer}/jwks"),
+            response_types_supported: vec!["code".into()],
+            subject_types_supported: vec!["public".into()],
+            id_token_signing_alg_values_supported: vec!["RS256".into()],
+        };
+        let jwks = JwksResponse {
+            keys: vec![Jwk {
+                kty: "RSA".into(),
+                kid: Some("k1".into()),
+                alg: Some("RS256".into()),
+                key_use: Some("sig".into()),
+                n: Some("test".into()),
+                e: Some("AQAB".into()),
+                crv: None,
+                x: None,
+                y: None,
+            }],
+        };
+        Mock::given(method("GET"))
+            .and(path("/.well-known/openid-configuration"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&discovery))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/jwks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&jwks))
+            .mount(&server)
+            .await;
+
+        let oidc = OidcProvider::discover(OidcConfig {
+            issuer_url: issuer.clone(),
+            client_id: "oidc-client".into(),
+            client_secret: None,
+            auto_provision: true,
+            allowed_email_domains: None,
+        })
+        .await
+        .unwrap();
+
+        // Build state with OIDC provider.
+        let mut state = test_state().await;
+        let sessions = Arc::new(PendingOidcSessionStore::new(Duration::from_secs(300)));
+        state.oidc_provider = Some(Arc::new(oidc));
+        state.oidc_sessions = Some(sessions);
+
+        // Register a client.
+        let app = build_app(state.clone());
+        let reg_body = serde_json::json!({
+            "client_name": "OIDC Test",
+            "redirect_uris": ["http://localhost/cb"],
+            "grant_types": ["authorization_code"]
+        });
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let client_id = client["client_id"].as_str().unwrap();
+
+        // GET /oauth/authorize should redirect to the IdP, not render a form.
+        let app = build_app(state);
+        let resp = app.oneshot(
+            Request::builder()
+                .uri(&format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&state=mystate"))
+                .body(Body::empty())
+                .unwrap(),
+        ).await.unwrap();
+
+        // Should be a redirect (303 from Redirect::to).
+        assert!(
+            resp.status().is_redirection(),
+            "OIDC authorize_get should redirect, got {}",
+            resp.status()
+        );
+        let location = resp.headers().get("location").unwrap().to_str().unwrap();
+        assert!(
+            location.starts_with(&format!("{issuer}/authorize?")),
+            "should redirect to IdP authorize endpoint: {location}"
+        );
+        assert!(
+            location.contains("client_id=oidc-client"),
+            "should include IdP client_id: {location}"
+        );
+        assert!(
+            location.contains("scope=openid"),
+            "should request openid scope: {location}"
         );
     }
 
