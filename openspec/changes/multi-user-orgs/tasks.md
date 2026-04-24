@@ -306,7 +306,7 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - Accept email + password form submission
   - Validate via `AuthProvider`, generate auth code, redirect to `redirect_uri?code=`
 
-- [ ] `feat(web-ui): GET /oauth/callback — OIDC IdP callback`
+- [x] `feat(web-ui): GET /oauth/callback — OIDC IdP callback`
   - Exchange IdP auth code for id_token
   - Validate id_token, provision/lookup user
   - Generate our auth code, redirect to original client's redirect_uri

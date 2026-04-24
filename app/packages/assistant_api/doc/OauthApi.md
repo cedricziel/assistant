@@ -11,6 +11,7 @@ Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**authorizeGet**](OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render login form.
 [**authorizePost**](OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate credentials, generate auth code, redirect.
+[**callback**](OauthApi.md#callback) | **GET** /oauth/callback | GET /oauth/callback — handle the IdP redirect.
 [**deviceInitiate**](OauthApi.md#deviceinitiate) | **POST** /oauth/device | POST /oauth/device — initiate the device authorization flow.
 [**deviceVerifyPage**](OauthApi.md#deviceverifypage) | **GET** /oauth/device/verify | GET /oauth/device/verify — render page where user enters the code.
 [**deviceVerifySubmit**](OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
@@ -120,6 +121,52 @@ No authorization required
 ### HTTP request headers
 
  - **Content-Type**: application/x-www-form-urlencoded
+ - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **callback**
+> callback(code, state, error, errorDescription)
+
+GET /oauth/callback — handle the IdP redirect.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getOauthApi();
+final String code = code_example; // String | Authorization code from the IdP.
+final String state = state_example; // String | The `state` value we sent when redirecting to the IdP.
+final String error = error_example; // String | Error code (if the IdP denied the request).
+final String errorDescription = errorDescription_example; // String | Human-readable error description from the IdP.
+
+try {
+    api.callback(code, state, error, errorDescription);
+} on DioException catch (e) {
+    print('Exception when calling OauthApi->callback: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **code** | **String**| Authorization code from the IdP. | [optional] 
+ **state** | **String**| The `state` value we sent when redirecting to the IdP. | [optional] 
+ **error** | **String**| Error code (if the IdP denied the request). | [optional] 
+ **errorDescription** | **String**| Human-readable error description from the IdP. | [optional] 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: Not defined
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
