@@ -204,6 +204,7 @@ pub struct ApiErrorResponse {
         crate::oauth::device::device_initiate,
         crate::oauth::device::device_verify_page,
         crate::oauth::device::device_verify_submit,
+        crate::oauth::callback::callback,
         crate::oauth::revoke::revoke,
         crate::oauth::revoke::metadata,
     ),

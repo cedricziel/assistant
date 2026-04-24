@@ -3428,6 +3428,79 @@
         ]
       }
     },
+    "/oauth/callback": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "GET /oauth/callback — handle the IdP redirect.",
+        "operationId": "callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "Authorization code from the IdP.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "The `state` value we sent when redirecting to the IdP.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "Error code (if the IdP denied the request).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "description": "Human-readable error description from the IdP.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Redirect to client with authorization code"
+          },
+          "400": {
+            "description": "Invalid or missing parameters"
+          },
+          "500": {
+            "description": "Internal error during token exchange"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/oauth/device": {
       "post": {
         "tags": [
