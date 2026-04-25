@@ -480,20 +480,20 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - Accept `TurnIdentity` parameter (or extract from ExecutionContext)
   - Pass through to tool handlers via execution context
 
-- [ ] `feat(runtime): ChannelRunner resolves platform identity before dispatch`
+- [x] `feat(runtime): ChannelRunner resolves platform identity before dispatch`
   - On incoming message: call `IdentityResolver::resolve(platform, sender_id)`
   - If resolved: build AuthContext for that user, dispatch with identity
   - If unresolved: reject or prompt for identity linking (configurable)
 
-- [ ] `feat(runtime): adapter registry keyed by instance ID`
+- [x] `feat(runtime): adapter registry keyed by instance ID`
   - Change `AdapterRegistry` key from interface type name to instance ID string
   - `ChannelRunner` looks up persona via binding table instead of global `agent_id`
 
-- [ ] `feat(runtime): scheduler runs with persona identity`
+- [x] `feat(runtime): scheduler runs with persona identity`
   - Scheduled tasks look up the persona's owning user (or system identity for org tasks)
   - Build AuthContext for the task's execution
 
-- [ ] `test(runtime): turn execution carries user identity to tool handlers`
+- [x] `test(runtime): turn execution carries user identity to tool handlers`
 
 ---
 

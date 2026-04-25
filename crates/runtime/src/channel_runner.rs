@@ -21,6 +21,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assistant_core::{
     ChannelAdapter, ChannelContent, ChannelMessage, ContentBlock, ConversationConfig,
+    IdentityResolver, TurnIdentity,
 };
 use assistant_storage::CommandEventStore;
 use base64::Engine as _;
@@ -55,6 +56,8 @@ pub struct ChannelRunner {
     active_turns: Arc<RwLock<HashMap<Uuid, Uuid>>>,
     /// Store for persisting command events.
     command_event_store: CommandEventStore,
+    /// Optional resolver that maps platform user IDs to assistant user IDs.
+    identity_resolver: Option<Arc<dyn IdentityResolver>>,
 }
 
 impl ChannelRunner {
@@ -73,7 +76,14 @@ impl ChannelRunner {
             conversation_configs: Arc::new(RwLock::new(HashMap::new())),
             active_turns: Arc::new(RwLock::new(HashMap::new())),
             command_event_store,
+            identity_resolver: None,
         }
+    }
+
+    /// Attach an identity resolver for mapping platform users to assistant users.
+    pub fn with_identity_resolver(mut self, resolver: Arc<dyn IdentityResolver>) -> Self {
+        self.identity_resolver = Some(resolver);
+        self
     }
 
     /// Attach an external shutdown token (for background / daemon mode).
@@ -130,12 +140,51 @@ impl ChannelRunner {
         }
     }
 
+    /// Resolve the platform sender to an assistant [`TurnIdentity`].
+    ///
+    /// Returns `TurnIdentity::default()` when no resolver is configured or
+    /// when the platform user cannot be mapped.
+    async fn resolve_identity(
+        resolver: &Option<Arc<dyn IdentityResolver>>,
+        interface: &assistant_core::Interface,
+        platform_id: &str,
+    ) -> TurnIdentity {
+        let Some(resolver) = resolver else {
+            return TurnIdentity::default();
+        };
+        match resolver.resolve(interface, platform_id).await {
+            Ok(Some(user_id)) => TurnIdentity {
+                user_id: Some(user_id),
+                // org_id / space_id will be resolved once multi-space
+                // routing is implemented.
+                org_id: None,
+                space_id: None,
+            },
+            Ok(None) => {
+                tracing::debug!(
+                    platform_id,
+                    "platform user not linked — using anonymous identity"
+                );
+                TurnIdentity::default()
+            }
+            Err(e) => {
+                warn!(
+                    platform_id,
+                    error = %e,
+                    "identity resolution failed — using anonymous identity"
+                );
+                TurnIdentity::default()
+            }
+        }
+    }
+
     /// Dispatch a single inbound message through the orchestrator.
     async fn dispatch(
         msg: ChannelMessage,
         conv_id: Uuid,
         adapter: Arc<dyn ChannelAdapter>,
         orchestrator: Arc<Orchestrator>,
+        identity: TurnIdentity,
     ) {
         let Some((text, attachments)) = Self::content_to_dispatch(&msg.content) else {
             return;
@@ -160,9 +209,7 @@ impl ChannelRunner {
                 None,
                 attachments,
                 vec![],
-                // TODO: resolve platform identity → TurnIdentity once
-                // IdentityResolver is wired up (multi-user-orgs task #71).
-                assistant_core::TurnIdentity::default(),
+                identity,
             )
             .await;
 
@@ -355,6 +402,14 @@ impl ChannelRunner {
                             let orchestrator = self.orchestrator.clone();
                             let active_turns = self.active_turns.clone();
 
+                            // Resolve platform identity before spawning the turn.
+                            let identity = Self::resolve_identity(
+                                &self.identity_resolver,
+                                &self.adapter.interface(),
+                                &channel_msg.sender.platform_id,
+                            )
+                            .await;
+
                             tokio::spawn(async move {
                                 let _guard = lock.lock().await;
 
@@ -362,8 +417,14 @@ impl ChannelRunner {
                                 let request_id = Uuid::new_v4();
                                 active_turns.write().await.insert(conv_id, request_id);
 
-                                Self::dispatch(channel_msg, conv_id, adapter, orchestrator)
-                                    .await;
+                                Self::dispatch(
+                                    channel_msg,
+                                    conv_id,
+                                    adapter,
+                                    orchestrator,
+                                    identity,
+                                )
+                                .await;
 
                                 active_turns.write().await.remove(&conv_id);
                             });
@@ -705,5 +766,75 @@ mod tests {
             "on_message_received must fire before the conv lock is acquired"
         );
         // _guard is still held here — the hook didn't need the lock.
+    }
+
+    // -- identity resolution tests -------------------------------------------
+
+    use assistant_core::types::Interface;
+    use assistant_core::{IdentityResolver, UserId};
+
+    /// A mock resolver that returns a fixed user ID for a known platform user.
+    struct MockResolver {
+        known_platform_id: String,
+        user_id: UserId,
+    }
+
+    #[async_trait]
+    impl IdentityResolver for MockResolver {
+        async fn resolve(
+            &self,
+            _platform: &Interface,
+            platform_user_id: &str,
+        ) -> anyhow::Result<Option<UserId>> {
+            if platform_user_id == self.known_platform_id {
+                Ok(Some(self.user_id.clone()))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_identity_returns_user_when_linked() {
+        let resolver: Option<Arc<dyn IdentityResolver>> = Some(Arc::new(MockResolver {
+            known_platform_id: "U_SLACK_123".into(),
+            user_id: UserId::from("usr_alice"),
+        }));
+
+        let identity =
+            ChannelRunner::resolve_identity(&resolver, &Interface::Slack, "U_SLACK_123").await;
+
+        assert_eq!(
+            identity.user_id.as_ref().map(|u| u.0.as_str()),
+            Some("usr_alice"),
+            "linked platform user should resolve to assistant user"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_identity_returns_default_when_unlinked() {
+        let resolver: Option<Arc<dyn IdentityResolver>> = Some(Arc::new(MockResolver {
+            known_platform_id: "U_SLACK_123".into(),
+            user_id: UserId::from("usr_alice"),
+        }));
+
+        let identity =
+            ChannelRunner::resolve_identity(&resolver, &Interface::Slack, "U_UNKNOWN").await;
+
+        assert!(
+            identity.user_id.is_none(),
+            "unlinked platform user should get anonymous identity"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_identity_returns_default_when_no_resolver() {
+        let identity =
+            ChannelRunner::resolve_identity(&None, &Interface::Slack, "U_SLACK_123").await;
+
+        assert!(
+            identity.user_id.is_none(),
+            "no resolver → anonymous identity"
+        );
     }
 }

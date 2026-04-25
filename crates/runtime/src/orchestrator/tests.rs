@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assistant_core::{
-    AssistantConfig, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, MessageBus,
-    PublishRequest, ToolCallItem, TurnIdentity, bus_messages, topic, types::Interface,
+    AssistantConfig, ChatHistoryMessage, ChatRole, ContentBlock, LlmProvider, MessageBus, OrgId,
+    PublishRequest, SpaceId, ToolCallItem, TurnIdentity, UserId, bus_messages, topic,
+    types::Interface,
 };
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_storage::{StorageLayer, registry::SkillRegistry};
@@ -3268,5 +3269,102 @@ async fn subagent_forwards_inner_events_to_parent_sink() {
         )),
         "Expected SubagentCompleted event, got: {:?}",
         events
+    );
+}
+
+// ── Identity threading test ──────────────────────────────────────────────
+
+/// A mock tool that captures the [`ExecutionContext`] it receives.
+struct IdentityCaptureTool {
+    captured: Arc<tokio::sync::Mutex<Option<ExecutionContext>>>,
+}
+
+#[async_trait::async_trait]
+impl ToolHandler for IdentityCaptureTool {
+    fn name(&self) -> &str {
+        "identity-probe"
+    }
+    fn description(&self) -> &str {
+        "Captures execution context for testing"
+    }
+    fn params_schema(&self) -> Value {
+        json!({ "type": "object", "properties": {}, "required": [] })
+    }
+    async fn run(
+        &self,
+        _params: HashMap<String, Value>,
+        ctx: &ExecutionContext,
+    ) -> anyhow::Result<ToolOutput> {
+        *self.captured.lock().await = Some(ctx.clone());
+        Ok(ToolOutput::success("captured"))
+    }
+}
+
+#[tokio::test]
+async fn turn_identity_reaches_tool_handler() {
+    let server = MockServer::start().await;
+
+    // First LLM call → invoke our probe tool; second → final answer.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["identity-probe"])),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("done")))
+        .mount(&server)
+        .await;
+
+    let (orch, _storage) = build(&server.uri()).await;
+
+    // Register our probe tool.
+    let captured = Arc::new(tokio::sync::Mutex::new(None));
+    let probe = Arc::new(IdentityCaptureTool {
+        captured: captured.clone(),
+    });
+    orch.executor.register_ambient_tool(probe);
+
+    // Run a turn with explicit identity.
+    let identity = TurnIdentity {
+        user_id: Some(UserId::from("usr_alice")),
+        org_id: Some(OrgId::from("org_acme")),
+        space_id: Some(SpaceId::from("spc_default")),
+    };
+
+    let result = orch
+        .run_turn(
+            "probe identity",
+            Uuid::new_v4(),
+            Interface::Cli,
+            None,
+            vec![],
+            identity,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "done");
+
+    // Verify the tool handler received the correct identity.
+    let ctx = captured.lock().await;
+    let ctx = ctx.as_ref().expect("tool should have been called");
+    assert_eq!(
+        ctx.user_id.as_ref().map(|u| u.0.as_str()),
+        Some("usr_alice"),
+        "user_id should reach tool handler"
+    );
+    assert_eq!(
+        ctx.org_id.as_ref().map(|o| o.0.as_str()),
+        Some("org_acme"),
+        "org_id should reach tool handler"
+    );
+    assert_eq!(
+        ctx.space_id.as_ref().map(|s| s.0.as_str()),
+        Some("spc_default"),
+        "space_id should reach tool handler"
     );
 }
