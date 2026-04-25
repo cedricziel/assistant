@@ -35,6 +35,7 @@ import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'image_utils.dart';
 import 'streaming_timeline_entry.dart';
+import 'theme_aware_mermaid.dart';
 import 'voice_recorder_button.dart';
 
 /// Main chat screen.
@@ -761,7 +762,12 @@ class _MessageBubble extends StatelessWidget {
                             ..registerBlock(MermaidPlugin())
                             ..registerBlock(const SvgPlugin()),
                           builderRegistry: BuilderRegistry()
-                            ..register('mermaid', const MermaidBuilder())
+                            ..register(
+                              'mermaid',
+                              ThemeAwareMermaidBuilder(
+                                style: mermaidStyleFromColorScheme(colorScheme),
+                              ),
+                            )
                             ..register('svg', const SvgBuilder()),
                         )
                       else if (message.content.isNotEmpty)
@@ -786,7 +792,12 @@ class _MessageBubble extends StatelessWidget {
                             ..registerBlock(MermaidPlugin())
                             ..registerBlock(const SvgPlugin()),
                           builderRegistry: BuilderRegistry()
-                            ..register('mermaid', const MermaidBuilder())
+                            ..register(
+                              'mermaid',
+                              ThemeAwareMermaidBuilder(
+                                style: mermaidStyleFromColorScheme(colorScheme),
+                              ),
+                            )
                             ..register('svg', const SvgBuilder()),
                         ),
                       // Attachment thumbnails (assistant-produced images).
