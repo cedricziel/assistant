@@ -21,10 +21,9 @@ const FLUTTER_SETTLE_MS = 3000;
 const PLATFORM_ERROR_PATTERN = /Platform\._operatingSystem/;
 
 async function loginFlutter(page: Page) {
-  await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(FLUTTER_SETTLE_MS);
+  await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "load" });
   await page.waitForURL((url) => !url.pathname.includes("/setup"), {
-    timeout: 15_000,
+    timeout: 20_000,
   });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
@@ -55,7 +54,7 @@ test.describe("dart:io Platform must not be used on web", () => {
 
     // 2. Navigate to /chat — UpdateBannerWrapper wraps every page and calls
     //    Platform.isIOS in its build() method, which crashes on web.
-    await page.goto("/chat", { waitUntil: "networkidle" });
+    await page.goto("/chat", { waitUntil: "load" });
     await page.waitForTimeout(FLUTTER_SETTLE_MS);
 
     expect(

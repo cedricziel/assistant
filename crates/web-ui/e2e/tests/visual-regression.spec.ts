@@ -35,31 +35,28 @@ const FLUTTER_SETTLE_MS = 3000;
  * Navigates to /setup with a `_token` query parameter. ConnectionScreen reads
  * this parameter in initState() and calls connect() automatically (GET /health
  * with the Bearer token). On success, flutter_secure_storage writes the
- * AES-GCM-encrypted profile and the router navigates to /chat.
+ * context and the router navigates to /chat.
  *
- * This avoids interacting with the Flutter canvas/semantic overlay, which
- * requires accessibility mode to be active and is unreliable in headless
- * Chromium without a screen reader.
- *
- * The router does not redirect /setup back to /setup (onSetup=true, no-op),
- * so the query parameter is still present in Uri.base when initState() runs.
+ * Uses `waitUntil: "load"` instead of `"networkidle"` because the Flutter
+ * WASM engine makes continuous network requests during initialisation, which
+ * can prevent `networkidle` from ever firing within the test timeout.
  */
 async function loginFlutter(page: Page) {
-  // Navigate directly to the setup screen with the auto-connect token.
-  await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(FLUTTER_SETTLE_MS);
-
-  // Wait for GET /health to succeed and Flutter to navigate away from /setup.
+  await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "load" });
   await page.waitForURL((url) => !url.pathname.includes("/setup"), {
-    timeout: 15_000,
+    timeout: 20_000,
   });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
-/** Navigate and wait for network idle before screenshotting. */
+/** Navigate and wait for the page to settle before screenshotting.
+ *
+ * Uses `waitUntil: "load"` because Flutter WASM keeps network connections
+ * open (SSE streams, polling) which prevents `"networkidle"` from firing.
+ */
 async function navigateAndSettle(page: Page, path: string) {
-  await page.goto(path, { waitUntil: "networkidle" });
-  // Extra settle time for any CSS transitions and Flutter rendering.
+  await page.goto(path, { waitUntil: "load" });
+  // Extra settle time for Flutter WASM init + rendering.
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
@@ -268,6 +265,19 @@ async function createSkill(page: Page): Promise<string> {
   return name;
 }
 
+/** Create a persona via the REST API and return its id. */
+async function createPersona(page: Page): Promise<string> {
+  const id = `e2e-persona-${Date.now()}`;
+  const { body, status } = await apiPost(page, "/api/personas", {
+    id,
+    name: `E2E Persona ${Date.now()}`,
+  });
+  if (status !== 201) {
+    throw new Error(`Failed to create persona: ${JSON.stringify(body)}`);
+  }
+  return id;
+}
+
 /** Create an agent via the REST API and return its id. */
 async function createAgent(page: Page): Promise<string> {
   const { body } = await apiPost(page, "/api/agents", {
@@ -382,7 +392,7 @@ test.describe("Authenticated pages", () => {
   });
 
   test("persona create form", async ({ page }) => {
-    await navigateAndSettle(page, "/contexts/new");
+    await navigateAndSettle(page, "/personas/new");
     await expect(page).toHaveScreenshot("persona-create-form.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
@@ -420,6 +430,48 @@ test.describe("Authenticated pages", () => {
     const skillName = await createSkill(page);
     await navigateAndSettle(page, `/skills/${skillName}`);
     await expect(page).toHaveScreenshot("skill-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("skill create form", async ({ page }) => {
+    await navigateAndSettle(page, "/skills/new");
+    await expect(page).toHaveScreenshot("skill-create-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("skill edit form", async ({ page }) => {
+    const skillName = await createSkill(page);
+    await navigateAndSettle(page, `/skills/${skillName}/edit`);
+    await expect(page).toHaveScreenshot("skill-edit-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("personas list page", async ({ page }) => {
+    await navigateAndSettle(page, "/personas");
+    await expect(page).toHaveScreenshot("personas-list.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("persona detail screen", async ({ page }) => {
+    const personaId = await createPersona(page);
+    await navigateAndSettle(page, `/personas/${personaId}`);
+    await expect(page).toHaveScreenshot("persona-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("settings screen", async ({ page }) => {
+    await navigateAndSettle(page, "/settings");
+    await expect(page).toHaveScreenshot("settings.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
     });
@@ -570,6 +622,8 @@ test.describe("Authenticated pages", () => {
       "/workflows",
       // /contexts is redirected to /chat on web — excluded from overflow check.
       "/skills",
+      "/personas",
+      "/settings",
     ];
 
     for (const route of routes) {

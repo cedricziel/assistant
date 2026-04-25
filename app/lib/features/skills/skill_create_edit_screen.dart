@@ -160,15 +160,14 @@ class _SkillCreateEditScreenState extends ConsumerState<SkillCreateEditScreen> {
             // Name (create-only)
             TextFormField(
               controller: _nameController,
-              enabled: !widget.isEdit && !_submitting,
+              enabled: !_submitting,
+              readOnly: widget.isEdit,
               decoration: InputDecoration(
                 labelText: 'Skill name',
                 hintText: 'e.g. my-custom-skill',
                 helperText:
                     'Lowercase letters, digits, hyphens and underscores',
                 border: const OutlineInputBorder(),
-                filled: widget.isEdit,
-                fillColor: widget.isEdit ? Colors.grey.shade100 : null,
               ),
               style: const TextStyle(fontFamily: 'monospace'),
               validator: (v) {

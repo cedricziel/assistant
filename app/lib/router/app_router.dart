@@ -86,8 +86,13 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // While the context is still loading from storage, show the loading
       // scaffold — the router will re-evaluate once the AsyncNotifier settles.
+      //
+      // Exception: /setup must NOT be redirected away — ConnectionScreen reads
+      // the `_token` query parameter in initState() for auto-connect, and
+      // redirecting to /loading would prevent it from ever running.
       if (activeContextAsync.isLoading) {
-        if (onLoading) return null; // already on /loading, avoid loop
+        final onSetupEarly = matchedPath == AppRoutes.setup;
+        if (onLoading || onSetupEarly) return null;
         // Preserve the intended destination so we can restore it later.
         if (requestedUri != AppRoutes.loading) {
           pendingRedirect = requestedUri;
