@@ -8,7 +8,7 @@
 use axum::Form;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::http::header::SET_COOKIE;
+use axum::http::header::{HeaderValue, SET_COOKIE};
 use axum::response::{IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 
@@ -154,8 +154,9 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
                 refresh_token: Some(pair.refresh_token),
             })
             .into_response();
-            resp.headers_mut()
-                .insert(SET_COOKIE, cookie.parse().unwrap());
+            if let Some(cookie) = cookie {
+                resp.headers_mut().insert(SET_COOKIE, cookie);
+            }
             resp
         }
         Err(e) => (
@@ -218,8 +219,9 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
                 refresh_token: Some(pair.refresh_token),
             })
             .into_response();
-            resp.headers_mut()
-                .insert(SET_COOKIE, cookie.parse().unwrap());
+            if let Some(cookie) = cookie {
+                resp.headers_mut().insert(SET_COOKIE, cookie);
+            }
             resp
         }
         Err(e) => (
@@ -233,12 +235,17 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
     }
 }
 
-/// Build the `Set-Cookie` value for the `assistant_session` JWT cookie.
-fn session_cookie(jwt: &str, secure: bool, max_age_secs: u64) -> String {
+/// Build the `Set-Cookie` header value for the `assistant_session` JWT cookie.
+///
+/// Returns `None` only if the constructed cookie string contains bytes that
+/// `HeaderValue` rejects — JWTs are base64url + dots so this cannot happen for
+/// a well-formed JWT, but we propagate the failure rather than panicking.
+fn session_cookie(jwt: &str, secure: bool, max_age_secs: u64) -> Option<HeaderValue> {
     let secure_attr = if secure { "; Secure" } else { "" };
-    format!(
+    let value = format!(
         "assistant_session={jwt}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age_secs}{secure_attr}"
-    )
+    );
+    HeaderValue::try_from(value).ok()
 }
 
 async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::response::Response {

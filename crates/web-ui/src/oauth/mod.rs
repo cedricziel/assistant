@@ -3,6 +3,11 @@
 //! Wires the `assistant-auth` crate's OAuth2 server, device code flow,
 //! and client registration into Axum HTTP handlers.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
+
 pub mod authorize;
 pub mod callback;
 pub mod complete;
