@@ -150,7 +150,20 @@ class OAuthService {
       throw OAuthException('No redirect location in authorization response');
     }
 
+    // Validate that the redirect target matches the registered redirect_uri.
+    // A reverse proxy or MITM could inject a different Location header
+    // to steal the authorization code.
     final locationUri = Uri.parse(location);
+    final expectedUri = Uri.parse(redirectUri);
+    if (locationUri.scheme != expectedUri.scheme ||
+        locationUri.host != expectedUri.host ||
+        locationUri.port != expectedUri.port ||
+        locationUri.path != expectedUri.path) {
+      throw OAuthException(
+        'Redirect location does not match registered redirect_uri',
+      );
+    }
+
     final code = locationUri.queryParameters['code'];
     if (code == null) {
       final error = locationUri.queryParameters['error'] ?? 'unknown_error';

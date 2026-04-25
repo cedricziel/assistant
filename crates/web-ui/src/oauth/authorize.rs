@@ -63,10 +63,20 @@ pub async fn authorize_get(
 
     let raw_client_id = params.client_id.as_deref().unwrap_or("");
     let raw_redirect_uri = params.redirect_uri.as_deref().unwrap_or("");
+    let raw_code_challenge = params.code_challenge.as_deref().unwrap_or("");
 
     // Validate client_id and redirect_uri against registered clients.
     if let Err(resp) = validate_client(&state, raw_client_id, raw_redirect_uri).await {
         return resp;
+    }
+
+    // PKCE is mandatory (OAuth 2.1).
+    if raw_code_challenge.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Html("error: code_challenge is required (PKCE)".to_string()),
+        )
+            .into_response();
     }
 
     // -- OIDC mode: redirect to external IdP instead of rendering login form --
@@ -204,6 +214,16 @@ pub async fn authorize_post(
         }
     }
 
+    // PKCE is mandatory per OAuth 2.1 §4.1.1 — reject requests without a
+    // code_challenge to prevent authorization code interception attacks.
+    if form.code_challenge.as_deref().unwrap_or("").is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Html("error: code_challenge is required (PKCE)".to_string()),
+        )
+            .into_response();
+    }
+
     // Generate authorization code.
     let scopes: Vec<String> = form
         .scope
@@ -279,7 +299,17 @@ async fn validate_client(
         }
     };
 
-    if !redirect_uri.is_empty() && !client.redirect_uris.contains(&redirect_uri.to_string()) {
+    // redirect_uri MUST be present and MUST exactly match one of the
+    // registered URIs (RFC 6749 §3.1.2.3).  Allowing an empty redirect_uri
+    // would let an attacker skip validation entirely.
+    if redirect_uri.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Html("error: redirect_uri is required".to_string()),
+        )
+            .into_response());
+    }
+    if !client.redirect_uris.contains(&redirect_uri.to_string()) {
         return Err((
             StatusCode::BAD_REQUEST,
             Html("error: redirect_uri not registered for this client".to_string()),

@@ -221,7 +221,7 @@ impl OAuth2Server {
             bail!("authorization code expired");
         }
 
-        // Validate PKCE.
+        // Validate PKCE — mandatory per OAuth 2.1 §4.1.3.
         match (&auth_code.pkce_challenge, pkce_verifier) {
             (Some(challenge), Some(verifier)) => {
                 if !pkce::verify(verifier, challenge) {
@@ -229,8 +229,8 @@ impl OAuth2Server {
                 }
             }
             (Some(_), None) => bail!("PKCE verifier required but not provided"),
-            (None, Some(_)) => { /* verifier provided but no challenge stored — ignore */ }
-            (None, None) => {}
+            (None, Some(_)) => bail!("PKCE verifier provided but no challenge was stored"),
+            (None, None) => bail!("PKCE code_challenge is required"),
         }
 
         // Generate tokens.
@@ -369,6 +369,13 @@ mod tests {
         )
     }
 
+    /// Generate a PKCE pair for tests that don't specifically test PKCE behaviour.
+    fn test_pkce() -> (String, String) {
+        let verifier = pkce::generate_verifier();
+        let challenge = pkce::challenge_from_verifier(&verifier);
+        (verifier, challenge)
+    }
+
     #[tokio::test]
     async fn auth_code_exchange_with_pkce() {
         let server = make_server();
@@ -398,21 +405,28 @@ mod tests {
     #[tokio::test]
     async fn auth_code_is_single_use() {
         let server = make_server();
+        let (verifier, challenge) = test_pkce();
 
         let code = server
-            .generate_auth_code("usr_alice", "webui", "http://localhost/cb", None, vec![])
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                Some(&challenge),
+                vec![],
+            )
             .await
             .unwrap();
 
         // First exchange succeeds.
         server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", None)
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
             .await
             .unwrap();
 
         // Second exchange fails.
         let err = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", None)
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
             .await;
         assert!(err.is_err(), "auth code should be single-use");
     }
@@ -467,14 +481,26 @@ mod tests {
     #[tokio::test]
     async fn wrong_client_id_is_rejected() {
         let server = make_server();
+        let (verifier, challenge) = test_pkce();
 
         let code = server
-            .generate_auth_code("usr_alice", "webui", "http://localhost/cb", None, vec![])
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                Some(&challenge),
+                vec![],
+            )
             .await
             .unwrap();
 
         let err = server
-            .exchange_auth_code(&code, "wrong_client", "http://localhost/cb", None)
+            .exchange_auth_code(
+                &code,
+                "wrong_client",
+                "http://localhost/cb",
+                Some(&verifier),
+            )
             .await;
         assert!(err.is_err(), "wrong client_id should be rejected");
     }
@@ -482,14 +508,21 @@ mod tests {
     #[tokio::test]
     async fn wrong_redirect_uri_is_rejected() {
         let server = make_server();
+        let (verifier, challenge) = test_pkce();
 
         let code = server
-            .generate_auth_code("usr_alice", "webui", "http://localhost/cb", None, vec![])
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                Some(&challenge),
+                vec![],
+            )
             .await
             .unwrap();
 
         let err = server
-            .exchange_auth_code(&code, "webui", "http://evil.com/cb", None)
+            .exchange_auth_code(&code, "webui", "http://evil.com/cb", Some(&verifier))
             .await;
         assert!(err.is_err(), "wrong redirect_uri should be rejected");
     }
@@ -497,14 +530,21 @@ mod tests {
     #[tokio::test]
     async fn refresh_token_rotation() {
         let server = make_server();
+        let (verifier, challenge) = test_pkce();
 
         let code = server
-            .generate_auth_code("usr_alice", "webui", "http://localhost/cb", None, vec![])
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                Some(&challenge),
+                vec![],
+            )
             .await
             .unwrap();
 
         let pair1 = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", None)
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
             .await
             .unwrap();
 
@@ -523,14 +563,21 @@ mod tests {
     #[tokio::test]
     async fn refresh_replay_revokes_all() {
         let server = make_server();
+        let (verifier, challenge) = test_pkce();
 
         let code = server
-            .generate_auth_code("usr_alice", "webui", "http://localhost/cb", None, vec![])
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                Some(&challenge),
+                vec![],
+            )
             .await
             .unwrap();
 
         let pair1 = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", None)
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
             .await
             .unwrap();
 
@@ -549,6 +596,55 @@ mod tests {
     #[tokio::test]
     async fn expired_code_is_rejected() {
         let server = make_server().with_code_ttl(Duration::seconds(-10));
+        let (_verifier, challenge) = test_pkce();
+
+        let code = server
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                Some(&challenge),
+                vec![],
+            )
+            .await
+            .unwrap();
+
+        // Exchange will fail on expiry before PKCE is checked, but we still
+        // supply the challenge to satisfy the mandatory-PKCE invariant.
+        let err = server
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&_verifier))
+            .await;
+        assert!(err.is_err(), "expired code should be rejected");
+    }
+
+    #[tokio::test]
+    async fn expired_refresh_token_is_rejected() {
+        let server = make_server().with_refresh_ttl(Duration::seconds(-10));
+        let (verifier, challenge) = test_pkce();
+
+        let code = server
+            .generate_auth_code(
+                "usr_alice",
+                "webui",
+                "http://localhost/cb",
+                Some(&challenge),
+                vec![],
+            )
+            .await
+            .unwrap();
+
+        let pair = server
+            .exchange_auth_code(&code, "webui", "http://localhost/cb", Some(&verifier))
+            .await
+            .unwrap();
+
+        let err = server.refresh(&pair.refresh_token, "webui").await;
+        assert!(err.is_err(), "expired refresh token should be rejected");
+    }
+
+    #[tokio::test]
+    async fn exchange_without_pkce_is_rejected() {
+        let server = make_server();
 
         let code = server
             .generate_auth_code("usr_alice", "webui", "http://localhost/cb", None, vec![])
@@ -558,25 +654,7 @@ mod tests {
         let err = server
             .exchange_auth_code(&code, "webui", "http://localhost/cb", None)
             .await;
-        assert!(err.is_err(), "expired code should be rejected");
-    }
-
-    #[tokio::test]
-    async fn expired_refresh_token_is_rejected() {
-        let server = make_server().with_refresh_ttl(Duration::seconds(-10));
-
-        let code = server
-            .generate_auth_code("usr_alice", "webui", "http://localhost/cb", None, vec![])
-            .await
-            .unwrap();
-
-        let pair = server
-            .exchange_auth_code(&code, "webui", "http://localhost/cb", None)
-            .await
-            .unwrap();
-
-        let err = server.refresh(&pair.refresh_token, "webui").await;
-        assert!(err.is_err(), "expired refresh token should be rejected");
+        assert!(err.is_err(), "exchange without PKCE should be rejected");
     }
 
     #[tokio::test]
