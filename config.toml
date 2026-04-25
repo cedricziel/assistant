@@ -2,7 +2,7 @@
 # Copy to ~/.assistant/config.toml and customize
 
 [llm]
-# LLM backend provider.  Options: "ollama" (default, local), "anthropic" (cloud), "openai" (cloud).
+# LLM backend provider.  Options: "ollama" (default, local), "anthropic", "openai", "openrouter", "moonshot".
 provider = "ollama"
 # Model to use for inference.
 # Ollama models — requires native tool-calling support. Recommended choices (2026):
@@ -117,6 +117,25 @@ timeout_secs = 120
 # base_url = "https://openrouter.ai/api/v1"        # OpenRouter
 # base_url = "http://localhost:8000/v1"             # vLLM / LM Studio
 # See docs/openai.md for full details.
+
+# ── OpenRouter (300+ models) ──────────────────────────────────────────────────
+# OpenRouter provides a unified API gateway for 300+ models from Anthropic,
+# OpenAI, Meta, Google, Mistral, and many more.  Uses the OpenAI Chat
+# Completions wire format.
+#
+# [llm]
+# provider        = "openrouter"
+# model           = "anthropic/claude-sonnet-4-20250514"  # any OpenRouter model slug
+# api_key         = "sk-or-..."       # or set OPENROUTER_API_KEY env var
+# max_iterations  = 80
+# timeout_secs    = 120
+#
+# [llm.openrouter]
+# referer    = "https://my-app.example.com"  # HTTP-Referer header (OpenRouter TOS)
+# title      = "My App"                       # X-Title header (dashboard display)
+# max_tokens = 8192                            # max completion tokens per response
+#
+# Browse models at: https://openrouter.ai/models
 
 # ── Moonshot AI (Kimi) cloud provider ─────────────────────────────────────────
 # To use Moonshot AI instead of a local Ollama model, replace the [llm] block

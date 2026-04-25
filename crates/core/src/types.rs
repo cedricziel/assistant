@@ -472,6 +472,8 @@ pub enum LlmProviderKind {
     OpenAI,
     /// Moonshot AI (Kimi) — OpenAI-compatible chat completions.
     Moonshot,
+    /// OpenRouter — unified API gateway for 300+ models.
+    OpenRouter,
 }
 
 /// Which embedding backend to use when configured separately from the main
@@ -546,6 +548,9 @@ pub struct LlmConfig {
     /// Provider-specific Moonshot options.
     #[serde(default)]
     pub moonshot: MoonshotOptions,
+    /// Provider-specific OpenRouter options.
+    #[serde(default)]
+    pub openrouter: OpenRouterOptions,
     /// Optional dedicated embedding provider override.
     ///
     /// When set, embeddings are served by this provider instead of the main
@@ -568,6 +573,7 @@ impl Default for LlmConfig {
             anthropic: AnthropicOptions::default(),
             openai: OpenAIOptions::default(),
             moonshot: MoonshotOptions::default(),
+            openrouter: OpenRouterOptions::default(),
             embeddings: None,
         }
     }
@@ -740,6 +746,32 @@ impl Default for MoonshotWebSearchOptions {
     fn default() -> Self {
         Self { enabled: true }
     }
+}
+
+// ── OpenRouter-specific options ─────────────────────────────────────────────
+
+/// Additional configuration for OpenRouter-specific features.
+///
+/// ```toml
+/// [llm]
+/// provider = "openrouter"
+/// model = "anthropic/claude-sonnet-4-20250514"
+/// # api_key = "sk-or-..."  # or set OPENROUTER_API_KEY env var
+///
+/// [llm.openrouter]
+/// referer = "https://my-app.example.com"
+/// title = "My App"
+/// max_tokens = 8192
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenRouterOptions {
+    /// `HTTP-Referer` header sent with every request.
+    /// Required by OpenRouter TOS for rankings/attribution.
+    pub referer: Option<String>,
+    /// `X-Title` header — shown in the OpenRouter dashboard.
+    pub title: Option<String>,
+    /// Maximum completion tokens per response (default: 8192).
+    pub max_tokens: Option<u32>,
 }
 
 /// Storage configuration

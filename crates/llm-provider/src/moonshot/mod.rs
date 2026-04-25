@@ -1,36 +1,24 @@
 //! `MoonshotProvider` — [`LlmProvider`] implementation for the Moonshot AI
 //! (Kimi) chat completions API.
 //!
-//! Uses `async-openai`'s Chat Completions client directly (Moonshot's API is
-//! OpenAI-compatible).  The `$web_search` builtin is handled via raw HTTP
-//! because it uses the non-standard `"type": "builtin_function"` tool spec
-//! and requires an echo-back loop.
+//! Delegates standard Chat Completions logic to [`ChatCompletionsProvider`].
+//! The `$web_search` builtin is handled via raw HTTP because it uses the
+//! non-standard `"type": "builtin_function"` tool spec and requires a
+//! multi-round echo-back loop.
 
-use async_openai::Client;
-use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
-use async_openai::types::chat::{
-    ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,
-    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-    ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestToolMessageArgs,
-    ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionTools, CompletionUsage,
-    CreateChatCompletionRequestArgs, FunctionCall, FunctionObjectArgs,
-};
 use async_trait::async_trait;
-use futures::StreamExt as _;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use assistant_core::{
-    Capabilities, ChatHistoryMessage, ChatRole, ContentBlock, HostedTool, LlmConfig, LlmProvider,
-    LlmResponse, LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec,
-    ToolSupport,
+    Capabilities, ChatHistoryMessage, HostedTool, LlmConfig, LlmProvider, LlmResponse,
+    LlmResponseMeta, StreamChunk, ToolCallItem, ToolCallResponse, ToolSpec, ToolSupport,
 };
 
-use crate::http::build_reqwest_client;
-use crate::retry::{RetryConfig, is_transient_error_message, with_retry};
+use crate::chat_completions::{ChatCompletionsConfig, ChatCompletionsProvider, build_raw_messages};
 
-// ── Defaults ──────────────────────────────────────────────────────────────────
+// ── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_BASE_URL: &str = "https://api.moonshot.ai/v1";
 const DEFAULT_MAX_TOKENS: u32 = 8192;
@@ -39,26 +27,18 @@ const DEFAULT_MAX_TOKENS: u32 = 8192;
 /// infinite loops if the API never returns `finish_reason: "stop"`.
 const MAX_WEB_SEARCH_ROUNDS: usize = 5;
 
-// ── MoonshotProvider ──────────────────────────────────────────────────────────
+// ── MoonshotProvider ─────────────────────────────────────────────────────────
 
 /// [`LlmProvider`] backed by the Moonshot AI (Kimi) chat completions API.
 ///
-/// Uses `async-openai` for the standard chat path (messages + function tools).
-/// When `web_search` is enabled, requests go through raw HTTP instead, because
-/// the `$web_search` tool uses the non-standard `"type": "builtin_function"`
-/// and requires a multi-round echo-back loop.
+/// Delegates standard chat / streaming to [`ChatCompletionsProvider`].
+/// When `web_search` is enabled, requests go through raw HTTP instead,
+/// because the `$web_search` tool uses the non-standard
+/// `"type": "builtin_function"` and requires a multi-round echo-back loop.
 pub struct MoonshotProvider {
-    /// async-openai client configured for the Moonshot endpoint.
-    client: Client<AsyncOpenAIConfig>,
-    model: String,
-    base_url: String,
-    max_tokens: u32,
-    /// API key — needed for the raw-HTTP web-search path.
-    api_key: String,
+    /// Shared Chat Completions client (handles standard chat + streaming).
+    inner: ChatCompletionsProvider,
     web_search_enabled: bool,
-    /// Pre-configured HTTP client (with tracing middleware) for the raw-HTTP
-    /// web-search path.
-    http_client: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl MoonshotProvider {
@@ -71,30 +51,25 @@ impl MoonshotProvider {
         max_tokens: u32,
         web_search_enabled: bool,
     ) -> anyhow::Result<Self> {
-        let oai_cfg = AsyncOpenAIConfig::new()
-            .with_api_key(api_key)
-            .with_api_base(&base_url);
-        let http = build_reqwest_client(timeout_secs)?;
-        let client = Client::with_config(oai_cfg).with_http_client(http);
-
-        let traced_client =
-            crate::http::build_http_client(timeout_secs, &crate::retry::RetryConfig::default())?;
+        let config = ChatCompletionsConfig {
+            model,
+            base_url,
+            api_key: api_key.to_string(),
+            timeout_secs,
+            max_tokens,
+            extra_headers: vec![],
+        };
 
         debug!(
-            model = %model,
-            base_url = %base_url,
+            model = %config.model,
+            base_url = %config.base_url,
             web_search = web_search_enabled,
             "Moonshot provider initialised"
         );
 
         Ok(Self {
-            client,
-            model,
-            base_url,
-            max_tokens,
-            api_key: api_key.to_string(),
+            inner: ChatCompletionsProvider::new(config)?,
             web_search_enabled,
-            http_client: traced_client,
         })
     }
 
@@ -135,229 +110,7 @@ impl MoonshotProvider {
         )
     }
 
-    // ── Non-streaming chat (async-openai) ─────────────────────────────────
-
-    async fn chat_non_streaming(
-        &self,
-        system_prompt: &str,
-        history: &[ChatHistoryMessage],
-        tools: &[ToolSpec],
-    ) -> anyhow::Result<LlmResponse> {
-        debug!(model = %self.model, tools = tools.len(), "Sending request to Moonshot");
-
-        let (messages, _pending) = build_chat_messages(system_prompt, history);
-        let openai_tools: Vec<ChatCompletionTools> = tools
-            .iter()
-            .map(|t| ChatCompletionTools::Function(tool_spec_to_chat(t)))
-            .collect();
-
-        let mut builder = CreateChatCompletionRequestArgs::default();
-        builder
-            .model(&self.model)
-            .messages(messages)
-            .max_completion_tokens(self.max_tokens);
-        if !openai_tools.is_empty() {
-            builder.tools(openai_tools);
-        }
-        let request = builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build Moonshot request: {e}"))?;
-
-        let retry_config = RetryConfig::default();
-        let response = with_retry(
-            &retry_config,
-            "Moonshot",
-            |e: &anyhow::Error| is_transient_error_message(&e.to_string()),
-            || {
-                let req = request.clone();
-                let client = &self.client;
-                async move {
-                    client
-                        .chat()
-                        .create(req)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Moonshot request failed: {e}"))
-                }
-            },
-        )
-        .await?;
-
-        debug!("Moonshot response received");
-
-        let meta = extract_chat_meta(&response.model, &response.id, &response.usage);
-        let choice = response
-            .choices
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("Moonshot returned empty choices"))?;
-
-        if let Some(ref tool_calls) = choice.message.tool_calls {
-            let items = parse_tool_calls(tool_calls);
-            if !items.is_empty() {
-                debug!(count = items.len(), "Moonshot: tool calls received");
-                return Ok(LlmResponse::ToolCalls(ToolCallResponse {
-                    items,
-                    meta,
-                    thinking: None,
-                }));
-            }
-        }
-
-        let content = choice.message.content.as_deref().unwrap_or("").to_string();
-        Ok(LlmResponse::FinalAnswer(content, meta))
-    }
-
-    // ── SSE streaming chat (async-openai) ─────────────────────────────────
-
-    async fn chat_sse(
-        &self,
-        system_prompt: &str,
-        history: &[ChatHistoryMessage],
-        tools: &[ToolSpec],
-        chunk_sink: Option<mpsc::Sender<StreamChunk>>,
-    ) -> anyhow::Result<LlmResponse> {
-        debug!(model = %self.model, "Sending streaming request to Moonshot");
-
-        let (messages, _pending) = build_chat_messages(system_prompt, history);
-        let openai_tools: Vec<ChatCompletionTools> = tools
-            .iter()
-            .map(|t| ChatCompletionTools::Function(tool_spec_to_chat(t)))
-            .collect();
-
-        let mut builder = CreateChatCompletionRequestArgs::default();
-        builder
-            .model(&self.model)
-            .messages(messages)
-            .max_completion_tokens(self.max_tokens);
-        if !openai_tools.is_empty() {
-            builder.tools(openai_tools);
-        }
-        let request = builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build Moonshot streaming request: {e}"))?;
-
-        let retry_config = RetryConfig::default();
-        let mut stream = with_retry(
-            &retry_config,
-            "Moonshot",
-            |e: &anyhow::Error| is_transient_error_message(&e.to_string()),
-            || {
-                let req = request.clone();
-                let client = &self.client;
-                async move {
-                    client
-                        .chat()
-                        .create_stream(req)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Moonshot streaming request failed: {e}"))
-                }
-            },
-        )
-        .await?;
-
-        let mut text_buf = String::new();
-        let mut tool_map: Vec<(String, String, String)> = Vec::new();
-        let mut model_name = String::new();
-        let mut response_id = String::new();
-        let mut finish_reason: Option<String> = None;
-        let mut input_tokens: Option<u64> = None;
-        let mut output_tokens: Option<u64> = None;
-
-        while let Some(result) = stream.next().await {
-            let chunk = result.map_err(|e| anyhow::anyhow!("Moonshot stream error: {e}"))?;
-
-            if model_name.is_empty() {
-                model_name.clone_from(&chunk.model);
-            }
-            if response_id.is_empty() {
-                response_id.clone_from(&chunk.id);
-            }
-            if let Some(ref usage) = chunk.usage {
-                input_tokens = Some(usage.prompt_tokens as u64);
-                output_tokens = Some(usage.completion_tokens as u64);
-            }
-
-            for choice in &chunk.choices {
-                if let Some(ref reason) = choice.finish_reason {
-                    finish_reason = Some(format!("{reason:?}").to_lowercase());
-                }
-
-                let delta = &choice.delta;
-
-                if let Some(ref content) = delta.content {
-                    text_buf.push_str(content);
-                    if let Some(ref sink) = chunk_sink {
-                        let _ = sink.send(StreamChunk::Text(content.clone())).await;
-                    }
-                }
-
-                if let Some(ref tc_chunks) = delta.tool_calls {
-                    for tc in tc_chunks {
-                        let idx = tc.index as usize;
-                        while tool_map.len() <= idx {
-                            tool_map.push((String::new(), String::new(), String::new()));
-                        }
-                        if let Some(ref id) = tc.id {
-                            tool_map[idx].0.clone_from(id);
-                        }
-                        if let Some(ref func) = tc.function {
-                            if let Some(ref name) = func.name {
-                                tool_map[idx].1.clone_from(name);
-                            }
-                            if let Some(ref args) = func.arguments {
-                                tool_map[idx].2.push_str(args);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        debug!("Moonshot SSE stream complete");
-
-        let meta = LlmResponseMeta {
-            model: if model_name.is_empty() {
-                None
-            } else {
-                Some(model_name)
-            },
-            response_id: if response_id.is_empty() {
-                None
-            } else {
-                Some(response_id)
-            },
-            finish_reason,
-            input_tokens,
-            output_tokens,
-        };
-
-        if !tool_map.is_empty() {
-            let items: Vec<ToolCallItem> = tool_map
-                .into_iter()
-                .filter(|(_, name, _)| !name.is_empty())
-                .map(|(id, name, args_json)| {
-                    let params = serde_json::from_str::<Value>(&args_json)
-                        .unwrap_or(Value::Object(serde_json::Map::new()));
-                    ToolCallItem {
-                        name,
-                        params,
-                        id: if id.is_empty() { None } else { Some(id) },
-                    }
-                })
-                .collect();
-            if !items.is_empty() {
-                debug!(count = items.len(), "Moonshot SSE: tool calls received");
-                return Ok(LlmResponse::ToolCalls(ToolCallResponse {
-                    items,
-                    meta,
-                    thinking: None,
-                }));
-            }
-        }
-
-        Ok(LlmResponse::FinalAnswer(text_buf, meta))
-    }
-
-    // ── Raw-HTTP chat (web search path) ───────────────────────────────────
+    // ── Raw-HTTP chat (web search path) ──────────────────────────────────
 
     /// Send a chat request via raw HTTP, injecting the `$web_search` builtin
     /// and handling the echo-back loop internally.
@@ -367,7 +120,10 @@ impl MoonshotProvider {
         history: &[ChatHistoryMessage],
         tools: &[ToolSpec],
     ) -> anyhow::Result<LlmResponse> {
-        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/chat/completions",
+            self.inner.config.base_url.trim_end_matches('/')
+        );
 
         // Build the initial messages array.
         let mut messages = build_raw_messages(system_prompt, history);
@@ -405,35 +161,14 @@ impl MoonshotProvider {
             // in tool-call responses, causing the API to reject the echo-back
             // with "thinking is enabled but reasoning_content is missing".
             let body = json!({
-                "model": self.model,
+                "model": self.inner.config.model,
                 "messages": messages,
                 "tools": request_tools,
-                "max_tokens": self.max_tokens,
+                "max_tokens": self.inner.config.max_tokens,
                 "thinking": { "type": "disabled" },
             });
 
-            let resp = self
-                .http_client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("Moonshot request failed: {e}"))?;
-
-            let status = resp.status();
-            let resp_body: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("Moonshot response parse failed: {e}"))?;
-
-            if !status.is_success() {
-                let err_msg = resp_body["error"]["message"]
-                    .as_str()
-                    .unwrap_or("unknown error");
-                anyhow::bail!("Moonshot API error ({}): {}", status, err_msg);
-            }
+            let resp_body = self.inner.raw_http_post(&url, &body).await?;
 
             let choice = resp_body["choices"]
                 .get(0)
@@ -521,7 +256,7 @@ impl MoonshotProvider {
     }
 }
 
-// ── LlmProvider ───────────────────────────────────────────────────────────────
+// ── LlmProvider ──────────────────────────────────────────────────────────────
 
 #[async_trait]
 impl LlmProvider for MoonshotProvider {
@@ -548,7 +283,9 @@ impl LlmProvider for MoonshotProvider {
             self.chat_with_web_search(system_prompt, history, tools)
                 .await
         } else {
-            self.chat_non_streaming(system_prompt, history, tools).await
+            self.inner
+                .chat_non_streaming(system_prompt, history, tools)
+                .await
         }
     }
 
@@ -572,7 +309,8 @@ impl LlmProvider for MoonshotProvider {
             }
             Ok(result)
         } else {
-            self.chat_sse(system_prompt, history, tools, chunk_sink)
+            self.inner
+                .chat_sse(system_prompt, history, tools, chunk_sink)
                 .await
         }
     }
@@ -588,298 +326,24 @@ impl LlmProvider for MoonshotProvider {
     }
 
     fn model_name(&self) -> &str {
-        &self.model
+        &self.inner.config.model
     }
 
     fn server_address(&self) -> &str {
-        &self.base_url
+        &self.inner.config.base_url
     }
 }
 
-// ── HTTP client helper ────────────────────────────────────────────────────────
-
-// ── Chat Completions message conversion ───────────────────────────────────────
-
-/// Build `async-openai` Chat Completions messages from conversation history.
-fn build_chat_messages(
-    system_prompt: &str,
-    history: &[ChatHistoryMessage],
-) -> (Vec<ChatCompletionRequestMessage>, Vec<(String, String)>) {
-    let mut messages: Vec<ChatCompletionRequestMessage> = Vec::with_capacity(history.len() + 1);
-    let mut pending_ids: Vec<(String, String)> = Vec::new();
-
-    if !system_prompt.is_empty()
-        && let Ok(msg) = ChatCompletionRequestSystemMessageArgs::default()
-            .content(system_prompt)
-            .build()
-    {
-        messages.push(ChatCompletionRequestMessage::System(msg));
-    }
-
-    for entry in history {
-        match entry {
-            ChatHistoryMessage::Text { role, content } => match role {
-                ChatRole::System => {
-                    if let Ok(msg) = ChatCompletionRequestSystemMessageArgs::default()
-                        .content(content.as_str())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::System(msg));
-                    }
-                }
-                ChatRole::User => {
-                    if let Ok(msg) = ChatCompletionRequestUserMessageArgs::default()
-                        .content(content.as_str())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::User(msg));
-                    }
-                }
-                ChatRole::Assistant => {
-                    if let Ok(msg) = ChatCompletionRequestAssistantMessageArgs::default()
-                        .content(content.as_str())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::Assistant(msg));
-                    }
-                }
-                ChatRole::Tool => {
-                    if let Ok(msg) = ChatCompletionRequestUserMessageArgs::default()
-                        .content(content.as_str())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::User(msg));
-                    }
-                }
-            },
-
-            ChatHistoryMessage::MultimodalUser { content } => {
-                let parts_json: Vec<Value> = content
-                    .iter()
-                    .filter_map(|block| match block {
-                        ContentBlock::Text(text) => Some(json!({"type": "text", "text": text})),
-                        ContentBlock::Image { media_type, data } => {
-                            let data_uri = format!("data:{media_type};base64,{data}");
-                            Some(json!({
-                                "type": "image_url",
-                                "image_url": { "url": data_uri }
-                            }))
-                        }
-                        ContentBlock::Document { .. } => None,
-                    })
-                    .collect();
-
-                let msg_json = json!({"role": "user", "content": parts_json});
-                match serde_json::from_value::<ChatCompletionRequestMessage>(msg_json) {
-                    Ok(msg) => messages.push(msg),
-                    Err(e) => {
-                        // async-openai may not support content arrays; fall back
-                        // to extracting only the text parts so the message is not
-                        // silently dropped.
-                        warn!(
-                            error = %e,
-                            "Failed to deserialize multimodal message for Moonshot; \
-                             falling back to text-only"
-                        );
-                        let text: String = content
-                            .iter()
-                            .filter_map(|b| match b {
-                                ContentBlock::Text(t) => Some(t.as_str()),
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        if let Ok(msg) = ChatCompletionRequestUserMessageArgs::default()
-                            .content(text.as_str())
-                            .build()
-                        {
-                            messages.push(ChatCompletionRequestMessage::User(msg));
-                        }
-                    }
-                }
-            }
-
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
-                let tc_enums: Vec<ChatCompletionMessageToolCalls> = calls
-                    .iter()
-                    .enumerate()
-                    .map(|(i, c)| {
-                        let id = c.id.clone().unwrap_or_else(|| format!("call_{i}"));
-                        pending_ids.push((c.name.clone(), id.clone()));
-                        ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
-                            id,
-                            function: FunctionCall {
-                                name: c.name.clone(),
-                                arguments: serde_json::to_string(&c.params)
-                                    .unwrap_or_else(|_| "{}".to_string()),
-                            },
-                        })
-                    })
-                    .collect();
-
-                if let Ok(msg) = ChatCompletionRequestAssistantMessageArgs::default()
-                    .tool_calls(tc_enums)
-                    .build()
-                {
-                    messages.push(ChatCompletionRequestMessage::Assistant(msg));
-                }
-            }
-
-            ChatHistoryMessage::ToolResult { name, content } => {
-                let pos = pending_ids.iter().position(|(n, _)| n == name);
-                let tool_call_id = if let Some(idx) = pos {
-                    pending_ids.remove(idx).1
-                } else {
-                    warn!(tool = %name, "no pending tool-call ID for tool result, using fallback");
-                    format!("call_unknown_{name}")
-                };
-
-                if let Ok(msg) = ChatCompletionRequestToolMessageArgs::default()
-                    .tool_call_id(&tool_call_id)
-                    .content(content.as_str())
-                    .build()
-                {
-                    messages.push(ChatCompletionRequestMessage::Tool(msg));
-                }
-            }
-        }
-    }
-
-    (messages, pending_ids)
-}
-
-/// Convert a [`ToolSpec`] to `async-openai` `ChatCompletionTool`.
-fn tool_spec_to_chat(tool: &ToolSpec) -> ChatCompletionTool {
-    let function = FunctionObjectArgs::default()
-        .name(&tool.name)
-        .description(&tool.description)
-        .parameters(tool.normalized_params_schema())
-        .build()
-        .expect("FunctionObject build should not fail");
-
-    ChatCompletionTool { function }
-}
-
-// ── Chat Completions response helpers ─────────────────────────────────────────
-
-fn extract_chat_meta(model: &str, id: &str, usage: &Option<CompletionUsage>) -> LlmResponseMeta {
-    LlmResponseMeta {
-        model: Some(model.to_string()),
-        response_id: Some(id.to_string()),
-        input_tokens: usage.as_ref().map(|u| u.prompt_tokens as u64),
-        output_tokens: usage.as_ref().map(|u| u.completion_tokens as u64),
-        finish_reason: None,
-    }
-}
-
-fn parse_tool_calls(tool_calls: &[ChatCompletionMessageToolCalls]) -> Vec<ToolCallItem> {
-    tool_calls
-        .iter()
-        .filter_map(|tc_enum| match tc_enum {
-            ChatCompletionMessageToolCalls::Function(tc) => {
-                if tc.function.name.is_empty() {
-                    return None;
-                }
-                let params = serde_json::from_str::<Value>(&tc.function.arguments)
-                    .unwrap_or(Value::Object(serde_json::Map::new()));
-                Some(ToolCallItem {
-                    name: tc.function.name.clone(),
-                    params,
-                    id: Some(tc.id.clone()),
-                })
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-// ── Raw-HTTP message conversion (web-search path) ─────────────────────────────
-
-fn build_raw_messages(system_prompt: &str, history: &[ChatHistoryMessage]) -> Vec<Value> {
-    let mut messages: Vec<Value> = Vec::with_capacity(history.len() + 1);
-    let mut pending_ids: Vec<(String, String)> = Vec::new();
-
-    if !system_prompt.is_empty() {
-        messages.push(json!({"role": "system", "content": system_prompt}));
-    }
-
-    for entry in history {
-        match entry {
-            ChatHistoryMessage::Text { role, content } => {
-                let role_str = match role {
-                    ChatRole::System => "system",
-                    ChatRole::User => "user",
-                    ChatRole::Assistant => "assistant",
-                    ChatRole::Tool => "user",
-                };
-                messages.push(json!({"role": role_str, "content": content}));
-            }
-
-            ChatHistoryMessage::MultimodalUser { content } => {
-                let parts: Vec<Value> = content
-                    .iter()
-                    .filter_map(|block| match block {
-                        ContentBlock::Text(text) => Some(json!({"type": "text", "text": text})),
-                        ContentBlock::Image { media_type, data } => {
-                            let data_uri = format!("data:{media_type};base64,{data}");
-                            Some(json!({"type": "image_url", "image_url": {"url": data_uri}}))
-                        }
-                        ContentBlock::Document { .. } => None,
-                    })
-                    .collect();
-                messages.push(json!({"role": "user", "content": parts}));
-            }
-
-            ChatHistoryMessage::AssistantToolCalls(calls) => {
-                let tool_calls: Vec<Value> = calls
-                    .iter()
-                    .enumerate()
-                    .map(|(i, c)| {
-                        let id = c.id.clone().unwrap_or_else(|| format!("call_{i}"));
-                        pending_ids.push((c.name.clone(), id.clone()));
-                        json!({
-                            "id": id,
-                            "type": "function",
-                            "function": {
-                                "name": c.name,
-                                "arguments": serde_json::to_string(&c.params)
-                                    .unwrap_or_else(|_| "{}".to_string()),
-                            }
-                        })
-                    })
-                    .collect();
-                messages
-                    .push(json!({"role": "assistant", "content": null, "tool_calls": tool_calls}));
-            }
-
-            ChatHistoryMessage::ToolResult { name, content } => {
-                let pos = pending_ids.iter().position(|(n, _)| n == name);
-                let tool_call_id = if let Some(idx) = pos {
-                    pending_ids.remove(idx).1
-                } else {
-                    warn!(tool = %name, "no pending tool-call ID for tool result, using fallback");
-                    format!("call_unknown_{name}")
-                };
-                messages.push(json!({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "name": name,
-                    "content": content,
-                }));
-            }
-        }
-    }
-
-    messages
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use assistant_core::ChatRole;
 
     #[test]
     fn default_constants_are_sensible() {
@@ -887,224 +351,7 @@ mod tests {
         assert!(DEFAULT_MAX_TOKENS > 0);
     }
 
-    // ── async-openai message builder tests ────────────────────────────────
-
-    #[test]
-    fn build_chat_messages_system_prompt() {
-        let (msgs, _) = build_chat_messages("You are helpful.", &[]);
-        assert_eq!(msgs.len(), 1);
-    }
-
-    #[test]
-    fn build_chat_messages_text_exchange() {
-        let history = vec![
-            ChatHistoryMessage::Text {
-                role: ChatRole::User,
-                content: "hello".to_string(),
-            },
-            ChatHistoryMessage::Text {
-                role: ChatRole::Assistant,
-                content: "hi there".to_string(),
-            },
-        ];
-        let (msgs, _) = build_chat_messages("sys", &history);
-        assert_eq!(msgs.len(), 3);
-    }
-
-    #[test]
-    fn build_chat_messages_tool_calls_and_results() {
-        let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "my-tool".to_string(),
-                params: json!({"key": "val"}),
-                id: Some("call_123".to_string()),
-            }]),
-            ChatHistoryMessage::ToolResult {
-                name: "my-tool".to_string(),
-                content: "result".to_string(),
-            },
-        ];
-        let (msgs, pending) = build_chat_messages("", &history);
-        assert_eq!(msgs.len(), 2);
-        assert!(pending.is_empty());
-    }
-
-    /// Two rounds of tool calls – the second `AssistantToolCalls` must not
-    /// lose the IDs established in the first round.
-    #[test]
-    fn build_chat_messages_multi_turn_tool_calls() {
-        let history = vec![
-            // Round 1
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "tool-a".to_string(),
-                params: json!({}),
-                id: Some("call_r1".to_string()),
-            }]),
-            ChatHistoryMessage::ToolResult {
-                name: "tool-a".to_string(),
-                content: "result-a".to_string(),
-            },
-            // Intermediate assistant text
-            ChatHistoryMessage::Text {
-                role: ChatRole::Assistant,
-                content: "thinking...".to_string(),
-            },
-            // Round 2
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "tool-b".to_string(),
-                params: json!({}),
-                id: Some("call_r2".to_string()),
-            }]),
-            ChatHistoryMessage::ToolResult {
-                name: "tool-b".to_string(),
-                content: "result-b".to_string(),
-            },
-        ];
-        let (msgs, pending) = build_chat_messages("sys", &history);
-        // system + 5 history entries
-        assert_eq!(msgs.len(), 6);
-        assert!(pending.is_empty(), "all tool results should be consumed");
-    }
-
-    /// When a `ToolResult` arrives after a *subsequent* `AssistantToolCalls`,
-    /// its ID must still be resolvable (regression for `pending_ids.clear()`).
-    #[test]
-    fn build_chat_messages_late_tool_result_preserves_id() {
-        // Simulate a history where a tool result for round-1 appears after
-        // round-2's tool calls (unusual ordering, but must not lose the ID).
-        let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![
-                ToolCallItem {
-                    name: "tool-a".to_string(),
-                    params: json!({}),
-                    id: Some("call_a".to_string()),
-                },
-                ToolCallItem {
-                    name: "tool-b".to_string(),
-                    params: json!({}),
-                    id: Some("call_b".to_string()),
-                },
-            ]),
-            // Only tool-a gets a result before the next assistant turn
-            ChatHistoryMessage::ToolResult {
-                name: "tool-a".to_string(),
-                content: "result-a".to_string(),
-            },
-            // Second round of tool calls
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "tool-c".to_string(),
-                params: json!({}),
-                id: Some("call_c".to_string()),
-            }]),
-            // Late result for tool-b from round 1
-            ChatHistoryMessage::ToolResult {
-                name: "tool-b".to_string(),
-                content: "result-b".to_string(),
-            },
-            ChatHistoryMessage::ToolResult {
-                name: "tool-c".to_string(),
-                content: "result-c".to_string(),
-            },
-        ];
-        let (msgs, pending) = build_chat_messages("", &history);
-        // 5 history entries, no system message (empty prompt)
-        assert_eq!(msgs.len(), 5);
-        assert!(pending.is_empty(), "all tool results should be consumed");
-    }
-
-    // ── Raw-HTTP message builder tests ────────────────────────────────────
-
-    #[test]
-    fn build_raw_messages_system_prompt() {
-        let msgs = build_raw_messages("You are helpful.", &[]);
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["role"], "system");
-    }
-
-    #[test]
-    fn build_raw_messages_text_exchange() {
-        let history = vec![
-            ChatHistoryMessage::Text {
-                role: ChatRole::User,
-                content: "hello".to_string(),
-            },
-            ChatHistoryMessage::Text {
-                role: ChatRole::Assistant,
-                content: "hi there".to_string(),
-            },
-        ];
-        let msgs = build_raw_messages("sys", &history);
-        assert_eq!(msgs.len(), 3);
-        assert_eq!(msgs[1]["role"], "user");
-        assert_eq!(msgs[2]["role"], "assistant");
-    }
-
-    #[test]
-    fn build_raw_messages_tool_calls_and_results() {
-        let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "my-tool".to_string(),
-                params: json!({"key": "val"}),
-                id: Some("call_123".to_string()),
-            }]),
-            ChatHistoryMessage::ToolResult {
-                name: "my-tool".to_string(),
-                content: "result".to_string(),
-            },
-        ];
-        let msgs = build_raw_messages("", &history);
-        assert_eq!(msgs.len(), 2);
-        assert_eq!(msgs[1]["tool_call_id"], "call_123");
-    }
-
-    /// Raw-HTTP: late tool result after a second `AssistantToolCalls` must
-    /// still carry the correct `tool_call_id`.
-    #[test]
-    fn build_raw_messages_late_tool_result_preserves_id() {
-        let history = vec![
-            ChatHistoryMessage::AssistantToolCalls(vec![
-                ToolCallItem {
-                    name: "tool-a".to_string(),
-                    params: json!({}),
-                    id: Some("call_a".to_string()),
-                },
-                ToolCallItem {
-                    name: "tool-b".to_string(),
-                    params: json!({}),
-                    id: Some("call_b".to_string()),
-                },
-            ]),
-            ChatHistoryMessage::ToolResult {
-                name: "tool-a".to_string(),
-                content: "result-a".to_string(),
-            },
-            ChatHistoryMessage::AssistantToolCalls(vec![ToolCallItem {
-                name: "tool-c".to_string(),
-                params: json!({}),
-                id: Some("call_c".to_string()),
-            }]),
-            // Late result for tool-b from round 1
-            ChatHistoryMessage::ToolResult {
-                name: "tool-b".to_string(),
-                content: "result-b".to_string(),
-            },
-            ChatHistoryMessage::ToolResult {
-                name: "tool-c".to_string(),
-                content: "result-c".to_string(),
-            },
-        ];
-        let msgs = build_raw_messages("", &history);
-        // 5 history entries, no system message (empty prompt)
-        assert_eq!(msgs.len(), 5);
-        // tool-b result must carry its original ID, not a fallback
-        assert_eq!(
-            msgs[3]["tool_call_id"], "call_b",
-            "tool-b must keep its original call ID"
-        );
-        assert_eq!(msgs[4]["tool_call_id"], "call_c");
-    }
-
-    // ── Capabilities ──────────────────────────────────────────────────────
+    // ── Capabilities ─────────────────────────────────────────────────────
 
     #[test]
     fn capabilities_with_web_search_enabled() {
@@ -1142,7 +389,7 @@ mod tests {
         );
     }
 
-    // ── Web-search echo-back tests (wiremock) ─────────────────────────────
+    // ── Web-search echo-back tests (wiremock) ────────────────────────────
 
     fn ws_tool_call_response(call_id: &str, query: &str) -> Value {
         json!({

@@ -217,9 +217,10 @@ async fn run_with_args(args: Args) -> Result<()> {
             "anthropic" => LlmProviderKind::Anthropic,
             "openai" => LlmProviderKind::OpenAI,
             "moonshot" => LlmProviderKind::Moonshot,
+            "openrouter" => LlmProviderKind::OpenRouter,
             other => anyhow::bail!(
                 "Unsupported --llm-provider value: {other}. \
-                 Expected one of: ollama, anthropic, openai, moonshot."
+                 Expected one of: ollama, anthropic, openai, moonshot, openrouter."
             ),
         };
     }
