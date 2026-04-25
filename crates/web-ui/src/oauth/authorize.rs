@@ -44,8 +44,9 @@ pub struct AuthorizeForm {
     security(()),
     params(AuthorizeQuery),
     responses(
-        (status = 200, description = "Login form HTML"),
-        (status = 400, description = "Invalid parameters"),
+        (status = 200, description = "Login form HTML", content_type = "text/html"),
+        (status = 303, description = "Redirect to external IdP (OIDC mode)"),
+        (status = 400, description = "Invalid parameters", content_type = "text/html"),
     )
 )]
 pub async fn authorize_get(
@@ -144,10 +145,12 @@ pub async fn authorize_get(
     path = "/oauth/authorize",
     tag = "oauth",
     security(()),
+    request_body(content = AuthorizeForm, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 303, description = "Redirect with authorization code"),
         (status = 400, description = "Invalid request"),
         (status = 401, description = "Invalid credentials"),
+        (status = 500, description = "Internal server error"),
     )
 )]
 pub async fn authorize_post(

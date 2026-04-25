@@ -70,6 +70,9 @@ const ALLOWED_GRANT_TYPES: &[&str] = &[
 /// Allowed response types for validation.
 const ALLOWED_RESPONSE_TYPES: &[&str] = &["code"];
 
+/// Allowed token endpoint auth methods.
+const ALLOWED_AUTH_METHODS: &[&str] = &["none", "client_secret_post", "client_secret_basic"];
+
 impl ClientRegistrar {
     /// Create a new client registrar.
     pub fn new(store: Arc<dyn ClientStore>) -> Self {
@@ -113,10 +116,26 @@ impl ClientRegistrar {
             }
         }
 
-        // Determine auth method.
+        // Validate auth method.
         let auth_method = req.token_endpoint_auth_method.as_deref().unwrap_or("none");
+        if !ALLOWED_AUTH_METHODS.contains(&auth_method) {
+            bail!("unsupported token_endpoint_auth_method: {auth_method}");
+        }
         let is_confidential =
             auth_method == "client_secret_post" || auth_method == "client_secret_basic";
+
+        // Cross-validate: authorization_code grant requires "code" response type (RFC 7591 §2).
+        if req.grant_types.contains(&"authorization_code".to_string()) {
+            let has_code = req
+                .response_types
+                .as_ref()
+                .is_some_and(|rts| rts.contains(&"code".to_string()));
+            if !has_code {
+                bail!(
+                    "grant_types includes 'authorization_code' but response_types does not include 'code'"
+                );
+            }
+        }
 
         // Generate client_id.
         let client_id = format!("cid_{}", uuid::Uuid::new_v4().as_simple());
@@ -320,6 +339,42 @@ mod tests {
         let mut req = valid_registration();
         req.response_types = Some(vec!["token".into()]);
         assert!(reg.register(req).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn unsupported_auth_method_is_rejected() {
+        let reg = make_registrar();
+        let mut req = valid_registration();
+        req.token_endpoint_auth_method = Some("private_key_jwt".into());
+        let err = reg.register(req).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unsupported token_endpoint_auth_method"),
+            "should reject unsupported auth method, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_code_grant_requires_code_response_type() {
+        let reg = make_registrar();
+        let mut req = valid_registration();
+        req.grant_types = vec!["authorization_code".into()];
+        req.response_types = None; // Missing response_types
+        let err = reg.register(req).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("response_types does not include 'code'"),
+            "should require code response type, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_code_grant_with_code_response_type_succeeds() {
+        let reg = make_registrar();
+        let mut req = valid_registration();
+        req.grant_types = vec!["authorization_code".into(), "refresh_token".into()];
+        req.response_types = Some(vec!["code".into()]);
+        assert!(reg.register(req).await.is_ok());
     }
 
     #[tokio::test]

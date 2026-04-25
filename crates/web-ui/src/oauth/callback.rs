@@ -389,7 +389,7 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
                 client_name: "Test App".into(),
                 redirect_uris: vec!["http://localhost:9999/cb".into()],
                 grant_types: vec!["authorization_code".into()],
-                response_types: None,
+                response_types: Some(vec!["code".into()]),
                 token_endpoint_auth_method: None,
             })
             .await

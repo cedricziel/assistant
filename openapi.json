@@ -58,9 +58,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Bad request"
           }
         },
         "security": [
@@ -5395,10 +5392,19 @@
         ],
         "responses": {
           "200": {
-            "description": "Login form HTML"
+            "description": "Login form HTML",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "303": {
+            "description": "Redirect to external IdP (OIDC mode)"
           },
           "400": {
-            "description": "Invalid parameters"
+            "description": "Invalid parameters",
+            "content": {
+              "text/html": {}
+            }
           }
         },
         "security": [
@@ -5430,6 +5436,9 @@
           },
           "401": {
             "description": "Invalid credentials"
+          },
+          "500": {
+            "description": "Internal server error"
           }
         },
         "security": [
@@ -5656,10 +5665,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Device verification form HTML"
-          },
-          "400": {
-            "description": "Bad request"
+            "description": "Device verification form HTML",
+            "content": {
+              "text/html": {}
+            }
           }
         },
         "security": [
@@ -5684,10 +5693,22 @@
         },
         "responses": {
           "200": {
-            "description": "Device authorized"
+            "description": "Device authorized",
+            "content": {
+              "text/html": {}
+            }
           },
           "400": {
-            "description": "Invalid or expired code"
+            "description": "Invalid or expired code",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "text/html": {}
+            }
           }
         },
         "security": [
@@ -5806,6 +5827,16 @@
           },
           "400": {
             "description": "Invalid grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
             "content": {
               "application/json": {
                 "schema": {
