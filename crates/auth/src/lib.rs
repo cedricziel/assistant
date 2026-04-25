@@ -10,6 +10,7 @@
 //! - [`AuthProvider`](assistant_core::auth::AuthProvider) implementations ([`providers`])
 
 pub mod api_keys;
+pub mod bootstrap;
 pub mod jwt;
 pub mod middleware;
 pub mod oauth2;

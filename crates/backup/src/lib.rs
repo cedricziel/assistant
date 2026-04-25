@@ -528,6 +528,50 @@ pub async fn list_backups(backup_dir: &Path) -> Result<Vec<BackupInfo>> {
     Ok(infos)
 }
 
+// -- Pre-migration helper ----------------------------------------------------
+
+/// Create a `pre-migration-<timestamp>.tar.gz` snapshot of a legacy
+/// single-user installation directory.
+///
+/// Used by callers that need to back up `~/.assistant/` (or another install
+/// dir) before running the legacy → multi-org migration. Encapsulates the
+/// `backups/` directory creation and timestamped naming so the storage crate
+/// can perform the migration without taking a backup-crate dependency.
+///
+/// Returns the path to the created archive.
+pub async fn backup_legacy_install(base_path: &Path) -> Result<PathBuf> {
+    let backups_dir = base_path.join("backups");
+    tokio::fs::create_dir_all(&backups_dir)
+        .await
+        .with_context(|| format!("creating backups directory: {}", backups_dir.display()))?;
+
+    let archive_name = format!(
+        "pre-migration-{}.tar.gz",
+        Utc::now().format("%Y%m%d-%H%M%S")
+    );
+    let output_path = backups_dir.join(&archive_name);
+
+    let opts = BackupOptions {
+        install_dir: base_path.to_path_buf(),
+        output_path: output_path.clone(),
+        db_path: Some(base_path.join("assistant.db")),
+    };
+
+    let result = BackupEngine::new()
+        .run(opts)
+        .await
+        .context("creating pre-migration backup")?;
+
+    info!(
+        "pre-migration backup created: {} ({} files, {} bytes)",
+        result.output_path.display(),
+        result.entry_count,
+        result.archive_size
+    );
+
+    Ok(result.output_path)
+}
+
 // -- Tests --
 
 #[cfg(test)]

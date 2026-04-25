@@ -198,10 +198,55 @@ async fn run_with_args(args: Args) -> Result<()> {
     let base_path = db_path.parent().unwrap_or(Path::new("."));
     if assistant_storage::migration::is_legacy_layout(base_path) {
         info!("detected legacy single-user layout — running auto-migration");
-        let backup = assistant_storage::migration::run_migration(base_path)
+
+        // Step 1: backup (lives in assistant-backup so storage doesn't depend
+        // on the backup engine).
+        let backup_path = assistant_backup::backup_legacy_install(base_path)
             .await
-            .context("legacy → multi-org auto-migration failed")?;
-        info!("migration complete — backup at {}", backup.display());
+            .context("creating pre-migration backup")?;
+
+        // Step 2: filesystem layout migration.
+        assistant_storage::migration::migrate_filesystem(base_path)
+            .await
+            .context("legacy → multi-org filesystem migration failed")?;
+
+        // Step 3: database migration. Returns the opened org storage layer
+        // plus the seeded org/space ids so we can bootstrap the admin user.
+        let (org_storage_for_bootstrap, org_id, space_id) =
+            assistant_storage::migration::migrate_database(base_path)
+                .await
+                .context("legacy → multi-org database migration failed")?;
+
+        // Step 4: bootstrap the initial admin user (lives in assistant-auth so
+        // storage doesn't depend on auth-domain logic).
+        let user_store = org_storage_for_bootstrap.user_store();
+        let membership_store = org_storage_for_bootstrap.membership_store();
+        let creds = assistant_auth::bootstrap::create_admin_user(
+            &user_store,
+            &membership_store,
+            &org_id.0,
+            &space_id.0,
+        )
+        .await
+        .context("creating initial admin user")?;
+        drop(org_storage_for_bootstrap);
+
+        info!("created admin user: {}", creds.user_id);
+        if let Some(pw) = creds.generated_password.as_ref() {
+            info!("============================================================");
+            info!("  Migration complete - initial admin credentials:");
+            info!("    Email:    {}", creds.email);
+            info!("    Password: {pw}");
+            info!("  Change this password after first login.");
+            info!("============================================================");
+        } else {
+            info!("============================================================");
+            info!("  Migration complete - admin user created.");
+            info!("    Email:    {}", creds.email);
+            info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
+            info!("============================================================");
+        }
+        info!("migration complete — backup at {}", backup_path.display());
     }
 
     let storage = Arc::new(StorageLayer::new(&db_path).await?);

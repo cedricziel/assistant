@@ -1,20 +1,27 @@
 ## 1. Slice A — Storage layering inversion
 
-- [x] 1.1 Add a failing test in `crates/storage/tests/` (or a doc-test in `lib.rs`) asserting that `assistant-storage` exposes only `assistant-core` types in its public API surface (compile-only test that imports from storage and never names `assistant_auth::` / `assistant_backup::`).
-- [ ] 1.2 Define `MigrationBackupHook` trait in `crates/storage/src/migration.rs` (method: `async fn pre_migration_backup(&self, db_path: &Path) -> Result<()>`).
-- [ ] 1.3 Refactor `Migrator::run` (or equivalent entry point) to take `Option<&dyn MigrationBackupHook>` instead of constructing `BackupEngine` directly.
-- [ ] 1.4 Add a `BackupHook` adapter struct in `crates/backup/src/lib.rs` that implements `assistant_storage::MigrationBackupHook` and wraps `BackupEngine`.
-- [ ] 1.5 Update CLI binary (`crates/interface-cli/src/main.rs` or equivalent migration call site) to construct the hook and pass it into the migrator.
-- [ ] 1.6 Update web-ui binary call site to construct the hook and pass it into the migrator.
-- [ ] 1.7 Remove the `assistant_backup::{BackupEngine, BackupOptions}` import from `crates/storage/src/migration.rs`.
-- [ ] 1.8 Move `crates/storage/src/api_key_store.rs` to `crates/auth/src/storage/api_key_store.rs`; update `mod.rs` files in both crates; update all `use assistant_storage::ApiKeyStore` imports across the workspace.
-- [ ] 1.9 Move `crates/storage/src/auth_state_store.rs` to `crates/auth/src/storage/auth_state_store.rs`; update imports.
-- [ ] 1.10 Replace the `assistant_auth::password::hash_password` call inside `crates/storage/src/migration.rs:385` (bootstrap user creation) by either (a) moving the bootstrap-user creation step out of the migration into the auth crate, or (b) accepting a `BootstrapUserHook` closure parameter on the migrator.
-- [ ] 1.11 Delete `assistant-auth = { path = "../auth" }` and `assistant-backup = { path = "../backup" }` from `crates/storage/Cargo.toml`.
-- [ ] 1.12 Run `cargo build --workspace`, `cargo test --workspace`, `cargo machete --with-metadata`, and `cargo tree -p assistant-storage --no-default-features` to verify only `assistant-core` and `assistant-skills` (intentional carve-out) remain as workspace path deps.
-- [ ] 1.13 Make the test from 1.1 pass (compile-only assertion of the new dep boundary).
-- [ ] 1.14 Document the dep-boundary contract in `crates/storage/src/lib.rs` module-level docs and reference the spec at `openspec/changes/resolve-priority-tech-debt/specs/storage-layering/spec.md`.
-- [ ] 1.15 Run `make lint` and `make format`; commit as `refactor(storage): invert auth/backup dependency layering`.
+**Implementation note:** During execution we replaced the originally proposed
+`MigrationBackupHook`/`BootstrapUserHook` trait approach with a cleaner design
+that matches existing patterns: trait contracts (`ApiKeyStore`, `ClientStore`,
+`AuthCodeStore`, `RefreshTokenStore`, `DeviceCodeStore`) were moved to
+`assistant_core::auth`, and the storage-only side-effect helpers
+(`backup_legacy`, `create_admin_user`) were extracted to
+`assistant_backup::backup_legacy_install` and
+`assistant_auth::bootstrap::create_admin_user` respectively. Production callers
+compose the four steps explicitly. This achieves the same dep-boundary outcome
+with no extra hook indirection.
+
+- [x] 1.1 Add a failing test in `crates/storage/tests/dep_boundary.rs` asserting that `assistant-storage`'s `[dependencies]` contain only `assistant-core` and `assistant-skills` workspace path deps.
+- [x] 1.2 Move auth trait contracts (`ApiKeyStore`, `ClientStore`, `AuthCodeStore`, `RefreshTokenStore`, `DeviceCodeStore`) and their record types (`ApiKeyRecord`, `AuthCode`, `StoredRefreshToken`, `DeviceState`) into `assistant_core::auth`; re-export from `assistant_auth` for back-compat.
+- [x] 1.3 Move `backup_legacy` from `storage::migration` into `assistant_backup::backup_legacy_install`.
+- [x] 1.4 Move `create_admin_user` + `AdminCredentials` from `storage::migration` into `assistant_auth::bootstrap`; takes `&dyn UserStore`+`&dyn MembershipStore` so auth needn't depend on storage.
+- [x] 1.5 Refactor `migrate_database` to return `(OrgStorageLayer, OrgId, SpaceId)` and stop bootstrapping the admin user internally; remove `run_migration` orchestrator.
+- [x] 1.6 Update web-ui binary call site to compose the four steps explicitly: `backup_legacy_install` → `migrate_filesystem` → `migrate_database` → `bootstrap::create_admin_user`.
+- [x] 1.7 Add `assistant-backup = { path = "../backup" }` to `crates/web-ui/Cargo.toml`.
+- [x] 1.8 Drop `assistant-auth` and `assistant-backup` from `crates/storage/Cargo.toml` `[dependencies]`; keep them as `[dev-dependencies]` so the round-trip migration test can compose the production pipeline.
+- [x] 1.9 Run `cargo check --workspace`, `cargo test -p assistant-storage`; verify the `dep_boundary` integration test passes.
+- [x] 1.10 Document the dep-boundary contract in `crates/storage/src/lib.rs` module-level docs.
+- [x] 1.11 Run `make lint` and `make format`; commit as `refactor(storage): invert auth/backup dependency layering`.
 
 ## 2. Slice B — Request-path error handling
 
