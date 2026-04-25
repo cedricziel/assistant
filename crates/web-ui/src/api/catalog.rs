@@ -352,6 +352,20 @@ pub async fn create_subscription(
         }
     }
 
+    // Verify catalog item belongs to this org.
+    let catalog_store = state.org_storage.catalog_item_store();
+    match catalog_store.get_item(&body.catalog_item_id).await {
+        Ok(Some(item)) if item.org_id == org_id => {}
+        Ok(Some(_)) => {
+            return (StatusCode::FORBIDDEN, "catalog item belongs to another org").into_response();
+        }
+        Ok(None) => return (StatusCode::NOT_FOUND, "catalog item not found").into_response(),
+        Err(e) => {
+            tracing::error!("failed to get catalog item: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+        }
+    }
+
     let now = Utc::now();
     let sub = CatalogSubscription {
         id: format!("sub_{}", uuid::Uuid::new_v4()),
@@ -440,17 +454,43 @@ pub async fn list_subscriptions(
 pub async fn delete_subscription(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<CatalogApiState>,
-    Path((org_id, _space_id, sub_id)): Path<(String, String, String)>,
+    Path((org_id, space_id, sub_id)): Path<(String, String, String)>,
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
         return (StatusCode::FORBIDDEN, "access denied").into_response();
     }
+
+    let space_id = assistant_core::identity::SpaceId::from(space_id);
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        match ctx.role_in(&space_id) {
+            Some(assistant_core::identity::Role::SpaceAdmin) => {}
+            _ => {
+                return (StatusCode::FORBIDDEN, "space admin or org admin required")
+                    .into_response();
+            }
+        }
     }
 
     let store = state.org_storage.catalog_subscription_store();
+
+    // Verify the subscription belongs to this space.
+    match store.get_subscription(&sub_id).await {
+        Ok(Some(sub)) if sub.space_id == space_id => {}
+        Ok(Some(_)) => {
+            return (
+                StatusCode::FORBIDDEN,
+                "subscription belongs to another space",
+            )
+                .into_response();
+        }
+        Ok(None) => return (StatusCode::NOT_FOUND, "subscription not found").into_response(),
+        Err(e) => {
+            tracing::error!("failed to get subscription: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+        }
+    }
+
     match store.delete_subscription(&sub_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, "subscription not found").into_response(),
@@ -707,5 +747,154 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_cross_org_catalog_item_denied() {
+        let state = setup_state().await;
+
+        // Seed a catalog item owned by org_other.
+        sqlx::query(
+            "INSERT INTO organizations (id, name, slug) VALUES ('org_other', 'Evil', 'evil')",
+        )
+        .execute(state.org_storage.pool())
+        .await
+        .unwrap();
+        let catalog = state.org_storage.catalog_item_store();
+        catalog
+            .create_item(&assistant_core::store::CatalogItem {
+                id: "ci_other".into(),
+                org_id: OrgId::from("org_other"),
+                resource_type: assistant_core::catalog::CatalogResourceType::Skill,
+                name: "stolen-skill".into(),
+                description: "".into(),
+                created_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let app = test_app(state, make_admin_ctx());
+
+        // Try to subscribe org_1/sp_eng to org_other's catalog item.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/orgs/org_1/spaces/sp_eng/subscriptions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "catalog_item_id": "ci_other"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "subscribing to a cross-org catalog item must be denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_subscription_wrong_space_denied() {
+        let state = setup_state().await;
+
+        // Seed a second space.
+        sqlx::query(
+            "INSERT INTO spaces (id, org_id, name, slug) VALUES ('sp_sales', 'org_1', 'Sales', 'sales')",
+        )
+        .execute(state.org_storage.pool())
+        .await
+        .unwrap();
+
+        // Publish a catalog item and subscribe sp_eng.
+        let catalog = state.org_storage.catalog_item_store();
+        catalog
+            .create_item(&assistant_core::store::CatalogItem {
+                id: "ci_1".into(),
+                org_id: OrgId::from("org_1"),
+                resource_type: assistant_core::catalog::CatalogResourceType::Skill,
+                name: "web-fetch".into(),
+                description: "".into(),
+                created_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let sub_store = state.org_storage.catalog_subscription_store();
+        let sub = assistant_core::CatalogSubscription {
+            id: "sub_1".into(),
+            space_id: assistant_core::identity::SpaceId::from("sp_eng"),
+            catalog_item_id: "ci_1".into(),
+            created_at: Utc::now(),
+        };
+        sub_store.create_subscription(&sub).await.unwrap();
+
+        let app = test_app(state, make_admin_ctx());
+
+        // Try to delete sp_eng's subscription via the sp_sales path.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/orgs/org_1/spaces/sp_sales/subscriptions/sub_1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "deleting a subscription via the wrong space path must be denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_catalog_item_cross_org_denied() {
+        let state = setup_state().await;
+
+        // Seed a catalog item owned by org_other.
+        sqlx::query(
+            "INSERT INTO organizations (id, name, slug) VALUES ('org_other', 'Evil', 'evil')",
+        )
+        .execute(state.org_storage.pool())
+        .await
+        .unwrap();
+        let catalog = state.org_storage.catalog_item_store();
+        catalog
+            .create_item(&assistant_core::store::CatalogItem {
+                id: "ci_other".into(),
+                org_id: OrgId::from("org_other"),
+                resource_type: assistant_core::catalog::CatalogResourceType::Skill,
+                name: "stolen-skill".into(),
+                description: "".into(),
+                created_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let app = test_app(state, make_admin_ctx());
+
+        // Try to delete org_other's item via org_1's path.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/orgs/org_1/catalog/ci_other")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "deleting a cross-org catalog item must be denied"
+        );
     }
 }

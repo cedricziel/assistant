@@ -26,7 +26,10 @@ fn resource_type_from_str(s: &str) -> CatalogResourceType {
         "skill" => CatalogResourceType::Skill,
         "template" => CatalogResourceType::Template,
         "interface" => CatalogResourceType::Interface,
-        _ => CatalogResourceType::Skill,
+        other => {
+            tracing::warn!("unrecognized catalog resource_type '{other}', defaulting to Skill");
+            CatalogResourceType::Skill
+        }
     }
 }
 
@@ -146,6 +149,17 @@ impl CatalogSubscriptionStore for SqliteCatalogSubscriptionStore {
         .await
         .with_context(|| format!("creating catalog subscription: {}", sub.id))?;
         Ok(())
+    }
+
+    async fn get_subscription(&self, id: &str) -> Result<Option<CatalogSubscription>> {
+        let row = sqlx::query(
+            "SELECT id, space_id, catalog_item_id, created_at
+             FROM catalog_subscriptions WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(row_to_sub))
     }
 
     async fn list_subscriptions(&self, space_id: &SpaceId) -> Result<Vec<CatalogSubscription>> {

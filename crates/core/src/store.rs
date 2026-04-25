@@ -185,6 +185,7 @@ pub trait CatalogItemStore: Send + Sync {
 #[async_trait]
 pub trait CatalogSubscriptionStore: Send + Sync {
     async fn create_subscription(&self, sub: &CatalogSubscription) -> Result<()>;
+    async fn get_subscription(&self, id: &str) -> Result<Option<CatalogSubscription>>;
     async fn list_subscriptions(&self, space_id: &SpaceId) -> Result<Vec<CatalogSubscription>>;
     async fn delete_subscription(&self, id: &str) -> Result<bool>;
 }
@@ -202,6 +203,7 @@ pub trait InterfaceInstanceStore: Send + Sync {
 #[async_trait]
 pub trait BindingStore: Send + Sync {
     async fn create_binding(&self, binding: &PersonaBinding) -> Result<()>;
+    async fn get_binding(&self, id: &str) -> Result<Option<PersonaBinding>>;
     async fn list_bindings(&self, space_id: &SpaceId) -> Result<Vec<PersonaBinding>>;
     async fn delete_binding(&self, id: &str) -> Result<bool>;
 }
@@ -524,8 +526,28 @@ impl CatalogSubscriptionStore for InMemoryCatalogSubscriptionStore {
         if subs.iter().any(|s| s.id == sub.id) {
             bail!("subscription already exists: {}", sub.id);
         }
+        if subs
+            .iter()
+            .any(|s| s.space_id == sub.space_id && s.catalog_item_id == sub.catalog_item_id)
+        {
+            bail!(
+                "duplicate subscription: space={} item={}",
+                sub.space_id.0,
+                sub.catalog_item_id
+            );
+        }
         subs.push(sub.clone());
         Ok(())
+    }
+
+    async fn get_subscription(&self, id: &str) -> Result<Option<CatalogSubscription>> {
+        Ok(self
+            .subs
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.id == id)
+            .cloned())
     }
 
     async fn list_subscriptions(&self, space_id: &SpaceId) -> Result<Vec<CatalogSubscription>> {
@@ -608,6 +630,16 @@ impl BindingStore for InMemoryBindingStore {
         }
         bindings.push(binding.clone());
         Ok(())
+    }
+
+    async fn get_binding(&self, id: &str) -> Result<Option<PersonaBinding>> {
+        Ok(self
+            .bindings
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|b| b.id == id)
+            .cloned())
     }
 
     async fn list_bindings(&self, space_id: &SpaceId) -> Result<Vec<PersonaBinding>> {

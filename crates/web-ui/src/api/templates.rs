@@ -157,9 +157,17 @@ pub async fn create_from_template(
     // Resolve the template from the catalog.
     let catalog = state.org_storage.catalog_item_store();
     let template = match catalog.get_item(&body.template_id).await {
-        Ok(Some(item)) if item.resource_type == CatalogResourceType::Template => item,
-        Ok(Some(_)) => {
+        Ok(Some(item))
+            if item.resource_type == CatalogResourceType::Template && item.org_id == org_id =>
+        {
+            item
+        }
+        Ok(Some(item)) if item.resource_type != CatalogResourceType::Template => {
             return (StatusCode::BAD_REQUEST, "catalog item is not a template").into_response();
+        }
+        Ok(Some(_)) => {
+            // Item exists but belongs to another org — treat as not found.
+            return (StatusCode::NOT_FOUND, "template not found").into_response();
         }
         Ok(None) => return (StatusCode::NOT_FOUND, "template not found").into_response(),
         Err(e) => {
@@ -217,11 +225,17 @@ pub async fn onboarding_status(
     State(state): State<TemplatesApiState>,
 ) -> Response {
     let has_persona: bool =
-        sqlx::query_scalar("SELECT COUNT(*) > 0 FROM personas WHERE owner_user_id = ?")
+        match sqlx::query_scalar("SELECT COUNT(*) > 0 FROM personas WHERE owner_user_id = ?")
             .bind(&ctx.user_id.0)
             .fetch_one(&state.pool)
             .await
-            .unwrap_or(false);
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("failed to query onboarding status: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+            }
+        };
 
     Json(OnboardingStatusResponse { has_persona }).into_response()
 }
@@ -366,5 +380,55 @@ mod tests {
             .unwrap();
         let status: OnboardingStatusResponse = serde_json::from_slice(&body).unwrap();
         assert!(!status.has_persona);
+    }
+
+    #[tokio::test]
+    async fn create_persona_from_cross_org_template_denied() {
+        let state = setup_state().await;
+
+        // Seed org_other with a template.
+        sqlx::query(
+            "INSERT INTO organizations (id, name, slug) VALUES ('org_other', 'Evil', 'evil')",
+        )
+        .execute(state.org_storage.pool())
+        .await
+        .unwrap();
+        let catalog = state.org_storage.catalog_item_store();
+        catalog
+            .create_item(&assistant_core::store::CatalogItem {
+                id: "tpl_evil".into(),
+                org_id: OrgId::from("org_other"),
+                resource_type: CatalogResourceType::Template,
+                name: "evil-chatbot".into(),
+                description: "".into(),
+                created_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let app = test_app(state, make_admin_ctx());
+
+        // Try to instantiate org_other's template via org_1's path.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/orgs/org_1/spaces/sp_eng/personas/from-template")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "template_id": "tpl_evil"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "instantiating a cross-org template must be denied (treated as not found)"
+        );
     }
 }

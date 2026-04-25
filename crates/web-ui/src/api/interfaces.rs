@@ -220,21 +220,29 @@ pub async fn list_interfaces(
 pub async fn delete_interface(
     Extension(ctx): Extension<AuthContext>,
     State(state): State<InterfacesApiState>,
-    Path((org_id, _space_id, id)): Path<(String, String, String)>,
+    Path((org_id, space_id, id)): Path<(String, String, String)>,
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
         return (StatusCode::FORBIDDEN, "access denied").into_response();
     }
+
+    let space_id = SpaceId::from(space_id);
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        match ctx.role_in(&space_id) {
+            Some(assistant_core::identity::Role::SpaceAdmin) => {}
+            _ => {
+                return (StatusCode::FORBIDDEN, "space admin or org admin required")
+                    .into_response();
+            }
+        }
     }
 
     let store = state.org_storage.interface_instance_store();
 
-    // Verify the instance belongs to this org.
+    // Verify the instance belongs to this org and space.
     match store.get_instance(&id).await {
-        Ok(Some(inst)) if inst.org_id == org_id => {}
+        Ok(Some(inst)) if inst.org_id == org_id && inst.space_id == space_id => {}
         Ok(Some(_)) => return (StatusCode::FORBIDDEN, "access denied").into_response(),
         Ok(None) => return (StatusCode::NOT_FOUND, "interface instance not found").into_response(),
         Err(e) => {
@@ -383,5 +391,101 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn delete_interface_wrong_space_denied() {
+        let state = setup_state().await;
+
+        // Seed a second space.
+        sqlx::query(
+            "INSERT INTO spaces (id, org_id, name, slug) VALUES ('sp_sales', 'org_1', 'Sales', 'sales')",
+        )
+        .execute(state.org_storage.pool())
+        .await
+        .unwrap();
+
+        // Create an interface instance in sp_eng.
+        let store = state.org_storage.interface_instance_store();
+        store
+            .create_instance(&InterfaceInstance {
+                id: "ii_eng".into(),
+                org_id: OrgId::from("org_1"),
+                space_id: SpaceId::from("sp_eng"),
+                interface_type: "slack".into(),
+                config: "{}".into(),
+                created_at: chrono::Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let app = test_app(state, make_admin_ctx());
+
+        // Try to delete sp_eng's instance via the sp_sales path.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/orgs/org_1/spaces/sp_sales/interfaces/ii_eng")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "deleting an interface via the wrong space path must be denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_interface_cross_org_denied() {
+        let state = setup_state().await;
+
+        // Seed org_other with a space and interface.
+        sqlx::query(
+            "INSERT INTO organizations (id, name, slug) VALUES ('org_other', 'Evil', 'evil')",
+        )
+        .execute(state.org_storage.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO spaces (id, org_id, name, slug) VALUES ('sp_evil', 'org_other', 'Evil Space', 'evil')",
+        )
+        .execute(state.org_storage.pool())
+        .await
+        .unwrap();
+        let store = state.org_storage.interface_instance_store();
+        store
+            .create_instance(&InterfaceInstance {
+                id: "ii_evil".into(),
+                org_id: OrgId::from("org_other"),
+                space_id: SpaceId::from("sp_evil"),
+                interface_type: "slack".into(),
+                config: "{}".into(),
+                created_at: chrono::Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let app = test_app(state, make_admin_ctx());
+
+        // Try to delete org_other's instance via org_1's path.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/orgs/org_1/spaces/sp_eng/interfaces/ii_evil")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "deleting a cross-org interface instance must be denied"
+        );
     }
 }

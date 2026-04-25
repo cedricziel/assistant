@@ -100,14 +100,27 @@ pub fn skills_router() -> Router<SkillsApiState> {
     security(("bearer_token" = []))
 )]
 pub async fn list_persona_skills(
-    Extension(_ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Path(persona_id): Path<String>,
 ) -> Response {
     let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
 
-    // Verify the persona exists.
+    // Verify the persona exists and the caller owns it.
     match persona_store.get(&persona_id).await {
+        Ok(Some(persona)) => {
+            if persona
+                .owner_user_id
+                .as_ref()
+                .is_some_and(|owner| owner != &ctx.user_id.0)
+            {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({"error": "Access denied"})),
+                )
+                    .into_response();
+            }
+        }
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -119,7 +132,6 @@ pub async fn list_persona_skills(
             warn!("Failed to get persona {persona_id}: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
-        _ => {}
     }
 
     let skill_access_store =
@@ -652,5 +664,34 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn list_persona_skills_other_user_denied() {
+        let (state, storage) = test_state().await;
+
+        // Create a persona owned by another user.
+        let persona_store = storage.persona_store();
+        persona_store
+            .create_owned("persona_other", "Other Persona", "other-user")
+            .await
+            .unwrap();
+
+        // Our test user is "test-user" (from make_test_ctx), not "other-user".
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/personas/persona_other/skills")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "listing skills for another user's persona must be denied"
+        );
     }
 }

@@ -46,6 +46,17 @@ impl BindingStore for SqliteBindingStore {
         Ok(())
     }
 
+    async fn get_binding(&self, id: &str) -> Result<Option<PersonaBinding>> {
+        let row = sqlx::query(
+            "SELECT id, space_id, persona_id, interface_instance_id, created_at
+             FROM persona_bindings WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(row_to_binding))
+    }
+
     async fn list_bindings(&self, space_id: &SpaceId) -> Result<Vec<PersonaBinding>> {
         let rows = sqlx::query(
             "SELECT id, space_id, persona_id, interface_instance_id, created_at
