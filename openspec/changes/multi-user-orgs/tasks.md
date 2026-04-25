@@ -536,12 +536,12 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - 6 credential storage unit tests (roundtrip, permissions, expiry)
   - `issue_token_pair` test for device code token issuance
 
-- [ ] `feat(app): OAuth2 Authorization Code + PKCE login in Flutter`
+- [x] `feat(app): OAuth2 Authorization Code + PKCE login in Flutter`
   - Replace single-token entry with OAuth2 flow
   - Use `url_launcher` to open browser for auth, listen on localhost callback
   - Store tokens securely (macOS keychain via `flutter_secure_storage`)
 
-- [ ] `feat(app): org/space selector after login`
+- [x] `feat(app): org/space selector after login`
   - Fetch user's orgs and spaces from API
   - Display space picker, persist selection
 
@@ -577,4 +577,4 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 - [x] `docs: update CLAUDE.md workspace structure with assistant-auth crate`
 
-- [ ] `chore: final OpenAPI spec update with all new endpoints`
+- [x] `chore: final OpenAPI spec update with all new endpoints`
