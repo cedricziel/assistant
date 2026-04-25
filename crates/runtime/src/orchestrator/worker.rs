@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    ClaimFilter, ContentBlock, Interface, PublishRequest, ToolHandler, bus_messages, topic,
+    ClaimFilter, ContentBlock, Interface, OrgId, PublishRequest, SpaceId, ToolHandler,
+    TurnIdentity, UserId, bus_messages, topic,
 };
 use chrono::{DateTime, Local, Utc};
 use opentelemetry::{
@@ -207,6 +208,14 @@ impl Orchestrator {
                         })
                         .unwrap_or_else(CancellationToken::new);
 
+                    // Extract identity from the bus message so tools see who
+                    // initiated this turn.
+                    let identity = TurnIdentity {
+                        user_id: turn_req.user_id.map(UserId::from),
+                        org_id: turn_req.org_id.map(OrgId::from),
+                        space_id: turn_req.space_id.map(SpaceId::from),
+                    };
+
                     // Dispatch to the appropriate processing method, racing
                     // against the per-turn cancellation token so an expired
                     // submit_turn deadline aborts work rather than letting it
@@ -225,6 +234,7 @@ impl Orchestrator {
                                         reg.attachments,
                                         sink,
                                         turn_req.attachment_ids.clone(),
+                                        identity.clone(),
                                     )
                                     .await
                                 } else {
@@ -237,6 +247,7 @@ impl Orchestrator {
                                         Some(&bus_consume_cx),
                                         reg.attachments,
                                         turn_req.attachment_ids.clone(),
+                                        identity.clone(),
                                     )
                                     .await
                                 }
@@ -249,6 +260,7 @@ impl Orchestrator {
                                     sink,
                                     Some(&bus_consume_cx),
                                     turn_req.attachment_ids.clone(),
+                                    identity.clone(),
                                 )
                                 .await
                             } else {
@@ -259,6 +271,7 @@ impl Orchestrator {
                                     interface,
                                     Some(&bus_consume_cx),
                                     turn_req.attachment_ids.clone(),
+                                    identity.clone(),
                                 )
                                 .await
                             }
@@ -569,6 +582,7 @@ impl Orchestrator {
             timestamp,
             HashMap::new(),
             vec![],
+            TurnIdentity::default(),
         )
         .await
     }
@@ -589,12 +603,36 @@ impl Orchestrator {
             timestamp,
             HashMap::new(),
             attachment_ids,
+            TurnIdentity::default(),
+        )
+        .await
+    }
+
+    /// Submit a turn with full identity context.
+    pub async fn submit_turn_with_identity(
+        &self,
+        prompt: &str,
+        conversation_id: Uuid,
+        interface: Interface,
+        timestamp: Option<DateTime<Utc>>,
+        attachment_ids: Vec<Uuid>,
+        identity: TurnIdentity,
+    ) -> Result<TurnResult> {
+        self.submit_turn_internal(
+            prompt,
+            conversation_id,
+            interface,
+            timestamp,
+            HashMap::new(),
+            attachment_ids,
+            identity,
         )
         .await
     }
 
     /// Submit a turn through the message bus and wait for the result, enriched
     /// with interface-provided metadata attributes and optional attachment IDs.
+    #[allow(clippy::too_many_arguments)]
     async fn submit_turn_internal(
         &self,
         prompt: &str,
@@ -603,6 +641,7 @@ impl Orchestrator {
         timestamp: Option<DateTime<Utc>>,
         submit_metadata: HashMap<String, String>,
         attachment_ids: Vec<Uuid>,
+        identity: TurnIdentity,
     ) -> Result<TurnResult> {
         let request_id = Uuid::new_v4();
         // Register a cancellation token so the worker can be interrupted if
@@ -643,6 +682,9 @@ impl Orchestrator {
             timestamp,
             traceparent: crate::otel_spans::traceparent_from_context(&interface_cx),
             attachment_ids,
+            user_id: identity.user_id.as_ref().map(|u| u.to_string()),
+            org_id: identity.org_id.as_ref().map(|o| o.to_string()),
+            space_id: identity.space_id.as_ref().map(|s| s.to_string()),
         };
 
         let mut produce_request_span = crate::otel_spans::start_bus_span(

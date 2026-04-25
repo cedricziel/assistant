@@ -117,6 +117,9 @@ impl Orchestrator {
                     interactive: false,
                     allowed_tools: None,
                     depth: 0,
+                    user_id: None,
+                    org_id: None,
+                    space_id: None,
                 };
                 if let Err(e) = reply_handler.run(params_map, &ctx).await {
                     warn!(tool = %reply_name, %e, "Auto-post via reply tool failed");

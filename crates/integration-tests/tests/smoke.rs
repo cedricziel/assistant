@@ -13,7 +13,9 @@ use std::sync::Arc;
 use std::{env, time::Duration};
 
 use anyhow::Result;
-use assistant_core::{AssistantConfig, ExecutionContext, MessageBus, types::Interface};
+use assistant_core::{
+    AssistantConfig, ExecutionContext, MessageBus, TurnIdentity, types::Interface,
+};
 use assistant_llm_provider::ollama::client::{LlmClient, LlmClientConfig};
 use assistant_runtime::Orchestrator;
 use assistant_skills::SkillSource;
@@ -164,6 +166,9 @@ fn exec_ctx(f: &Fixture) -> ExecutionContext {
         interactive: false,
         allowed_tools: None,
         depth: 0,
+        user_id: None,
+        org_id: None,
+        space_id: None,
     }
 }
 
@@ -246,6 +251,7 @@ async fn test_tool_loop_terminates() -> Result<()> {
                 Interface::Cli,
                 None,
                 vec![],
+                TurnIdentity::default(),
             )
             .await
     })
@@ -274,6 +280,7 @@ async fn test_self_analyze_runs() -> Result<()> {
                 Interface::Cli,
                 None,
                 vec![],
+                TurnIdentity::default(),
             )
             .await?;
 
@@ -286,6 +293,7 @@ async fn test_self_analyze_runs() -> Result<()> {
                 Interface::Cli,
                 None,
                 vec![],
+                TurnIdentity::default(),
             )
             .await?;
 

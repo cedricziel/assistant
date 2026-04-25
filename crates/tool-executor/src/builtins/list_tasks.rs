@@ -116,6 +116,9 @@ mod tests {
             interactive: false,
             allowed_tools: None,
             depth: 0,
+            user_id: None,
+            org_id: None,
+            space_id: None,
         }
     }
 

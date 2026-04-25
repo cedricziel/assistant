@@ -158,6 +158,9 @@ pub async fn handle_request(
                 interactive: false,
                 allowed_tools: None,
                 depth: 0,
+                user_id: None,
+                org_id: None,
+                space_id: None,
             };
 
             match executor.execute(&tool_name, params, &ctx).await {

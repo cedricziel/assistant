@@ -448,6 +448,9 @@ impl SubagentRunner for Orchestrator {
                                 interactive: false,
                                 allowed_tools: allowed_tools.clone(),
                                 depth: new_depth,
+                                user_id: None,
+                                org_id: None,
+                                space_id: None,
                             };
 
                             let start = std::time::Instant::now();
