@@ -270,6 +270,7 @@ impl LlmProvider for MoonshotProvider {
             streaming: true,
             vision: true,
             hosted_tools,
+            context_window_tokens: Some(262_144),
         }
     }
 

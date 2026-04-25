@@ -234,6 +234,24 @@ impl Orchestrator {
     ) -> Self {
         let memory_loader = MemoryLoader::new(config);
         memory_loader.ensure_defaults();
+
+        // Use the provider's reported context window to configure compaction.
+        // If the provider reports a specific window, use the smaller of that
+        // and the user-configured value to avoid exceeding the model's limit.
+        let mut compaction_config = config.compaction.clone();
+        if let Some(provider_window) = llm.capabilities().context_window_tokens {
+            let effective = provider_window.min(compaction_config.context_window_tokens);
+            if effective != compaction_config.context_window_tokens {
+                info!(
+                    config_window = compaction_config.context_window_tokens,
+                    provider_window,
+                    effective,
+                    "Adjusting compaction context_window_tokens to match provider limit"
+                );
+            }
+            compaction_config.context_window_tokens = effective;
+        }
+
         Self {
             llm,
             storage,
@@ -250,7 +268,7 @@ impl Orchestrator {
             turn_cancellations: tokio::sync::RwLock::new(HashMap::new()),
             metrics: crate::MetricsRecorder::new(),
             agent_id: config.agent.id.clone(),
-            compaction_config: config.compaction.clone(),
+            compaction_config,
             submit_timeout_secs: 10_800,
             adapter_registry: crate::AdapterRegistry::new(),
             audio_store: None,
@@ -559,10 +577,11 @@ impl Orchestrator {
             debug!(iteration, "Extension-tools loop iteration");
 
             // Pre-call compaction: compact before sending to the LLM so we
-            // never exceed the context window on the call itself.  Use the
-            // token estimator as a fallback when we have no prior metadata.
+            // never exceed the context window on the call itself.  Uses the
+            // total estimator (history + system prompt + tool specs).
             {
-                let estimated = crate::compaction::estimate_tokens(&history);
+                let estimated =
+                    crate::compaction::estimate_total_tokens(&system_prompt, &history, &all_specs);
                 if crate::compaction::should_compact(estimated, &self.compaction_config) {
                     crate::compaction::maybe_compact(
                         &mut history,
@@ -573,6 +592,15 @@ impl Orchestrator {
                     .await;
                 }
             }
+
+            // Hard-truncate as a safety net: if the estimate still exceeds the
+            // hard limit after compaction, drop oldest messages.
+            crate::compaction::hard_truncate(
+                &system_prompt,
+                &mut history,
+                &all_specs,
+                &self.compaction_config,
+            );
 
             let ctx = ExecutionContext {
                 conversation_id,
@@ -937,9 +965,11 @@ impl Orchestrator {
             let iteration_span = info_span!("turn_iteration", iteration);
             debug!(parent: &iteration_span, iteration, "Tool-calling loop iteration");
 
-            // Pre-call compaction using the token estimator.
+            // Pre-call compaction using the total token estimator (includes
+            // system prompt and tool specs for a more accurate picture).
             {
-                let estimated = crate::compaction::estimate_tokens(&history);
+                let estimated =
+                    crate::compaction::estimate_total_tokens(&system_prompt, &history, &tool_specs);
                 if crate::compaction::should_compact(estimated, &self.compaction_config) {
                     crate::compaction::maybe_compact(
                         &mut history,
@@ -950,6 +980,16 @@ impl Orchestrator {
                     .await;
                 }
             }
+
+            // Hard-truncate as a safety net: if the estimate still exceeds the
+            // hard limit after compaction (e.g. a single huge tool result),
+            // drop oldest messages to avoid a 400 from the provider.
+            crate::compaction::hard_truncate(
+                &system_prompt,
+                &mut history,
+                &tool_specs,
+                &self.compaction_config,
+            );
 
             let ctx = ExecutionContext {
                 conversation_id,

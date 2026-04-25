@@ -33,6 +33,12 @@ pub struct Capabilities {
     pub vision: bool,
     /// Hosted tools supplied directly by the provider (e.g. Anthropic web search).
     pub hosted_tools: Vec<HostedTool>,
+    /// The model's context window size in tokens, if known.
+    ///
+    /// When set, the orchestrator uses this to override the default compaction
+    /// `context_window_tokens` so that history compaction triggers at the right
+    /// threshold for the actual model being used.
+    pub context_window_tokens: Option<u64>,
 }
 
 /// Provider-managed tools that should suppress local equivalents.

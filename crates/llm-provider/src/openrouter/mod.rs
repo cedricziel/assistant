@@ -100,6 +100,7 @@ impl LlmProvider for OpenRouterProvider {
             // handles multimodal content blocks regardless.
             vision: true,
             hosted_tools: vec![],
+            context_window_tokens: None, // varies by model
         }
     }
 

@@ -54,6 +54,70 @@ pub fn estimate_tokens(history: &[ChatHistoryMessage]) -> u64 {
     (chars / 4) as u64
 }
 
+/// Estimate total input tokens including the system prompt and tool specs.
+///
+/// The basic `estimate_tokens` only counts history characters. The actual
+/// request also includes the system prompt and tool definitions, which can
+/// add tens of thousands of tokens. This function provides a more accurate
+/// pre-call estimate.
+pub fn estimate_total_tokens(
+    system_prompt: &str,
+    history: &[ChatHistoryMessage],
+    tool_specs: &[assistant_core::ToolSpec],
+) -> u64 {
+    let history_chars: usize = history.iter().map(message_estimated_chars).sum();
+    let system_chars = system_prompt.len();
+    let tool_chars: usize = tool_specs
+        .iter()
+        .map(|t| t.name.len() + t.description.len() + t.params_schema.to_string().len())
+        .sum();
+    ((history_chars + system_chars + tool_chars) / 4) as u64
+}
+
+/// Hard-truncate history by dropping the oldest messages when the estimated
+/// token count exceeds the hard limit (`context_window - reserve_floor`).
+///
+/// Unlike soft compaction (which summarises old turns via an LLM call), this
+/// is a synchronous, zero-cost safety net that prevents sending an
+/// over-limit request. It drops whole messages from the front of the
+/// history until the estimate fits.
+///
+/// Returns `true` if any messages were dropped.
+pub fn hard_truncate(
+    system_prompt: &str,
+    history: &mut Vec<ChatHistoryMessage>,
+    tool_specs: &[assistant_core::ToolSpec],
+    cfg: &CompactionConfig,
+) -> bool {
+    let hard_limit = cfg
+        .context_window_tokens
+        .saturating_sub(cfg.reserve_floor_tokens);
+
+    if hard_limit == 0 {
+        return false;
+    }
+
+    let initial_len = history.len();
+    while history.len() > 1 {
+        let estimated = estimate_total_tokens(system_prompt, history, tool_specs);
+        if estimated < hard_limit {
+            break;
+        }
+        // Drop the oldest message.
+        history.remove(0);
+    }
+
+    let dropped = history.len() < initial_len;
+    if dropped {
+        let n = initial_len - history.len();
+        warn!(
+            dropped_messages = n,
+            hard_limit, "Hard-truncated {n} oldest messages to fit within context window"
+        );
+    }
+    dropped
+}
+
 /// Estimate character count for a message, including binary payload sizes for
 /// image/document blocks that `message_text` would skip.
 fn message_estimated_chars(msg: &ChatHistoryMessage) -> usize {
@@ -520,5 +584,92 @@ mod tests {
                 .saturating_sub(default_cfg.reserve_floor_tokens)
                 .saturating_sub(default_cfg.soft_threshold_tokens),
         );
+    }
+
+    #[test]
+    fn estimate_total_tokens_includes_system_and_tools() {
+        let history = vec![ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "a".repeat(400),
+        }];
+        let system_prompt = "b".repeat(200);
+        let tools = vec![assistant_core::ToolSpec {
+            name: "test-tool".into(),
+            description: "A test tool".into(),
+            params_schema: serde_json::json!({"type": "object"}),
+            is_mutating: false,
+            requires_confirmation: false,
+        }];
+
+        let history_only = estimate_tokens(&history);
+        let total = estimate_total_tokens(&system_prompt, &history, &tools);
+
+        assert!(
+            total > history_only,
+            "total estimate ({total}) should be larger than history-only ({history_only})"
+        );
+    }
+
+    #[test]
+    fn hard_truncate_drops_messages_when_over_limit() {
+        // Context window = 1000 tokens, reserve = 200 → hard limit = 800 tokens.
+        // Each message is 400 chars = 100 estimated tokens.
+        let c = cfg(true, 1_000, 200, 100, 2);
+        let mut history: Vec<ChatHistoryMessage> = (0..10)
+            .map(|i| ChatHistoryMessage::Text {
+                role: if i % 2 == 0 {
+                    ChatRole::User
+                } else {
+                    ChatRole::Assistant
+                },
+                content: "x".repeat(400),
+            })
+            .collect();
+
+        // 10 messages × 100 tokens = 1000 tokens > 800 hard limit
+        let dropped = hard_truncate("", &mut history, &[], &c);
+        assert!(dropped, "should have dropped messages");
+        assert!(
+            history.len() < 10,
+            "should have fewer messages after truncation"
+        );
+
+        // The remaining history should fit within the hard limit.
+        let remaining_estimate = estimate_total_tokens("", &history, &[]);
+        assert!(
+            remaining_estimate < 800,
+            "remaining estimate ({remaining_estimate}) should be below hard limit (800)"
+        );
+    }
+
+    #[test]
+    fn hard_truncate_noop_when_under_limit() {
+        let c = cfg(true, 200_000, 20_000, 30_000, 10);
+        let mut history = vec![
+            ChatHistoryMessage::Text {
+                role: ChatRole::User,
+                content: "hello".into(),
+            },
+            ChatHistoryMessage::Text {
+                role: ChatRole::Assistant,
+                content: "hi there".into(),
+            },
+        ];
+        let original_len = history.len();
+        let dropped = hard_truncate("system prompt", &mut history, &[], &c);
+        assert!(!dropped, "should not have dropped any messages");
+        assert_eq!(history.len(), original_len);
+    }
+
+    #[test]
+    fn hard_truncate_preserves_at_least_one_message() {
+        // Even when a single message exceeds the limit, we keep at least 1.
+        let c = cfg(true, 100, 50, 10, 1);
+        let mut history = vec![ChatHistoryMessage::Text {
+            role: ChatRole::User,
+            content: "x".repeat(10_000),
+        }];
+        hard_truncate("", &mut history, &[], &c);
+        assert_eq!(history.len(), 1, "should keep at least one message");
     }
 }
