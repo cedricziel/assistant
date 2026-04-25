@@ -256,7 +256,7 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 ///
 /// - `assistant.db` → `orgs/default/spaces/default/space.db` (verbatim copy;
 ///   existing space-level migrations will apply on next startup).
-/// - Creates `orgs/default/org.db` with org schema populated with:
+/// - Creates `org.db` (at the installation root) with org schema populated with:
 ///   - Default organization row
 ///   - Default space row
 ///   - Admin user (see [`create_admin_user`])
@@ -292,8 +292,9 @@ pub async fn migrate_database(base_path: &Path) -> Result<()> {
         }
     }
 
-    // Create org.db via OrgStorageLayer (runs org migrations).
-    let org_db_path = org_dir.join("org.db");
+    // Create org.db at the installation root (next to assistant.db) so the
+    // web-ui startup path finds it at `db_path.with_file_name("org.db")`.
+    let org_db_path = base_path.join("org.db");
     let org_storage = crate::org_storage::OrgStorageLayer::new(&org_db_path)
         .await
         .context("creating org.db")?;
@@ -730,8 +731,8 @@ enabled = true
             "space.db should be created by copying assistant.db"
         );
 
-        let org_db = dir.path().join("orgs/default/org.db");
-        assert!(org_db.exists(), "org.db should be created with org schema");
+        let org_db = dir.path().join("org.db");
+        assert!(org_db.exists(), "org.db should be created at install root");
 
         // Verify org.db has a default organization.
         let org_storage = crate::org_storage::OrgStorageLayer::new(&org_db)
@@ -858,11 +859,10 @@ enabled = true
             "persona should survive migration to space.db"
         );
 
-        // org.db has the admin user.
-        let org_storage =
-            crate::org_storage::OrgStorageLayer::new(&dir.path().join("orgs/default/org.db"))
-                .await
-                .unwrap();
+        // org.db (at install root) has the admin user.
+        let org_storage = crate::org_storage::OrgStorageLayer::new(&dir.path().join("org.db"))
+            .await
+            .unwrap();
         let orgs = org_storage.org_store().list_orgs().await.unwrap();
         let users = org_storage
             .user_store()
