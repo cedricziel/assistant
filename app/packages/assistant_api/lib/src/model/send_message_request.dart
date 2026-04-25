@@ -20,7 +20,8 @@ part 'send_message_request.g.dart';
 /// * [metadata] - Additional context or parameters.
 /// * [tenant] - Optional tenant ID.
 @BuiltValue()
-abstract class SendMessageRequest implements Built<SendMessageRequest, SendMessageRequestBuilder> {
+abstract class SendMessageRequest
+    implements Built<SendMessageRequest, SendMessageRequestBuilder> {
   /// Configuration for the send request.
   @BuiltValueField(wireName: r'configuration')
   SendMessageConfiguration? get configuration;
@@ -39,16 +40,19 @@ abstract class SendMessageRequest implements Built<SendMessageRequest, SendMessa
 
   SendMessageRequest._();
 
-  factory SendMessageRequest([void updates(SendMessageRequestBuilder b)]) = _$SendMessageRequest;
+  factory SendMessageRequest([void updates(SendMessageRequestBuilder b)]) =
+      _$SendMessageRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SendMessageRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SendMessageRequest> get serializer => _$SendMessageRequestSerializer();
+  static Serializer<SendMessageRequest> get serializer =>
+      _$SendMessageRequestSerializer();
 }
 
-class _$SendMessageRequestSerializer implements PrimitiveSerializer<SendMessageRequest> {
+class _$SendMessageRequestSerializer
+    implements PrimitiveSerializer<SendMessageRequest> {
   @override
   final Iterable<Type> types = const [SendMessageRequest, _$SendMessageRequest];
 
@@ -76,7 +80,8 @@ class _$SendMessageRequestSerializer implements PrimitiveSerializer<SendMessageR
       yield r'metadata';
       yield serializers.serialize(
         object.metadata,
-        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(
+            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     if (object.tenant != null) {
@@ -94,7 +99,9 @@ class _$SendMessageRequestSerializer implements PrimitiveSerializer<SendMessageR
     SendMessageRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -127,7 +134,8 @@ class _$SendMessageRequestSerializer implements PrimitiveSerializer<SendMessageR
         case r'metadata':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(
+                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.metadata.replace(valueDes);
@@ -168,4 +176,3 @@ class _$SendMessageRequestSerializer implements PrimitiveSerializer<SendMessageR
     return result.build();
   }
 }
-

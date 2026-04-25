@@ -33,6 +33,7 @@ pub struct DeviceInitiateRequest {
     request_body(content = DeviceInitiateRequest, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "Device code issued", body = DeviceCodeResponseSchema),
+        (status = 400, description = "Invalid request"),
         (status = 500, description = "Server error", body = OAuthErrorResponse),
     )
 )]
@@ -76,6 +77,7 @@ pub struct VerifyQuery {
     params(VerifyQuery),
     responses(
         (status = 200, description = "Device verification form HTML"),
+        (status = 400, description = "Bad request"),
     )
 )]
 pub async fn device_verify_page(Query(params): Query<VerifyQuery>) -> impl IntoResponse {

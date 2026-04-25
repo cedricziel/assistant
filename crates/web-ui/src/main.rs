@@ -764,6 +764,19 @@ async fn run_with_args(args: Args) -> Result<()> {
         org_storage: org_storage.clone(),
     };
     let api_keys_api_state = api::api_keys::ApiKeysApiState { api_key_store };
+    let catalog_api_state = api::catalog::CatalogApiState {
+        org_storage: org_storage.clone(),
+    };
+    let interfaces_api_state = api::interfaces::InterfacesApiState {
+        org_storage: org_storage.clone(),
+    };
+    let bindings_api_state = api::bindings::BindingsApiState {
+        org_storage: org_storage.clone(),
+    };
+    let templates_api_state = api::templates::TemplatesApiState {
+        org_storage: org_storage.clone(),
+        pool: storage.pool.clone(),
+    };
 
     // -- Router: public routes (no auth required) --------------------------
     let public_routes = Router::new()
@@ -804,6 +817,10 @@ async fn run_with_args(args: Args) -> Result<()> {
                 .merge(api::spaces::spaces_api_router().with_state(spaces_api_state))
                 .merge(api::members::members_api_router().with_state(members_api_state))
                 .merge(api::api_keys::api_keys_router().with_state(api_keys_api_state))
+                .merge(api::catalog::catalog_api_router().with_state(catalog_api_state))
+                .merge(api::interfaces::interfaces_api_router().with_state(interfaces_api_state))
+                .merge(api::bindings::bindings_api_router().with_state(bindings_api_state))
+                .merge(api::templates::templates_api_router().with_state(templates_api_state))
                 .merge(
                     push_api_state
                         .map(|s| push_api_router().with_state(s))

@@ -21,7 +21,8 @@ part 'task_artifact_update_event.g.dart';
 /// * [metadata] - Metadata associated with the artifact update.
 /// * [taskId] - The ID of the task for this artifact.
 @BuiltValue()
-abstract class TaskArtifactUpdateEvent implements Built<TaskArtifactUpdateEvent, TaskArtifactUpdateEventBuilder> {
+abstract class TaskArtifactUpdateEvent
+    implements Built<TaskArtifactUpdateEvent, TaskArtifactUpdateEventBuilder> {
   /// If true, append content to a previously sent artifact with the same ID.
   @BuiltValueField(wireName: r'append')
   bool? get append;
@@ -48,18 +49,25 @@ abstract class TaskArtifactUpdateEvent implements Built<TaskArtifactUpdateEvent,
 
   TaskArtifactUpdateEvent._();
 
-  factory TaskArtifactUpdateEvent([void updates(TaskArtifactUpdateEventBuilder b)]) = _$TaskArtifactUpdateEvent;
+  factory TaskArtifactUpdateEvent(
+          [void updates(TaskArtifactUpdateEventBuilder b)]) =
+      _$TaskArtifactUpdateEvent;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(TaskArtifactUpdateEventBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<TaskArtifactUpdateEvent> get serializer => _$TaskArtifactUpdateEventSerializer();
+  static Serializer<TaskArtifactUpdateEvent> get serializer =>
+      _$TaskArtifactUpdateEventSerializer();
 }
 
-class _$TaskArtifactUpdateEventSerializer implements PrimitiveSerializer<TaskArtifactUpdateEvent> {
+class _$TaskArtifactUpdateEventSerializer
+    implements PrimitiveSerializer<TaskArtifactUpdateEvent> {
   @override
-  final Iterable<Type> types = const [TaskArtifactUpdateEvent, _$TaskArtifactUpdateEvent];
+  final Iterable<Type> types = const [
+    TaskArtifactUpdateEvent,
+    _$TaskArtifactUpdateEvent
+  ];
 
   @override
   final String wireName = r'TaskArtifactUpdateEvent';
@@ -97,7 +105,8 @@ class _$TaskArtifactUpdateEventSerializer implements PrimitiveSerializer<TaskArt
       yield r'metadata';
       yield serializers.serialize(
         object.metadata,
-        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(
+            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     yield r'taskId';
@@ -113,7 +122,9 @@ class _$TaskArtifactUpdateEventSerializer implements PrimitiveSerializer<TaskArt
     TaskArtifactUpdateEvent object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -159,7 +170,8 @@ class _$TaskArtifactUpdateEventSerializer implements PrimitiveSerializer<TaskArt
         case r'metadata':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(
+                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.metadata.replace(valueDes);
@@ -199,4 +211,3 @@ class _$TaskArtifactUpdateEventSerializer implements PrimitiveSerializer<TaskArt
     return result.build();
   }
 }
-

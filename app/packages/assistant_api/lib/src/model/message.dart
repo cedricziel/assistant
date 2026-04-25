@@ -104,7 +104,8 @@ class _$MessageSerializer implements PrimitiveSerializer<Message> {
       yield r'metadata';
       yield serializers.serialize(
         object.metadata,
-        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(
+            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     yield r'parts';
@@ -139,7 +140,9 @@ class _$MessageSerializer implements PrimitiveSerializer<Message> {
     Message object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -179,7 +182,8 @@ class _$MessageSerializer implements PrimitiveSerializer<Message> {
         case r'metadata':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(
+                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.metadata.replace(valueDes);
@@ -241,4 +245,3 @@ class _$MessageSerializer implements PrimitiveSerializer<Message> {
     return result.build();
   }
 }
-

@@ -12,16 +12,17 @@ part 'workflow_run_summary.g.dart';
 /// Single workflow run.
 ///
 /// Properties:
-/// * [errorMessage] 
-/// * [finishedAt] 
-/// * [id] 
-/// * [startedAt] 
-/// * [status] 
-/// * [triggerPayload] 
-/// * [triggerType] 
-/// * [workflowId] 
+/// * [errorMessage]
+/// * [finishedAt]
+/// * [id]
+/// * [startedAt]
+/// * [status]
+/// * [triggerPayload]
+/// * [triggerType]
+/// * [workflowId]
 @BuiltValue()
-abstract class WorkflowRunSummary implements Built<WorkflowRunSummary, WorkflowRunSummaryBuilder> {
+abstract class WorkflowRunSummary
+    implements Built<WorkflowRunSummary, WorkflowRunSummaryBuilder> {
   @BuiltValueField(wireName: r'error_message')
   String? get errorMessage;
 
@@ -48,16 +49,19 @@ abstract class WorkflowRunSummary implements Built<WorkflowRunSummary, WorkflowR
 
   WorkflowRunSummary._();
 
-  factory WorkflowRunSummary([void updates(WorkflowRunSummaryBuilder b)]) = _$WorkflowRunSummary;
+  factory WorkflowRunSummary([void updates(WorkflowRunSummaryBuilder b)]) =
+      _$WorkflowRunSummary;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WorkflowRunSummaryBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WorkflowRunSummary> get serializer => _$WorkflowRunSummarySerializer();
+  static Serializer<WorkflowRunSummary> get serializer =>
+      _$WorkflowRunSummarySerializer();
 }
 
-class _$WorkflowRunSummarySerializer implements PrimitiveSerializer<WorkflowRunSummary> {
+class _$WorkflowRunSummarySerializer
+    implements PrimitiveSerializer<WorkflowRunSummary> {
   @override
   final Iterable<Type> types = const [WorkflowRunSummary, _$WorkflowRunSummary];
 
@@ -99,10 +103,12 @@ class _$WorkflowRunSummarySerializer implements PrimitiveSerializer<WorkflowRunS
       specifiedType: const FullType(String),
     );
     yield r'trigger_payload';
-    yield object.triggerPayload == null ? null : serializers.serialize(
-      object.triggerPayload,
-      specifiedType: const FullType.nullable(JsonObject),
-    );
+    yield object.triggerPayload == null
+        ? null
+        : serializers.serialize(
+            object.triggerPayload,
+            specifiedType: const FullType.nullable(JsonObject),
+          );
     yield r'trigger_type';
     yield serializers.serialize(
       object.triggerType,
@@ -121,7 +127,9 @@ class _$WorkflowRunSummarySerializer implements PrimitiveSerializer<WorkflowRunS
     WorkflowRunSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -223,4 +231,3 @@ class _$WorkflowRunSummarySerializer implements PrimitiveSerializer<WorkflowRunS
     return result.build();
   }
 }
-

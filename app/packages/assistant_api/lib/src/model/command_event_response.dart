@@ -17,9 +17,10 @@ part 'command_event_response.g.dart';
 /// * [createdAt] - When the event was created.
 /// * [eventType] - Event type (always `\"command\"` for now).
 /// * [id] - Unique event ID.
-/// * [payload] 
+/// * [payload]
 @BuiltValue()
-abstract class CommandEventResponse implements Built<CommandEventResponse, CommandEventResponseBuilder> {
+abstract class CommandEventResponse
+    implements Built<CommandEventResponse, CommandEventResponseBuilder> {
   /// Acknowledgement text returned by the command.
   @BuiltValueField(wireName: r'ack_text')
   String? get ackText;
@@ -45,18 +46,24 @@ abstract class CommandEventResponse implements Built<CommandEventResponse, Comma
 
   CommandEventResponse._();
 
-  factory CommandEventResponse([void updates(CommandEventResponseBuilder b)]) = _$CommandEventResponse;
+  factory CommandEventResponse([void updates(CommandEventResponseBuilder b)]) =
+      _$CommandEventResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(CommandEventResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<CommandEventResponse> get serializer => _$CommandEventResponseSerializer();
+  static Serializer<CommandEventResponse> get serializer =>
+      _$CommandEventResponseSerializer();
 }
 
-class _$CommandEventResponseSerializer implements PrimitiveSerializer<CommandEventResponse> {
+class _$CommandEventResponseSerializer
+    implements PrimitiveSerializer<CommandEventResponse> {
   @override
-  final Iterable<Type> types = const [CommandEventResponse, _$CommandEventResponse];
+  final Iterable<Type> types = const [
+    CommandEventResponse,
+    _$CommandEventResponse
+  ];
 
   @override
   final String wireName = r'CommandEventResponse';
@@ -108,7 +115,9 @@ class _$CommandEventResponseSerializer implements PrimitiveSerializer<CommandEve
     CommandEventResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -195,4 +204,3 @@ class _$CommandEventResponseSerializer implements PrimitiveSerializer<CommandEve
     return result.build();
   }
 }
-

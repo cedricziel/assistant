@@ -15,7 +15,8 @@ part 'execute_command_request.g.dart';
 /// * [args] - Optional command arguments.
 /// * [command] - Command name without the leading `/` (e.g. `\"model\"`).
 @BuiltValue()
-abstract class ExecuteCommandRequest implements Built<ExecuteCommandRequest, ExecuteCommandRequestBuilder> {
+abstract class ExecuteCommandRequest
+    implements Built<ExecuteCommandRequest, ExecuteCommandRequestBuilder> {
   /// Optional command arguments.
   @BuiltValueField(wireName: r'args')
   BuiltList<String>? get args;
@@ -26,18 +27,24 @@ abstract class ExecuteCommandRequest implements Built<ExecuteCommandRequest, Exe
 
   ExecuteCommandRequest._();
 
-  factory ExecuteCommandRequest([void updates(ExecuteCommandRequestBuilder b)]) = _$ExecuteCommandRequest;
+  factory ExecuteCommandRequest(
+      [void updates(ExecuteCommandRequestBuilder b)]) = _$ExecuteCommandRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ExecuteCommandRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ExecuteCommandRequest> get serializer => _$ExecuteCommandRequestSerializer();
+  static Serializer<ExecuteCommandRequest> get serializer =>
+      _$ExecuteCommandRequestSerializer();
 }
 
-class _$ExecuteCommandRequestSerializer implements PrimitiveSerializer<ExecuteCommandRequest> {
+class _$ExecuteCommandRequestSerializer
+    implements PrimitiveSerializer<ExecuteCommandRequest> {
   @override
-  final Iterable<Type> types = const [ExecuteCommandRequest, _$ExecuteCommandRequest];
+  final Iterable<Type> types = const [
+    ExecuteCommandRequest,
+    _$ExecuteCommandRequest
+  ];
 
   @override
   final String wireName = r'ExecuteCommandRequest';
@@ -67,7 +74,9 @@ class _$ExecuteCommandRequestSerializer implements PrimitiveSerializer<ExecuteCo
     ExecuteCommandRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -124,4 +133,3 @@ class _$ExecuteCommandRequestSerializer implements PrimitiveSerializer<ExecuteCo
     return result.build();
   }
 }
-

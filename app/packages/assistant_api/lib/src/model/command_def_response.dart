@@ -18,7 +18,8 @@ part 'command_def_response.g.dart';
 /// * [description] - One-line description.
 /// * [name] - Command name without the leading `/`.
 @BuiltValue()
-abstract class CommandDefResponse implements Built<CommandDefResponse, CommandDefResponseBuilder> {
+abstract class CommandDefResponse
+    implements Built<CommandDefResponse, CommandDefResponseBuilder> {
   /// Argument definitions.
   @BuiltValueField(wireName: r'args')
   BuiltList<CommandArgResponse> get args;
@@ -37,16 +38,19 @@ abstract class CommandDefResponse implements Built<CommandDefResponse, CommandDe
 
   CommandDefResponse._();
 
-  factory CommandDefResponse([void updates(CommandDefResponseBuilder b)]) = _$CommandDefResponse;
+  factory CommandDefResponse([void updates(CommandDefResponseBuilder b)]) =
+      _$CommandDefResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(CommandDefResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<CommandDefResponse> get serializer => _$CommandDefResponseSerializer();
+  static Serializer<CommandDefResponse> get serializer =>
+      _$CommandDefResponseSerializer();
 }
 
-class _$CommandDefResponseSerializer implements PrimitiveSerializer<CommandDefResponse> {
+class _$CommandDefResponseSerializer
+    implements PrimitiveSerializer<CommandDefResponse> {
   @override
   final Iterable<Type> types = const [CommandDefResponse, _$CommandDefResponse];
 
@@ -86,7 +90,9 @@ class _$CommandDefResponseSerializer implements PrimitiveSerializer<CommandDefRe
     CommandDefResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -104,7 +110,8 @@ class _$CommandDefResponseSerializer implements PrimitiveSerializer<CommandDefRe
         case r'args':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(CommandArgResponse)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(CommandArgResponse)]),
           ) as BuiltList<CommandArgResponse>;
           result.args.replace(valueDes);
           break;
@@ -157,4 +164,3 @@ class _$CommandDefResponseSerializer implements PrimitiveSerializer<CommandDefRe
     return result.build();
   }
 }
-

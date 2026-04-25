@@ -1,4 +1,5 @@
 mod cmd_backup;
+mod cmd_doctor;
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write as IoWrite};
@@ -117,6 +118,8 @@ enum Command {
     Backup(cmd_backup::BackupArgs),
     /// Restore the assistant installation from a backup archive.
     Restore(cmd_backup::RestoreArgs),
+    /// Diagnose installation health (config, database, providers, etc.).
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -1218,6 +1221,10 @@ async fn main() -> Result<()> {
 
     if let Some(Command::Webui { command }) = &cli.command {
         return cmd_webui(command).await;
+    }
+
+    if matches!(cli.command, Some(Command::Doctor)) {
+        return cmd_doctor::cmd_doctor(&config_path, &db_path, &config);
     }
 
     let (orchestrator_interfaces, orchestrator_no_repl) =

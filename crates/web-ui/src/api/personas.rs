@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -30,6 +30,7 @@ use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use tracing::warn;
 
+use assistant_core::auth::AuthContext;
 use assistant_core::validate_agent_id;
 
 // -- Constants ---------------------------------------------------------------
@@ -216,9 +217,12 @@ pub fn personas_router() -> Router<PersonaApiState> {
     ),
     security(("bearer_token" = []))
 )]
-pub async fn list_personas(State(state): State<PersonaApiState>) -> Response {
+pub async fn list_personas(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<PersonaApiState>,
+) -> Response {
     let store = assistant_storage::personas::PersonaStore::new(state.pool);
-    match store.list().await {
+    match store.list_accessible(&ctx.user_id.0).await {
         Ok(personas) => {
             let summaries: Vec<PersonaSummary> = personas
                 .into_iter()
@@ -253,6 +257,7 @@ pub async fn list_personas(State(state): State<PersonaApiState>) -> Response {
     security(("bearer_token" = []))
 )]
 pub async fn create_persona(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Json(body): Json<CreatePersonaRequest>,
 ) -> Response {
@@ -275,7 +280,7 @@ pub async fn create_persona(
     }
 
     let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
-    match store.create(&id, &name).await {
+    match store.create_owned(&id, &name, &ctx.user_id.0).await {
         Ok(p) => {
             let files: Vec<PersonaFileSlot> = PERSONA_FILE_SLOTS
                 .iter()
@@ -327,6 +332,7 @@ pub async fn create_persona(
     security(("bearer_token" = []))
 )]
 pub async fn set_active_persona(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Json(body): Json<SetActivePersonaRequest>,
 ) -> Response {
@@ -337,8 +343,8 @@ pub async fn set_active_persona(
 
     let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
 
-    // Verify the persona exists.
-    let persona = match store.get(&id).await {
+    // Verify the persona exists and is accessible to this user.
+    let persona = match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             return (
@@ -379,7 +385,11 @@ pub async fn set_active_persona(
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_persona(State(state): State<PersonaApiState>, Path(id): Path<String>) -> Response {
+pub async fn get_persona(
+    Extension(ctx): Extension<AuthContext>,
+    State(state): State<PersonaApiState>,
+    Path(id): Path<String>,
+) -> Response {
     if !validate_agent_id(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -389,7 +399,7 @@ pub async fn get_persona(State(state): State<PersonaApiState>, Path(id): Path<St
     }
 
     let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
-    let persona = match store.get(&id).await {
+    let persona = match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             return (
@@ -436,6 +446,7 @@ pub async fn get_persona(State(state): State<PersonaApiState>, Path(id): Path<St
     security(("bearer_token" = []))
 )]
 pub async fn get_persona_file(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Path((id, filename)): Path<(String, String)>,
 ) -> Response {
@@ -455,7 +466,7 @@ pub async fn get_persona_file(
     }
 
     let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
-    match store.get(&id).await {
+    match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -500,6 +511,7 @@ pub async fn get_persona_file(
     security(("bearer_token" = []))
 )]
 pub async fn put_persona_file(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Path((id, filename)): Path<(String, String)>,
     Json(body): Json<WritePersonaFileRequest>,
@@ -527,7 +539,7 @@ pub async fn put_persona_file(
     }
 
     let store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
-    match store.get(&id).await {
+    match store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -587,6 +599,7 @@ pub async fn put_persona_file(
     security(("bearer_token" = []))
 )]
 pub async fn get_skill_access(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Path(id): Path<String>,
 ) -> Response {
@@ -599,7 +612,7 @@ pub async fn get_skill_access(
     }
 
     let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
-    match persona_store.get(&id).await {
+    match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -641,6 +654,7 @@ pub async fn get_skill_access(
     security(("bearer_token" = []))
 )]
 pub async fn patch_skill_access_mode(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Path(id): Path<String>,
     Json(body): Json<SetSkillAccessModeRequest>,
@@ -663,7 +677,7 @@ pub async fn patch_skill_access_mode(
     }
 
     let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
-    match persona_store.get(&id).await {
+    match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -707,6 +721,7 @@ pub async fn patch_skill_access_mode(
     security(("bearer_token" = []))
 )]
 pub async fn add_skill_access(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Path(id): Path<String>,
     Json(body): Json<AddSkillAccessRequest>,
@@ -720,7 +735,7 @@ pub async fn add_skill_access(
     }
 
     let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
-    match persona_store.get(&id).await {
+    match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -770,6 +785,7 @@ pub async fn add_skill_access(
     security(("bearer_token" = []))
 )]
 pub async fn delete_skill_access(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<PersonaApiState>,
     Path((id, skill_name)): Path<(String, String)>,
 ) -> Response {
@@ -782,7 +798,7 @@ pub async fn delete_skill_access(
     }
 
     let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
-    match persona_store.get(&id).await {
+    match persona_store.get_accessible(&id, &ctx.user_id.0).await {
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -812,17 +828,32 @@ pub async fn delete_skill_access(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
+    use axum::Extension;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use tokio::sync::RwLock;
     use tower::ServiceExt;
 
+    use assistant_core::auth::AuthContext;
+    use assistant_core::identity::{OrgId, UserId};
     use assistant_storage::StorageLayer;
 
     use super::{PersonaApiState, personas_router};
+
+    fn make_test_ctx() -> AuthContext {
+        AuthContext {
+            user_id: UserId::from("test-user"),
+            org_id: OrgId::from("org_1"),
+            email: "test@test.local".into(),
+            space_roles: HashMap::new(),
+            scopes: vec![],
+            client_id: "test".into(),
+        }
+    }
 
     async fn test_state() -> (PersonaApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
@@ -835,7 +866,9 @@ mod tests {
     }
 
     fn app(state: PersonaApiState) -> axum::Router {
-        personas_router().with_state(state)
+        personas_router()
+            .with_state(state)
+            .layer(Extension(make_test_ctx()))
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -1328,5 +1361,85 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_persona_cross_user_denied() {
+        let (state, storage) = test_state().await;
+
+        // Create a persona owned by a different user.
+        storage
+            .persona_store()
+            .create_owned("secret-persona", "Secret", "other-user")
+            .await
+            .unwrap();
+
+        // The default test context is "test-user" — should not see "other-user"'s persona.
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/personas/secret-persona")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "accessing another user's persona must return 404"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_persona_org_owned_accessible() {
+        let (state, _) = test_state().await;
+
+        // The "default" persona has no owner_user_id (org-owned) — any user can access it.
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/personas/default")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "org-owned personas should be accessible to any user"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_active_persona_cross_user_denied() {
+        let (state, storage) = test_state().await;
+
+        storage
+            .persona_store()
+            .create_owned("other-persona", "Other", "other-user")
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/personas/active")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"id":"other-persona"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "activating another user's persona must be denied"
+        );
     }
 }

@@ -13,23 +13,27 @@ part 'vapid_key_response.g.dart';
 /// Properties:
 /// * [publicKey] - Base64url-encoded uncompressed P-256 public key (65 bytes). Pass this as `applicationServerKey` to `PushManager.subscribe()`.
 @BuiltValue()
-abstract class VapidKeyResponse implements Built<VapidKeyResponse, VapidKeyResponseBuilder> {
+abstract class VapidKeyResponse
+    implements Built<VapidKeyResponse, VapidKeyResponseBuilder> {
   /// Base64url-encoded uncompressed P-256 public key (65 bytes). Pass this as `applicationServerKey` to `PushManager.subscribe()`.
   @BuiltValueField(wireName: r'public_key')
   String get publicKey;
 
   VapidKeyResponse._();
 
-  factory VapidKeyResponse([void updates(VapidKeyResponseBuilder b)]) = _$VapidKeyResponse;
+  factory VapidKeyResponse([void updates(VapidKeyResponseBuilder b)]) =
+      _$VapidKeyResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(VapidKeyResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<VapidKeyResponse> get serializer => _$VapidKeyResponseSerializer();
+  static Serializer<VapidKeyResponse> get serializer =>
+      _$VapidKeyResponseSerializer();
 }
 
-class _$VapidKeyResponseSerializer implements PrimitiveSerializer<VapidKeyResponse> {
+class _$VapidKeyResponseSerializer
+    implements PrimitiveSerializer<VapidKeyResponse> {
   @override
   final Iterable<Type> types = const [VapidKeyResponse, _$VapidKeyResponse];
 
@@ -54,7 +58,9 @@ class _$VapidKeyResponseSerializer implements PrimitiveSerializer<VapidKeyRespon
     VapidKeyResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -104,4 +110,3 @@ class _$VapidKeyResponseSerializer implements PrimitiveSerializer<VapidKeyRespon
     return result.build();
   }
 }
-

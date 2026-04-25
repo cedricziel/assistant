@@ -11,10 +11,11 @@ part 'workflow_webhook_secrets.g.dart';
 /// Webhook URL and token for a workflow trigger.
 ///
 /// Properties:
-/// * [webhookToken] 
-/// * [webhookUrl] 
+/// * [webhookToken]
+/// * [webhookUrl]
 @BuiltValue()
-abstract class WorkflowWebhookSecrets implements Built<WorkflowWebhookSecrets, WorkflowWebhookSecretsBuilder> {
+abstract class WorkflowWebhookSecrets
+    implements Built<WorkflowWebhookSecrets, WorkflowWebhookSecretsBuilder> {
   @BuiltValueField(wireName: r'webhook_token')
   String get webhookToken;
 
@@ -23,18 +24,25 @@ abstract class WorkflowWebhookSecrets implements Built<WorkflowWebhookSecrets, W
 
   WorkflowWebhookSecrets._();
 
-  factory WorkflowWebhookSecrets([void updates(WorkflowWebhookSecretsBuilder b)]) = _$WorkflowWebhookSecrets;
+  factory WorkflowWebhookSecrets(
+          [void updates(WorkflowWebhookSecretsBuilder b)]) =
+      _$WorkflowWebhookSecrets;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WorkflowWebhookSecretsBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WorkflowWebhookSecrets> get serializer => _$WorkflowWebhookSecretsSerializer();
+  static Serializer<WorkflowWebhookSecrets> get serializer =>
+      _$WorkflowWebhookSecretsSerializer();
 }
 
-class _$WorkflowWebhookSecretsSerializer implements PrimitiveSerializer<WorkflowWebhookSecrets> {
+class _$WorkflowWebhookSecretsSerializer
+    implements PrimitiveSerializer<WorkflowWebhookSecrets> {
   @override
-  final Iterable<Type> types = const [WorkflowWebhookSecrets, _$WorkflowWebhookSecrets];
+  final Iterable<Type> types = const [
+    WorkflowWebhookSecrets,
+    _$WorkflowWebhookSecrets
+  ];
 
   @override
   final String wireName = r'WorkflowWebhookSecrets';
@@ -62,7 +70,9 @@ class _$WorkflowWebhookSecretsSerializer implements PrimitiveSerializer<Workflow
     WorkflowWebhookSecrets object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -119,4 +129,3 @@ class _$WorkflowWebhookSecretsSerializer implements PrimitiveSerializer<Workflow
     return result.build();
   }
 }
-

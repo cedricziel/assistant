@@ -11,11 +11,11 @@ part 'skill_detail.g.dart';
 /// Full skill detail returned by the API.
 ///
 /// Properties:
-/// * [body] 
-/// * [description] 
-/// * [isBuiltin] 
-/// * [name] 
-/// * [source_] 
+/// * [body]
+/// * [description]
+/// * [isBuiltin]
+/// * [name]
+/// * [source_]
 @BuiltValue()
 abstract class SkillDetail implements Built<SkillDetail, SkillDetailBuilder> {
   @BuiltValueField(wireName: r'body')
@@ -89,7 +89,9 @@ class _$SkillDetailSerializer implements PrimitiveSerializer<SkillDetail> {
     SkillDetail object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -167,4 +169,3 @@ class _$SkillDetailSerializer implements PrimitiveSerializer<SkillDetail> {
     return result.build();
   }
 }
-

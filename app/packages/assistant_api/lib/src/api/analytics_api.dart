@@ -12,7 +12,6 @@ import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/analytics_summary_response.dart';
 
 class AnalyticsApi {
-
   final Dio _dio;
 
   final Serializers _serializers;
@@ -20,7 +19,7 @@ class AnalyticsApi {
   const AnalyticsApi(this._dio, this._serializers);
 
   /// &#x60;GET /api/analytics&#x60; — get aggregated usage analytics for a time window.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [window] - Window in hours. Valid values: 1, 6, 24, 72, 168. Defaults to 24.
@@ -33,7 +32,7 @@ class AnalyticsApi {
   ///
   /// Returns a [Future] containing a [Response] with a [AnalyticsSummaryResponse] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<AnalyticsSummaryResponse>> getAnalytics({ 
+  Future<Response<AnalyticsSummaryResponse>> getAnalytics({
     int? window,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -62,7 +61,8 @@ class AnalyticsApi {
     );
 
     final _queryParameters = <String, dynamic>{
-      r'window': encodeQueryParameter(_serializers, window, const FullType(int)),
+      r'window':
+          encodeQueryParameter(_serializers, window, const FullType(int)),
     };
 
     final _response = await _dio.request<Object>(
@@ -78,11 +78,12 @@ class AnalyticsApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(AnalyticsSummaryResponse),
-      ) as AnalyticsSummaryResponse;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(AnalyticsSummaryResponse),
+            ) as AnalyticsSummaryResponse;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -104,5 +105,4 @@ class AnalyticsApi {
       extra: _response.extra,
     );
   }
-
 }

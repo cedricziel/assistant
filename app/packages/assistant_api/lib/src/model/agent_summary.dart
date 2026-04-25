@@ -11,15 +11,16 @@ part 'agent_summary.g.dart';
 /// A brief summary of a registered agent.
 ///
 /// Properties:
-/// * [description] 
-/// * [id] 
-/// * [interfaceCount] 
-/// * [isDefault] 
-/// * [name] 
-/// * [skillCount] 
-/// * [version] 
+/// * [description]
+/// * [id]
+/// * [interfaceCount]
+/// * [isDefault]
+/// * [name]
+/// * [skillCount]
+/// * [version]
 @BuiltValue()
-abstract class AgentSummary implements Built<AgentSummary, AgentSummaryBuilder> {
+abstract class AgentSummary
+    implements Built<AgentSummary, AgentSummaryBuilder> {
   @BuiltValueField(wireName: r'description')
   String get description;
 
@@ -107,7 +108,9 @@ class _$AgentSummarySerializer implements PrimitiveSerializer<AgentSummary> {
     AgentSummary object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -199,4 +202,3 @@ class _$AgentSummarySerializer implements PrimitiveSerializer<AgentSummary> {
     return result.build();
   }
 }
-

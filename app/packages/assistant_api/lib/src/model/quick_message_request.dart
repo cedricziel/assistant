@@ -15,7 +15,8 @@ part 'quick_message_request.g.dart';
 /// * [message] - The message text to send to the assistant.
 /// * [personaId] - Optional persona ID to route the message to a specific persona. When absent, the server's active persona is used.
 @BuiltValue()
-abstract class QuickMessageRequest implements Built<QuickMessageRequest, QuickMessageRequestBuilder> {
+abstract class QuickMessageRequest
+    implements Built<QuickMessageRequest, QuickMessageRequestBuilder> {
   /// Optional context text to include with the message (e.g. clipboard contents, file text).  Prepended to the user message for the LLM.
   @BuiltValueField(wireName: r'context')
   String? get context;
@@ -30,18 +31,24 @@ abstract class QuickMessageRequest implements Built<QuickMessageRequest, QuickMe
 
   QuickMessageRequest._();
 
-  factory QuickMessageRequest([void updates(QuickMessageRequestBuilder b)]) = _$QuickMessageRequest;
+  factory QuickMessageRequest([void updates(QuickMessageRequestBuilder b)]) =
+      _$QuickMessageRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(QuickMessageRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<QuickMessageRequest> get serializer => _$QuickMessageRequestSerializer();
+  static Serializer<QuickMessageRequest> get serializer =>
+      _$QuickMessageRequestSerializer();
 }
 
-class _$QuickMessageRequestSerializer implements PrimitiveSerializer<QuickMessageRequest> {
+class _$QuickMessageRequestSerializer
+    implements PrimitiveSerializer<QuickMessageRequest> {
   @override
-  final Iterable<Type> types = const [QuickMessageRequest, _$QuickMessageRequest];
+  final Iterable<Type> types = const [
+    QuickMessageRequest,
+    _$QuickMessageRequest
+  ];
 
   @override
   final String wireName = r'QuickMessageRequest';
@@ -78,7 +85,9 @@ class _$QuickMessageRequestSerializer implements PrimitiveSerializer<QuickMessag
     QuickMessageRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -144,4 +153,3 @@ class _$QuickMessageRequestSerializer implements PrimitiveSerializer<QuickMessag
     return result.build();
   }
 }
-

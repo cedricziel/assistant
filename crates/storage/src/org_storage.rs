@@ -94,6 +94,30 @@ impl OrgStorageLayer {
     pub fn device_code_store(&self) -> super::auth_state_store::SqliteDeviceCodeStore {
         super::auth_state_store::SqliteDeviceCodeStore::new(self.pool.clone())
     }
+
+    /// Build a [`SqliteCatalogItemStore`](super::catalog_item_store::SqliteCatalogItemStore).
+    pub fn catalog_item_store(&self) -> super::catalog_item_store::SqliteCatalogItemStore {
+        super::catalog_item_store::SqliteCatalogItemStore::new(self.pool.clone())
+    }
+
+    /// Build a [`SqliteCatalogSubscriptionStore`](super::catalog_item_store::SqliteCatalogSubscriptionStore).
+    pub fn catalog_subscription_store(
+        &self,
+    ) -> super::catalog_item_store::SqliteCatalogSubscriptionStore {
+        super::catalog_item_store::SqliteCatalogSubscriptionStore::new(self.pool.clone())
+    }
+
+    /// Build a [`SqliteInterfaceInstanceStore`](super::interface_instance_store::SqliteInterfaceInstanceStore).
+    pub fn interface_instance_store(
+        &self,
+    ) -> super::interface_instance_store::SqliteInterfaceInstanceStore {
+        super::interface_instance_store::SqliteInterfaceInstanceStore::new(self.pool.clone())
+    }
+
+    /// Build a [`SqliteBindingStore`](super::binding_store::SqliteBindingStore).
+    pub fn binding_store(&self) -> super::binding_store::SqliteBindingStore {
+        super::binding_store::SqliteBindingStore::new(self.pool.clone())
+    }
 }
 
 /// Run all org.db migrations in order.
@@ -127,6 +151,10 @@ async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
         (
             "003_api_keys",
             include_str!("../../../migrations/org/003_api_keys.sql"),
+        ),
+        (
+            "004_catalog_interfaces_bindings",
+            include_str!("../../../migrations/org/004_catalog_interfaces_bindings.sql"),
         ),
     ];
 

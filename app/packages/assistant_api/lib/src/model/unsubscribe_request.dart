@@ -13,23 +13,27 @@ part 'unsubscribe_request.g.dart';
 /// Properties:
 /// * [endpoint] - The push endpoint URL to remove.
 @BuiltValue()
-abstract class UnsubscribeRequest implements Built<UnsubscribeRequest, UnsubscribeRequestBuilder> {
+abstract class UnsubscribeRequest
+    implements Built<UnsubscribeRequest, UnsubscribeRequestBuilder> {
   /// The push endpoint URL to remove.
   @BuiltValueField(wireName: r'endpoint')
   String get endpoint;
 
   UnsubscribeRequest._();
 
-  factory UnsubscribeRequest([void updates(UnsubscribeRequestBuilder b)]) = _$UnsubscribeRequest;
+  factory UnsubscribeRequest([void updates(UnsubscribeRequestBuilder b)]) =
+      _$UnsubscribeRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(UnsubscribeRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<UnsubscribeRequest> get serializer => _$UnsubscribeRequestSerializer();
+  static Serializer<UnsubscribeRequest> get serializer =>
+      _$UnsubscribeRequestSerializer();
 }
 
-class _$UnsubscribeRequestSerializer implements PrimitiveSerializer<UnsubscribeRequest> {
+class _$UnsubscribeRequestSerializer
+    implements PrimitiveSerializer<UnsubscribeRequest> {
   @override
   final Iterable<Type> types = const [UnsubscribeRequest, _$UnsubscribeRequest];
 
@@ -54,7 +58,9 @@ class _$UnsubscribeRequestSerializer implements PrimitiveSerializer<UnsubscribeR
     UnsubscribeRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -104,4 +110,3 @@ class _$UnsubscribeRequestSerializer implements PrimitiveSerializer<UnsubscribeR
     return result.build();
   }
 }
-

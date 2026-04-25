@@ -11,26 +11,33 @@ part 'rotate_secret_response.g.dart';
 /// Response after rotating a webhook secret.
 ///
 /// Properties:
-/// * [secret] 
+/// * [secret]
 @BuiltValue()
-abstract class RotateSecretResponse implements Built<RotateSecretResponse, RotateSecretResponseBuilder> {
+abstract class RotateSecretResponse
+    implements Built<RotateSecretResponse, RotateSecretResponseBuilder> {
   @BuiltValueField(wireName: r'secret')
   String get secret;
 
   RotateSecretResponse._();
 
-  factory RotateSecretResponse([void updates(RotateSecretResponseBuilder b)]) = _$RotateSecretResponse;
+  factory RotateSecretResponse([void updates(RotateSecretResponseBuilder b)]) =
+      _$RotateSecretResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(RotateSecretResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<RotateSecretResponse> get serializer => _$RotateSecretResponseSerializer();
+  static Serializer<RotateSecretResponse> get serializer =>
+      _$RotateSecretResponseSerializer();
 }
 
-class _$RotateSecretResponseSerializer implements PrimitiveSerializer<RotateSecretResponse> {
+class _$RotateSecretResponseSerializer
+    implements PrimitiveSerializer<RotateSecretResponse> {
   @override
-  final Iterable<Type> types = const [RotateSecretResponse, _$RotateSecretResponse];
+  final Iterable<Type> types = const [
+    RotateSecretResponse,
+    _$RotateSecretResponse
+  ];
 
   @override
   final String wireName = r'RotateSecretResponse';
@@ -53,7 +60,9 @@ class _$RotateSecretResponseSerializer implements PrimitiveSerializer<RotateSecr
     RotateSecretResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -103,4 +112,3 @@ class _$RotateSecretResponseSerializer implements PrimitiveSerializer<RotateSecr
     return result.build();
   }
 }
-

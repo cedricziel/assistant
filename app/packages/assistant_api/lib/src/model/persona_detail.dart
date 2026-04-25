@@ -13,16 +13,17 @@ part 'persona_detail.g.dart';
 /// Full persona detail including file slot inventory.
 ///
 /// Properties:
-/// * [createdAt] 
-/// * [files] 
-/// * [id] 
-/// * [isDefault] 
-/// * [name] 
-/// * [skillAccessMode] 
-/// * [turnTimeoutSecs] 
-/// * [updatedAt] 
+/// * [createdAt]
+/// * [files]
+/// * [id]
+/// * [isDefault]
+/// * [name]
+/// * [skillAccessMode]
+/// * [turnTimeoutSecs]
+/// * [updatedAt]
 @BuiltValue()
-abstract class PersonaDetail implements Built<PersonaDetail, PersonaDetailBuilder> {
+abstract class PersonaDetail
+    implements Built<PersonaDetail, PersonaDetailBuilder> {
   @BuiltValueField(wireName: r'created_at')
   String get createdAt;
 
@@ -49,13 +50,15 @@ abstract class PersonaDetail implements Built<PersonaDetail, PersonaDetailBuilde
 
   PersonaDetail._();
 
-  factory PersonaDetail([void updates(PersonaDetailBuilder b)]) = _$PersonaDetail;
+  factory PersonaDetail([void updates(PersonaDetailBuilder b)]) =
+      _$PersonaDetail;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(PersonaDetailBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<PersonaDetail> get serializer => _$PersonaDetailSerializer();
+  static Serializer<PersonaDetail> get serializer =>
+      _$PersonaDetailSerializer();
 }
 
 class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
@@ -120,7 +123,9 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
     PersonaDetail object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -145,7 +150,8 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
         case r'files':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(PersonaFileSlot)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(PersonaFileSlot)]),
           ) as BuiltList<PersonaFileSlot>;
           result.files.replace(valueDes);
           break;
@@ -220,4 +226,3 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
     return result.build();
   }
 }
-

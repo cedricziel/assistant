@@ -11,10 +11,11 @@ part 'verify_webhook_response.g.dart';
 /// Response after attempting webhook verification.
 ///
 /// Properties:
-/// * [detail] 
-/// * [success] 
+/// * [detail]
+/// * [success]
 @BuiltValue()
-abstract class VerifyWebhookResponse implements Built<VerifyWebhookResponse, VerifyWebhookResponseBuilder> {
+abstract class VerifyWebhookResponse
+    implements Built<VerifyWebhookResponse, VerifyWebhookResponseBuilder> {
   @BuiltValueField(wireName: r'detail')
   String get detail;
 
@@ -23,18 +24,24 @@ abstract class VerifyWebhookResponse implements Built<VerifyWebhookResponse, Ver
 
   VerifyWebhookResponse._();
 
-  factory VerifyWebhookResponse([void updates(VerifyWebhookResponseBuilder b)]) = _$VerifyWebhookResponse;
+  factory VerifyWebhookResponse(
+      [void updates(VerifyWebhookResponseBuilder b)]) = _$VerifyWebhookResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(VerifyWebhookResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<VerifyWebhookResponse> get serializer => _$VerifyWebhookResponseSerializer();
+  static Serializer<VerifyWebhookResponse> get serializer =>
+      _$VerifyWebhookResponseSerializer();
 }
 
-class _$VerifyWebhookResponseSerializer implements PrimitiveSerializer<VerifyWebhookResponse> {
+class _$VerifyWebhookResponseSerializer
+    implements PrimitiveSerializer<VerifyWebhookResponse> {
   @override
-  final Iterable<Type> types = const [VerifyWebhookResponse, _$VerifyWebhookResponse];
+  final Iterable<Type> types = const [
+    VerifyWebhookResponse,
+    _$VerifyWebhookResponse
+  ];
 
   @override
   final String wireName = r'VerifyWebhookResponse';
@@ -62,7 +69,9 @@ class _$VerifyWebhookResponseSerializer implements PrimitiveSerializer<VerifyWeb
     VerifyWebhookResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -119,4 +128,3 @@ class _$VerifyWebhookResponseSerializer implements PrimitiveSerializer<VerifyWeb
     return result.build();
   }
 }
-
