@@ -422,7 +422,11 @@ mod tests {
 
     async fn test_state() -> (SkillsApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .ensure_exists("default")
+            .await
+            .unwrap();
         let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
         let state = SkillsApiState {
             pool: storage.pool.clone(),

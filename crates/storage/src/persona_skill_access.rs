@@ -138,7 +138,11 @@ mod tests {
     async fn test_set_and_get_mode() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         // Ensure default persona exists
-        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .ensure_exists("default")
+            .await
+            .unwrap();
 
         let store = PersonaSkillAccessStore::new(storage.pool.clone());
         store.set_mode("default", MODE_BLACKLIST).await.unwrap();
@@ -149,7 +153,11 @@ mod tests {
     #[tokio::test]
     async fn test_invalid_mode_rejected() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .ensure_exists("default")
+            .await
+            .unwrap();
 
         let store = PersonaSkillAccessStore::new(storage.pool.clone());
         let result = store.set_mode("default", "invalid").await;
@@ -159,7 +167,11 @@ mod tests {
     #[tokio::test]
     async fn test_add_remove_skill() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .ensure_exists("default")
+            .await
+            .unwrap();
 
         let store = PersonaSkillAccessStore::new(storage.pool.clone());
         store.add_skill("default", "git-commit").await.unwrap();
@@ -176,7 +188,11 @@ mod tests {
     #[tokio::test]
     async fn test_add_skill_idempotent() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
-        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .ensure_exists("default")
+            .await
+            .unwrap();
 
         let store = PersonaSkillAccessStore::new(storage.pool.clone());
         store.add_skill("default", "git-commit").await.unwrap();

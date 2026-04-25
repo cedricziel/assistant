@@ -2029,7 +2029,11 @@ async fn conversation_can_delegate_to_existing_agent_context() {
         .await;
 
     let (orch, storage) = build(&server.uri()).await;
-    storage.persona_store().ensure_default().await.unwrap();
+    storage
+        .persona_store()
+        .ensure_exists("default")
+        .await
+        .unwrap();
     storage
         .persona_store()
         .ensure_exists("marketing")

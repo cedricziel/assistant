@@ -41,30 +41,6 @@ impl PersonaStore {
         Self { pool }
     }
 
-    pub async fn ensure_default(&self) -> Result<PersonaRecord> {
-        sqlx::query(
-            "INSERT INTO personas (id, name, is_default) VALUES ('default', 'Default', 1) \
-             ON CONFLICT(id) DO NOTHING",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "UPDATE personas
-             SET is_default = CASE WHEN id = 'default' THEN 1 ELSE 0 END,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE NOT EXISTS (
-                 SELECT 1 FROM personas WHERE is_default = 1
-             )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        self.get("default")
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("default persona missing after ensure_default"))
-    }
-
     pub async fn ensure_exists(&self, id: &str) -> Result<PersonaRecord> {
         if let Some(existing) = self.get(id).await? {
             return Ok(existing);
@@ -93,52 +69,12 @@ impl PersonaStore {
         let rows = sqlx::query(
             "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
              FROM personas
-             ORDER BY is_default DESC, id ASC",
+             ORDER BY id ASC",
         )
         .fetch_all(&self.pool)
         .await?;
 
         rows.into_iter().map(row_to_record).collect()
-    }
-
-    pub async fn set_default(&self, id: &str) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-
-        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM personas WHERE id = ?1")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await?;
-        if exists == 0 {
-            anyhow::bail!("persona '{}' does not exist", id);
-        }
-
-        sqlx::query("UPDATE personas SET is_default = 0, updated_at = CURRENT_TIMESTAMP")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query(
-            "UPDATE personas
-             SET is_default = 1, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?1",
-        )
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-        Ok(())
-    }
-
-    pub async fn default_id(&self) -> Result<String> {
-        let id = sqlx::query_scalar::<_, String>(
-            "SELECT id
-             FROM personas
-             WHERE is_default = 1
-             LIMIT 1",
-        )
-        .fetch_optional(&self.pool)
-        .await?
-        .unwrap_or_else(|| "default".to_string());
-        Ok(id)
     }
 
     pub async fn get(&self, id: &str) -> Result<Option<PersonaRecord>> {
@@ -264,7 +200,7 @@ impl PersonaStore {
             "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
              FROM personas
              WHERE owner_user_id IS NULL OR owner_user_id = ?1
-             ORDER BY is_default DESC, id ASC",
+             ORDER BY id ASC",
         )
         .bind(user_id)
         .fetch_all(&self.pool)
@@ -330,6 +266,38 @@ mod tests {
     use crate::StorageLayer;
 
     #[tokio::test]
+    async fn ensure_exists_replaces_ensure_default() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        // ensure_exists("default") should work as the replacement for ensure_default()
+        let persona = store.ensure_exists("default").await.unwrap();
+        assert_eq!(persona.id, "default");
+        // Migration seeds "Default" — ensure_exists returns the existing record
+        assert_eq!(persona.name, "Default");
+    }
+
+    #[tokio::test]
+    async fn list_orders_by_id_not_is_default() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        // Create personas with IDs that sort alphabetically
+        store.create("zeta", "Zeta").await.unwrap();
+        store.create("alpha", "Alpha").await.unwrap();
+        store.create("beta", "Beta").await.unwrap();
+
+        let items = store.list().await.unwrap();
+        let ids: Vec<&str> = items.iter().map(|p| p.id.as_str()).collect();
+        // "default" is seeded by migration — should sort alphabetically with the rest
+        assert_eq!(
+            ids,
+            vec!["alpha", "beta", "default", "zeta"],
+            "list should order by id ASC without is_default priority"
+        );
+    }
+
+    #[tokio::test]
     async fn create_returns_error_on_duplicate_id() {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let store = super::PersonaStore::new(storage.pool.clone());
@@ -344,7 +312,7 @@ mod tests {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let store = super::PersonaStore::new(storage.pool.clone());
 
-        store.ensure_default().await.unwrap();
+        store.ensure_exists("default").await.unwrap();
         let persona = store.get("default").await.unwrap().unwrap();
         assert!(
             persona.turn_timeout_secs.is_none(),
@@ -402,7 +370,7 @@ mod tests {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let store = super::PersonaStore::new(storage.pool.clone());
 
-        store.ensure_default().await.unwrap();
+        store.ensure_exists("default").await.unwrap();
         let persona = store.get("default").await.unwrap().unwrap();
         assert!(
             persona.home_channel.is_none(),
@@ -468,7 +436,7 @@ mod tests {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let store = super::PersonaStore::new(storage.pool.clone());
 
-        store.ensure_default().await.unwrap();
+        store.ensure_exists("default").await.unwrap();
         store.create("notifier", "Notifier").await.unwrap();
         store
             .set_home_channel("notifier", "signal", "+12345678901")
@@ -490,7 +458,7 @@ mod tests {
         let storage = StorageLayer::new_in_memory().await.unwrap();
         let store = super::PersonaStore::new(storage.pool.clone());
 
-        store.ensure_default().await.unwrap();
+        store.ensure_exists("default").await.unwrap();
         store.create("slow", "Slow").await.unwrap();
         store.set_turn_timeout("slow", 21600).await.unwrap();
 
