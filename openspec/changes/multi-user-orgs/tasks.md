@@ -476,8 +476,8 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 - [x] `feat(runtime): extend ExecutionContext with identity fields`
   - Add `user_id: Option<UserId>`, `org_id: Option<OrgId>`, `space_id: Option<SpaceId>` to `ExecutionContext`
 
-- [x] `feat(runtime): thread AuthContext through Orchestrator.run_turn_with_tools()`
-  - Accept `AuthContext` parameter (or extract from ExecutionContext)
+- [x] `feat(runtime): thread TurnIdentity through Orchestrator.run_turn_with_tools()`
+  - Accept `TurnIdentity` parameter (or extract from ExecutionContext)
   - Pass through to tool handlers via execution context
 
 - [ ] `feat(runtime): ChannelRunner resolves platform identity before dispatch`

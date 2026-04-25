@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use tracing::info;
+use tracing::{info, warn};
 
 use assistant_backup::{BackupEngine, BackupOptions};
 
@@ -198,9 +198,15 @@ fn split_config(content: &str) -> (String, String) {
         }
 
         if !header_done {
-            // Lines before the first section header go to both (comments/preamble).
+            // Lines before the first section header: comments and blanks go
+            // to both files; non-comment scalar keys go to server only
+            // (legacy top-level keys like `db_path` map to storage config).
+            let is_comment_or_blank =
+                trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';');
             server_lines.push(line.to_string());
-            org_lines.push(line.to_string());
+            if is_comment_or_blank {
+                org_lines.push(line.to_string());
+            }
         } else if in_server_section {
             server_lines.push(line.to_string());
         } else {
@@ -271,12 +277,18 @@ pub async fn migrate_database(base_path: &Path) -> Result<()> {
         .with_context(|| format!("copying {} → {}", legacy_db.display(), space_db.display()))?;
     info!("copied assistant.db → {}", space_db.display());
 
-    // Also copy WAL/SHM if present
+    // Also copy WAL/SHM if present.
+    // Note: callers should ensure the source database is closed (no active
+    // connections) before invoking this migration so that the WAL is
+    // checkpointed. If the files still exist, we copy them on a best-effort
+    // basis and warn on failure.
     for suffix in &["-wal", "-shm"] {
         let src = base_path.join(format!("assistant.db{suffix}"));
         if src.exists() {
             let dst = space_dir.join(format!("space.db{suffix}"));
-            tokio::fs::copy(&src, &dst).await.ok();
+            if let Err(e) = tokio::fs::copy(&src, &dst).await {
+                warn!(src = %src.display(), dst = %dst.display(), error = %e, "failed to copy WAL/SHM file");
+            }
         }
     }
 
@@ -323,25 +335,52 @@ pub async fn migrate_database(base_path: &Path) -> Result<()> {
     info!("created default space: {}", space.id);
 
     // Create admin user and membership.
-    let admin_user_id = create_admin_user(&org_storage, &org.id.0, &space.id.0).await?;
-    info!("created admin user: {admin_user_id}");
+    let creds = create_admin_user(&org_storage, &org.id.0, &space.id.0).await?;
+    info!("created admin user: {}", creds.user_id);
+
+    if let Some(ref pw) = creds.generated_password {
+        info!("============================================================");
+        info!("  Migration complete - initial admin credentials:");
+        info!("    Email:    {}", creds.email);
+        info!("    Password: {pw}");
+        info!("  Change this password after first login.");
+        info!("============================================================");
+    } else {
+        info!("============================================================");
+        info!("  Migration complete - admin user created.");
+        info!("    Email:    {}", creds.email);
+        info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
+        info!("============================================================");
+    }
 
     Ok(())
 }
 
 // -- Admin user creation -----------------------------------------------------
 
+/// Credentials returned by [`create_admin_user`] so the caller can display
+/// them through the appropriate output channel (e.g. `info!` log, CLI
+/// banner, etc.) instead of writing directly to stdout from library code.
+#[derive(Debug)]
+pub struct AdminCredentials {
+    pub user_id: String,
+    pub email: String,
+    /// `Some(password)` when a random password was generated.
+    /// `None` when `ASSISTANT_WEB_TOKEN` was used (caller already knows it).
+    pub generated_password: Option<String>,
+}
+
 /// Create the initial admin user during migration.
 ///
 /// - If `ASSISTANT_WEB_TOKEN` is set, uses it as a temporary password.
-/// - Otherwise, generates a random 24-character password and prints it to stdout.
+/// - Otherwise, generates a random 24-character password.
 ///
-/// Returns the new user's ID.
+/// Returns [`AdminCredentials`] so the caller can display them.
 pub async fn create_admin_user(
     org_storage: &crate::org_storage::OrgStorageLayer,
     org_id: &str,
     space_id: &str,
-) -> Result<String> {
+) -> Result<AdminCredentials> {
     use assistant_auth::password::hash_password;
     use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
     use assistant_core::store::{MembershipStore, SpaceMembership, User, UserStore};
@@ -400,30 +439,11 @@ pub async fn create_admin_user(
         .await
         .context("granting admin membership")?;
 
-    if was_generated {
-        // Print to stdout so the operator sees it exactly once.
-        println!();
-        println!("═══════════════════════════════════════════════════════════");
-        println!("  Migration complete — initial admin credentials:");
-        println!();
-        println!("    Email:    admin@localhost");
-        println!("    Password: {password}");
-        println!();
-        println!("  Change this password after first login.");
-        println!("═══════════════════════════════════════════════════════════");
-        println!();
-    } else {
-        println!();
-        println!("══════════════���════════════════════════════════════════════");
-        println!("  Migration complete — admin user created.");
-        println!();
-        println!("    Email:    admin@localhost");
-        println!("    Password: (your ASSISTANT_WEB_TOKEN value)");
-        println!("═════���═════════════════════════════════��═══════════════════");
-        println!();
-    }
-
-    Ok(user_id)
+    Ok(AdminCredentials {
+        user_id,
+        email: "admin@localhost".into(),
+        generated_password: if was_generated { Some(password) } else { None },
+    })
 }
 
 // -- Full migration entry point ----------------------------------------------
@@ -696,9 +716,11 @@ enabled = true
     async fn migrate_database_creates_org_and_space_dbs() {
         let dir = TempDir::new().unwrap();
 
-        // Create a valid legacy database with migrations.
+        // Create a valid legacy database with migrations, then close it so
+        // the WAL is checkpointed before migrate_database copies the file.
         let legacy_db = dir.path().join("assistant.db");
-        let _storage = crate::StorageLayer::new(&legacy_db).await.unwrap();
+        let storage = crate::StorageLayer::new(&legacy_db).await.unwrap();
+        drop(storage);
 
         migrate_database(dir.path()).await.unwrap();
 

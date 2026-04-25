@@ -160,6 +160,8 @@ impl ChannelRunner {
                 None,
                 attachments,
                 vec![],
+                // TODO: resolve platform identity → TurnIdentity once
+                // IdentityResolver is wired up (multi-user-orgs task #71).
                 assistant_core::TurnIdentity::default(),
             )
             .await;
