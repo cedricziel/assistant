@@ -117,10 +117,9 @@ void main() {
 PersonaSummary _persona(String id, String name, {bool isDefault = false}) =>
     PersonaSummary(
       (b) => b
-        ..id = id
+        ..id = isDefault ? 'default' : id
         ..name = name
-        ..description = 'Test persona $name'
-        ..isDefault = isDefault,
+        ..description = 'Test persona $name',
     );
 
 // ---------------------------------------------------------------------------

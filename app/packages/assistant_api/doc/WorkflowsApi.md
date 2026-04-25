@@ -18,6 +18,7 @@ Method | HTTP request | Description
 [**getWorkflowWebhookSecrets**](WorkflowsApi.md#getworkflowwebhooksecrets) | **GET** /api/workflows/{id}/webhook-secrets | &#x60;GET /api/workflows/{id}/webhook-secrets&#x60; — reveal webhook URL and token.
 [**listWorkflowRuns**](WorkflowsApi.md#listworkflowruns) | **GET** /api/workflows/{id}/runs | &#x60;GET /api/workflows/{id}/runs&#x60; — list recent runs (up to 50).
 [**listWorkflows**](WorkflowsApi.md#listworkflows) | **GET** /api/workflows | &#x60;GET /api/workflows&#x60; — list all workflows.
+[**publicWebhookTrigger**](WorkflowsApi.md#publicwebhooktrigger) | **POST** /workflow-hooks/{id}/{token} | Public webhook trigger endpoint — no auth required.
 [**testRunWorkflow**](WorkflowsApi.md#testrunworkflow) | **POST** /api/workflows/{id}/test-run | &#x60;POST /api/workflows/{id}/test-run&#x60; — queue a manual test run.
 [**updateWorkflow**](WorkflowsApi.md#updateworkflow) | **PUT** /api/workflows/{id} | &#x60;PUT /api/workflows/{id}&#x60; — update a workflow.
 
@@ -384,6 +385,53 @@ This endpoint does not need any parameter.
 ### HTTP request headers
 
  - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **publicWebhookTrigger**
+> WorkflowWebhookTriggerAccepted publicWebhookTrigger(id, token, body)
+
+Public webhook trigger endpoint — no auth required.
+
+Receives an inbound HTTP POST from an external system and queues a workflow run with trigger type `Webhook`.  The `token` path parameter is the per-workflow HMAC secret that acts as authentication.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getWorkflowsApi();
+final String id = id_example; // String | Workflow ID
+final String token = token_example; // String | Webhook HMAC token
+final JsonObject body = ; // JsonObject | 
+
+try {
+    final response = api.publicWebhookTrigger(id, token, body);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling WorkflowsApi->publicWebhookTrigger: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **id** | **String**| Workflow ID | 
+ **token** | **String**| Webhook HMAC token | 
+ **body** | **JsonObject**|  | 
+
+### Return type
+
+[**WorkflowWebhookTriggerAccepted**](WorkflowWebhookTriggerAccepted.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

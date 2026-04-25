@@ -53,7 +53,7 @@ class PersonasNotifier extends AsyncNotifier<PersonasState> {
       final response = await api.personas.listPersonas();
       final personas = response.data!.toList();
       final defaultPersona =
-          personas.where((p) => p.isDefault).firstOrNull ??
+          personas.where((p) => p.id == 'default').firstOrNull ??
           personas.firstOrNull;
       return PersonasState(personas: personas, activePersona: defaultPersona);
     } catch (e) {

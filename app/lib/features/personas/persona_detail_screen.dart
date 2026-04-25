@@ -83,7 +83,7 @@ class _PersonaDetailBody extends StatelessWidget {
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                     ),
-                    if (detail.isDefault)
+                    if (detail.id == 'default')
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,

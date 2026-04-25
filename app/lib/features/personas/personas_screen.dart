@@ -189,13 +189,13 @@ class _PersonaRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: persona.isDefault
+        backgroundColor: persona.id == 'default'
             ? Theme.of(context).colorScheme.primaryContainer
             : Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Text(
           persona.name.isNotEmpty ? persona.name[0].toUpperCase() : '?',
           style: TextStyle(
-            color: persona.isDefault
+            color: persona.id == 'default'
                 ? Theme.of(context).colorScheme.onPrimaryContainer
                 : Theme.of(context).colorScheme.onSurface,
             fontWeight: FontWeight.w600,
@@ -213,7 +213,7 @@ class _PersonaRow extends StatelessWidget {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
-      trailing: persona.isDefault
+      trailing: persona.id == 'default'
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(

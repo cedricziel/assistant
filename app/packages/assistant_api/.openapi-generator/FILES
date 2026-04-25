@@ -172,6 +172,7 @@ doc/WorkflowRunSummary.md
 doc/WorkflowSummary.md
 doc/WorkflowUpsertRequest.md
 doc/WorkflowWebhookSecrets.md
+doc/WorkflowWebhookTriggerAccepted.md
 doc/WorkflowsApi.md
 doc/WritePersonaFileRequest.md
 lib/assistant_api.dart
@@ -356,6 +357,8 @@ lib/src/model/workflow_run_summary.dart
 lib/src/model/workflow_summary.dart
 lib/src/model/workflow_upsert_request.dart
 lib/src/model/workflow_webhook_secrets.dart
+lib/src/model/workflow_webhook_trigger_accepted.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
+test/workflow_webhook_trigger_accepted_test.dart

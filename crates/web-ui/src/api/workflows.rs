@@ -609,7 +609,7 @@ async fn set_active(
 // -- Public webhook trigger --------------------------------------------------
 
 /// Accepted response for a public webhook trigger.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct WorkflowWebhookTriggerAccepted {
     workflow_id: String,
     run_id: String,
@@ -621,6 +621,21 @@ pub struct WorkflowWebhookTriggerAccepted {
 /// Receives an inbound HTTP POST from an external system and queues a workflow
 /// run with trigger type `Webhook`.  The `token` path parameter is the
 /// per-workflow HMAC secret that acts as authentication.
+#[utoipa::path(
+    post,
+    path = "/workflow-hooks/{id}/{token}",
+    tag = "workflows",
+    security(()),
+    params(
+        ("id" = String, Path, description = "Workflow ID"),
+        ("token" = String, Path, description = "Webhook HMAC token"),
+    ),
+    request_body(content = serde_json::Value, content_type = "application/json"),
+    responses(
+        (status = 202, description = "Webhook accepted, run queued", body = WorkflowWebhookTriggerAccepted),
+        (status = 404, description = "Workflow webhook not found"),
+    )
+)]
 pub async fn public_webhook_trigger(
     State(state): State<WorkflowsApiState>,
     Path((id, token)): Path<(String, String)>,

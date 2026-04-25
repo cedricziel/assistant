@@ -86,10 +86,9 @@ void main() {
     testWidgets('shows active persona name in app bar title', (tester) async {
       final persona = PersonaSummary(
         (b) => b
-          ..id = 'p1'
+          ..id = 'default'
           ..name = 'Ada'
-          ..description = ''
-          ..isDefault = true,
+          ..description = '',
       );
       final personasState = PersonasState(
         personas: [persona],

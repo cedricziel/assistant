@@ -81,6 +81,7 @@ use crate::api::{
     workflows::{
         WorkflowDetail, WorkflowRunDetail, WorkflowRunPreview, WorkflowRunStep, WorkflowRunSummary,
         WorkflowSummary, WorkflowUpsertRequest, WorkflowWebhookSecrets,
+        WorkflowWebhookTriggerAccepted,
     },
 };
 
@@ -237,6 +238,7 @@ pub struct ApiErrorResponse {
         crate::api::workflows::get_workflow_webhook_secrets,
         crate::api::workflows::list_workflow_runs,
         crate::api::workflows::get_workflow_run,
+        crate::api::workflows::public_webhook_trigger,
         handlers::get_agent_card_well_known,
         handlers::get_extended_agent_card,
         handlers::send_message,
@@ -417,6 +419,7 @@ pub struct ApiErrorResponse {
             WorkflowRunDetail,
             WorkflowRunPreview,
             WorkflowWebhookSecrets,
+            WorkflowWebhookTriggerAccepted,
             // Command API types
             CommandDefResponse,
             CommandArgResponse,
