@@ -16,7 +16,9 @@ import 'package:assistant_api/src/model/workflow_run_summary.dart';
 import 'package:assistant_api/src/model/workflow_summary.dart';
 import 'package:assistant_api/src/model/workflow_upsert_request.dart';
 import 'package:assistant_api/src/model/workflow_webhook_secrets.dart';
+import 'package:assistant_api/src/model/workflow_webhook_trigger_accepted.dart';
 import 'package:built_collection/built_collection.dart';
+import 'package:built_value/json_object.dart';
 
 class WorkflowsApi {
   final Dio _dio;
@@ -771,6 +773,112 @@ class WorkflowsApi {
     }
 
     return Response<BuiltList<WorkflowSummary>>(
+      data: _responseData,
+      headers: _response.headers,
+      isRedirect: _response.isRedirect,
+      requestOptions: _response.requestOptions,
+      redirects: _response.redirects,
+      statusCode: _response.statusCode,
+      statusMessage: _response.statusMessage,
+      extra: _response.extra,
+    );
+  }
+
+  /// Public webhook trigger endpoint — no auth required.
+  /// Receives an inbound HTTP POST from an external system and queues a workflow run with trigger type &#x60;Webhook&#x60;.  The &#x60;token&#x60; path parameter is the per-workflow HMAC secret that acts as authentication.
+  ///
+  /// Parameters:
+  /// * [id] - Workflow ID
+  /// * [token] - Webhook HMAC token
+  /// * [body]
+  /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
+  /// * [headers] - Can be used to add additional headers to the request
+  /// * [extras] - Can be used to add flags to the request
+  /// * [validateStatus] - A [ValidateStatus] callback that can be used to determine request success based on the HTTP status of the response
+  /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
+  /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
+  ///
+  /// Returns a [Future] containing a [Response] with a [WorkflowWebhookTriggerAccepted] as data
+  /// Throws [DioException] if API call or serialization fails
+  Future<Response<WorkflowWebhookTriggerAccepted>> publicWebhookTrigger({
+    required String id,
+    required String token,
+    JsonObject? body,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    final _path = r'/workflow-hooks/{id}/{token}'
+        .replaceAll(
+            '{' r'id' '}',
+            encodeQueryParameter(_serializers, id, const FullType(String))
+                .toString())
+        .replaceAll(
+            '{' r'token' '}',
+            encodeQueryParameter(_serializers, token, const FullType(String))
+                .toString());
+    final _options = Options(
+      method: r'POST',
+      headers: <String, dynamic>{
+        ...?headers,
+      },
+      extra: <String, dynamic>{
+        'secure': <Map<String, String>>[],
+        ...?extra,
+      },
+      contentType: 'application/json',
+      validateStatus: validateStatus,
+    );
+
+    dynamic _bodyData;
+
+    try {
+      _bodyData = body;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final _response = await _dio.request<Object>(
+      _path,
+      data: _bodyData,
+      options: _options,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+    );
+
+    WorkflowWebhookTriggerAccepted? _responseData;
+
+    try {
+      final rawResponse = _response.data;
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(WorkflowWebhookTriggerAccepted),
+            ) as WorkflowWebhookTriggerAccepted;
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _response.requestOptions,
+        response: _response,
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    return Response<WorkflowWebhookTriggerAccepted>(
       data: _responseData,
       headers: _response.headers,
       isRedirect: _response.isRedirect,

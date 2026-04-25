@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:assistant_api/assistant_api.dart';
 
 import '../../shared/platform/platform.dart';
+import 'persona_constants.dart';
 import 'personas_provider.dart';
 
 /// Screen that lists all personas.
@@ -187,15 +188,16 @@ class _PersonaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDefault = persona.id == kDefaultPersonaId;
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: persona.isDefault
+        backgroundColor: isDefault
             ? Theme.of(context).colorScheme.primaryContainer
             : Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Text(
           persona.name.isNotEmpty ? persona.name[0].toUpperCase() : '?',
           style: TextStyle(
-            color: persona.isDefault
+            color: isDefault
                 ? Theme.of(context).colorScheme.onPrimaryContainer
                 : Theme.of(context).colorScheme.onSurface,
             fontWeight: FontWeight.w600,
@@ -213,7 +215,7 @@ class _PersonaRow extends StatelessWidget {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
-      trailing: persona.isDefault
+      trailing: isDefault
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(

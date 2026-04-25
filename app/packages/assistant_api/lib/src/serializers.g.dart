@@ -152,6 +152,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(WorkflowSummary.serializer)
       ..add(WorkflowUpsertRequest.serializer)
       ..add(WorkflowWebhookSecrets.serializer)
+      ..add(WorkflowWebhookTriggerAccepted.serializer)
       ..add(WritePersonaFileRequest.serializer)
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(AgentExtension)]),

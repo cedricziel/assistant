@@ -13,7 +13,7 @@ part 'publish_catalog_item_request.g.dart';
 /// Properties:
 /// * [description]
 /// * [name]
-/// * [resourceType] - `\"skill\"`, `\"template\"`, or `\"interface\"`.
+/// * [resourceType] - Resource type: `\"skill\"`, `\"template\"`, or `\"interface\"`.
 @BuiltValue()
 abstract class PublishCatalogItemRequest
     implements
@@ -24,7 +24,7 @@ abstract class PublishCatalogItemRequest
   @BuiltValueField(wireName: r'name')
   String get name;
 
-  /// `\"skill\"`, `\"template\"`, or `\"interface\"`.
+  /// Resource type: `\"skill\"`, `\"template\"`, or `\"interface\"`.
   @BuiltValueField(wireName: r'resource_type')
   String get resourceType;
 

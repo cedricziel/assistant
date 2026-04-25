@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
 import '../connection/connection_provider.dart';
+import 'persona_constants.dart';
 
 /// State for the personas feature.
 class PersonasState {
@@ -53,7 +54,7 @@ class PersonasNotifier extends AsyncNotifier<PersonasState> {
       final response = await api.personas.listPersonas();
       final personas = response.data!.toList();
       final defaultPersona =
-          personas.where((p) => p.isDefault).firstOrNull ??
+          personas.where((p) => p.id == kDefaultPersonaId).firstOrNull ??
           personas.firstOrNull;
       return PersonasState(personas: personas, activePersona: defaultPersona);
     } catch (e) {

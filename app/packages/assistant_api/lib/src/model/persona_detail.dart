@@ -16,7 +16,6 @@ part 'persona_detail.g.dart';
 /// * [createdAt]
 /// * [files]
 /// * [id]
-/// * [isDefault]
 /// * [name]
 /// * [skillAccessMode]
 /// * [turnTimeoutSecs]
@@ -32,9 +31,6 @@ abstract class PersonaDetail
 
   @BuiltValueField(wireName: r'id')
   String get id;
-
-  @BuiltValueField(wireName: r'is_default')
-  bool get isDefault;
 
   @BuiltValueField(wireName: r'name')
   String get name;
@@ -87,11 +83,6 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
     yield serializers.serialize(
       object.id,
       specifiedType: const FullType(String),
-    );
-    yield r'is_default';
-    yield serializers.serialize(
-      object.isDefault,
-      specifiedType: const FullType(bool),
     );
     yield r'name';
     yield serializers.serialize(
@@ -161,13 +152,6 @@ class _$PersonaDetailSerializer implements PrimitiveSerializer<PersonaDetail> {
             specifiedType: const FullType(String),
           ) as String;
           result.id = valueDes;
-          break;
-        case r'is_default':
-          final valueDes = serializers.deserialize(
-            value,
-            specifiedType: const FullType(bool),
-          ) as bool;
-          result.isDefault = valueDes;
           break;
         case r'name':
           final valueDes = serializers.deserialize(

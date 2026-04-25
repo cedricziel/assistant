@@ -14,8 +14,6 @@ class _$PersonaDetail extends PersonaDetail {
   @override
   final String id;
   @override
-  final bool isDefault;
-  @override
   final String name;
   @override
   final String skillAccessMode;
@@ -31,7 +29,6 @@ class _$PersonaDetail extends PersonaDetail {
       {required this.createdAt,
       required this.files,
       required this.id,
-      required this.isDefault,
       required this.name,
       required this.skillAccessMode,
       this.turnTimeoutSecs,
@@ -51,7 +48,6 @@ class _$PersonaDetail extends PersonaDetail {
         createdAt == other.createdAt &&
         files == other.files &&
         id == other.id &&
-        isDefault == other.isDefault &&
         name == other.name &&
         skillAccessMode == other.skillAccessMode &&
         turnTimeoutSecs == other.turnTimeoutSecs &&
@@ -64,7 +60,6 @@ class _$PersonaDetail extends PersonaDetail {
     _$hash = $jc(_$hash, createdAt.hashCode);
     _$hash = $jc(_$hash, files.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
-    _$hash = $jc(_$hash, isDefault.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jc(_$hash, skillAccessMode.hashCode);
     _$hash = $jc(_$hash, turnTimeoutSecs.hashCode);
@@ -79,7 +74,6 @@ class _$PersonaDetail extends PersonaDetail {
           ..add('createdAt', createdAt)
           ..add('files', files)
           ..add('id', id)
-          ..add('isDefault', isDefault)
           ..add('name', name)
           ..add('skillAccessMode', skillAccessMode)
           ..add('turnTimeoutSecs', turnTimeoutSecs)
@@ -104,10 +98,6 @@ class PersonaDetailBuilder
   String? _id;
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
-
-  bool? _isDefault;
-  bool? get isDefault => _$this._isDefault;
-  set isDefault(bool? isDefault) => _$this._isDefault = isDefault;
 
   String? _name;
   String? get name => _$this._name;
@@ -137,7 +127,6 @@ class PersonaDetailBuilder
       _createdAt = $v.createdAt;
       _files = $v.files.toBuilder();
       _id = $v.id;
-      _isDefault = $v.isDefault;
       _name = $v.name;
       _skillAccessMode = $v.skillAccessMode;
       _turnTimeoutSecs = $v.turnTimeoutSecs;
@@ -170,8 +159,6 @@ class PersonaDetailBuilder
             files: files.build(),
             id: BuiltValueNullFieldError.checkNotNull(
                 id, r'PersonaDetail', 'id'),
-            isDefault: BuiltValueNullFieldError.checkNotNull(
-                isDefault, r'PersonaDetail', 'isDefault'),
             name: BuiltValueNullFieldError.checkNotNull(
                 name, r'PersonaDetail', 'name'),
             skillAccessMode: BuiltValueNullFieldError.checkNotNull(

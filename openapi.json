@@ -6302,6 +6302,65 @@
           }
         ]
       }
+    },
+    "/workflow-hooks/{id}/{token}": {
+      "post": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Public webhook trigger endpoint — no auth required.",
+        "description": "Receives an inbound HTTP POST from an external system and queues a workflow\nrun with trigger type `Webhook`.  The `token` path parameter is the\nper-workflow HMAC secret that acts as authentication.",
+        "operationId": "public_webhook_trigger",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Workflow ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "description": "Webhook HMAC token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Webhook accepted, run queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowWebhookTriggerAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid UUID"
+          },
+          "404": {
+            "description": "Workflow webhook not found"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
     }
   },
   "components": {
@@ -8485,7 +8544,6 @@
         "required": [
           "id",
           "name",
-          "is_default",
           "skill_access_mode",
           "created_at",
           "updated_at",
@@ -8503,9 +8561,6 @@
           },
           "id": {
             "type": "string"
-          },
-          "is_default": {
-            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -8606,8 +8661,7 @@
         "required": [
           "id",
           "name",
-          "description",
-          "is_default"
+          "description"
         ],
         "properties": {
           "description": {
@@ -8615,9 +8669,6 @@
           },
           "id": {
             "type": "string"
-          },
-          "is_default": {
-            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -8639,7 +8690,8 @@
           },
           "resource_type": {
             "type": "string",
-            "description": "`\"skill\"`, `\"template\"`, or `\"interface\"`."
+            "description": "Resource type: `\"skill\"`, `\"template\"`, or `\"interface\"`.",
+            "example": "skill"
           }
         }
       },
@@ -10508,6 +10560,26 @@
             "type": "string"
           },
           "webhook_url": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkflowWebhookTriggerAccepted": {
+        "type": "object",
+        "description": "Accepted response for a public webhook trigger.",
+        "required": [
+          "workflow_id",
+          "run_id",
+          "status"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "workflow_id": {
             "type": "string"
           }
         }

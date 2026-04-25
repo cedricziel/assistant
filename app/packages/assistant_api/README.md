@@ -190,6 +190,7 @@ Class | Method | HTTP request | Description
 [*WorkflowsApi*](doc/WorkflowsApi.md) | [**getWorkflowWebhookSecrets**](doc/WorkflowsApi.md#getworkflowwebhooksecrets) | **GET** /api/workflows/{id}/webhook-secrets | &#x60;GET /api/workflows/{id}/webhook-secrets&#x60; — reveal webhook URL and token.
 [*WorkflowsApi*](doc/WorkflowsApi.md) | [**listWorkflowRuns**](doc/WorkflowsApi.md#listworkflowruns) | **GET** /api/workflows/{id}/runs | &#x60;GET /api/workflows/{id}/runs&#x60; — list recent runs (up to 50).
 [*WorkflowsApi*](doc/WorkflowsApi.md) | [**listWorkflows**](doc/WorkflowsApi.md#listworkflows) | **GET** /api/workflows | &#x60;GET /api/workflows&#x60; — list all workflows.
+[*WorkflowsApi*](doc/WorkflowsApi.md) | [**publicWebhookTrigger**](doc/WorkflowsApi.md#publicwebhooktrigger) | **POST** /workflow-hooks/{id}/{token} | Public webhook trigger endpoint — no auth required.
 [*WorkflowsApi*](doc/WorkflowsApi.md) | [**testRunWorkflow**](doc/WorkflowsApi.md#testrunworkflow) | **POST** /api/workflows/{id}/test-run | &#x60;POST /api/workflows/{id}/test-run&#x60; — queue a manual test run.
 [*WorkflowsApi*](doc/WorkflowsApi.md) | [**updateWorkflow**](doc/WorkflowsApi.md#updateworkflow) | **PUT** /api/workflows/{id} | &#x60;PUT /api/workflows/{id}&#x60; — update a workflow.
 
@@ -341,6 +342,7 @@ Class | Method | HTTP request | Description
  - [WorkflowSummary](doc/WorkflowSummary.md)
  - [WorkflowUpsertRequest](doc/WorkflowUpsertRequest.md)
  - [WorkflowWebhookSecrets](doc/WorkflowWebhookSecrets.md)
+ - [WorkflowWebhookTriggerAccepted](doc/WorkflowWebhookTriggerAccepted.md)
  - [WritePersonaFileRequest](doc/WritePersonaFileRequest.md)
 
 

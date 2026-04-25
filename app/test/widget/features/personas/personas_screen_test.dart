@@ -63,7 +63,7 @@ void main() {
 
     testWidgets('shows Default badge for default persona', (tester) async {
       final state = PersonasState(
-        personas: [_persona('p1', 'Default Persona', isDefault: true)],
+        personas: [_persona('default', 'Default Persona')],
       );
       await tester.pumpWidget(buildUnderTest(state: state));
       await tester.pump();
@@ -114,14 +114,12 @@ void main() {
 // ---------------------------------------------------------------------------
 // Fixtures
 
-PersonaSummary _persona(String id, String name, {bool isDefault = false}) =>
-    PersonaSummary(
-      (b) => b
-        ..id = id
-        ..name = name
-        ..description = 'Test persona $name'
-        ..isDefault = isDefault,
-    );
+PersonaSummary _persona(String id, String name) => PersonaSummary(
+  (b) => b
+    ..id = id
+    ..name = name
+    ..description = 'Test persona $name',
+);
 
 // ---------------------------------------------------------------------------
 // Fake notifier

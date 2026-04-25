@@ -11,7 +11,6 @@ Name | Type | Description | Notes
 **createdAt** | **String** |  | 
 **files** | [**BuiltList&lt;PersonaFileSlot&gt;**](PersonaFileSlot.md) |  | 
 **id** | **String** |  | 
-**isDefault** | **bool** |  | 
 **name** | **String** |  | 
 **skillAccessMode** | **String** |  | 
 **turnTimeoutSecs** | **int** |  | [optional] 

@@ -12,18 +12,13 @@ class _$PersonaSummary extends PersonaSummary {
   @override
   final String id;
   @override
-  final bool isDefault;
-  @override
   final String name;
 
   factory _$PersonaSummary([void Function(PersonaSummaryBuilder)? updates]) =>
       (PersonaSummaryBuilder()..update(updates))._build();
 
   _$PersonaSummary._(
-      {required this.description,
-      required this.id,
-      required this.isDefault,
-      required this.name})
+      {required this.description, required this.id, required this.name})
       : super._();
   @override
   PersonaSummary rebuild(void Function(PersonaSummaryBuilder) updates) =>
@@ -38,7 +33,6 @@ class _$PersonaSummary extends PersonaSummary {
     return other is PersonaSummary &&
         description == other.description &&
         id == other.id &&
-        isDefault == other.isDefault &&
         name == other.name;
   }
 
@@ -47,7 +41,6 @@ class _$PersonaSummary extends PersonaSummary {
     var _$hash = 0;
     _$hash = $jc(_$hash, description.hashCode);
     _$hash = $jc(_$hash, id.hashCode);
-    _$hash = $jc(_$hash, isDefault.hashCode);
     _$hash = $jc(_$hash, name.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -58,7 +51,6 @@ class _$PersonaSummary extends PersonaSummary {
     return (newBuiltValueToStringHelper(r'PersonaSummary')
           ..add('description', description)
           ..add('id', id)
-          ..add('isDefault', isDefault)
           ..add('name', name))
         .toString();
   }
@@ -76,10 +68,6 @@ class PersonaSummaryBuilder
   String? get id => _$this._id;
   set id(String? id) => _$this._id = id;
 
-  bool? _isDefault;
-  bool? get isDefault => _$this._isDefault;
-  set isDefault(bool? isDefault) => _$this._isDefault = isDefault;
-
   String? _name;
   String? get name => _$this._name;
   set name(String? name) => _$this._name = name;
@@ -93,7 +81,6 @@ class PersonaSummaryBuilder
     if ($v != null) {
       _description = $v.description;
       _id = $v.id;
-      _isDefault = $v.isDefault;
       _name = $v.name;
       _$v = null;
     }
@@ -120,8 +107,6 @@ class PersonaSummaryBuilder
               description, r'PersonaSummary', 'description'),
           id: BuiltValueNullFieldError.checkNotNull(
               id, r'PersonaSummary', 'id'),
-          isDefault: BuiltValueNullFieldError.checkNotNull(
-              isDefault, r'PersonaSummary', 'isDefault'),
           name: BuiltValueNullFieldError.checkNotNull(
               name, r'PersonaSummary', 'name'),
         );

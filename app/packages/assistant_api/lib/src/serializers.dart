@@ -159,6 +159,7 @@ import 'package:assistant_api/src/model/workflow_run_summary.dart';
 import 'package:assistant_api/src/model/workflow_summary.dart';
 import 'package:assistant_api/src/model/workflow_upsert_request.dart';
 import 'package:assistant_api/src/model/workflow_webhook_secrets.dart';
+import 'package:assistant_api/src/model/workflow_webhook_trigger_accepted.dart';
 import 'package:assistant_api/src/model/write_persona_file_request.dart';
 
 part 'serializers.g.dart';
@@ -309,6 +310,7 @@ part 'serializers.g.dart';
   WorkflowSummary,
   WorkflowUpsertRequest,
   WorkflowWebhookSecrets,
+  WorkflowWebhookTriggerAccepted,
   WritePersonaFileRequest,
 ])
 Serializers serializers = (_$serializers.toBuilder()

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:assistant_api/assistant_api.dart';
 
+import 'persona_constants.dart';
 import 'persona_detail_provider.dart';
 
 /// Screen that shows the full detail of a single persona.
@@ -83,7 +84,7 @@ class _PersonaDetailBody extends StatelessWidget {
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                     ),
-                    if (detail.isDefault)
+                    if (detail.id == kDefaultPersonaId)
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,

@@ -6,65 +6,71 @@
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
-part 'persona_summary.g.dart';
+part 'workflow_webhook_trigger_accepted.g.dart';
 
-/// A persona summary returned by the API.
+/// Accepted response for a public webhook trigger.
 ///
 /// Properties:
-/// * [description]
-/// * [id]
-/// * [name]
+/// * [runId]
+/// * [status]
+/// * [workflowId]
 @BuiltValue()
-abstract class PersonaSummary
-    implements Built<PersonaSummary, PersonaSummaryBuilder> {
-  @BuiltValueField(wireName: r'description')
-  String get description;
+abstract class WorkflowWebhookTriggerAccepted
+    implements
+        Built<WorkflowWebhookTriggerAccepted,
+            WorkflowWebhookTriggerAcceptedBuilder> {
+  @BuiltValueField(wireName: r'run_id')
+  String get runId;
 
-  @BuiltValueField(wireName: r'id')
-  String get id;
+  @BuiltValueField(wireName: r'status')
+  String get status;
 
-  @BuiltValueField(wireName: r'name')
-  String get name;
+  @BuiltValueField(wireName: r'workflow_id')
+  String get workflowId;
 
-  PersonaSummary._();
+  WorkflowWebhookTriggerAccepted._();
 
-  factory PersonaSummary([void updates(PersonaSummaryBuilder b)]) =
-      _$PersonaSummary;
+  factory WorkflowWebhookTriggerAccepted(
+          [void updates(WorkflowWebhookTriggerAcceptedBuilder b)]) =
+      _$WorkflowWebhookTriggerAccepted;
 
   @BuiltValueHook(initializeBuilder: true)
-  static void _defaults(PersonaSummaryBuilder b) => b;
+  static void _defaults(WorkflowWebhookTriggerAcceptedBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<PersonaSummary> get serializer =>
-      _$PersonaSummarySerializer();
+  static Serializer<WorkflowWebhookTriggerAccepted> get serializer =>
+      _$WorkflowWebhookTriggerAcceptedSerializer();
 }
 
-class _$PersonaSummarySerializer
-    implements PrimitiveSerializer<PersonaSummary> {
+class _$WorkflowWebhookTriggerAcceptedSerializer
+    implements PrimitiveSerializer<WorkflowWebhookTriggerAccepted> {
   @override
-  final Iterable<Type> types = const [PersonaSummary, _$PersonaSummary];
+  final Iterable<Type> types = const [
+    WorkflowWebhookTriggerAccepted,
+    _$WorkflowWebhookTriggerAccepted
+  ];
 
   @override
-  final String wireName = r'PersonaSummary';
+  final String wireName = r'WorkflowWebhookTriggerAccepted';
 
   Iterable<Object?> _serializeProperties(
     Serializers serializers,
-    PersonaSummary object, {
+    WorkflowWebhookTriggerAccepted object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    yield r'description';
+    yield r'run_id';
     yield serializers.serialize(
-      object.description,
+      object.runId,
       specifiedType: const FullType(String),
     );
-    yield r'id';
+    yield r'status';
     yield serializers.serialize(
-      object.id,
+      object.status,
       specifiedType: const FullType(String),
     );
-    yield r'name';
+    yield r'workflow_id';
     yield serializers.serialize(
-      object.name,
+      object.workflowId,
       specifiedType: const FullType(String),
     );
   }
@@ -72,7 +78,7 @@ class _$PersonaSummarySerializer
   @override
   Object serialize(
     Serializers serializers,
-    PersonaSummary object, {
+    WorkflowWebhookTriggerAccepted object, {
     FullType specifiedType = FullType.unspecified,
   }) {
     return _serializeProperties(serializers, object,
@@ -85,33 +91,33 @@ class _$PersonaSummarySerializer
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
     required List<Object?> serializedList,
-    required PersonaSummaryBuilder result,
+    required WorkflowWebhookTriggerAcceptedBuilder result,
     required List<Object?> unhandled,
   }) {
     for (var i = 0; i < serializedList.length; i += 2) {
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'description':
+        case r'run_id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.description = valueDes;
+          result.runId = valueDes;
           break;
-        case r'id':
+        case r'status':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.id = valueDes;
+          result.status = valueDes;
           break;
-        case r'name':
+        case r'workflow_id':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.name = valueDes;
+          result.workflowId = valueDes;
           break;
         default:
           unhandled.add(key);
@@ -122,12 +128,12 @@ class _$PersonaSummarySerializer
   }
 
   @override
-  PersonaSummary deserialize(
+  WorkflowWebhookTriggerAccepted deserialize(
     Serializers serializers,
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    final result = PersonaSummaryBuilder();
+    final result = WorkflowWebhookTriggerAcceptedBuilder();
     final serializedList = (serialized as Iterable<Object?>).toList();
     final unhandled = <Object?>[];
     _deserializeProperties(
