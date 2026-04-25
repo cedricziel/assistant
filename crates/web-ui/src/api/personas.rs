@@ -108,7 +108,6 @@ pub struct PersonaSummary {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub is_default: bool,
 }
 
 /// Full persona detail including file slot inventory.
@@ -116,7 +115,6 @@ pub struct PersonaSummary {
 pub struct PersonaDetail {
     pub id: String,
     pub name: String,
-    pub is_default: bool,
     pub skill_access_mode: String,
     pub turn_timeout_secs: Option<u64>,
     pub created_at: String,
@@ -230,7 +228,6 @@ pub async fn list_personas(
                     id: p.id,
                     name: p.name,
                     description: String::new(),
-                    is_default: p.is_default,
                 })
                 .collect();
             Json(summaries).into_response()
@@ -294,7 +291,6 @@ pub async fn create_persona(
             let detail = PersonaDetail {
                 id: p.id,
                 name: p.name,
-                is_default: p.is_default,
                 skill_access_mode: p.skill_access_mode,
                 turn_timeout_secs: p.turn_timeout_secs,
                 created_at: p.created_at.to_rfc3339(),
@@ -366,7 +362,6 @@ pub async fn set_active_persona(
         id: persona.id,
         name: persona.name,
         description: String::new(),
-        is_default: persona.is_default,
     })
     .into_response()
 }
@@ -418,7 +413,6 @@ pub async fn get_persona(
     let detail = PersonaDetail {
         id: persona.id,
         name: persona.name,
-        is_default: persona.is_default,
         skill_access_mode: persona.skill_access_mode,
         turn_timeout_secs: persona.turn_timeout_secs,
         created_at: persona.created_at.to_rfc3339(),
@@ -857,7 +851,11 @@ mod tests {
 
     async fn test_state() -> (PersonaApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
-        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .ensure_exists("default")
+            .await
+            .unwrap();
         let state = PersonaApiState {
             pool: storage.pool.clone(),
             agent_id: Arc::new(RwLock::new("default".to_string())),

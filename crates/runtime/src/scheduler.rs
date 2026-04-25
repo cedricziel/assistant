@@ -896,7 +896,11 @@ mod tests {
         let (orch, storage) = build(&server.uri()).await;
 
         // Persona exists but has no home_channel set (default).
-        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .ensure_exists("default")
+            .await
+            .unwrap();
 
         let conv_id = Uuid::new_v4();
         let tools = resolve_home_channel_tools(&storage, &orch, conv_id).await;
@@ -911,7 +915,11 @@ mod tests {
         let server = MockServer::start().await;
         let (orch, storage) = build(&server.uri()).await;
 
-        storage.persona_store().ensure_default().await.unwrap();
+        storage
+            .persona_store()
+            .ensure_exists("default")
+            .await
+            .unwrap();
         storage
             .persona_store()
             .set_home_channel("default", "slack", "#ops")

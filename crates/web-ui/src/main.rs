@@ -256,7 +256,7 @@ async fn run_with_args(args: Args) -> Result<()> {
     };
 
     let cli_agent_override = args.agent.clone();
-    let mut selected_agent = cli_agent_override
+    let selected_agent = cli_agent_override
         .clone()
         .unwrap_or_else(|| config.agent.id.clone());
     if !validate_agent_id(&selected_agent) {
@@ -277,23 +277,6 @@ async fn run_with_args(args: Args) -> Result<()> {
         .with_context(|| format!("Failed to create workspace at {}", workspace_dir.display()))?;
 
     let personas = storage.persona_store();
-    personas.ensure_default().await?;
-    if cli_agent_override.is_none() {
-        let default_id = personas.default_id().await?;
-        selected_agent = default_id;
-        apply_agent_context(&mut config, &selected_agent);
-        if let Some(home) = dirs::home_dir() {
-            let agent_root = home.join(".assistant").join("agents").join(&selected_agent);
-            set_runtime_agent_root(agent_root);
-        }
-        let workspace_dir = default_workspace_dir(&selected_agent);
-        set_runtime_workspace_dir(workspace_dir.clone());
-        tokio::fs::create_dir_all(&workspace_dir)
-            .await
-            .with_context(|| {
-                format!("Failed to create workspace at {}", workspace_dir.display())
-            })?;
-    }
     personas.ensure_exists(&selected_agent).await?;
 
     // -- Build the full orchestrator chain -----------------------------------

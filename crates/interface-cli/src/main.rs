@@ -153,13 +153,10 @@ enum PersonaCommand {
     Create {
         /// Persona ID (letters, numbers, '-', '_').
         id: String,
-        /// Mark the created/existing Persona as default.
-        #[arg(long)]
-        default: bool,
     },
-    /// Set an existing Persona as default.
+    /// Switch to an existing Persona (creates it if needed).
     Use {
-        /// Persona ID to mark as default.
+        /// Persona ID to activate.
         id: String,
     },
     /// Set the skill access mode for a persona (all, whitelist, blacklist).
@@ -649,7 +646,7 @@ fn cmd_reset(db_path: &Path, config: &AssistantConfig, skip_confirm: bool) -> Re
 async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
     let storage = StorageLayer::new(db_path).await?;
     let store = storage.persona_store();
-    store.ensure_default().await?;
+    store.ensure_exists("default").await?;
 
     match command {
         PersonaCommand::List => {
@@ -660,12 +657,10 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
             }
             println!("Configured Personas:\n");
             for item in items {
-                let marker = if item.is_default { "*" } else { " " };
-                println!("{marker} {:20} {}", item.id, item.name);
+                println!("  {:20} {}", item.id, item.name);
             }
-            println!("\n* default");
         }
-        PersonaCommand::Create { id, default } => {
+        PersonaCommand::Create { id } => {
             if !validate_agent_id(id) {
                 anyhow::bail!(
                     "Invalid Persona ID '{}'. Use only letters, numbers, '-' and '_'.",
@@ -673,18 +668,12 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
                 );
             }
             store.ensure_exists(id).await?;
-            if *default {
-                store.set_default(id).await?;
-            }
 
             let root = home_agent_root(id)?;
             let workspace = default_workspace_dir(id);
             tokio::fs::create_dir_all(&root).await?;
             tokio::fs::create_dir_all(&workspace).await?;
             println!("Persona '{}' is ready.", id);
-            if *default {
-                println!("Default Persona set to '{}'.", id);
-            }
         }
         PersonaCommand::Use { id } => {
             if !validate_agent_id(id) {
@@ -694,12 +683,14 @@ async fn cmd_persona(db_path: &Path, command: &PersonaCommand) -> Result<()> {
                 );
             }
             store.ensure_exists(id).await?;
-            store.set_default(id).await?;
             let root = home_agent_root(id)?;
             let workspace = default_workspace_dir(id);
             tokio::fs::create_dir_all(&root).await?;
             tokio::fs::create_dir_all(&workspace).await?;
-            println!("Default Persona set to '{}'.", id);
+            println!(
+                "Persona '{}' activated. Use --agent {} on next run.",
+                id, id
+            );
         }
         PersonaCommand::SkillMode { persona_id, mode } => {
             let access_store = PersonaSkillAccessStore::new(storage.pool.clone());
@@ -1170,7 +1161,7 @@ async fn main() -> Result<()> {
     let (mut config, config_logs) = load_config_messages(&config_path);
 
     let cli_persona_override = cli.persona.clone();
-    let mut selected_persona = cli_persona_override
+    let selected_persona = cli_persona_override
         .clone()
         .unwrap_or_else(|| config.agent.id.clone());
     if !validate_agent_id(&selected_persona) {
@@ -1278,23 +1269,6 @@ async fn main() -> Result<()> {
             .with_context(|| format!("Failed to open database at {}", db_path.display()))?,
     );
     let personas = storage.persona_store();
-    personas.ensure_default().await?;
-    if cli_persona_override.is_none() {
-        let default_id = personas.default_id().await?;
-        if default_id != selected_persona {
-            selected_persona = default_id;
-            apply_agent_context(&mut config, &selected_persona);
-            let agent_root = assistant_dir.join("agents").join(&selected_persona);
-            let workspace_dir = default_workspace_dir(&selected_persona);
-            set_runtime_agent_root(agent_root);
-            set_runtime_workspace_dir(workspace_dir.clone());
-            tokio::fs::create_dir_all(&workspace_dir)
-                .await
-                .with_context(|| {
-                    format!("Failed to create workspace at {}", workspace_dir.display())
-                })?;
-        }
-    }
     personas.ensure_exists(&selected_persona).await?;
 
     let _otel_guard = init_tracing(storage.pool.clone(), &config.observability).await?;

@@ -271,8 +271,12 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - User-private persona visible only to owner
   - `list()` returns all personas regardless of owner
 
-- [ ] `refactor(storage): update callers of removed default persona API`
-  - Deferred to PR 9 — is_default not yet removed, existing callers unchanged
+- [x] `refactor(storage): update callers of removed default persona API`
+  - Removed `ensure_default()`, `set_default()`, `default_id()` from PersonaStore
+  - Replaced all callers with `ensure_exists("default")` and direct `"default"` fallback
+  - Removed `is_default` from API response types (`PersonaSummary`, `PersonaDetail`)
+  - Removed `--default` flag from CLI `persona create`, simplified `persona use`
+  - Updated ORDER BY in `list()` / `list_accessible()` to sort by `id ASC` only
 
 - [x] `feat(storage): add sender_user_id to messages`
   - Migration 040: `ALTER TABLE messages ADD COLUMN sender_user_id TEXT`
