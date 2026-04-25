@@ -109,26 +109,43 @@ class OAuthService {
     required String redirectUri,
     required PkceChallenge pkce,
   }) async {
-    // POST credentials to get an auth code via redirect.
-    final authResponse = await _dio.post<dynamic>(
-      '/oauth/authorize',
-      data: {
-        'client_id': clientId,
-        'redirect_uri': redirectUri,
-        'code_challenge': pkce.challenge,
-        'email': email,
-        'password': password,
-      },
-      options: Options(
-        contentType: 'application/x-www-form-urlencoded',
-        followRedirects: false,
-        validateStatus: (status) =>
-            status != null && (status >= 200 && status < 400),
-      ),
-    );
+    // POST credentials to get an auth code via redirect (302/303).
+    //
+    // Dio on some platforms (notably iOS) does not reliably honour
+    // `followRedirects: false` — the underlying HttpClient may follow
+    // the redirect or throw a DioException with the redirect status.
+    // We handle both paths: a successful response with a Location header,
+    // and a DioException whose response carries the Location header.
+    String? location;
 
-    // Extract the auth code from the redirect Location header.
-    final location = authResponse.headers.value('location');
+    try {
+      final authResponse = await _dio.post<dynamic>(
+        '/oauth/authorize',
+        data: {
+          'client_id': clientId,
+          'redirect_uri': redirectUri,
+          'code_challenge': pkce.challenge,
+          'email': email,
+          'password': password,
+        },
+        options: Options(
+          contentType: 'application/x-www-form-urlencoded',
+          followRedirects: false,
+          validateStatus: (status) =>
+              status != null && (status >= 200 && status < 400),
+        ),
+      );
+      location = authResponse.headers.value('location');
+    } on DioException catch (e) {
+      // Dio threw on the redirect status — extract Location from the
+      // error response if available.
+      final status = e.response?.statusCode;
+      if (status != null && status >= 300 && status < 400) {
+        location = e.response?.headers.value('location');
+      }
+      if (location == null) rethrow;
+    }
+
     if (location == null) {
       throw OAuthException('No redirect location in authorization response');
     }
