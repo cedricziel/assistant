@@ -379,7 +379,7 @@ test.describe("Authenticated pages", () => {
   });
 
   test("persona create form", async ({ page }) => {
-    await navigateAndSettle(page, "/contexts/new");
+    await navigateAndSettle(page, "/personas/new");
     await expect(page).toHaveScreenshot("persona-create-form.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
