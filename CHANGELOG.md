@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.1.136](https://github.com/cedricziel/assistant/compare/v0.1.135...v0.1.136) (2026-04-25)
+
+
+### Features
+
+* **app:** Flutter multi-user UI — space switcher, API keys, admin screens ([#644](https://github.com/cedricziel/assistant/issues/644)) ([5fa17f6](https://github.com/cedricziel/assistant/commit/5fa17f60527f37d6bf40cd6b482b92f1d2018bd9))
+* **app:** OAuth2 login flow with PKCE and dual-mode auth ([#642](https://github.com/cedricziel/assistant/issues/642)) ([0e667a7](https://github.com/cedricziel/assistant/commit/0e667a747632b3bc6513819a94442a5a95b37a8f))
+* **app:** org/space selector after OAuth2 login ([#643](https://github.com/cedricziel/assistant/issues/643)) ([d25761c](https://github.com/cedricziel/assistant/commit/d25761cd14305ebb25cafabbdc104fb56e74159c))
+* **app:** theme-aware Mermaid diagrams from ColorScheme ([#637](https://github.com/cedricziel/assistant/issues/637)) ([8184d6b](https://github.com/cedricziel/assistant/commit/8184d6babfff231f24ecb3bae445d6a0b2071cb5))
+* **auth:** OAuth2 server — PKCE, auth code grant, device code, client registration ([#612](https://github.com/cedricziel/assistant/issues/612)) ([902f791](https://github.com/cedricziel/assistant/commit/902f7914f684084e48c4e172827be6a9351949c4))
+* **auth:** OIDC federation, API keys, middleware, and AuthProvider implementations ([#615](https://github.com/cedricziel/assistant/issues/615)) ([581f260](https://github.com/cedricziel/assistant/commit/581f260ca3a6b9d577d5f544c431a8df8e1d7e6c))
+* **cli:** add `assistant doctor` subcommand ([#632](https://github.com/cedricziel/assistant/issues/632)) ([adc3b5f](https://github.com/cedricziel/assistant/commit/adc3b5f3665c41eecaa2b04ec83f95805ffd7c17))
+* **cli:** OAuth2 device code login, api-keys, and credential storage ([#639](https://github.com/cedricziel/assistant/issues/639)) ([9ab0f3c](https://github.com/cedricziel/assistant/commit/9ab0f3c31380ef02eec975e26e0ef97ceb9d93fa))
+* core identity types, auth abstractions, and assistant-auth crate ([#610](https://github.com/cedricziel/assistant/issues/610)) ([0916a4d](https://github.com/cedricziel/assistant/commit/0916a4de99974979660ea5cf65c15d0de03348af))
+* **llm-provider:** add OpenRouter provider with shared Chat Completions base ([#633](https://github.com/cedricziel/assistant/issues/633)) ([a59bb43](https://github.com/cedricziel/assistant/commit/a59bb43bf112e216057dc0393a5f6b27dd410c3c))
+* **openspec:** rich output rendering — SVG + interface-aware capabilities ([#613](https://github.com/cedricziel/assistant/issues/613)) ([617f86a](https://github.com/cedricziel/assistant/commit/617f86ad90ebabcd1b6321b47c9d18617daa6e90))
+* **runtime:** runtime identity threading — ChannelRunner, scheduler, adapter registry ([#636](https://github.com/cedricziel/assistant/issues/636)) ([621ff11](https://github.com/cedricziel/assistant/commit/621ff1150c3605afa7b96a05d3fd66172aaa72cb))
+* **runtime:** storage migration + runtime AuthContext threading ([#634](https://github.com/cedricziel/assistant/issues/634)) ([a2f95c5](https://github.com/cedricziel/assistant/commit/a2f95c568f1a8f066f32928b41527c652bf67a98))
+* **storage:** conversation/persona user-scoping and message sender identity ([#617](https://github.com/cedricziel/assistant/issues/617)) ([a42374f](https://github.com/cedricziel/assistant/commit/a42374fc45902c5da88a49d407d5c8fff560931d))
+* **storage:** org/space database layer with multi-tenant stores ([#616](https://github.com/cedricziel/assistant/issues/616)) ([c1bbb89](https://github.com/cedricziel/assistant/commit/c1bbb89f04ad1a594a8ae4ca1b687f08d32c1e59))
+* **web-ui:** auth middleware rewrite — JWT, API key, permission guards, session cookies ([#621](https://github.com/cedricziel/assistant/issues/621)) ([bcf19bd](https://github.com/cedricziel/assistant/commit/bcf19bd0666d5534c9050aa1d122a7756b9847cf))
+* **web-ui:** auto-migrate legacy layout on startup ([#645](https://github.com/cedricziel/assistant/issues/645)) ([e7249f1](https://github.com/cedricziel/assistant/commit/e7249f1cfe1adfcebe1393b641bcf6592e7f30c0))
+* **web-ui:** catalog, interfaces, bindings, templates API with AuthContext ([#630](https://github.com/cedricziel/assistant/issues/630)) ([3c8cfe8](https://github.com/cedricziel/assistant/commit/3c8cfe83553e84711eb6d8ca115884f914703b62))
+* **web-ui:** management API endpoints for orgs, users, spaces, members, API keys ([#629](https://github.com/cedricziel/assistant/issues/629)) ([d18e68d](https://github.com/cedricziel/assistant/commit/d18e68d40286a40633ae54f1df891eb33dd71051))
+* **web-ui:** OAuth2 endpoints — authorize, token, device flow, registration, revocation ([#618](https://github.com/cedricziel/assistant/issues/618)) ([3e7d565](https://github.com/cedricziel/assistant/commit/3e7d5657d687d3886b1514be3c36ccb4b9887490))
+* **web-ui:** OIDC IdP callback — complete external IdP login flow ([#626](https://github.com/cedricziel/assistant/issues/626)) ([3ea6165](https://github.com/cedricziel/assistant/commit/3ea616569bf982791a0e396bc00c5dccb6aabf58))
+
+
+### Bug Fixes
+
+* **runtime:** prevent context window overflow with provider-aware compaction ([#635](https://github.com/cedricziel/assistant/issues/635)) ([782c6dd](https://github.com/cedricziel/assistant/commit/782c6dd76677c9efd837b5dc7f39701e4c17a591))
+* **web-ui:** restore /setup auto-connect and update screenshot baselines ([#631](https://github.com/cedricziel/assistant/issues/631)) ([0afac30](https://github.com/cedricziel/assistant/commit/0afac3075853e7a46703656d95aca64a0a079a8b))
+
 ## [0.1.135](https://github.com/cedricziel/assistant/compare/v0.1.134...v0.1.135) (2026-04-22)
 
 
