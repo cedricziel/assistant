@@ -35,31 +35,28 @@ const FLUTTER_SETTLE_MS = 3000;
  * Navigates to /setup with a `_token` query parameter. ConnectionScreen reads
  * this parameter in initState() and calls connect() automatically (GET /health
  * with the Bearer token). On success, flutter_secure_storage writes the
- * AES-GCM-encrypted profile and the router navigates to /chat.
+ * context and the router navigates to /chat.
  *
- * This avoids interacting with the Flutter canvas/semantic overlay, which
- * requires accessibility mode to be active and is unreliable in headless
- * Chromium without a screen reader.
- *
- * The router does not redirect /setup back to /setup (onSetup=true, no-op),
- * so the query parameter is still present in Uri.base when initState() runs.
+ * Uses `waitUntil: "load"` instead of `"networkidle"` because the Flutter
+ * WASM engine makes continuous network requests during initialisation, which
+ * can prevent `networkidle` from ever firing within the test timeout.
  */
 async function loginFlutter(page: Page) {
-  // Navigate directly to the setup screen with the auto-connect token.
-  await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(FLUTTER_SETTLE_MS);
-
-  // Wait for GET /health to succeed and Flutter to navigate away from /setup.
+  await page.goto(`/setup?_token=${AUTH_TOKEN}`, { waitUntil: "load" });
   await page.waitForURL((url) => !url.pathname.includes("/setup"), {
-    timeout: 15_000,
+    timeout: 20_000,
   });
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
-/** Navigate and wait for network idle before screenshotting. */
+/** Navigate and wait for the page to settle before screenshotting.
+ *
+ * Uses `waitUntil: "load"` because Flutter WASM keeps network connections
+ * open (SSE streams, polling) which prevents `"networkidle"` from firing.
+ */
 async function navigateAndSettle(page: Page, path: string) {
-  await page.goto(path, { waitUntil: "networkidle" });
-  // Extra settle time for any CSS transitions and Flutter rendering.
+  await page.goto(path, { waitUntil: "load" });
+  // Extra settle time for Flutter WASM init + rendering.
   await page.waitForTimeout(FLUTTER_SETTLE_MS);
 }
 
