@@ -7,9 +7,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+
+// `DeviceCodeStore` and `DeviceState` live in `assistant_core::auth`; re-export
+// here for back-compat.
+pub use assistant_core::auth::{DeviceCodeStore, DeviceState};
 
 // -- Types --
 
@@ -40,38 +44,6 @@ pub enum PollResult {
     },
     /// The device code has expired.
     Expired,
-}
-
-// -- DeviceCodeStore trait --
-
-/// Storage backend for device code flow state.
-#[async_trait::async_trait]
-pub trait DeviceCodeStore: Send + Sync {
-    /// Store a new pending device authorization.
-    async fn store(&self, device_code: &str, state: DeviceState) -> Result<()>;
-
-    /// Look up a pending device authorization by device code.
-    async fn get_by_device_code(&self, device_code: &str) -> Result<Option<DeviceState>>;
-
-    /// Look up a pending device authorization by user code.
-    async fn get_by_user_code(&self, user_code: &str) -> Result<Option<DeviceState>>;
-
-    /// Update the state (e.g., mark as authorized).
-    async fn update(&self, device_code: &str, state: DeviceState) -> Result<()>;
-
-    /// Remove a device code entry.
-    async fn remove(&self, device_code: &str) -> Result<()>;
-}
-
-/// Externalized device flow state for storage backends.
-#[derive(Clone, Debug)]
-pub struct DeviceState {
-    pub device_code: String,
-    pub user_code: String,
-    pub client_id: String,
-    pub scopes: Vec<String>,
-    pub expires_at: DateTime<Utc>,
-    pub authorized_user: Option<String>,
 }
 
 // -- In-memory implementation --

@@ -10,20 +10,9 @@ use tokio::sync::RwLock;
 
 use assistant_core::auth::{ClientInfo, ClientRegistration};
 
-// -- ClientStore trait --
-
-/// Storage backend for registered OAuth2 clients.
-#[async_trait::async_trait]
-pub trait ClientStore: Send + Sync {
-    /// Register a new client.
-    async fn register(&self, info: ClientInfo) -> Result<()>;
-
-    /// Look up a client by ID.
-    async fn get(&self, client_id: &str) -> Result<Option<ClientInfo>>;
-
-    /// List all registered clients.
-    async fn list(&self) -> Result<Vec<ClientInfo>>;
-}
+// `ClientStore` lives in `assistant_core::auth`; re-export for back-compat
+// with existing callers that imported from this module.
+pub use assistant_core::auth::ClientStore;
 
 // -- In-memory implementation --
 

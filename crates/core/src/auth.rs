@@ -320,6 +320,95 @@ pub trait ApiKeyStore: Send + Sync {
     async fn revoke(&self, key_id: &str, user_id: &UserId) -> Result<bool>;
 }
 
+/// Storage backend for registered OAuth2 clients.
+#[async_trait]
+pub trait ClientStore: Send + Sync {
+    /// Register a new client.
+    async fn register(&self, info: ClientInfo) -> Result<()>;
+    /// Look up a client by ID.
+    async fn get(&self, client_id: &str) -> Result<Option<ClientInfo>>;
+    /// List all registered clients.
+    async fn list(&self) -> Result<Vec<ClientInfo>>;
+}
+
+/// A pending authorization code waiting to be exchanged for tokens.
+#[derive(Clone, Debug)]
+pub struct AuthCode {
+    pub code: String,
+    pub user_id: String,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub scopes: Vec<String>,
+    pub pkce_challenge: Option<String>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Storage backend for OAuth2 authorization codes.
+#[async_trait]
+pub trait AuthCodeStore: Send + Sync {
+    /// Store a new authorization code.
+    async fn store_code(&self, code: AuthCode) -> Result<()>;
+    /// Look up and consume an authorization code (single-use).
+    async fn take_code(&self, code: &str) -> Result<Option<AuthCode>>;
+}
+
+/// A stored refresh token.
+#[derive(Clone, Debug)]
+pub struct StoredRefreshToken {
+    pub token: String,
+    pub user_id: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub expires_at: DateTime<Utc>,
+    /// Whether this token has been consumed (for rotation detection).
+    pub consumed: bool,
+}
+
+/// Storage backend for refresh tokens.
+#[async_trait]
+pub trait RefreshTokenStore: Send + Sync {
+    /// Store a new refresh token.
+    async fn store_token(&self, token: StoredRefreshToken) -> Result<()>;
+    /// Look up a refresh token without consuming it.
+    async fn get_token(&self, token: &str) -> Result<Option<StoredRefreshToken>>;
+    /// Mark a refresh token as consumed (for rotation).
+    async fn consume_token(&self, token: &str) -> Result<()>;
+    /// Revoke all refresh tokens for a user+client pair (security measure when
+    /// replay is detected).
+    async fn revoke_all(&self, user_id: &str, client_id: &str) -> Result<()>;
+    /// Revoke all refresh tokens belonging to a user except the specified
+    /// token. Used after a self-service password change to log the user out
+    /// of every other session while keeping the current one alive. Returns
+    /// the number of tokens revoked.
+    async fn revoke_for_user_except(&self, user_id: &str, except_token: &str) -> Result<u64>;
+}
+
+/// Externalized device flow state for storage backends.
+#[derive(Clone, Debug)]
+pub struct DeviceState {
+    pub device_code: String,
+    pub user_code: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub expires_at: DateTime<Utc>,
+    pub authorized_user: Option<String>,
+}
+
+/// Storage backend for OAuth2 device authorization grant state (RFC 8628).
+#[async_trait]
+pub trait DeviceCodeStore: Send + Sync {
+    /// Store a new pending device authorization.
+    async fn store(&self, device_code: &str, state: DeviceState) -> Result<()>;
+    /// Look up a pending device authorization by device code.
+    async fn get_by_device_code(&self, device_code: &str) -> Result<Option<DeviceState>>;
+    /// Look up a pending device authorization by user code.
+    async fn get_by_user_code(&self, user_code: &str) -> Result<Option<DeviceState>>;
+    /// Update the state (e.g., mark as authorized).
+    async fn update(&self, device_code: &str, state: DeviceState) -> Result<()>;
+    /// Remove a device code entry.
+    async fn remove(&self, device_code: &str) -> Result<()>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
