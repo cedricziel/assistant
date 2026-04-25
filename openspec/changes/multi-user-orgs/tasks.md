@@ -399,35 +399,35 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - CRUD happy paths
   - Permission enforcement: member can't create spaces, viewer can't invite users
 
-- [ ] `feat(web-ui): catalog management endpoints`
+- [x] `feat(web-ui): catalog management endpoints`
   - `POST /api/orgs/{org_id}/catalog/skills` — publish skill to catalog
   - `POST /api/orgs/{org_id}/catalog/templates` — publish template to catalog
   - `GET /api/orgs/{org_id}/catalog/{type}` — list catalog resources
   - `DELETE /api/orgs/{org_id}/catalog/{type}/{id}` — remove from catalog
 
-- [ ] `feat(web-ui): catalog subscription endpoints`
+- [x] `feat(web-ui): catalog subscription endpoints`
   - `POST /api/orgs/{org_id}/spaces/{space_id}/subscriptions` — subscribe space to catalog resource
   - `GET /api/orgs/{org_id}/spaces/{space_id}/subscriptions` — list subscriptions
   - `DELETE /api/orgs/{org_id}/spaces/{space_id}/subscriptions/{id}` — unsubscribe
 
-- [ ] `feat(web-ui): interface instance endpoints`
+- [x] `feat(web-ui): interface instance endpoints`
   - `POST /api/orgs/{org_id}/spaces/{space_id}/interfaces` — create interface instance (type, config, owner: org|user)
   - `GET /api/orgs/{org_id}/spaces/{space_id}/interfaces` — list instances
   - `DELETE /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}` — remove instance
 
-- [ ] `feat(web-ui): persona ↔ interface binding endpoints`
+- [x] `feat(web-ui): persona ↔ interface binding endpoints`
   - `POST /api/orgs/{org_id}/spaces/{space_id}/bindings` — bind persona to interface instance
   - `GET /api/orgs/{org_id}/spaces/{space_id}/bindings` — list bindings
   - `DELETE /api/orgs/{org_id}/spaces/{space_id}/bindings/{id}` — unbind
 
-- [ ] `feat(web-ui): persona template instantiation and onboarding`
+- [x] `feat(web-ui): persona template instantiation and onboarding`
   - `GET /api/orgs/{org_id}/catalog/templates` — list templates (filtered by user's allowed_templates quota)
   - `POST /api/orgs/{org_id}/spaces/{space_id}/personas/from-template` — create persona from template, enforce max_personas quota
   - `GET /api/users/me/onboarding-status` — has user created at least one persona?
 
-- [ ] `test(web-ui): catalog, subscriptions, interfaces, bindings, and template instantiation`
+- [x] `test(web-ui): catalog, subscriptions, interfaces, bindings, and template instantiation`
 
-- [ ] `refactor(web-ui): update existing API handlers to enforce AuthContext`
+- [x] `refactor(web-ui): update existing API handlers to enforce AuthContext`
   - Conversations, messages, personas, skills endpoints
   - Scope queries by user_id + space from AuthContext
   - Return 403 when user lacks access
