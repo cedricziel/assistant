@@ -12,6 +12,7 @@ Method | HTTP request | Description
 [**authorizeGet**](OauthApi.md#authorizeget) | **GET** /oauth/authorize | GET /oauth/authorize — render login form.
 [**authorizePost**](OauthApi.md#authorizepost) | **POST** /oauth/authorize | POST /oauth/authorize — validate credentials, generate auth code, redirect.
 [**callback**](OauthApi.md#callback) | **GET** /oauth/callback | GET /oauth/callback — handle the IdP redirect.
+[**complete**](OauthApi.md#complete) | **GET** /oauth/complete | GET /oauth/complete — return the authorization code as JSON.
 [**deviceInitiate**](OauthApi.md#deviceinitiate) | **POST** /oauth/device | POST /oauth/device — initiate the device authorization flow.
 [**deviceVerifyPage**](OauthApi.md#deviceverifypage) | **GET** /oauth/device/verify | GET /oauth/device/verify — render page where user enters the code.
 [**deviceVerifySubmit**](OauthApi.md#deviceverifysubmit) | **POST** /oauth/device/verify | POST /oauth/device/verify — user approves the device code.
@@ -168,6 +169,53 @@ No authorization required
 
  - **Content-Type**: Not defined
  - **Accept**: Not defined
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **complete**
+> CompleteResponse complete(code, state, error, errorDescription)
+
+GET /oauth/complete — return the authorization code as JSON.
+
+### Example
+```dart
+import 'package:assistant_api/api.dart';
+
+final api = AssistantApi().getOauthApi();
+final String code = code_example; // String | Authorization code from the authorize endpoint.
+final String state = state_example; // String | Client-supplied state (forwarded from the authorize request).
+final String error = error_example; // String | Error code (if authorization failed).
+final String errorDescription = errorDescription_example; // String | Human-readable error description.
+
+try {
+    final response = api.complete(code, state, error, errorDescription);
+    print(response);
+} on DioException catch (e) {
+    print('Exception when calling OauthApi->complete: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **code** | **String**| Authorization code from the authorize endpoint. | [optional] 
+ **state** | **String**| Client-supplied state (forwarded from the authorize request). | [optional] 
+ **error** | **String**| Error code (if authorization failed). | [optional] 
+ **errorDescription** | **String**| Human-readable error description. | [optional] 
+
+### Return type
+
+[**CompleteResponse**](CompleteResponse.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

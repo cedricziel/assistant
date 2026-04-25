@@ -5510,6 +5510,83 @@
         ]
       }
     },
+    "/oauth/complete": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "GET /oauth/complete — return the authorization code as JSON.",
+        "operationId": "complete",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "Authorization code from the authorize endpoint.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Client-supplied state (forwarded from the authorize request).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "Error code (if authorization failed).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "description": "Human-readable error description.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorization code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or error parameters"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/oauth/device": {
       "post": {
         "tags": [
@@ -7417,6 +7494,26 @@
           },
           "payload": {
             "description": "Optional payload associated with the command."
+          }
+        }
+      },
+      "CompleteResponse": {
+        "type": "object",
+        "description": "JSON response from the completion endpoint.",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The authorization code."
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client state, if any."
           }
         }
       },

@@ -43,6 +43,7 @@ import 'package:assistant_api/src/model/client_registration_schema.dart';
 import 'package:assistant_api/src/model/command_arg_response.dart';
 import 'package:assistant_api/src/model/command_def_response.dart';
 import 'package:assistant_api/src/model/command_event_response.dart';
+import 'package:assistant_api/src/model/complete_response.dart';
 import 'package:assistant_api/src/model/conversation_detail.dart';
 import 'package:assistant_api/src/model/conversation_summary.dart';
 import 'package:assistant_api/src/model/create_api_key_request.dart';
@@ -194,6 +195,7 @@ part 'serializers.g.dart';
   CommandArgResponse,
   CommandDefResponse,
   CommandEventResponse,
+  CompleteResponse,
   ConversationDetail,
   ConversationSummary,
   CreateApiKeyRequest,

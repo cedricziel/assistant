@@ -263,6 +263,7 @@ pub struct ApiErrorResponse {
         crate::oauth::device::device_verify_page,
         crate::oauth::device::device_verify_submit,
         crate::oauth::callback::callback,
+        crate::oauth::complete::complete,
         crate::oauth::revoke::revoke,
         crate::oauth::revoke::metadata,
         // Organization management
@@ -449,6 +450,7 @@ pub struct ApiErrorResponse {
             crate::oauth::device::DeviceVerifyForm,
             crate::oauth::revoke::RevokeRequest,
             crate::oauth::revoke::ServerMetadata,
+            crate::oauth::complete::CompleteResponse,
             crate::oauth::DeviceCodeResponseSchema,
             crate::oauth::ClientRegistrationSchema,
             crate::oauth::ClientInfoSchema,
