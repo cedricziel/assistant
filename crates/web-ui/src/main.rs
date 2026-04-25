@@ -207,9 +207,10 @@ async fn run_with_args(args: Args) -> Result<()> {
     let storage = Arc::new(StorageLayer::new(&db_path).await?);
 
     // -- Org-level storage (users, spaces, auth state) --------------------------
-    let org_db_path = db_path.with_file_name("org.db");
+    let pool_factory = assistant_storage::OrgPoolFactory::new(base_path);
     let org_storage = Arc::new(
-        assistant_storage::OrgStorageLayer::new(&org_db_path)
+        pool_factory
+            .org_storage()
             .await
             .context("Failed to open org.db")?,
     );
