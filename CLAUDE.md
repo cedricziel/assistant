@@ -26,10 +26,12 @@ The Rust build embeds the Flutter web app via `rust-embed`. `cargo build -p assi
 
 All runtime data lives under `~/.assistant/`:
 
-- `assistant.db` — SQLite database (WAL mode)
+- `assistant.db` — SQLite database (WAL mode), space-level data
+- `org.db` — org-level database (users, spaces, auth state, API keys)
 - `config.toml` — copied from `config.toml` at repo root on first run
 - `skills/<name>/SKILL.md` — user-created skills
 - `agents/<id>/` — per-persona agent workspace
+- `orgs/{slug}/spaces/{space}/space.db` — per-space databases (multi-org layout)
 
 ## OpenAPI Spec
 
