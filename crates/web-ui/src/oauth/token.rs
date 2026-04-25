@@ -87,8 +87,32 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
                 .into_response();
         }
     };
-    let client_id = req.client_id.unwrap_or_default();
-    let redirect_uri = req.redirect_uri.unwrap_or_default();
+    let client_id = match req.client_id {
+        Some(c) if !c.is_empty() => c,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(OAuthError {
+                    error: "invalid_request",
+                    error_description: "missing client_id parameter".into(),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let redirect_uri = match req.redirect_uri {
+        Some(r) if !r.is_empty() => r,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(OAuthError {
+                    error: "invalid_request",
+                    error_description: "missing redirect_uri parameter".into(),
+                }),
+            )
+                .into_response();
+        }
+    };
 
     match state
         .oauth2_server

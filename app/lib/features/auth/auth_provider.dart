@@ -131,11 +131,12 @@ class OAuthLoginNotifier extends Notifier<OAuthLoginState> {
 
   /// The redirect URI for OAuth2 flows.
   ///
-  /// On web, this is the same origin with `/oauth/callback`.
-  /// On macOS, this uses a loopback address (the server accepts this).
+  /// Uses `/oauth/complete` — a dedicated endpoint that returns the auth
+  /// code as JSON.  This avoids colliding with `/oauth/callback` which is
+  /// reserved for OIDC IdP callbacks (and expects a `state` parameter).
   String _redirectUri(String serverUrl) {
     final uri = Uri.parse(serverUrl);
-    return uri.replace(path: '/oauth/callback').toString();
+    return uri.replace(path: '/oauth/complete').toString();
   }
 }
 

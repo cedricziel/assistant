@@ -317,7 +317,7 @@ void main() {
         );
       });
 
-      test('throws OAuthException when no Location header', () async {
+      test('throws OAuthException when response has no code', () async {
         mock.when(
           '/oauth/authorize',
           respond: const MockResponse(statusCode: 200, data: 'OK'),
@@ -335,6 +335,52 @@ void main() {
           throwsA(isA<OAuthException>()),
         );
       });
+
+      test(
+        'extracts code from JSON body when redirect is followed (web)',
+        () async {
+          // Simulate Dio following the 303 redirect to /oauth/complete
+          // which returns JSON {"code": "..."}.
+          mock.when(
+            '/oauth/authorize',
+            respond: const MockResponse(
+              statusCode: 200,
+              data: {'code': 'code_from_body'},
+            ),
+          );
+
+          mock.when(
+            '/oauth/token',
+            respond: const MockResponse(
+              statusCode: 200,
+              data: {
+                'access_token': 'at_web',
+                'refresh_token': 'rt_web',
+                'token_type': 'Bearer',
+                'expires_in': 3600,
+              },
+            ),
+          );
+
+          final pkce = PkceChallenge.generate();
+          final creds = await service.login(
+            email: 'alice@example.com',
+            password: 'secret',
+            clientId: 'client_1',
+            redirectUri: 'http://localhost/cb',
+            pkce: pkce,
+          );
+
+          expect(creds.accessToken, 'at_web');
+          expect(creds.refreshToken, 'rt_web');
+
+          // Verify the code from the body was used in the token exchange.
+          final tokenReq = mock.requests.firstWhere(
+            (r) => r.path == '/oauth/token',
+          );
+          expect(tokenReq.data, containsPair('code', 'code_from_body'));
+        },
+      );
     });
 
     group('refresh', () {

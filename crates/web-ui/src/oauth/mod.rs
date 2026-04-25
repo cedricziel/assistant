@@ -5,6 +5,7 @@
 
 pub mod authorize;
 pub mod callback;
+pub mod complete;
 pub mod device;
 pub mod oidc_bridge;
 pub mod oidc_sessions;
@@ -60,6 +61,8 @@ pub fn oauth_router() -> Router<OAuthState> {
         .route("/oauth/authorize", post(authorize::authorize_post))
         // OIDC IdP callback (receives code from external IdP).
         .route("/oauth/callback", get(callback::callback))
+        // Password-mode redirect completion (returns code as JSON).
+        .route("/oauth/complete", get(complete::complete))
         // Token endpoint.
         .route("/oauth/token", post(token::token))
         // Dynamic client registration.
@@ -157,6 +160,13 @@ mod tests {
     use assistant_auth::jwt::JwtKeyPair;
     use assistant_core::identity::OrgId;
     use assistant_core::store::{OrgStore, Organization, User, UserStore};
+
+    /// Generate a PKCE pair for tests that don't specifically test PKCE behaviour.
+    fn test_pkce() -> (String, String) {
+        let verifier = assistant_auth::oauth2::pkce::generate_verifier();
+        let challenge = assistant_auth::oauth2::pkce::challenge_from_verifier(&verifier);
+        (verifier, challenge)
+    }
 
     /// Build a test `OAuthState` backed by in-memory stores.
     async fn test_state() -> OAuthState {
@@ -284,6 +294,7 @@ mod tests {
     #[tokio::test]
     async fn authorize_get_renders_form() {
         let state = test_state().await;
+        let (_verifier, challenge) = test_pkce();
 
         // Register a client first so authorize_get can validate it.
         let app = build_app(state.clone());
@@ -313,7 +324,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(&format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb"))
+                    .uri(&format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&code_challenge={challenge}&code_challenge_method=S256"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -425,10 +436,11 @@ mod tests {
         let client_id = client["client_id"].as_str().unwrap();
 
         // GET /oauth/authorize should redirect to the IdP, not render a form.
+        let (_verifier, challenge) = test_pkce();
         let app = build_app(state);
         let resp = app.oneshot(
             Request::builder()
-                .uri(&format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&state=mystate"))
+                .uri(&format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&state=mystate&code_challenge={challenge}&code_challenge_method=S256"))
                 .body(Body::empty())
                 .unwrap(),
         ).await.unwrap();
@@ -551,6 +563,7 @@ mod tests {
     #[tokio::test]
     async fn full_auth_code_flow() {
         let state = test_state().await;
+        let (verifier, challenge) = test_pkce();
 
         // Step 1: Register a client.
         let app = build_app(state.clone());
@@ -576,10 +589,10 @@ mod tests {
         let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let client_id = client["client_id"].as_str().unwrap();
 
-        // Step 2: POST /oauth/authorize with credentials.
+        // Step 2: POST /oauth/authorize with credentials + PKCE challenge.
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}"
         );
         let resp = app
             .oneshot(
@@ -613,10 +626,10 @@ mod tests {
             .next()
             .unwrap();
 
-        // Step 3: Exchange code for tokens.
+        // Step 3: Exchange code for tokens (with PKCE verifier).
         let app = build_app(state.clone());
         let token_form = format!(
-            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_verifier={verifier}"
         );
         let resp = app
             .oneshot(
@@ -653,6 +666,7 @@ mod tests {
     #[tokio::test]
     async fn auth_code_exchange_sets_session_cookie() {
         let state = test_state().await;
+        let (verifier, challenge) = test_pkce();
 
         // Register a client.
         let app = build_app(state.clone());
@@ -678,10 +692,10 @@ mod tests {
         let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let client_id = client["client_id"].as_str().unwrap();
 
-        // Authorize (get auth code).
+        // Authorize (get auth code with PKCE challenge).
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}"
         );
         let resp = app
             .oneshot(
@@ -703,10 +717,10 @@ mod tests {
             .next()
             .unwrap();
 
-        // Exchange code for tokens.
+        // Exchange code for tokens (with PKCE verifier).
         let app = build_app(state.clone());
         let token_form = format!(
-            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_verifier={verifier}"
         );
         let resp = app
             .oneshot(
@@ -754,6 +768,7 @@ mod tests {
     #[tokio::test]
     async fn refresh_token_exchange_sets_session_cookie() {
         let state = test_state().await;
+        let (verifier, challenge) = test_pkce();
 
         // Register client + get auth code + exchange for tokens (setup).
         let app = build_app(state.clone());
@@ -781,7 +796,7 @@ mod tests {
 
         let app = build_app(state.clone());
         let form = format!(
-            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}"
         );
         let resp = app
             .oneshot(
@@ -805,7 +820,7 @@ mod tests {
 
         let app = build_app(state.clone());
         let token_form = format!(
-            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb"
+            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_verifier={verifier}"
         );
         let resp = app
             .oneshot(
