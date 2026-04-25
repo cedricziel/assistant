@@ -6,14 +6,14 @@
 
 ## 2. Backend: `/api/users/me` capability
 
-- [ ] 2.1 Create `crates/web-ui/src/api/account.rs` with module-level docs listing the three routes (mirror `users.rs:1-11` style).
-- [ ] 2.2 Define request/response types: `UpdateCurrentUserRequest { name?, email? }`, `UpdateCurrentUserResponse` (a `UserDetail` plus optional `previous_email`), `ChangePasswordRequest { current_password, new_password }`. Use `utoipa::ToSchema` derives.
-- [ ] 2.3 Implement `get_current_user` handler — read `AuthContext`, look up user, return `UserDetail`. Include `#[utoipa::path]` annotation with `operation_id = "get_current_user"`.
-- [ ] 2.4 Implement `update_current_user` handler — apply name/email patch, dedupe email within org (return 409), reject empty/invalid email (400), include `previous_email` in response when changed. `operation_id = "update_current_user"`.
-- [ ] 2.5 Implement `change_password` handler — verify current via `assistant_auth::password::verify_password`, hash new via `hash_password`, persist, then call the bulk revocation from §1.2 excepting the current refresh token's jti. Return `204 No Content`. `operation_id = "change_password"`.
-- [ ] 2.6 Add OIDC-mode guard to `update_current_user` and `change_password`: if the user's org has `auth_mode == "oidc"`, return `409` with `{"error": "account managed by identity provider <issuer>"}`. `get_current_user` is unguarded.
-- [ ] 2.7 Wire the router in `crates/web-ui/src/main.rs` (or wherever `users_api_router` is mounted) under `/api`.
-- [ ] 2.8 Write handler tests in `account.rs` `#[cfg(test)] mod tests` covering every scenario in `specs/self-service-account/spec.md` for the three endpoints (success paths, OIDC rejection, email collision, wrong current password, empty new password, API-key survives, calling-token survives + sibling revoked).
+- [x] 2.1 Create `crates/web-ui/src/api/account.rs` with module-level docs listing the three routes (mirror `users.rs:1-11` style).
+- [x] 2.2 Define request/response types: `UpdateCurrentUserRequest { name?, email? }`, `UpdateCurrentUserResponse` (a `UserDetail` plus optional `previous_email`), `ChangePasswordRequest { current_password, new_password }`. Use `utoipa::ToSchema` derives.
+- [x] 2.3 Implement `get_current_user` handler — read `AuthContext`, look up user, return `UserDetail`. Include `#[utoipa::path]` annotation with `operation_id = "get_current_user"`.
+- [x] 2.4 Implement `update_current_user` handler — apply name/email patch, dedupe email within org (return 409), reject empty/invalid email (400), include `previous_email` in response when changed. `operation_id = "update_current_user"`.
+- [x] 2.5 Implement `change_password` handler — verify current via `assistant_auth::password::verify_password`, hash new via `hash_password`, persist, then revoke **all** of the user's refresh tokens via `revoke_for_user_except(user_id, "")`. Return `204 No Content`. The calling access JWT survives until natural expiry. `operation_id = "change_password"`.
+- [x] 2.6 Add OIDC-mode guard to `update_current_user` and `change_password`: if the user's org has `auth_mode == "oidc"`, return `409` with `{"error": "account managed by identity provider <issuer>"}`. `get_current_user` is unguarded.
+- [x] 2.7 Wire the router in `crates/web-ui/src/main.rs` (or wherever `users_api_router` is mounted) under `/api`.
+- [x] 2.8 Write handler tests in `account.rs` `#[cfg(test)] mod tests` covering every scenario in `specs/self-service-account/spec.md` for the three endpoints (success paths, OIDC rejection, email collision, wrong current password, empty new password, sibling-tokens revoked + cross-user untouched). Note: "API keys survive password change" and "calling JWT continues to work" are deferred to the §7 integration test, which exercises a real bearer-token / API-key auth flow.
 
 ## 3. OpenAPI + generated Flutter client
 

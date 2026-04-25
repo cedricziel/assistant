@@ -7,6 +7,7 @@
 //! - `logs.rs`: log entry retrieval
 //! - `skills.rs`: skill discovery per persona
 
+pub mod account;
 pub mod agents;
 pub mod analytics;
 pub mod api_keys;

@@ -56,12 +56,12 @@ The system SHALL expose `PATCH /api/users/me` accepting an `UpdateCurrentUserReq
 
 ### Requirement: Caller can change own password
 
-The system SHALL expose `POST /api/users/me/password` accepting a `ChangePasswordRequest` of the shape `{ current_password: string, new_password: string }`. The system MUST verify the current password against the stored argon2id hash, hash the new password, persist it, and revoke all of the user's refresh tokens **except** the one underlying the current request. API keys MUST NOT be affected.
+The system SHALL expose `POST /api/users/me/password` accepting a `ChangePasswordRequest` of the shape `{ current_password: string, new_password: string }`. The system MUST verify the current password against the stored argon2id hash, hash the new password, persist it, and revoke **all** of the user's refresh tokens. The calling access-token JWT continues to work until its natural expiry, so the user is not abruptly logged out of the current session. API keys MUST NOT be affected.
 
 #### Scenario: Successful password change
 
 - **WHEN** an authenticated user submits a correct `current_password` and a non-empty `new_password`
-- **THEN** the response is `204 No Content`, the stored hash is updated, the calling session's refresh token still works, and all of the user's other refresh tokens are revoked
+- **THEN** the response is `204 No Content`, the stored hash is updated, every refresh token belonging to the user is revoked, and the calling access-token JWT remains valid until its natural expiry
 
 #### Scenario: Wrong current password
 
@@ -77,6 +77,11 @@ The system SHALL expose `POST /api/users/me/password` accepting a `ChangePasswor
 
 - **WHEN** a user with at least one active API key successfully changes their password
 - **THEN** that API key still authenticates subsequent requests
+
+#### Scenario: All refresh tokens are revoked
+
+- **WHEN** a user with multiple stored refresh tokens (across browsers / devices) successfully changes their password
+- **THEN** every refresh token belonging to that user is revoked, so any subsequent `/oauth/token` refresh call from any device fails until the user re-logs-in
 
 #### Scenario: OIDC org rejects password change
 
