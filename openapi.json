@@ -1669,62 +1669,12 @@
         ]
       }
     },
-    "/api/orgs/{org_id}/catalog/{item_id}": {
-      "delete": {
-        "tags": [
-          "catalog"
-        ],
-        "summary": "`DELETE /api/orgs/{org_id}/catalog/{item_id}` — remove from catalog.",
-        "operationId": "delete_catalog_item",
-        "parameters": [
-          {
-            "name": "org_id",
-            "in": "path",
-            "description": "Organization ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "item_id",
-            "in": "path",
-            "description": "Catalog item ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Deleted"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "404": {
-            "description": "Not found"
-          }
-        },
-        "security": [
-          {
-            "bearer_token": []
-          },
-          {
-            "oauth2": [
-              "org:manage"
-            ]
-          }
-        ]
-      }
-    },
-    "/api/orgs/{org_id}/catalog/{type}": {
+    "/api/orgs/{org_id}/catalog/type/{type}": {
       "get": {
         "tags": [
           "catalog"
         ],
-        "summary": "`GET /api/orgs/{org_id}/catalog/{type}` — list catalog items by type.",
+        "summary": "`GET /api/orgs/{org_id}/catalog/type/{type}` — list catalog items by type.",
         "operationId": "list_catalog_by_type",
         "parameters": [
           {
@@ -1773,6 +1723,56 @@
           },
           {
             "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/catalog/{item_id}": {
+      "delete": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "`DELETE /api/orgs/{org_id}/catalog/{item_id}` — remove from catalog.",
+        "operationId": "delete_catalog_item",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "description": "Catalog item ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
           }
         ]
       }

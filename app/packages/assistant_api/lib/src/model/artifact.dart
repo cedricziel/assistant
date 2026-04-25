@@ -92,7 +92,8 @@ class _$ArtifactSerializer implements PrimitiveSerializer<Artifact> {
       yield r'metadata';
       yield serializers.serialize(
         object.metadata,
-        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(
+            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     if (object.name != null) {
@@ -115,7 +116,9 @@ class _$ArtifactSerializer implements PrimitiveSerializer<Artifact> {
     Artifact object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -155,7 +158,8 @@ class _$ArtifactSerializer implements PrimitiveSerializer<Artifact> {
         case r'metadata':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(
+                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.metadata.replace(valueDes);
@@ -203,4 +207,3 @@ class _$ArtifactSerializer implements PrimitiveSerializer<Artifact> {
     return result.build();
   }
 }
-

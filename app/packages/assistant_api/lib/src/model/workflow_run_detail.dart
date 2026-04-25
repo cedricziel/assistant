@@ -14,10 +14,11 @@ part 'workflow_run_detail.g.dart';
 /// Workflow run detail including all steps.
 ///
 /// Properties:
-/// * [run] 
-/// * [steps] 
+/// * [run]
+/// * [steps]
 @BuiltValue()
-abstract class WorkflowRunDetail implements Built<WorkflowRunDetail, WorkflowRunDetailBuilder> {
+abstract class WorkflowRunDetail
+    implements Built<WorkflowRunDetail, WorkflowRunDetailBuilder> {
   @BuiltValueField(wireName: r'run')
   WorkflowRunSummary get run;
 
@@ -26,16 +27,19 @@ abstract class WorkflowRunDetail implements Built<WorkflowRunDetail, WorkflowRun
 
   WorkflowRunDetail._();
 
-  factory WorkflowRunDetail([void updates(WorkflowRunDetailBuilder b)]) = _$WorkflowRunDetail;
+  factory WorkflowRunDetail([void updates(WorkflowRunDetailBuilder b)]) =
+      _$WorkflowRunDetail;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WorkflowRunDetailBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WorkflowRunDetail> get serializer => _$WorkflowRunDetailSerializer();
+  static Serializer<WorkflowRunDetail> get serializer =>
+      _$WorkflowRunDetailSerializer();
 }
 
-class _$WorkflowRunDetailSerializer implements PrimitiveSerializer<WorkflowRunDetail> {
+class _$WorkflowRunDetailSerializer
+    implements PrimitiveSerializer<WorkflowRunDetail> {
   @override
   final Iterable<Type> types = const [WorkflowRunDetail, _$WorkflowRunDetail];
 
@@ -65,7 +69,9 @@ class _$WorkflowRunDetailSerializer implements PrimitiveSerializer<WorkflowRunDe
     WorkflowRunDetail object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -90,7 +96,8 @@ class _$WorkflowRunDetailSerializer implements PrimitiveSerializer<WorkflowRunDe
         case r'steps':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(WorkflowRunStep)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(WorkflowRunStep)]),
           ) as BuiltList<WorkflowRunStep>;
           result.steps.replace(valueDes);
           break;
@@ -122,4 +129,3 @@ class _$WorkflowRunDetailSerializer implements PrimitiveSerializer<WorkflowRunDe
     return result.build();
   }
 }
-

@@ -17,7 +17,8 @@ part 'device_code_o_auth_flow.g.dart';
 /// * [scopes] - Available scopes for the OAuth2 security scheme.
 /// * [tokenUrl] - The token URL.
 @BuiltValue()
-abstract class DeviceCodeOAuthFlow implements Built<DeviceCodeOAuthFlow, DeviceCodeOAuthFlowBuilder> {
+abstract class DeviceCodeOAuthFlow
+    implements Built<DeviceCodeOAuthFlow, DeviceCodeOAuthFlowBuilder> {
   /// The device authorization endpoint URL.
   @BuiltValueField(wireName: r'deviceAuthorizationUrl')
   String get deviceAuthorizationUrl;
@@ -36,18 +37,24 @@ abstract class DeviceCodeOAuthFlow implements Built<DeviceCodeOAuthFlow, DeviceC
 
   DeviceCodeOAuthFlow._();
 
-  factory DeviceCodeOAuthFlow([void updates(DeviceCodeOAuthFlowBuilder b)]) = _$DeviceCodeOAuthFlow;
+  factory DeviceCodeOAuthFlow([void updates(DeviceCodeOAuthFlowBuilder b)]) =
+      _$DeviceCodeOAuthFlow;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(DeviceCodeOAuthFlowBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<DeviceCodeOAuthFlow> get serializer => _$DeviceCodeOAuthFlowSerializer();
+  static Serializer<DeviceCodeOAuthFlow> get serializer =>
+      _$DeviceCodeOAuthFlowSerializer();
 }
 
-class _$DeviceCodeOAuthFlowSerializer implements PrimitiveSerializer<DeviceCodeOAuthFlow> {
+class _$DeviceCodeOAuthFlowSerializer
+    implements PrimitiveSerializer<DeviceCodeOAuthFlow> {
   @override
-  final Iterable<Type> types = const [DeviceCodeOAuthFlow, _$DeviceCodeOAuthFlow];
+  final Iterable<Type> types = const [
+    DeviceCodeOAuthFlow,
+    _$DeviceCodeOAuthFlow
+  ];
 
   @override
   final String wireName = r'DeviceCodeOAuthFlow';
@@ -72,7 +79,8 @@ class _$DeviceCodeOAuthFlowSerializer implements PrimitiveSerializer<DeviceCodeO
     yield r'scopes';
     yield serializers.serialize(
       object.scopes,
-      specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
+      specifiedType:
+          const FullType(BuiltMap, [FullType(String), FullType(String)]),
     );
     yield r'tokenUrl';
     yield serializers.serialize(
@@ -87,7 +95,9 @@ class _$DeviceCodeOAuthFlowSerializer implements PrimitiveSerializer<DeviceCodeO
     DeviceCodeOAuthFlow object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -120,7 +130,8 @@ class _$DeviceCodeOAuthFlowSerializer implements PrimitiveSerializer<DeviceCodeO
         case r'scopes':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltMap, [FullType(String), FullType(String)]),
+            specifiedType:
+                const FullType(BuiltMap, [FullType(String), FullType(String)]),
           ) as BuiltMap<String, String>;
           result.scopes.replace(valueDes);
           break;
@@ -159,4 +170,3 @@ class _$DeviceCodeOAuthFlowSerializer implements PrimitiveSerializer<DeviceCodeO
     return result.build();
   }
 }
-

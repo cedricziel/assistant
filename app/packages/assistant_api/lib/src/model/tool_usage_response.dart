@@ -11,11 +11,12 @@ part 'tool_usage_response.g.dart';
 /// Tool invocation statistics.
 ///
 /// Properties:
-/// * [avgDurationS] 
-/// * [invocations] 
-/// * [toolName] 
+/// * [avgDurationS]
+/// * [invocations]
+/// * [toolName]
 @BuiltValue()
-abstract class ToolUsageResponse implements Built<ToolUsageResponse, ToolUsageResponseBuilder> {
+abstract class ToolUsageResponse
+    implements Built<ToolUsageResponse, ToolUsageResponseBuilder> {
   @BuiltValueField(wireName: r'avg_duration_s')
   double get avgDurationS;
 
@@ -27,16 +28,19 @@ abstract class ToolUsageResponse implements Built<ToolUsageResponse, ToolUsageRe
 
   ToolUsageResponse._();
 
-  factory ToolUsageResponse([void updates(ToolUsageResponseBuilder b)]) = _$ToolUsageResponse;
+  factory ToolUsageResponse([void updates(ToolUsageResponseBuilder b)]) =
+      _$ToolUsageResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ToolUsageResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ToolUsageResponse> get serializer => _$ToolUsageResponseSerializer();
+  static Serializer<ToolUsageResponse> get serializer =>
+      _$ToolUsageResponseSerializer();
 }
 
-class _$ToolUsageResponseSerializer implements PrimitiveSerializer<ToolUsageResponse> {
+class _$ToolUsageResponseSerializer
+    implements PrimitiveSerializer<ToolUsageResponse> {
   @override
   final Iterable<Type> types = const [ToolUsageResponse, _$ToolUsageResponse];
 
@@ -71,7 +75,9 @@ class _$ToolUsageResponseSerializer implements PrimitiveSerializer<ToolUsageResp
     ToolUsageResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -135,4 +141,3 @@ class _$ToolUsageResponseSerializer implements PrimitiveSerializer<ToolUsageResp
     return result.build();
   }
 }
-

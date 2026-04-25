@@ -17,7 +17,8 @@ part 'push_notification_config.g.dart';
 /// * [token] - A token unique for this task or session.
 /// * [url] - The URL where the notification should be sent.
 @BuiltValue()
-abstract class PushNotificationConfig implements Built<PushNotificationConfig, PushNotificationConfigBuilder> {
+abstract class PushNotificationConfig
+    implements Built<PushNotificationConfig, PushNotificationConfigBuilder> {
   /// Authentication information required to send the notification.
   @BuiltValueField(wireName: r'authentication')
   AuthenticationInfo? get authentication;
@@ -36,18 +37,25 @@ abstract class PushNotificationConfig implements Built<PushNotificationConfig, P
 
   PushNotificationConfig._();
 
-  factory PushNotificationConfig([void updates(PushNotificationConfigBuilder b)]) = _$PushNotificationConfig;
+  factory PushNotificationConfig(
+          [void updates(PushNotificationConfigBuilder b)]) =
+      _$PushNotificationConfig;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(PushNotificationConfigBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<PushNotificationConfig> get serializer => _$PushNotificationConfigSerializer();
+  static Serializer<PushNotificationConfig> get serializer =>
+      _$PushNotificationConfigSerializer();
 }
 
-class _$PushNotificationConfigSerializer implements PrimitiveSerializer<PushNotificationConfig> {
+class _$PushNotificationConfigSerializer
+    implements PrimitiveSerializer<PushNotificationConfig> {
   @override
-  final Iterable<Type> types = const [PushNotificationConfig, _$PushNotificationConfig];
+  final Iterable<Type> types = const [
+    PushNotificationConfig,
+    _$PushNotificationConfig
+  ];
 
   @override
   final String wireName = r'PushNotificationConfig';
@@ -91,7 +99,9 @@ class _$PushNotificationConfigSerializer implements PrimitiveSerializer<PushNoti
     PushNotificationConfig object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -165,4 +175,3 @@ class _$PushNotificationConfigSerializer implements PrimitiveSerializer<PushNoti
     return result.build();
   }
 }
-

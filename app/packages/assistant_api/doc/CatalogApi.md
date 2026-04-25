@@ -13,7 +13,7 @@ Method | HTTP request | Description
 [**deleteCatalogItem**](CatalogApi.md#deletecatalogitem) | **DELETE** /api/orgs/{org_id}/catalog/{item_id} | &#x60;DELETE /api/orgs/{org_id}/catalog/{item_id}&#x60; — remove from catalog.
 [**deleteSubscription**](CatalogApi.md#deletesubscription) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/subscriptions/{sub_id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/subscriptions/{sub_id}&#x60; — unsubscribe.
 [**listCatalog**](CatalogApi.md#listcatalog) | **GET** /api/orgs/{org_id}/catalog | &#x60;GET /api/orgs/{org_id}/catalog&#x60; — list all catalog items.
-[**listCatalogByType**](CatalogApi.md#listcatalogbytype) | **GET** /api/orgs/{org_id}/catalog/{type} | &#x60;GET /api/orgs/{org_id}/catalog/{type}&#x60; — list catalog items by type.
+[**listCatalogByType**](CatalogApi.md#listcatalogbytype) | **GET** /api/orgs/{org_id}/catalog/type/{type} | &#x60;GET /api/orgs/{org_id}/catalog/type/{type}&#x60; — list catalog items by type.
 [**listSubscriptions**](CatalogApi.md#listsubscriptions) | **GET** /api/orgs/{org_id}/spaces/{space_id}/subscriptions | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/subscriptions&#x60; — list subscriptions.
 [**publishCatalogItem**](CatalogApi.md#publishcatalogitem) | **POST** /api/orgs/{org_id}/catalog | &#x60;POST /api/orgs/{org_id}/catalog&#x60; — publish a resource to the org catalog.
 
@@ -209,7 +209,7 @@ Name | Type | Description  | Notes
 # **listCatalogByType**
 > BuiltList<CatalogItemResponse> listCatalogByType(orgId, type)
 
-`GET /api/orgs/{org_id}/catalog/{type}` — list catalog items by type.
+`GET /api/orgs/{org_id}/catalog/type/{type}` — list catalog items by type.
 
 ### Example
 ```dart

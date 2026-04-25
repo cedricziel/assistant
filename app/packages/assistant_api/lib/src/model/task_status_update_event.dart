@@ -19,7 +19,8 @@ part 'task_status_update_event.g.dart';
 /// * [status] - The new status of the task.
 /// * [taskId] - The ID of the task that has changed.
 @BuiltValue()
-abstract class TaskStatusUpdateEvent implements Built<TaskStatusUpdateEvent, TaskStatusUpdateEventBuilder> {
+abstract class TaskStatusUpdateEvent
+    implements Built<TaskStatusUpdateEvent, TaskStatusUpdateEventBuilder> {
   /// The ID of the context that the task belongs to.
   @BuiltValueField(wireName: r'contextId')
   String get contextId;
@@ -38,18 +39,24 @@ abstract class TaskStatusUpdateEvent implements Built<TaskStatusUpdateEvent, Tas
 
   TaskStatusUpdateEvent._();
 
-  factory TaskStatusUpdateEvent([void updates(TaskStatusUpdateEventBuilder b)]) = _$TaskStatusUpdateEvent;
+  factory TaskStatusUpdateEvent(
+      [void updates(TaskStatusUpdateEventBuilder b)]) = _$TaskStatusUpdateEvent;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(TaskStatusUpdateEventBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<TaskStatusUpdateEvent> get serializer => _$TaskStatusUpdateEventSerializer();
+  static Serializer<TaskStatusUpdateEvent> get serializer =>
+      _$TaskStatusUpdateEventSerializer();
 }
 
-class _$TaskStatusUpdateEventSerializer implements PrimitiveSerializer<TaskStatusUpdateEvent> {
+class _$TaskStatusUpdateEventSerializer
+    implements PrimitiveSerializer<TaskStatusUpdateEvent> {
   @override
-  final Iterable<Type> types = const [TaskStatusUpdateEvent, _$TaskStatusUpdateEvent];
+  final Iterable<Type> types = const [
+    TaskStatusUpdateEvent,
+    _$TaskStatusUpdateEvent
+  ];
 
   @override
   final String wireName = r'TaskStatusUpdateEvent';
@@ -68,7 +75,8 @@ class _$TaskStatusUpdateEventSerializer implements PrimitiveSerializer<TaskStatu
       yield r'metadata';
       yield serializers.serialize(
         object.metadata,
-        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(
+            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     yield r'status';
@@ -89,7 +97,9 @@ class _$TaskStatusUpdateEventSerializer implements PrimitiveSerializer<TaskStatu
     TaskStatusUpdateEvent object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -114,7 +124,8 @@ class _$TaskStatusUpdateEventSerializer implements PrimitiveSerializer<TaskStatu
         case r'metadata':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(
+                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.metadata.replace(valueDes);
@@ -161,4 +172,3 @@ class _$TaskStatusUpdateEventSerializer implements PrimitiveSerializer<TaskStatu
     return result.build();
   }
 }
-

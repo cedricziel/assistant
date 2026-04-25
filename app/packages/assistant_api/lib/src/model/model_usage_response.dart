@@ -11,13 +11,14 @@ part 'model_usage_response.g.dart';
 /// Per-model token usage breakdown.
 ///
 /// Properties:
-/// * [avgDurationS] 
-/// * [inputTokens] 
-/// * [model] 
-/// * [outputTokens] 
-/// * [requestCount] 
+/// * [avgDurationS]
+/// * [inputTokens]
+/// * [model]
+/// * [outputTokens]
+/// * [requestCount]
 @BuiltValue()
-abstract class ModelUsageResponse implements Built<ModelUsageResponse, ModelUsageResponseBuilder> {
+abstract class ModelUsageResponse
+    implements Built<ModelUsageResponse, ModelUsageResponseBuilder> {
   @BuiltValueField(wireName: r'avg_duration_s')
   double get avgDurationS;
 
@@ -35,16 +36,19 @@ abstract class ModelUsageResponse implements Built<ModelUsageResponse, ModelUsag
 
   ModelUsageResponse._();
 
-  factory ModelUsageResponse([void updates(ModelUsageResponseBuilder b)]) = _$ModelUsageResponse;
+  factory ModelUsageResponse([void updates(ModelUsageResponseBuilder b)]) =
+      _$ModelUsageResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ModelUsageResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ModelUsageResponse> get serializer => _$ModelUsageResponseSerializer();
+  static Serializer<ModelUsageResponse> get serializer =>
+      _$ModelUsageResponseSerializer();
 }
 
-class _$ModelUsageResponseSerializer implements PrimitiveSerializer<ModelUsageResponse> {
+class _$ModelUsageResponseSerializer
+    implements PrimitiveSerializer<ModelUsageResponse> {
   @override
   final Iterable<Type> types = const [ModelUsageResponse, _$ModelUsageResponse];
 
@@ -89,7 +93,9 @@ class _$ModelUsageResponseSerializer implements PrimitiveSerializer<ModelUsageRe
     ModelUsageResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -167,4 +173,3 @@ class _$ModelUsageResponseSerializer implements PrimitiveSerializer<ModelUsageRe
     return result.build();
   }
 }
-

@@ -17,7 +17,6 @@ import 'package:assistant_api/src/model/task.dart';
 import 'package:assistant_api/src/model/task_state.dart';
 
 class TasksApi {
-
   final Dio _dio;
 
   final Serializers _serializers;
@@ -25,7 +24,7 @@ class TasksApi {
   const TasksApi(this._dio, this._serializers);
 
   /// &#x60;POST /tasks/:id/cancel&#x60; -- Cancels a task.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [id] - Task ID to cancel
@@ -39,7 +38,7 @@ class TasksApi {
   ///
   /// Returns a [Future] containing a [Response] with a [Task] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<Task>> cancelTask({ 
+  Future<Response<Task>> cancelTask({
     required String id,
     required CancelTaskRequest cancelTaskRequest,
     CancelToken? cancelToken,
@@ -49,7 +48,10 @@ class TasksApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/tasks/{id}/cancel'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
+    final _path = r'/tasks/{id}/cancel'.replaceAll(
+        '{' r'id' '}',
+        encodeQueryParameter(_serializers, id, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'POST',
       headers: <String, dynamic>{
@@ -73,11 +75,11 @@ class TasksApi {
 
     try {
       const _type = FullType(CancelTaskRequest);
-      _bodyData = _serializers.serialize(cancelTaskRequest, specifiedType: _type);
-
-    } catch(error, stackTrace) {
+      _bodyData =
+          _serializers.serialize(cancelTaskRequest, specifiedType: _type);
+    } catch (error, stackTrace) {
       throw DioException(
-         requestOptions: _options.compose(
+        requestOptions: _options.compose(
           _dio.options,
           _path,
         ),
@@ -100,11 +102,12 @@ class TasksApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(Task),
-      ) as Task;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(Task),
+            ) as Task;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -128,7 +131,7 @@ class TasksApi {
   }
 
   /// &#x60;GET /tasks/:id&#x60; -- Gets the latest state of a task.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [id] - Task ID
@@ -143,7 +146,7 @@ class TasksApi {
   ///
   /// Returns a [Future] containing a [Response] with a [Task] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<Task>> getTask({ 
+  Future<Response<Task>> getTask({
     required String id,
     int? historyLength,
     String? tenant,
@@ -154,7 +157,10 @@ class TasksApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/tasks/{id}'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
+    final _path = r'/tasks/{id}'.replaceAll(
+        '{' r'id' '}',
+        encodeQueryParameter(_serializers, id, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -174,8 +180,10 @@ class TasksApi {
     );
 
     final _queryParameters = <String, dynamic>{
-      r'historyLength': encodeQueryParameter(_serializers, historyLength, const FullType(int)),
-      r'tenant': encodeQueryParameter(_serializers, tenant, const FullType(String)),
+      r'historyLength': encodeQueryParameter(
+          _serializers, historyLength, const FullType(int)),
+      r'tenant':
+          encodeQueryParameter(_serializers, tenant, const FullType(String)),
     };
 
     final _response = await _dio.request<Object>(
@@ -191,11 +199,12 @@ class TasksApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(Task),
-      ) as Task;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(Task),
+            ) as Task;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -219,7 +228,7 @@ class TasksApi {
   }
 
   /// &#x60;GET /tasks&#x60; -- Lists tasks matching optional filters.
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [tenant] - Tenant ID.
@@ -239,7 +248,7 @@ class TasksApi {
   ///
   /// Returns a [Future] containing a [Response] with a [ListTasksResponse] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<ListTasksResponse>> listTasks({ 
+  Future<Response<ListTasksResponse>> listTasks({
     String? tenant,
     String? contextId,
     TaskState? status,
@@ -275,14 +284,22 @@ class TasksApi {
     );
 
     final _queryParameters = <String, dynamic>{
-      r'tenant': encodeQueryParameter(_serializers, tenant, const FullType(String)),
-      r'contextId': encodeQueryParameter(_serializers, contextId, const FullType(String)),
-      r'status': encodeQueryParameter(_serializers, status, const FullType(TaskState)),
-      r'pageSize': encodeQueryParameter(_serializers, pageSize, const FullType(int)),
-      r'pageToken': encodeQueryParameter(_serializers, pageToken, const FullType(String)),
-      r'historyLength': encodeQueryParameter(_serializers, historyLength, const FullType(int)),
-      r'statusTimestampAfter': encodeQueryParameter(_serializers, statusTimestampAfter, const FullType(DateTime)),
-      r'includeArtifacts': encodeQueryParameter(_serializers, includeArtifacts, const FullType(bool)),
+      r'tenant':
+          encodeQueryParameter(_serializers, tenant, const FullType(String)),
+      r'contextId':
+          encodeQueryParameter(_serializers, contextId, const FullType(String)),
+      r'status':
+          encodeQueryParameter(_serializers, status, const FullType(TaskState)),
+      r'pageSize':
+          encodeQueryParameter(_serializers, pageSize, const FullType(int)),
+      r'pageToken':
+          encodeQueryParameter(_serializers, pageToken, const FullType(String)),
+      r'historyLength': encodeQueryParameter(
+          _serializers, historyLength, const FullType(int)),
+      r'statusTimestampAfter': encodeQueryParameter(
+          _serializers, statusTimestampAfter, const FullType(DateTime)),
+      r'includeArtifacts': encodeQueryParameter(
+          _serializers, includeArtifacts, const FullType(bool)),
     };
 
     final _response = await _dio.request<Object>(
@@ -298,11 +315,12 @@ class TasksApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(ListTasksResponse),
-      ) as ListTasksResponse;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(ListTasksResponse),
+            ) as ListTasksResponse;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -326,7 +344,7 @@ class TasksApi {
   }
 
   /// &#x60;GET /tasks/:id/subscribe&#x60; -- Subscribes to task updates (SSE).
-  /// 
+  ///
   ///
   /// Parameters:
   /// * [id] - Task ID to subscribe to
@@ -339,7 +357,7 @@ class TasksApi {
   ///
   /// Returns a [Future] containing a [Response] with a [StreamResponse] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<StreamResponse>> subscribeToTask({ 
+  Future<Response<StreamResponse>> subscribeToTask({
     required String id,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
@@ -348,7 +366,10 @@ class TasksApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/tasks/{id}/subscribe'.replaceAll('{' r'id' '}', encodeQueryParameter(_serializers, id, const FullType(String)).toString());
+    final _path = r'/tasks/{id}/subscribe'.replaceAll(
+        '{' r'id' '}',
+        encodeQueryParameter(_serializers, id, const FullType(String))
+            .toString());
     final _options = Options(
       method: r'GET',
       headers: <String, dynamic>{
@@ -379,11 +400,12 @@ class TasksApi {
 
     try {
       final rawResponse = _response.data;
-      _responseData = rawResponse == null ? null : _serializers.deserialize(
-        rawResponse,
-        specifiedType: const FullType(StreamResponse),
-      ) as StreamResponse;
-
+      _responseData = rawResponse == null
+          ? null
+          : _serializers.deserialize(
+              rawResponse,
+              specifiedType: const FullType(StreamResponse),
+            ) as StreamResponse;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -405,5 +427,4 @@ class TasksApi {
       extra: _response.extra,
     );
   }
-
 }

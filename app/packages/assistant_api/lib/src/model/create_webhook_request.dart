@@ -13,11 +13,12 @@ part 'create_webhook_request.g.dart';
 ///
 /// Properties:
 /// * [active] - Defaults to `true` when omitted.
-/// * [eventTypes] 
-/// * [name] 
-/// * [url] 
+/// * [eventTypes]
+/// * [name]
+/// * [url]
 @BuiltValue()
-abstract class CreateWebhookRequest implements Built<CreateWebhookRequest, CreateWebhookRequestBuilder> {
+abstract class CreateWebhookRequest
+    implements Built<CreateWebhookRequest, CreateWebhookRequestBuilder> {
   /// Defaults to `true` when omitted.
   @BuiltValueField(wireName: r'active')
   bool? get active;
@@ -33,18 +34,24 @@ abstract class CreateWebhookRequest implements Built<CreateWebhookRequest, Creat
 
   CreateWebhookRequest._();
 
-  factory CreateWebhookRequest([void updates(CreateWebhookRequestBuilder b)]) = _$CreateWebhookRequest;
+  factory CreateWebhookRequest([void updates(CreateWebhookRequestBuilder b)]) =
+      _$CreateWebhookRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(CreateWebhookRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<CreateWebhookRequest> get serializer => _$CreateWebhookRequestSerializer();
+  static Serializer<CreateWebhookRequest> get serializer =>
+      _$CreateWebhookRequestSerializer();
 }
 
-class _$CreateWebhookRequestSerializer implements PrimitiveSerializer<CreateWebhookRequest> {
+class _$CreateWebhookRequestSerializer
+    implements PrimitiveSerializer<CreateWebhookRequest> {
   @override
-  final Iterable<Type> types = const [CreateWebhookRequest, _$CreateWebhookRequest];
+  final Iterable<Type> types = const [
+    CreateWebhookRequest,
+    _$CreateWebhookRequest
+  ];
 
   @override
   final String wireName = r'CreateWebhookRequest';
@@ -84,7 +91,9 @@ class _$CreateWebhookRequestSerializer implements PrimitiveSerializer<CreateWebh
     CreateWebhookRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -156,4 +165,3 @@ class _$CreateWebhookRequestSerializer implements PrimitiveSerializer<CreateWebh
     return result.build();
   }
 }
-

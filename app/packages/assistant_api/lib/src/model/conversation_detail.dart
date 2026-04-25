@@ -13,13 +13,14 @@ part 'conversation_detail.g.dart';
 /// A conversation with its full message history.
 ///
 /// Properties:
-/// * [createdAt] 
-/// * [id] 
-/// * [messages] 
-/// * [title] 
-/// * [updatedAt] 
+/// * [createdAt]
+/// * [id]
+/// * [messages]
+/// * [title]
+/// * [updatedAt]
 @BuiltValue()
-abstract class ConversationDetail implements Built<ConversationDetail, ConversationDetailBuilder> {
+abstract class ConversationDetail
+    implements Built<ConversationDetail, ConversationDetailBuilder> {
   @BuiltValueField(wireName: r'created_at')
   DateTime get createdAt;
 
@@ -37,16 +38,19 @@ abstract class ConversationDetail implements Built<ConversationDetail, Conversat
 
   ConversationDetail._();
 
-  factory ConversationDetail([void updates(ConversationDetailBuilder b)]) = _$ConversationDetail;
+  factory ConversationDetail([void updates(ConversationDetailBuilder b)]) =
+      _$ConversationDetail;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ConversationDetailBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ConversationDetail> get serializer => _$ConversationDetailSerializer();
+  static Serializer<ConversationDetail> get serializer =>
+      _$ConversationDetailSerializer();
 }
 
-class _$ConversationDetailSerializer implements PrimitiveSerializer<ConversationDetail> {
+class _$ConversationDetailSerializer
+    implements PrimitiveSerializer<ConversationDetail> {
   @override
   final Iterable<Type> types = const [ConversationDetail, _$ConversationDetail];
 
@@ -91,7 +95,9 @@ class _$ConversationDetailSerializer implements PrimitiveSerializer<Conversation
     ConversationDetail object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -123,7 +129,8 @@ class _$ConversationDetailSerializer implements PrimitiveSerializer<Conversation
         case r'messages':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(MessageSummary)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(MessageSummary)]),
           ) as BuiltList<MessageSummary>;
           result.messages.replace(valueDes);
           break;
@@ -169,4 +176,3 @@ class _$ConversationDetailSerializer implements PrimitiveSerializer<Conversation
     return result.build();
   }
 }
-

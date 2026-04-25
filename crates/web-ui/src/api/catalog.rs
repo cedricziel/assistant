@@ -6,7 +6,7 @@
 //! |--------|---------------------------------------------------------------|----------------------------|
 //! | POST   | `/api/orgs/{org_id}/catalog`                                  | Publish to catalog         |
 //! | GET    | `/api/orgs/{org_id}/catalog`                                  | List catalog items         |
-//! | GET    | `/api/orgs/{org_id}/catalog/{type}`                           | List catalog by type       |
+//! | GET    | `/api/orgs/{org_id}/catalog/type/{type}`                      | List catalog by type       |
 //! | DELETE | `/api/orgs/{org_id}/catalog/{item_id}`                        | Remove from catalog        |
 //! | POST   | `/api/orgs/{org_id}/spaces/{space_id}/subscriptions`          | Subscribe space            |
 //! | GET    | `/api/orgs/{org_id}/spaces/{space_id}/subscriptions`          | List subscriptions         |
@@ -79,8 +79,12 @@ pub fn catalog_api_router() -> Router<CatalogApiState> {
             get(list_catalog).post(publish_catalog_item),
         )
         .route(
-            "/orgs/{org_id}/catalog/{type_or_id}",
-            get(list_catalog_by_type).delete(delete_catalog_item),
+            "/orgs/{org_id}/catalog/type/{type}",
+            get(list_catalog_by_type),
+        )
+        .route(
+            "/orgs/{org_id}/catalog/{item_id}",
+            axum::routing::delete(delete_catalog_item),
         )
         .route(
             "/orgs/{org_id}/spaces/{space_id}/subscriptions",
@@ -211,10 +215,10 @@ pub async fn list_catalog(
     }
 }
 
-/// `GET /api/orgs/{org_id}/catalog/{type}` — list catalog items by type.
+/// `GET /api/orgs/{org_id}/catalog/type/{type}` — list catalog items by type.
 #[utoipa::path(
     get,
-    path = "/api/orgs/{org_id}/catalog/{type}",
+    path = "/api/orgs/{org_id}/catalog/type/{type}",
     tag = "catalog",
     security(("bearer_token" = []), ("oauth2" = [])),
     params(
@@ -565,7 +569,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri("/orgs/org_1/catalog/skills")
+                    .uri("/orgs/org_1/catalog/type/skills")
                     .body(Body::empty())
                     .unwrap(),
             )

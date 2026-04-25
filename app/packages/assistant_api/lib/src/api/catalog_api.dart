@@ -386,7 +386,7 @@ class CatalogApi {
     );
   }
 
-  /// &#x60;GET /api/orgs/{org_id}/catalog/{type}&#x60; — list catalog items by type.
+  /// &#x60;GET /api/orgs/{org_id}/catalog/type/{type}&#x60; — list catalog items by type.
   ///
   ///
   /// Parameters:
@@ -411,7 +411,7 @@ class CatalogApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    final _path = r'/api/orgs/{org_id}/catalog/{type}'
+    final _path = r'/api/orgs/{org_id}/catalog/type/{type}'
         .replaceAll(
             '{' r'org_id' '}',
             encodeQueryParameter(_serializers, orgId, const FullType(String))

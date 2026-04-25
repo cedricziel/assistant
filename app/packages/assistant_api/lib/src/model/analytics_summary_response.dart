@@ -15,20 +15,22 @@ part 'analytics_summary_response.g.dart';
 /// Aggregated analytics summary for a time window.
 ///
 /// Properties:
-/// * [avgDurationS] 
-/// * [errorCount] 
-/// * [models] 
-/// * [requestSeries] 
-/// * [tokenSeries] 
-/// * [tools] 
-/// * [totalRequests] 
-/// * [totalTokensIn] 
-/// * [totalTokensOut] 
-/// * [totalToolInvocations] 
-/// * [uniqueModels] 
+/// * [avgDurationS]
+/// * [errorCount]
+/// * [models]
+/// * [requestSeries]
+/// * [tokenSeries]
+/// * [tools]
+/// * [totalRequests]
+/// * [totalTokensIn]
+/// * [totalTokensOut]
+/// * [totalToolInvocations]
+/// * [uniqueModels]
 /// * [windowHours] - The requested window in hours.
 @BuiltValue()
-abstract class AnalyticsSummaryResponse implements Built<AnalyticsSummaryResponse, AnalyticsSummaryResponseBuilder> {
+abstract class AnalyticsSummaryResponse
+    implements
+        Built<AnalyticsSummaryResponse, AnalyticsSummaryResponseBuilder> {
   @BuiltValueField(wireName: r'avg_duration_s')
   double get avgDurationS;
 
@@ -68,18 +70,25 @@ abstract class AnalyticsSummaryResponse implements Built<AnalyticsSummaryRespons
 
   AnalyticsSummaryResponse._();
 
-  factory AnalyticsSummaryResponse([void updates(AnalyticsSummaryResponseBuilder b)]) = _$AnalyticsSummaryResponse;
+  factory AnalyticsSummaryResponse(
+          [void updates(AnalyticsSummaryResponseBuilder b)]) =
+      _$AnalyticsSummaryResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AnalyticsSummaryResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AnalyticsSummaryResponse> get serializer => _$AnalyticsSummaryResponseSerializer();
+  static Serializer<AnalyticsSummaryResponse> get serializer =>
+      _$AnalyticsSummaryResponseSerializer();
 }
 
-class _$AnalyticsSummaryResponseSerializer implements PrimitiveSerializer<AnalyticsSummaryResponse> {
+class _$AnalyticsSummaryResponseSerializer
+    implements PrimitiveSerializer<AnalyticsSummaryResponse> {
   @override
-  final Iterable<Type> types = const [AnalyticsSummaryResponse, _$AnalyticsSummaryResponse];
+  final Iterable<Type> types = const [
+    AnalyticsSummaryResponse,
+    _$AnalyticsSummaryResponse
+  ];
 
   @override
   final String wireName = r'AnalyticsSummaryResponse';
@@ -157,7 +166,9 @@ class _$AnalyticsSummaryResponseSerializer implements PrimitiveSerializer<Analyt
     AnalyticsSummaryResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -189,28 +200,32 @@ class _$AnalyticsSummaryResponseSerializer implements PrimitiveSerializer<Analyt
         case r'models':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(ModelUsageResponse)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(ModelUsageResponse)]),
           ) as BuiltList<ModelUsageResponse>;
           result.models.replace(valueDes);
           break;
         case r'request_series':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(TimeSeriesResponse)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(TimeSeriesResponse)]),
           ) as BuiltList<TimeSeriesResponse>;
           result.requestSeries.replace(valueDes);
           break;
         case r'token_series':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(TimeSeriesResponse)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(TimeSeriesResponse)]),
           ) as BuiltList<TimeSeriesResponse>;
           result.tokenSeries.replace(valueDes);
           break;
         case r'tools':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType(BuiltList, [FullType(ToolUsageResponse)]),
+            specifiedType:
+                const FullType(BuiltList, [FullType(ToolUsageResponse)]),
           ) as BuiltList<ToolUsageResponse>;
           result.tools.replace(valueDes);
           break;
@@ -284,4 +299,3 @@ class _$AnalyticsSummaryResponseSerializer implements PrimitiveSerializer<Analyt
     return result.build();
   }
 }
-
