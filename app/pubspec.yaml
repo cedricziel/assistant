@@ -27,6 +27,7 @@ dependencies:
   url_launcher: ^6.3.2
   package_info_plus: ^9.0.1
   built_value: ^8.12.5
+  built_collection: ^5.1.1
   assistant_api:
     path: packages/assistant_api
   tray_manager: ^0.5.2
@@ -50,14 +51,13 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   audioplayers_platform_interface: ^7.1.1
   flutter_launcher_icons: ^0.14.4
-  built_collection: ^5.1.1
   dart_pre_commit: ^6.1.2
 flutter_launcher_icons:
   web:
     generate: true
     image_path: macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png
-    background_color: '#080C1A'
-    theme_color: '#080C1A'
+    background_color: "#080C1A"
+    theme_color: "#080C1A"
 flutter:
   uses-material-design: true
   assets:
