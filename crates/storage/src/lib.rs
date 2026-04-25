@@ -2,10 +2,13 @@ pub mod agents;
 pub mod api_key_store;
 pub mod attachments;
 pub mod auth_state_store;
+pub mod binding_store;
+pub mod catalog_item_store;
 pub mod command_events;
 pub mod conversation_broadcaster;
 pub mod conversation_events;
 pub mod conversations;
+pub mod interface_instance_store;
 pub mod logs;
 pub mod memory_chunks;
 pub mod message_bus;
@@ -32,6 +35,8 @@ pub use attachments::AttachmentStore;
 pub use auth_state_store::{
     SqliteAuthCodeStore, SqliteClientStore, SqliteDeviceCodeStore, SqliteRefreshTokenStore,
 };
+pub use binding_store::SqliteBindingStore;
+pub use catalog_item_store::{SqliteCatalogItemStore, SqliteCatalogSubscriptionStore};
 pub use command_events::{CommandEventRow, CommandEventStore};
 pub use conversation_broadcaster::{
     ConversationBroadcast, ConversationEvent, InMemoryConversationBroadcaster,
@@ -40,6 +45,7 @@ pub use conversation_events::{
     ConversationEventRow, ConversationEventStore, LiveEvent, RunBroadcaster,
 };
 pub use conversations::{ConversationRecord, ConversationStore};
+pub use interface_instance_store::SqliteInterfaceInstanceStore;
 pub use logs::{LogStats, LogStore, RecordedLog};
 pub use memory_chunks::{FtsMatch, MemoryChunkStore, StoredChunk};
 pub use message_bus::SqliteMessageBus;

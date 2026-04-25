@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::CatalogResourceType;
 use crate::identity::{OrgId, Role, SpaceId, UserId};
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,52 @@ pub struct SpaceMembership {
     pub created_at: DateTime<Utc>,
 }
 
+/// A resource published to the org-level catalog.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CatalogItem {
+    pub id: String,
+    pub org_id: OrgId,
+    pub resource_type: CatalogResourceType,
+    /// Name/slug of the resource (e.g. skill name, template name).
+    pub name: String,
+    /// Human-readable description.
+    pub description: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A space's subscription to a catalog item.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CatalogSubscription {
+    pub id: String,
+    pub space_id: SpaceId,
+    pub catalog_item_id: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A configured interface instance within a space.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InterfaceInstance {
+    pub id: String,
+    pub org_id: OrgId,
+    pub space_id: SpaceId,
+    /// Interface type: `"slack"`, `"matrix"`, `"mattermost"`, etc.
+    pub interface_type: String,
+    /// JSON-encoded configuration (tokens, channels, etc.).
+    pub config: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Binds a persona to an interface instance so the persona is reachable
+/// through that interface.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersonaBinding {
+    pub id: String,
+    pub space_id: SpaceId,
+    pub persona_id: String,
+    pub interface_instance_id: String,
+    pub created_at: DateTime<Utc>,
+}
+
 // ---------------------------------------------------------------------------
 // Store traits
 // ---------------------------------------------------------------------------
@@ -119,6 +166,44 @@ pub trait MembershipStore: Send + Sync {
             .map(|m| (m.space_id, m.role))
             .collect())
     }
+}
+
+/// Org-level catalog item CRUD.
+#[async_trait]
+pub trait CatalogItemStore: Send + Sync {
+    async fn create_item(&self, item: &CatalogItem) -> Result<()>;
+    async fn get_item(&self, id: &str) -> Result<Option<CatalogItem>>;
+    async fn list_items(
+        &self,
+        org_id: &OrgId,
+        resource_type: Option<&CatalogResourceType>,
+    ) -> Result<Vec<CatalogItem>>;
+    async fn delete_item(&self, id: &str) -> Result<bool>;
+}
+
+/// Space-level catalog subscriptions.
+#[async_trait]
+pub trait CatalogSubscriptionStore: Send + Sync {
+    async fn create_subscription(&self, sub: &CatalogSubscription) -> Result<()>;
+    async fn list_subscriptions(&self, space_id: &SpaceId) -> Result<Vec<CatalogSubscription>>;
+    async fn delete_subscription(&self, id: &str) -> Result<bool>;
+}
+
+/// Per-space interface instance management.
+#[async_trait]
+pub trait InterfaceInstanceStore: Send + Sync {
+    async fn create_instance(&self, instance: &InterfaceInstance) -> Result<()>;
+    async fn get_instance(&self, id: &str) -> Result<Option<InterfaceInstance>>;
+    async fn list_instances(&self, space_id: &SpaceId) -> Result<Vec<InterfaceInstance>>;
+    async fn delete_instance(&self, id: &str) -> Result<bool>;
+}
+
+/// Persona ↔ interface instance bindings.
+#[async_trait]
+pub trait BindingStore: Send + Sync {
+    async fn create_binding(&self, binding: &PersonaBinding) -> Result<()>;
+    async fn list_bindings(&self, space_id: &SpaceId) -> Result<Vec<PersonaBinding>>;
+    async fn delete_binding(&self, id: &str) -> Result<bool>;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +456,176 @@ impl MembershipStore for InMemoryMembershipStore {
             .filter(|m| m.space_id == *space_id)
             .cloned()
             .collect())
+    }
+}
+
+/// In-memory catalog item store.
+#[derive(Default)]
+pub struct InMemoryCatalogItemStore {
+    items: Mutex<Vec<CatalogItem>>,
+}
+
+#[async_trait]
+impl CatalogItemStore for InMemoryCatalogItemStore {
+    async fn create_item(&self, item: &CatalogItem) -> Result<()> {
+        let mut items = self.items.lock().unwrap();
+        if items.iter().any(|i| i.id == item.id) {
+            bail!("catalog item already exists: {}", item.id);
+        }
+        items.push(item.clone());
+        Ok(())
+    }
+
+    async fn get_item(&self, id: &str) -> Result<Option<CatalogItem>> {
+        Ok(self
+            .items
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|i| i.id == id)
+            .cloned())
+    }
+
+    async fn list_items(
+        &self,
+        org_id: &OrgId,
+        resource_type: Option<&CatalogResourceType>,
+    ) -> Result<Vec<CatalogItem>> {
+        Ok(self
+            .items
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|i| {
+                i.org_id == *org_id && resource_type.is_none_or(|rt| i.resource_type == *rt)
+            })
+            .cloned()
+            .collect())
+    }
+
+    async fn delete_item(&self, id: &str) -> Result<bool> {
+        let mut items = self.items.lock().unwrap();
+        let len_before = items.len();
+        items.retain(|i| i.id != id);
+        Ok(items.len() < len_before)
+    }
+}
+
+/// In-memory catalog subscription store.
+#[derive(Default)]
+pub struct InMemoryCatalogSubscriptionStore {
+    subs: Mutex<Vec<CatalogSubscription>>,
+}
+
+#[async_trait]
+impl CatalogSubscriptionStore for InMemoryCatalogSubscriptionStore {
+    async fn create_subscription(&self, sub: &CatalogSubscription) -> Result<()> {
+        let mut subs = self.subs.lock().unwrap();
+        if subs.iter().any(|s| s.id == sub.id) {
+            bail!("subscription already exists: {}", sub.id);
+        }
+        subs.push(sub.clone());
+        Ok(())
+    }
+
+    async fn list_subscriptions(&self, space_id: &SpaceId) -> Result<Vec<CatalogSubscription>> {
+        Ok(self
+            .subs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.space_id == *space_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn delete_subscription(&self, id: &str) -> Result<bool> {
+        let mut subs = self.subs.lock().unwrap();
+        let len_before = subs.len();
+        subs.retain(|s| s.id != id);
+        Ok(subs.len() < len_before)
+    }
+}
+
+/// In-memory interface instance store.
+#[derive(Default)]
+pub struct InMemoryInterfaceInstanceStore {
+    instances: Mutex<Vec<InterfaceInstance>>,
+}
+
+#[async_trait]
+impl InterfaceInstanceStore for InMemoryInterfaceInstanceStore {
+    async fn create_instance(&self, instance: &InterfaceInstance) -> Result<()> {
+        let mut instances = self.instances.lock().unwrap();
+        if instances.iter().any(|i| i.id == instance.id) {
+            bail!("interface instance already exists: {}", instance.id);
+        }
+        instances.push(instance.clone());
+        Ok(())
+    }
+
+    async fn get_instance(&self, id: &str) -> Result<Option<InterfaceInstance>> {
+        Ok(self
+            .instances
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|i| i.id == id)
+            .cloned())
+    }
+
+    async fn list_instances(&self, space_id: &SpaceId) -> Result<Vec<InterfaceInstance>> {
+        Ok(self
+            .instances
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|i| i.space_id == *space_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn delete_instance(&self, id: &str) -> Result<bool> {
+        let mut instances = self.instances.lock().unwrap();
+        let len_before = instances.len();
+        instances.retain(|i| i.id != id);
+        Ok(instances.len() < len_before)
+    }
+}
+
+/// In-memory persona-interface binding store.
+#[derive(Default)]
+pub struct InMemoryBindingStore {
+    bindings: Mutex<Vec<PersonaBinding>>,
+}
+
+#[async_trait]
+impl BindingStore for InMemoryBindingStore {
+    async fn create_binding(&self, binding: &PersonaBinding) -> Result<()> {
+        let mut bindings = self.bindings.lock().unwrap();
+        if bindings.iter().any(|b| b.id == binding.id) {
+            bail!("binding already exists: {}", binding.id);
+        }
+        bindings.push(binding.clone());
+        Ok(())
+    }
+
+    async fn list_bindings(&self, space_id: &SpaceId) -> Result<Vec<PersonaBinding>> {
+        Ok(self
+            .bindings
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|b| b.space_id == *space_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn delete_binding(&self, id: &str) -> Result<bool> {
+        let mut bindings = self.bindings.lock().unwrap();
+        let len_before = bindings.len();
+        bindings.retain(|b| b.id != id);
+        Ok(bindings.len() < len_before)
     }
 }
 
@@ -812,5 +1067,193 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(members.len(), 3);
+    }
+
+    // -- CatalogItemStore --
+
+    fn make_catalog_item(
+        id: &str,
+        org_id: &str,
+        rt: CatalogResourceType,
+        name: &str,
+    ) -> CatalogItem {
+        CatalogItem {
+            id: id.into(),
+            org_id: OrgId::from(org_id),
+            resource_type: rt,
+            name: name.into(),
+            description: format!("{name} description"),
+            created_at: now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_item_create_and_list() {
+        let store = InMemoryCatalogItemStore::default();
+        store
+            .create_item(&make_catalog_item(
+                "ci_1",
+                "org_1",
+                CatalogResourceType::Skill,
+                "web-fetch",
+            ))
+            .await
+            .unwrap();
+        store
+            .create_item(&make_catalog_item(
+                "ci_2",
+                "org_1",
+                CatalogResourceType::Template,
+                "chatbot",
+            ))
+            .await
+            .unwrap();
+
+        let all = store.list_items(&OrgId::from("org_1"), None).await.unwrap();
+        assert_eq!(all.len(), 2);
+
+        let skills = store
+            .list_items(&OrgId::from("org_1"), Some(&CatalogResourceType::Skill))
+            .await
+            .unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "web-fetch");
+    }
+
+    #[tokio::test]
+    async fn catalog_item_delete() {
+        let store = InMemoryCatalogItemStore::default();
+        store
+            .create_item(&make_catalog_item(
+                "ci_1",
+                "org_1",
+                CatalogResourceType::Skill,
+                "web-fetch",
+            ))
+            .await
+            .unwrap();
+
+        assert!(store.delete_item("ci_1").await.unwrap());
+        assert!(!store.delete_item("ci_1").await.unwrap());
+    }
+
+    // -- CatalogSubscriptionStore --
+
+    #[tokio::test]
+    async fn subscription_create_and_list() {
+        let store = InMemoryCatalogSubscriptionStore::default();
+        let sub = CatalogSubscription {
+            id: "sub_1".into(),
+            space_id: SpaceId::from("sp_eng"),
+            catalog_item_id: "ci_1".into(),
+            created_at: now(),
+        };
+        store.create_subscription(&sub).await.unwrap();
+
+        let subs = store
+            .list_subscriptions(&SpaceId::from("sp_eng"))
+            .await
+            .unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].catalog_item_id, "ci_1");
+    }
+
+    #[tokio::test]
+    async fn subscription_delete() {
+        let store = InMemoryCatalogSubscriptionStore::default();
+        let sub = CatalogSubscription {
+            id: "sub_1".into(),
+            space_id: SpaceId::from("sp_eng"),
+            catalog_item_id: "ci_1".into(),
+            created_at: now(),
+        };
+        store.create_subscription(&sub).await.unwrap();
+
+        assert!(store.delete_subscription("sub_1").await.unwrap());
+        assert!(!store.delete_subscription("sub_1").await.unwrap());
+    }
+
+    // -- InterfaceInstanceStore --
+
+    fn make_instance(
+        id: &str,
+        org_id: &str,
+        space_id: &str,
+        iface_type: &str,
+    ) -> InterfaceInstance {
+        InterfaceInstance {
+            id: id.into(),
+            org_id: OrgId::from(org_id),
+            space_id: SpaceId::from(space_id),
+            interface_type: iface_type.into(),
+            config: "{}".into(),
+            created_at: now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn interface_instance_create_and_list() {
+        let store = InMemoryInterfaceInstanceStore::default();
+        store
+            .create_instance(&make_instance("ii_1", "org_1", "sp_eng", "slack"))
+            .await
+            .unwrap();
+        store
+            .create_instance(&make_instance("ii_2", "org_1", "sp_eng", "matrix"))
+            .await
+            .unwrap();
+
+        let instances = store
+            .list_instances(&SpaceId::from("sp_eng"))
+            .await
+            .unwrap();
+        assert_eq!(instances.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn interface_instance_delete() {
+        let store = InMemoryInterfaceInstanceStore::default();
+        store
+            .create_instance(&make_instance("ii_1", "org_1", "sp_eng", "slack"))
+            .await
+            .unwrap();
+
+        assert!(store.delete_instance("ii_1").await.unwrap());
+        assert!(store.get_instance("ii_1").await.unwrap().is_none());
+    }
+
+    // -- BindingStore --
+
+    #[tokio::test]
+    async fn binding_create_and_list() {
+        let store = InMemoryBindingStore::default();
+        let binding = PersonaBinding {
+            id: "bind_1".into(),
+            space_id: SpaceId::from("sp_eng"),
+            persona_id: "persona_ops".into(),
+            interface_instance_id: "ii_1".into(),
+            created_at: now(),
+        };
+        store.create_binding(&binding).await.unwrap();
+
+        let bindings = store.list_bindings(&SpaceId::from("sp_eng")).await.unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].persona_id, "persona_ops");
+    }
+
+    #[tokio::test]
+    async fn binding_delete() {
+        let store = InMemoryBindingStore::default();
+        let binding = PersonaBinding {
+            id: "bind_1".into(),
+            space_id: SpaceId::from("sp_eng"),
+            persona_id: "persona_ops".into(),
+            interface_instance_id: "ii_1".into(),
+            created_at: now(),
+        };
+        store.create_binding(&binding).await.unwrap();
+
+        assert!(store.delete_binding("bind_1").await.unwrap());
+        assert!(!store.delete_binding("bind_1").await.unwrap());
     }
 }

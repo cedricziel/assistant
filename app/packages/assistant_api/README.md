@@ -81,7 +81,17 @@ Class | Method | HTTP request | Description
 [*ApiKeysApi*](doc/ApiKeysApi.md) | [**listApiKeys**](doc/ApiKeysApi.md#listapikeys) | **GET** /api/users/me/api-keys | &#x60;GET /api/users/me/api-keys&#x60; — list the caller&#39;s API keys.
 [*AttachmentsApi*](doc/AttachmentsApi.md) | [**serveAttachment**](doc/AttachmentsApi.md#serveattachment) | **GET** /api/attachments/{id} | &#x60;GET /api/attachments/{id}&#x60; — serve an attachment, optionally resized.
 [*AttachmentsApi*](doc/AttachmentsApi.md) | [**uploadAttachment**](doc/AttachmentsApi.md#uploadattachment) | **POST** /api/conversations/{id}/attachments | &#x60;POST /api/conversations/{id}/attachments&#x60; — upload an image attachment.
+[*BindingsApi*](doc/BindingsApi.md) | [**createBinding**](doc/BindingsApi.md#createbinding) | **POST** /api/orgs/{org_id}/spaces/{space_id}/bindings | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/bindings&#x60; — bind a persona to an interface.
+[*BindingsApi*](doc/BindingsApi.md) | [**deleteBinding**](doc/BindingsApi.md#deletebinding) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/bindings/{id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/bindings/{id}&#x60; — delete a binding.
+[*BindingsApi*](doc/BindingsApi.md) | [**listBindings**](doc/BindingsApi.md#listbindings) | **GET** /api/orgs/{org_id}/spaces/{space_id}/bindings | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/bindings&#x60; — list bindings.
 [*CapabilitiesApi*](doc/CapabilitiesApi.md) | [**getCapabilities**](doc/CapabilitiesApi.md#getcapabilities) | **GET** /api/capabilities | &#x60;GET /api/capabilities&#x60; — return server capability flags.
+[*CatalogApi*](doc/CatalogApi.md) | [**createSubscription**](doc/CatalogApi.md#createsubscription) | **POST** /api/orgs/{org_id}/spaces/{space_id}/subscriptions | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/subscriptions&#x60; — subscribe a space to a catalog item.
+[*CatalogApi*](doc/CatalogApi.md) | [**deleteCatalogItem**](doc/CatalogApi.md#deletecatalogitem) | **DELETE** /api/orgs/{org_id}/catalog/{item_id} | &#x60;DELETE /api/orgs/{org_id}/catalog/{item_id}&#x60; — remove from catalog.
+[*CatalogApi*](doc/CatalogApi.md) | [**deleteSubscription**](doc/CatalogApi.md#deletesubscription) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/subscriptions/{sub_id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/subscriptions/{sub_id}&#x60; — unsubscribe.
+[*CatalogApi*](doc/CatalogApi.md) | [**listCatalog**](doc/CatalogApi.md#listcatalog) | **GET** /api/orgs/{org_id}/catalog | &#x60;GET /api/orgs/{org_id}/catalog&#x60; — list all catalog items.
+[*CatalogApi*](doc/CatalogApi.md) | [**listCatalogByType**](doc/CatalogApi.md#listcatalogbytype) | **GET** /api/orgs/{org_id}/catalog/{type} | &#x60;GET /api/orgs/{org_id}/catalog/{type}&#x60; — list catalog items by type.
+[*CatalogApi*](doc/CatalogApi.md) | [**listSubscriptions**](doc/CatalogApi.md#listsubscriptions) | **GET** /api/orgs/{org_id}/spaces/{space_id}/subscriptions | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/subscriptions&#x60; — list subscriptions.
+[*CatalogApi*](doc/CatalogApi.md) | [**publishCatalogItem**](doc/CatalogApi.md#publishcatalogitem) | **POST** /api/orgs/{org_id}/catalog | &#x60;POST /api/orgs/{org_id}/catalog&#x60; — publish a resource to the org catalog.
 [*CommandsApi*](doc/CommandsApi.md) | [**executeCommand**](doc/CommandsApi.md#executecommand) | **POST** /api/conversations/{id}/command | &#x60;POST /api/conversations/{id}/command&#x60; — execute a slash command.
 [*CommandsApi*](doc/CommandsApi.md) | [**listCommands**](doc/CommandsApi.md#listcommands) | **GET** /api/commands | &#x60;GET /api/commands&#x60; — list all registered commands.
 [*CommandsApi*](doc/CommandsApi.md) | [**listConversationEvents**](doc/CommandsApi.md#listconversationevents) | **GET** /api/conversations/{id}/events | &#x60;GET /api/conversations/{id}/events&#x60; — list command events for the timeline.
@@ -97,6 +107,9 @@ Class | Method | HTTP request | Description
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamConversations**](doc/ConversationsApi.md#streamconversations) | **GET** /api/conversations/stream | &#x60;GET /api/conversations/stream&#x60; — SSE stream of conversation list changes.
 [*ConversationsApi*](doc/ConversationsApi.md) | [**streamRunEvents**](doc/ConversationsApi.md#streamrunevents) | **GET** /api/conversations/{id}/runs/{run_id}/events/stream | &#x60;GET /api/conversations/{id}/runs/{run_id}/events/stream&#x60;
 [*ConversationsApi*](doc/ConversationsApi.md) | [**updateConversation**](doc/ConversationsApi.md#updateconversation) | **PATCH** /api/conversations/{id} | &#x60;PATCH /api/conversations/{id}&#x60; — update a conversation&#39;s title.
+[*InterfacesApi*](doc/InterfacesApi.md) | [**createInterface**](doc/InterfacesApi.md#createinterface) | **POST** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — create an interface instance.
+[*InterfacesApi*](doc/InterfacesApi.md) | [**deleteInterface**](doc/InterfacesApi.md#deleteinterface) | **DELETE** /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id} | &#x60;DELETE /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}&#x60; — delete an interface instance.
+[*InterfacesApi*](doc/InterfacesApi.md) | [**listInterfaces**](doc/InterfacesApi.md#listinterfaces) | **GET** /api/orgs/{org_id}/spaces/{space_id}/interfaces | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/interfaces&#x60; — list interface instances.
 [*LogsApi*](doc/LogsApi.md) | [**listLogs**](doc/LogsApi.md#listlogs) | **GET** /api/logs | &#x60;GET /api/logs&#x60; — list recent log entries, newest first.
 [*MembersApi*](doc/MembersApi.md) | [**addMember**](doc/MembersApi.md#addmember) | **POST** /api/orgs/{org_id}/spaces/{space_id}/members | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/members&#x60; — add a member.
 [*MembersApi*](doc/MembersApi.md) | [**listMembers**](doc/MembersApi.md#listmembers) | **GET** /api/orgs/{org_id}/spaces/{space_id}/members | &#x60;GET /api/orgs/{org_id}/spaces/{space_id}/members&#x60; — list space members.
@@ -147,6 +160,9 @@ Class | Method | HTTP request | Description
 [*TasksApi*](doc/TasksApi.md) | [**getTask**](doc/TasksApi.md#gettask) | **GET** /tasks/{id} | &#x60;GET /tasks/:id&#x60; -- Gets the latest state of a task.
 [*TasksApi*](doc/TasksApi.md) | [**listTasks**](doc/TasksApi.md#listtasks) | **GET** /tasks | &#x60;GET /tasks&#x60; -- Lists tasks matching optional filters.
 [*TasksApi*](doc/TasksApi.md) | [**subscribeToTask**](doc/TasksApi.md#subscribetotask) | **GET** /tasks/{id}/subscribe | &#x60;GET /tasks/:id/subscribe&#x60; -- Subscribes to task updates (SSE).
+[*TemplatesApi*](doc/TemplatesApi.md) | [**createFromTemplate**](doc/TemplatesApi.md#createfromtemplate) | **POST** /api/orgs/{org_id}/spaces/{space_id}/personas/from-template | &#x60;POST /api/orgs/{org_id}/spaces/{space_id}/personas/from-template&#x60; — create a persona from a template.
+[*TemplatesApi*](doc/TemplatesApi.md) | [**listTemplates**](doc/TemplatesApi.md#listtemplates) | **GET** /api/orgs/{org_id}/catalog/templates | &#x60;GET /api/orgs/{org_id}/catalog/templates&#x60; — list available persona templates.
+[*TemplatesApi*](doc/TemplatesApi.md) | [**onboardingStatus**](doc/TemplatesApi.md#onboardingstatus) | **GET** /api/users/me/onboarding-status | &#x60;GET /api/users/me/onboarding-status&#x60; — check if user has created at least one persona.
 [*TracesApi*](doc/TracesApi.md) | [**getTrace**](doc/TracesApi.md#gettrace) | **GET** /api/traces/{trace_id} | &#x60;GET /api/traces/{trace_id}&#x60; — get a single trace with span breakdown.
 [*TracesApi*](doc/TracesApi.md) | [**listTraces**](doc/TracesApi.md#listtraces) | **GET** /api/traces | &#x60;GET /api/traces&#x60; — list recent traces, newest first.
 [*UsersApi*](doc/UsersApi.md) | [**createUser**](doc/UsersApi.md#createuser) | **POST** /api/orgs/{org_id}/users | &#x60;POST /api/orgs/{org_id}/users&#x60; — create/invite a user.
@@ -200,7 +216,9 @@ Class | Method | HTTP request | Description
  - [AttachmentMetaResponse](doc/AttachmentMetaResponse.md)
  - [AuthenticationInfo](doc/AuthenticationInfo.md)
  - [AuthorizationCodeOAuthFlow](doc/AuthorizationCodeOAuthFlow.md)
+ - [BindingResponse](doc/BindingResponse.md)
  - [CancelTaskRequest](doc/CancelTaskRequest.md)
+ - [CatalogItemResponse](doc/CatalogItemResponse.md)
  - [ClientCredentialsOAuthFlow](doc/ClientCredentialsOAuthFlow.md)
  - [ClientInfoSchema](doc/ClientInfoSchema.md)
  - [ClientRegistrationSchema](doc/ClientRegistrationSchema.md)
@@ -211,11 +229,15 @@ Class | Method | HTTP request | Description
  - [ConversationSummary](doc/ConversationSummary.md)
  - [CreateApiKeyRequest](doc/CreateApiKeyRequest.md)
  - [CreateApiKeyResponse](doc/CreateApiKeyResponse.md)
+ - [CreateBindingRequest](doc/CreateBindingRequest.md)
  - [CreateConversationRequest](doc/CreateConversationRequest.md)
+ - [CreateFromTemplateRequest](doc/CreateFromTemplateRequest.md)
+ - [CreateInterfaceInstanceRequest](doc/CreateInterfaceInstanceRequest.md)
  - [CreateOrgRequest](doc/CreateOrgRequest.md)
  - [CreatePersonaRequest](doc/CreatePersonaRequest.md)
  - [CreateSkillRequest](doc/CreateSkillRequest.md)
  - [CreateSpaceRequest](doc/CreateSpaceRequest.md)
+ - [CreateSubscriptionRequest](doc/CreateSubscriptionRequest.md)
  - [CreateTaskPushNotificationConfigRequest](doc/CreateTaskPushNotificationConfigRequest.md)
  - [CreateUserRequest](doc/CreateUserRequest.md)
  - [CreateWebhookRequest](doc/CreateWebhookRequest.md)
@@ -224,6 +246,7 @@ Class | Method | HTTP request | Description
  - [ExecuteCommandRequest](doc/ExecuteCommandRequest.md)
  - [HttpAuthSecurityScheme](doc/HttpAuthSecurityScheme.md)
  - [ImplicitOAuthFlow](doc/ImplicitOAuthFlow.md)
+ - [InterfaceInstanceResponse](doc/InterfaceInstanceResponse.md)
  - [ListTaskPushNotificationConfigsResponse](doc/ListTaskPushNotificationConfigsResponse.md)
  - [ListTasksResponse](doc/ListTasksResponse.md)
  - [LogEntryResponse](doc/LogEntryResponse.md)
@@ -236,6 +259,7 @@ Class | Method | HTTP request | Description
  - [OAuth2SecurityScheme](doc/OAuth2SecurityScheme.md)
  - [OAuthErrorResponse](doc/OAuthErrorResponse.md)
  - [OAuthFlows](doc/OAuthFlows.md)
+ - [OnboardingStatusResponse](doc/OnboardingStatusResponse.md)
  - [OpenIdConnectSecurityScheme](doc/OpenIdConnectSecurityScheme.md)
  - [OrgDetail](doc/OrgDetail.md)
  - [OrgSummary](doc/OrgSummary.md)
@@ -243,8 +267,10 @@ Class | Method | HTTP request | Description
  - [PersonaDetail](doc/PersonaDetail.md)
  - [PersonaFileContent](doc/PersonaFileContent.md)
  - [PersonaFileSlot](doc/PersonaFileSlot.md)
+ - [PersonaFromTemplateResponse](doc/PersonaFromTemplateResponse.md)
  - [PersonaSkillAccess](doc/PersonaSkillAccess.md)
  - [PersonaSummary](doc/PersonaSummary.md)
+ - [PublishCatalogItemRequest](doc/PublishCatalogItemRequest.md)
  - [PushNotificationConfig](doc/PushNotificationConfig.md)
  - [QuickMessageRequest](doc/QuickMessageRequest.md)
  - [QuickMessageResponse](doc/QuickMessageResponse.md)
@@ -279,12 +305,14 @@ Class | Method | HTTP request | Description
  - [StreamRunEventsQuery](doc/StreamRunEventsQuery.md)
  - [StringList](doc/StringList.md)
  - [SubscribeRequest](doc/SubscribeRequest.md)
+ - [SubscriptionResponse](doc/SubscriptionResponse.md)
  - [Task](doc/Task.md)
  - [TaskArtifactUpdateEvent](doc/TaskArtifactUpdateEvent.md)
  - [TaskPushNotificationConfig](doc/TaskPushNotificationConfig.md)
  - [TaskState](doc/TaskState.md)
  - [TaskStatus](doc/TaskStatus.md)
  - [TaskStatusUpdateEvent](doc/TaskStatusUpdateEvent.md)
+ - [TemplateResponse](doc/TemplateResponse.md)
  - [TimeSeriesResponse](doc/TimeSeriesResponse.md)
  - [TokenResponse](doc/TokenResponse.md)
  - [ToolCallSummary](doc/ToolCallSummary.md)

@@ -1521,6 +1521,262 @@
         ]
       }
     },
+    "/api/orgs/{org_id}/catalog": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/catalog` — list all catalog items.",
+        "operationId": "list_catalog",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogItemResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "`POST /api/orgs/{org_id}/catalog` — publish a resource to the org catalog.",
+        "operationId": "publish_catalog_item",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishCatalogItemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogItemResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/catalog/templates": {
+      "get": {
+        "tags": [
+          "templates"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/catalog/templates` — list available persona templates.",
+        "operationId": "list_templates",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/catalog/{item_id}": {
+      "delete": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "`DELETE /api/orgs/{org_id}/catalog/{item_id}` — remove from catalog.",
+        "operationId": "delete_catalog_item",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "description": "Catalog item ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "org:manage"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/catalog/{type}": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/catalog/{type}` — list catalog items by type.",
+        "operationId": "list_catalog_by_type",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "path",
+            "description": "Resource type: skill, template, interface",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog items by type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogItemResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid type"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
+          }
+        ]
+      }
+    },
     "/api/orgs/{org_id}/spaces": {
       "get": {
         "tags": [
@@ -1795,6 +2051,368 @@
         ]
       }
     },
+    "/api/orgs/{org_id}/spaces/{space_id}/bindings": {
+      "get": {
+        "tags": [
+          "bindings"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/spaces/{space_id}/bindings` — list bindings.",
+        "operationId": "list_bindings",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bindings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BindingResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:read"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "bindings"
+        ],
+        "summary": "`POST /api/orgs/{org_id}/spaces/{space_id}/bindings` — bind a persona to an interface.",
+        "operationId": "create_binding",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBindingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Binding created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{space_id}/bindings/{id}": {
+      "delete": {
+        "tags": [
+          "bindings"
+        ],
+        "summary": "`DELETE /api/orgs/{org_id}/spaces/{space_id}/bindings/{id}` — delete a binding.",
+        "operationId": "delete_binding",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Binding ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{space_id}/interfaces": {
+      "get": {
+        "tags": [
+          "interfaces"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/spaces/{space_id}/interfaces` — list interface instances.",
+        "operationId": "list_interfaces",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Interface instances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InterfaceInstanceResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:read"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "interfaces"
+        ],
+        "summary": "`POST /api/orgs/{org_id}/spaces/{space_id}/interfaces` — create an interface instance.",
+        "operationId": "create_interface",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInterfaceInstanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceInstanceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}": {
+      "delete": {
+        "tags": [
+          "interfaces"
+        ],
+        "summary": "`DELETE /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}` — delete an interface instance.",
+        "operationId": "delete_interface",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Interface instance ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
     "/api/orgs/{org_id}/spaces/{space_id}/members": {
       "get": {
         "tags": [
@@ -2036,6 +2654,254 @@
           },
           "403": {
             "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{space_id}/personas/from-template": {
+      "post": {
+        "tags": [
+          "templates"
+        ],
+        "summary": "`POST /api/orgs/{org_id}/spaces/{space_id}/personas/from-template` — create a persona from a template.",
+        "operationId": "create_from_template",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFromTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Persona created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonaFromTemplateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Template not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{space_id}/subscriptions": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "`GET /api/orgs/{org_id}/spaces/{space_id}/subscriptions` — list subscriptions.",
+        "operationId": "list_subscriptions",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscriptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubscriptionResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:read"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "`POST /api/orgs/{org_id}/spaces/{space_id}/subscriptions` — subscribe a space to a catalog item.",
+        "operationId": "create_subscription",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Subscribed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "spaces:write"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/orgs/{org_id}/spaces/{space_id}/subscriptions/{sub_id}": {
+      "delete": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "`DELETE /api/orgs/{org_id}/spaces/{space_id}/subscriptions/{sub_id}` — unsubscribe.",
+        "operationId": "delete_subscription",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "path",
+            "description": "Space ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sub_id",
+            "in": "path",
+            "description": "Subscription ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Unsubscribed"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
           }
         },
         "security": [
@@ -3478,6 +4344,35 @@
             "oauth2": [
               "api_keys:write"
             ]
+          }
+        ]
+      }
+    },
+    "/api/users/me/onboarding-status": {
+      "get": {
+        "tags": [
+          "templates"
+        ],
+        "summary": "`GET /api/users/me/onboarding-status` — check if user has created at least one persona.",
+        "operationId": "onboarding_status",
+        "responses": {
+          "200": {
+            "description": "Onboarding status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": []
           }
         ]
       }
@@ -6162,6 +7057,29 @@
           }
         }
       },
+      "BindingResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "persona_id",
+          "interface_instance_id",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "interface_instance_id": {
+            "type": "string"
+          },
+          "persona_id": {
+            "type": "string"
+          }
+        }
+      },
       "CancelTaskRequest": {
         "type": "object",
         "description": "Request for the `CancelTask` method.",
@@ -6187,6 +7105,33 @@
               "null"
             ],
             "description": "Optional tenant ID."
+          }
+        }
+      },
+      "CatalogItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "resource_type",
+          "name",
+          "description",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "resource_type": {
+            "type": "string"
           }
         }
       },
@@ -6513,6 +7458,21 @@
           }
         }
       },
+      "CreateBindingRequest": {
+        "type": "object",
+        "required": [
+          "persona_id",
+          "interface_instance_id"
+        ],
+        "properties": {
+          "interface_instance_id": {
+            "type": "string"
+          },
+          "persona_id": {
+            "type": "string"
+          }
+        }
+      },
       "CreateConversationRequest": {
         "type": "object",
         "description": "Body for `POST /api/conversations`.",
@@ -6523,6 +7483,40 @@
               "null"
             ],
             "description": "Optional title for the new conversation."
+          }
+        }
+      },
+      "CreateFromTemplateRequest": {
+        "type": "object",
+        "required": [
+          "template_id"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name for the new persona (optional — defaults to template name)."
+          },
+          "template_id": {
+            "type": "string",
+            "description": "Catalog item ID of the template to instantiate."
+          }
+        }
+      },
+      "CreateInterfaceInstanceRequest": {
+        "type": "object",
+        "required": [
+          "interface_type"
+        ],
+        "properties": {
+          "config": {
+            "description": "JSON configuration (tokens, channels, etc.)."
+          },
+          "interface_type": {
+            "type": "string",
+            "description": "Interface type: `\"slack\"`, `\"matrix\"`, `\"mattermost\"`, `\"signal\"`, `\"nextcloud\"`."
           }
         }
       },
@@ -6597,6 +7591,17 @@
             "type": "string"
           },
           "slug": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateSubscriptionRequest": {
+        "type": "object",
+        "required": [
+          "catalog_item_id"
+        ],
+        "properties": {
+          "catalog_item_id": {
             "type": "string"
           }
         }
@@ -6861,6 +7866,31 @@
             "propertyNames": {
               "type": "string"
             }
+          }
+        }
+      },
+      "InterfaceInstanceResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "space_id",
+          "interface_type",
+          "config",
+          "created_at"
+        ],
+        "properties": {
+          "config": {},
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "interface_type": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
           }
         }
       },
@@ -7260,6 +8290,18 @@
           }
         }
       },
+      "OnboardingStatusResponse": {
+        "type": "object",
+        "required": [
+          "has_persona"
+        ],
+        "properties": {
+          "has_persona": {
+            "type": "boolean",
+            "description": "Whether the user has created at least one persona."
+          }
+        }
+      },
       "OpenIdConnectSecurityScheme": {
         "type": "object",
         "description": "Defines a security scheme using OpenID Connect.",
@@ -7506,6 +8548,21 @@
           }
         }
       },
+      "PersonaFromTemplateResponse": {
+        "type": "object",
+        "required": [
+          "persona_id",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "persona_id": {
+            "type": "string"
+          }
+        }
+      },
       "PersonaSkillAccess": {
         "type": "object",
         "description": "Skill access configuration for a persona.",
@@ -7546,6 +8603,25 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "PublishCatalogItemRequest": {
+        "type": "object",
+        "required": [
+          "resource_type",
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "resource_type": {
+            "type": "string",
+            "description": "`\"skill\"`, `\"template\"`, or `\"interface\"`."
           }
         }
       },
@@ -8401,6 +9477,25 @@
           }
         }
       },
+      "SubscriptionResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "catalog_item_id",
+          "created_at"
+        ],
+        "properties": {
+          "catalog_item_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
       "Task": {
         "type": "object",
         "description": "`Task` is the core unit of action for A2A. It has a current status and when\nresults are created they are stored in artifacts. Multi-turn interactions\nare stored in history.",
@@ -8585,6 +9680,29 @@
           "taskId": {
             "type": "string",
             "description": "The ID of the task that has changed."
+          }
+        }
+      },
+      "TemplateResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -9525,6 +10643,22 @@
     {
       "name": "api-keys",
       "description": "API key management — create, list, revoke API keys"
+    },
+    {
+      "name": "catalog",
+      "description": "Catalog management — publish, list, and remove shared resources; manage space subscriptions"
+    },
+    {
+      "name": "interfaces",
+      "description": "Interface instances — create, list, and delete per-space interface configurations"
+    },
+    {
+      "name": "bindings",
+      "description": "Persona-interface bindings — bind personas to interfaces within a space"
+    },
+    {
+      "name": "templates",
+      "description": "Persona templates — list templates, instantiate personas, check onboarding status"
     }
   ]
 }

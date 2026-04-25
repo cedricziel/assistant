@@ -12,7 +12,7 @@
 //! | POST   | `/api/agents/{id}/set-default`| Set an agent as the default    |
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use assistant_a2a_json_schema::agent_card::AgentCard;
+use assistant_core::auth::AuthContext;
 
 use crate::a2a::agent_store::{AgentStore, RegisteredAgent};
 
@@ -121,7 +122,10 @@ pub fn agents_api_router() -> Router<AgentsApiState> {
     ),
     security(("bearer_token" = []))
 )]
-pub async fn list_agents(State(state): State<AgentsApiState>) -> Response {
+pub async fn list_agents(
+    Extension(_ctx): Extension<AuthContext>,
+    State(state): State<AgentsApiState>,
+) -> Response {
     match state.agent_store.list().await {
         Ok(agents) => {
             let summaries: Vec<AgentSummary> = agents.iter().map(to_summary).collect();
@@ -149,6 +153,7 @@ pub async fn list_agents(State(state): State<AgentsApiState>) -> Response {
     security(("bearer_token" = []))
 )]
 pub async fn register_agent(
+    Extension(_ctx): Extension<AuthContext>,
     State(state): State<AgentsApiState>,
     Json(body): Json<RegisterAgentRequest>,
 ) -> Response {
@@ -197,7 +202,11 @@ pub async fn register_agent(
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_agent(State(state): State<AgentsApiState>, Path(id): Path<String>) -> Response {
+pub async fn get_agent(
+    Extension(_ctx): Extension<AuthContext>,
+    State(state): State<AgentsApiState>,
+    Path(id): Path<String>,
+) -> Response {
     match state.agent_store.get(&id).await {
         Some(agent) => Json(to_detail(agent)).into_response(),
         None => (
@@ -224,6 +233,7 @@ pub async fn get_agent(State(state): State<AgentsApiState>, Path(id): Path<Strin
     security(("bearer_token" = []))
 )]
 pub async fn update_agent(
+    Extension(_ctx): Extension<AuthContext>,
     State(state): State<AgentsApiState>,
     Path(id): Path<String>,
     Json(body): Json<UpdateAgentRequest>,
@@ -270,7 +280,11 @@ pub async fn update_agent(
     ),
     security(("bearer_token" = []))
 )]
-pub async fn delete_agent(State(state): State<AgentsApiState>, Path(id): Path<String>) -> Response {
+pub async fn delete_agent(
+    Extension(_ctx): Extension<AuthContext>,
+    State(state): State<AgentsApiState>,
+    Path(id): Path<String>,
+) -> Response {
     if state.agent_store.remove(&id).await {
         StatusCode::NO_CONTENT.into_response()
     } else {
@@ -296,6 +310,7 @@ pub async fn delete_agent(State(state): State<AgentsApiState>, Path(id): Path<St
     security(("bearer_token" = []))
 )]
 pub async fn set_default_agent(
+    Extension(_ctx): Extension<AuthContext>,
     State(state): State<AgentsApiState>,
     Path(id): Path<String>,
 ) -> Response {
@@ -321,15 +336,32 @@ pub async fn set_default_agent(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use axum::Extension;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use tempfile::TempDir;
     use tower::ServiceExt;
 
+    use assistant_core::auth::AuthContext;
+    use assistant_core::identity::{OrgId, UserId};
+
     use crate::a2a::agent_store::AgentStore;
 
     use super::{AgentsApiState, agents_api_router};
+
+    fn make_test_ctx() -> AuthContext {
+        AuthContext {
+            user_id: UserId::from("test-user"),
+            org_id: OrgId::from("org_1"),
+            email: "test@test.local".into(),
+            space_roles: HashMap::new(),
+            scopes: vec![],
+            client_id: "test".into(),
+        }
+    }
 
     async fn test_state() -> (AgentsApiState, TempDir) {
         let tmp = TempDir::new().unwrap();
@@ -339,7 +371,9 @@ mod tests {
     }
 
     fn app(state: AgentsApiState) -> axum::Router {
-        agents_api_router().with_state(state)
+        agents_api_router()
+            .with_state(state)
+            .layer(Extension(make_test_ctx()))
     }
 
     async fn body_json(body: Body) -> serde_json::Value {

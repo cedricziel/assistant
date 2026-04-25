@@ -49,9 +49,15 @@ use crate::api::{
         AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
     },
     api_keys::{ApiKeySummary, CreateApiKeyRequest, CreateApiKeyResponse},
+    bindings::{BindingResponse, CreateBindingRequest},
+    catalog::{
+        CatalogItemResponse, CreateSubscriptionRequest, PublishCatalogItemRequest,
+        SubscriptionResponse,
+    },
     commands::{
         CommandArgResponse, CommandDefResponse, CommandEventResponse, ExecuteCommandRequest,
     },
+    interfaces::{CreateInterfaceInstanceRequest, InterfaceInstanceResponse},
     logs::LogEntryResponse,
     members::{AddMemberRequest, MemberEntry, UpdateMemberRequest},
     orgs::{CreateOrgRequest, OrgDetail, OrgSummary, UpdateOrgRequest},
@@ -62,6 +68,10 @@ use crate::api::{
     },
     skills::{CreateSkillRequest, SkillDetail, SkillEntryResponse, UpdateSkillRequest},
     spaces::{CreateSpaceRequest, SpaceDetail, SpaceSummary, UpdateSpaceRequest},
+    templates::{
+        CreateFromTemplateRequest, OnboardingStatusResponse, PersonaFromTemplateResponse,
+        TemplateResponse,
+    },
     traces::{SpanEntryResponse, TraceDetailResponse, TraceSummaryResponse},
     users::{CreateUserRequest, UpdateUserRequest, UserDetail, UserSummary},
     webhooks::{
@@ -279,6 +289,27 @@ pub struct ApiErrorResponse {
         crate::api::api_keys::list_api_keys,
         crate::api::api_keys::create_api_key,
         crate::api::api_keys::delete_api_key,
+        // Catalog management
+        crate::api::catalog::publish_catalog_item,
+        crate::api::catalog::list_catalog,
+        crate::api::catalog::list_catalog_by_type,
+        crate::api::catalog::delete_catalog_item,
+        // Catalog subscriptions
+        crate::api::catalog::create_subscription,
+        crate::api::catalog::list_subscriptions,
+        crate::api::catalog::delete_subscription,
+        // Interface instances
+        crate::api::interfaces::create_interface,
+        crate::api::interfaces::list_interfaces,
+        crate::api::interfaces::delete_interface,
+        // Persona-interface bindings
+        crate::api::bindings::create_binding,
+        crate::api::bindings::list_bindings,
+        crate::api::bindings::delete_binding,
+        // Templates & onboarding
+        crate::api::templates::list_templates,
+        crate::api::templates::create_from_template,
+        crate::api::templates::onboarding_status,
     ),
     components(
         schemas(
@@ -443,6 +474,22 @@ pub struct ApiErrorResponse {
             ApiKeySummary,
             CreateApiKeyRequest,
             CreateApiKeyResponse,
+            // Catalog management types
+            CatalogItemResponse,
+            PublishCatalogItemRequest,
+            SubscriptionResponse,
+            CreateSubscriptionRequest,
+            // Interface instance types
+            InterfaceInstanceResponse,
+            CreateInterfaceInstanceRequest,
+            // Binding types
+            BindingResponse,
+            CreateBindingRequest,
+            // Template / onboarding types
+            TemplateResponse,
+            CreateFromTemplateRequest,
+            PersonaFromTemplateResponse,
+            OnboardingStatusResponse,
         )
     ),
     tags(
@@ -488,6 +535,14 @@ pub struct ApiErrorResponse {
          description = "Membership management — add, update, remove space members"),
         (name = "api-keys",
          description = "API key management — create, list, revoke API keys"),
+        (name = "catalog",
+         description = "Catalog management — publish, list, and remove shared resources; manage space subscriptions"),
+        (name = "interfaces",
+         description = "Interface instances — create, list, and delete per-space interface configurations"),
+        (name = "bindings",
+         description = "Persona-interface bindings — bind personas to interfaces within a space"),
+        (name = "templates",
+         description = "Persona templates — list templates, instantiate personas, check onboarding status"),
     ),
     servers(
         (url = "/", description = "Local assistant server")
