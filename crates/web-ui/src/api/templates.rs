@@ -209,6 +209,7 @@ pub async fn create_from_template(
     security(("bearer_token" = []), ("oauth2" = [])),
     responses(
         (status = 200, description = "Onboarding status", body = OnboardingStatusResponse),
+        (status = 401, description = "Unauthorized"),
     )
 )]
 pub async fn onboarding_status(

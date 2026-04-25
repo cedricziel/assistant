@@ -77,6 +77,7 @@ pub struct ServerMetadata {
     security(()),
     responses(
         (status = 200, description = "Authorization server metadata", body = ServerMetadata),
+        (status = 400, description = "Bad request"),
     )
 )]
 pub async fn metadata(State(state): State<OAuthState>) -> Json<ServerMetadata> {

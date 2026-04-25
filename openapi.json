@@ -58,6 +58,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Bad request"
           }
         },
         "security": [
@@ -557,6 +560,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
         "security": [
@@ -4254,6 +4260,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
         "security": [
@@ -4365,6 +4374,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
         "security": [
@@ -5526,6 +5538,9 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid request"
+          },
           "500": {
             "description": "Server error",
             "content": {
@@ -5565,6 +5580,9 @@
         "responses": {
           "200": {
             "description": "Device verification form HTML"
+          },
+          "400": {
+            "description": "Bad request"
           }
         },
         "security": [
