@@ -1,11 +1,20 @@
 //! Registry of live [`ChannelAdapter`] instances.
 //!
 //! The scheduler uses this registry to look up a running adapter by its
-//! interface name when injecting platform tools for scheduler-originated turns.
+//! interface name or instance ID when injecting platform tools for
+//! scheduler-originated turns.
 //!
 //! Adapters register themselves when started (via [`ChannelRunner`]) and
-//! deregister on stop.  Lookup by name returns `None` if no matching adapter
-//! is currently running, which the scheduler treats as graceful degradation.
+//! deregister on stop.  Lookup returns `None` if no matching adapter is
+//! currently running, which the scheduler treats as graceful degradation.
+//!
+//! ## Registration modes
+//!
+//! - **By name** ([`register`](AdapterRegistry::register)) — legacy mode,
+//!   keys by `adapter.name()`. Only one adapter per interface type.
+//! - **By instance ID** ([`register_instance`](AdapterRegistry::register_instance))
+//!   — multi-instance mode, allows multiple adapters of the same type (e.g.
+//!   two Slack workspaces).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,15 +24,25 @@ use tokio::sync::RwLock;
 
 // -- Types --
 
-/// A thread-safe registry of live [`ChannelAdapter`] instances keyed by their
-/// interface name (i.e. the value returned by [`ChannelAdapter::name()`]).
+/// Stored adapter entry with its interface name for reverse lookups.
+struct AdapterEntry {
+    adapter: Arc<dyn ChannelAdapter>,
+    interface_name: String,
+}
+
+/// A thread-safe registry of live [`ChannelAdapter`] instances.
 ///
-/// **Limitation**: only one adapter per interface name is supported.  Running
-/// two adapters of the same type (e.g. two Slack workspaces) requires adapter
-/// instance IDs, which is out of scope for this change.
+/// Supports two keying modes:
+/// - **By name** (legacy): one adapter per interface type, keyed by
+///   [`ChannelAdapter::name()`].
+/// - **By instance ID** (multi-instance): multiple adapters of the same
+///   type, keyed by a caller-supplied instance ID string.
 #[derive(Clone, Default)]
 pub struct AdapterRegistry {
-    inner: Arc<RwLock<HashMap<String, Arc<dyn ChannelAdapter>>>>,
+    /// Legacy name-based registrations.
+    by_name: Arc<RwLock<HashMap<String, Arc<dyn ChannelAdapter>>>>,
+    /// Instance-based registrations (multi-instance support).
+    by_instance: Arc<RwLock<HashMap<String, AdapterEntry>>>,
 }
 
 impl AdapterRegistry {
@@ -31,20 +50,68 @@ impl AdapterRegistry {
         Self::default()
     }
 
-    /// Register a live adapter.  Overwrites any existing adapter with the same name.
+    // -- Legacy name-based API ------------------------------------------------
+
+    /// Register a live adapter keyed by its interface name.
+    ///
+    /// Overwrites any existing adapter with the same name.
     pub async fn register(&self, adapter: Arc<dyn ChannelAdapter>) {
         let name = adapter.name().to_string();
-        self.inner.write().await.insert(name, adapter);
+        self.by_name.write().await.insert(name, adapter);
     }
 
     /// Deregister the adapter with the given interface name.
     pub async fn deregister(&self, name: &str) {
-        self.inner.write().await.remove(name);
+        self.by_name.write().await.remove(name);
     }
 
-    /// Look up a live adapter by interface name.  Returns `None` if not registered.
+    /// Look up a live adapter by interface name.
+    ///
+    /// Checks the legacy name-based registry first, then falls back to
+    /// searching instance-based registrations by interface name.
     pub async fn get(&self, name: &str) -> Option<Arc<dyn ChannelAdapter>> {
-        self.inner.read().await.get(name).cloned()
+        // Try legacy registry first.
+        if let Some(a) = self.by_name.read().await.get(name).cloned() {
+            return Some(a);
+        }
+        // Fall back to instance registry — return the first matching name.
+        self.by_instance
+            .read()
+            .await
+            .values()
+            .find(|e| e.interface_name == name)
+            .map(|e| e.adapter.clone())
+    }
+
+    // -- Instance-based API ---------------------------------------------------
+
+    /// Register an adapter with an explicit instance ID.
+    ///
+    /// This allows multiple adapters of the same interface type (e.g. two
+    /// Slack workspaces) to coexist in the registry.
+    pub async fn register_instance(&self, instance_id: &str, adapter: Arc<dyn ChannelAdapter>) {
+        let entry = AdapterEntry {
+            interface_name: adapter.name().to_string(),
+            adapter,
+        };
+        self.by_instance
+            .write()
+            .await
+            .insert(instance_id.to_string(), entry);
+    }
+
+    /// Deregister the adapter with the given instance ID.
+    pub async fn deregister_instance(&self, instance_id: &str) {
+        self.by_instance.write().await.remove(instance_id);
+    }
+
+    /// Look up a live adapter by instance ID.
+    pub async fn get_by_instance(&self, instance_id: &str) -> Option<Arc<dyn ChannelAdapter>> {
+        self.by_instance
+            .read()
+            .await
+            .get(instance_id)
+            .map(|e| e.adapter.clone())
     }
 }
 
@@ -133,5 +200,74 @@ mod tests {
     async fn get_unknown_returns_none() {
         let registry = AdapterRegistry::new();
         assert!(registry.get("matrix").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn register_with_instance_id_and_lookup() {
+        let registry = AdapterRegistry::new();
+        let adapter: Arc<dyn ChannelAdapter> = Arc::new(FakeAdapter {
+            name: "slack",
+            channel_type: ChannelType::Slack,
+        });
+
+        registry
+            .register_instance("inst_workspace_a", adapter)
+            .await;
+
+        assert!(
+            registry.get_by_instance("inst_workspace_a").await.is_some(),
+            "adapter should be retrievable by instance ID"
+        );
+        assert!(
+            registry.get_by_instance("inst_workspace_b").await.is_none(),
+            "unknown instance ID should return None"
+        );
+        // Legacy name-based lookup should also find it.
+        assert!(
+            registry.get("slack").await.is_some(),
+            "name-based lookup should still work"
+        );
+    }
+
+    #[tokio::test]
+    async fn multiple_instances_same_interface_type() {
+        let registry = AdapterRegistry::new();
+        let a1: Arc<dyn ChannelAdapter> = Arc::new(FakeAdapter {
+            name: "slack",
+            channel_type: ChannelType::Slack,
+        });
+        let a2: Arc<dyn ChannelAdapter> = Arc::new(FakeAdapter {
+            name: "slack",
+            channel_type: ChannelType::Slack,
+        });
+
+        registry.register_instance("ws_a", a1).await;
+        registry.register_instance("ws_b", a2).await;
+
+        assert!(
+            registry.get_by_instance("ws_a").await.is_some(),
+            "first instance should be retrievable"
+        );
+        assert!(
+            registry.get_by_instance("ws_b").await.is_some(),
+            "second instance should be retrievable"
+        );
+    }
+
+    #[tokio::test]
+    async fn deregister_instance() {
+        let registry = AdapterRegistry::new();
+        let adapter: Arc<dyn ChannelAdapter> = Arc::new(FakeAdapter {
+            name: "slack",
+            channel_type: ChannelType::Slack,
+        });
+
+        registry.register_instance("inst_1", adapter).await;
+        registry.deregister_instance("inst_1").await;
+
+        assert!(
+            registry.get_by_instance("inst_1").await.is_none(),
+            "deregistered instance should not be retrievable"
+        );
     }
 }
