@@ -173,20 +173,20 @@ void main() {
       expect(find.text('Save'), findsOneWidget);
     });
 
-    testWidgets('name field is disabled in edit mode', (tester) async {
+    testWidgets('name field is read-only in edit mode', (tester) async {
       await tester.pumpWidget(
         buildEditScreen(detailState: SkillDetailState(skill: _existingSkill())),
       );
       await tester.pump();
 
-      // The name TextFormField is disabled — its underlying TextField has
-      // enabled=false, making the widget ignore pointer events.
+      // The name TextFormField uses readOnly instead of enabled=false so that
+      // Material 3 dark theme does not render a light disabled fill.
       final nameFields = tester
           .widgetList<TextField>(find.byType(TextField))
           .toList();
 
       // First field is name (in layout order: name, description, body).
-      expect(nameFields.first.enabled, isFalse);
+      expect(nameFields.first.readOnly, isTrue);
     });
   });
 }
