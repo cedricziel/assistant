@@ -51,8 +51,9 @@ pub struct CatalogItemResponse {
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct PublishCatalogItemRequest {
-    /// `"skill"`, `"template"`, or `"interface"`.
-    pub resource_type: String,
+    /// Resource type: `"skill"`, `"template"`, or `"interface"`.
+    #[schema(value_type = String, example = "skill")]
+    pub resource_type: CatalogResourceType,
     pub name: String,
     #[serde(default)]
     pub description: String,
@@ -147,17 +148,6 @@ pub async fn publish_catalog_item(
         return (StatusCode::FORBIDDEN, "org admin required").into_response();
     }
 
-    let resource_type = match parse_resource_type(&body.resource_type) {
-        Some(rt) => rt,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                "resource_type must be skill, template, or interface",
-            )
-                .into_response();
-        }
-    };
-
     if body.name.is_empty() {
         return (StatusCode::BAD_REQUEST, "name is required").into_response();
     }
@@ -165,7 +155,7 @@ pub async fn publish_catalog_item(
     let item = CatalogItem {
         id: format!("ci_{}", uuid::Uuid::new_v4()),
         org_id,
-        resource_type,
+        resource_type: body.resource_type,
         name: body.name,
         description: body.description,
         created_at: Utc::now(),

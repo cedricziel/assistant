@@ -53,7 +53,8 @@ impl BindingStore for SqliteBindingStore {
         )
         .bind(id)
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .with_context(|| format!("loading persona binding: {id}"))?;
         Ok(row.map(row_to_binding))
     }
 
@@ -64,7 +65,8 @@ impl BindingStore for SqliteBindingStore {
         )
         .bind(&space_id.0)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .with_context(|| format!("listing persona bindings for space: {}", space_id.0))?;
         Ok(rows.into_iter().map(row_to_binding).collect())
     }
 
@@ -72,7 +74,8 @@ impl BindingStore for SqliteBindingStore {
         let result = sqlx::query("DELETE FROM persona_bindings WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .with_context(|| format!("deleting persona binding: {id}"))?;
         Ok(result.rows_affected() > 0)
     }
 }

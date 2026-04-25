@@ -115,7 +115,8 @@ pub async fn create_interface(
         return (StatusCode::BAD_REQUEST, "interface_type is required").into_response();
     }
 
-    let config_str = serde_json::to_string(&body.config).unwrap_or_else(|_| "{}".into());
+    let config_value = body.config;
+    let config_str = serde_json::to_string(&config_value).unwrap_or_else(|_| "{}".into());
 
     let instance = InterfaceInstance {
         id: format!("ii_{}", uuid::Uuid::new_v4()),
@@ -136,8 +137,6 @@ pub async fn create_interface(
             .into_response();
     }
 
-    let config_value: serde_json::Value =
-        serde_json::from_str(&instance.config).unwrap_or(serde_json::json!({}));
     let resp = InterfaceInstanceResponse {
         id: instance.id,
         space_id: instance.space_id.0,

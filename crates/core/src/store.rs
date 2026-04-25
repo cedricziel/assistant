@@ -628,6 +628,16 @@ impl BindingStore for InMemoryBindingStore {
         if bindings.iter().any(|b| b.id == binding.id) {
             bail!("binding already exists: {}", binding.id);
         }
+        if bindings.iter().any(|b| {
+            b.persona_id == binding.persona_id
+                && b.interface_instance_id == binding.interface_instance_id
+        }) {
+            bail!(
+                "binding already exists for persona {} on interface {}",
+                binding.persona_id,
+                binding.interface_instance_id
+            );
+        }
         bindings.push(binding.clone());
         Ok(())
     }

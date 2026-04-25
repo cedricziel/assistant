@@ -70,7 +70,8 @@ impl CatalogItemStore for SqliteCatalogItemStore {
         )
         .bind(id)
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .with_context(|| format!("loading catalog item: {id}"))?;
         Ok(row.map(row_to_item))
     }
 
@@ -80,25 +81,23 @@ impl CatalogItemStore for SqliteCatalogItemStore {
         resource_type: Option<&CatalogResourceType>,
     ) -> Result<Vec<CatalogItem>> {
         let rows = match resource_type {
-            Some(rt) => {
-                sqlx::query(
-                    "SELECT id, org_id, resource_type, name, description, created_at
+            Some(rt) => sqlx::query(
+                "SELECT id, org_id, resource_type, name, description, created_at
                      FROM catalog_items WHERE org_id = ? AND resource_type = ? ORDER BY created_at",
-                )
-                .bind(&org_id.0)
-                .bind(rt.to_string())
-                .fetch_all(&self.pool)
-                .await?
-            }
-            None => {
-                sqlx::query(
-                    "SELECT id, org_id, resource_type, name, description, created_at
+            )
+            .bind(&org_id.0)
+            .bind(rt.to_string())
+            .fetch_all(&self.pool)
+            .await
+            .with_context(|| format!("listing catalog items for org {} type {rt}", org_id.0))?,
+            None => sqlx::query(
+                "SELECT id, org_id, resource_type, name, description, created_at
                      FROM catalog_items WHERE org_id = ? ORDER BY created_at",
-                )
-                .bind(&org_id.0)
-                .fetch_all(&self.pool)
-                .await?
-            }
+            )
+            .bind(&org_id.0)
+            .fetch_all(&self.pool)
+            .await
+            .with_context(|| format!("listing catalog items for org {}", org_id.0))?,
         };
         Ok(rows.into_iter().map(row_to_item).collect())
     }
@@ -107,7 +106,8 @@ impl CatalogItemStore for SqliteCatalogItemStore {
         let result = sqlx::query("DELETE FROM catalog_items WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .with_context(|| format!("deleting catalog item: {id}"))?;
         Ok(result.rows_affected() > 0)
     }
 }
@@ -158,7 +158,8 @@ impl CatalogSubscriptionStore for SqliteCatalogSubscriptionStore {
         )
         .bind(id)
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .with_context(|| format!("loading catalog subscription: {id}"))?;
         Ok(row.map(row_to_sub))
     }
 
@@ -169,7 +170,8 @@ impl CatalogSubscriptionStore for SqliteCatalogSubscriptionStore {
         )
         .bind(&space_id.0)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .with_context(|| format!("listing subscriptions for space: {}", space_id.0))?;
         Ok(rows.into_iter().map(row_to_sub).collect())
     }
 
@@ -177,7 +179,8 @@ impl CatalogSubscriptionStore for SqliteCatalogSubscriptionStore {
         let result = sqlx::query("DELETE FROM catalog_subscriptions WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .with_context(|| format!("deleting catalog subscription: {id}"))?;
         Ok(result.rows_affected() > 0)
     }
 }

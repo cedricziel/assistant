@@ -55,7 +55,8 @@ impl InterfaceInstanceStore for SqliteInterfaceInstanceStore {
         )
         .bind(id)
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .with_context(|| format!("loading interface instance: {id}"))?;
         Ok(row.map(row_to_instance))
     }
 
@@ -66,7 +67,8 @@ impl InterfaceInstanceStore for SqliteInterfaceInstanceStore {
         )
         .bind(&space_id.0)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .with_context(|| format!("listing interface instances for space: {}", space_id.0))?;
         Ok(rows.into_iter().map(row_to_instance).collect())
     }
 
@@ -74,7 +76,8 @@ impl InterfaceInstanceStore for SqliteInterfaceInstanceStore {
         let result = sqlx::query("DELETE FROM interface_instances WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .with_context(|| format!("deleting interface instance: {id}"))?;
         Ok(result.rows_affected() > 0)
     }
 }
@@ -118,13 +121,21 @@ mod tests {
 
         let found = store.get_instance("ii_1").await.unwrap();
         assert!(found.is_some());
-        assert_eq!(found.unwrap().interface_type, "slack");
+        assert_eq!(
+            found.unwrap().interface_type,
+            "slack",
+            "get_instance should return the stored interface_type for ii_1"
+        );
 
         let all = store
             .list_instances(&SpaceId::from("sp_eng"))
             .await
             .unwrap();
-        assert_eq!(all.len(), 1);
+        assert_eq!(
+            all.len(),
+            1,
+            "list_instances for sp_eng should return exactly one instance"
+        );
 
         assert!(store.delete_instance("ii_1").await.unwrap());
         assert!(store.get_instance("ii_1").await.unwrap().is_none());

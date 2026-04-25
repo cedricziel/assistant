@@ -154,6 +154,26 @@ impl PersonaStore {
         row.map(row_to_record).transpose()
     }
 
+    /// Fetch a persona only if the caller is allowed to see it.
+    ///
+    /// Returns the persona when it is org-owned (`owner_user_id IS NULL`)
+    /// **or** owned by the given `user_id`. Returns `Ok(None)` otherwise.
+    pub async fn get_accessible(&self, id: &str, user_id: &str) -> Result<Option<PersonaRecord>> {
+        anyhow::ensure!(!user_id.trim().is_empty(), "user_id must be non-empty");
+
+        let row = sqlx::query(
+            "SELECT id, name, is_default, skill_access_mode, turn_timeout_secs, home_interface, home_channel, owner_user_id, created_at, updated_at
+             FROM personas
+             WHERE id = ?1 AND (owner_user_id IS NULL OR owner_user_id = ?2)",
+        )
+        .bind(id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(row_to_record).transpose()
+    }
+
     pub async fn create(&self, id: &str, name: &str) -> Result<PersonaRecord> {
         sqlx::query("INSERT INTO personas (id, name, is_default) VALUES (?1, ?2, 0)")
             .bind(id)
@@ -590,6 +610,60 @@ mod tests {
 
         let result = store.create_owned("bot", "Bot", "").await;
         assert!(result.is_err(), "empty owner_user_id should be rejected");
+    }
+
+    #[tokio::test]
+    async fn get_accessible_returns_org_owned() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store.create("shared", "Shared").await.unwrap();
+
+        let result = store.get_accessible("shared", "alice").await.unwrap();
+        assert!(
+            result.is_some(),
+            "org-owned personas should be accessible to any user"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_accessible_returns_own_persona() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store
+            .create_owned("alice-bot", "Alice Bot", "alice")
+            .await
+            .unwrap();
+
+        let result = store.get_accessible("alice-bot", "alice").await.unwrap();
+        assert!(result.is_some(), "user should see their own persona");
+    }
+
+    #[tokio::test]
+    async fn get_accessible_denies_other_user() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        store
+            .create_owned("alice-bot", "Alice Bot", "alice")
+            .await
+            .unwrap();
+
+        let result = store.get_accessible("alice-bot", "bob").await.unwrap();
+        assert!(
+            result.is_none(),
+            "user should not see another user's persona"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_accessible_rejects_empty_user_id() {
+        let storage = StorageLayer::new_in_memory().await.unwrap();
+        let store = super::PersonaStore::new(storage.pool.clone());
+
+        let result = store.get_accessible("any", "").await;
+        assert!(result.is_err(), "empty user_id should be rejected");
     }
 }
 
