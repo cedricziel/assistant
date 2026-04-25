@@ -1,8 +1,8 @@
 //! Consolidated LLM provider implementations.
 //!
-//! Houses all provider backends (Ollama, Anthropic, OpenAI, Moonshot) in a
-//! single crate with shared infrastructure. Each provider lives in its own
-//! submodule and implements [`assistant_core::LlmProvider`].
+//! Houses all provider backends (Ollama, Anthropic, OpenAI, Moonshot,
+//! OpenRouter) in a single crate with shared infrastructure.  Each provider
+//! lives in its own submodule and implements [`assistant_core::LlmProvider`].
 
 use std::sync::Arc;
 
@@ -14,8 +14,10 @@ pub mod anthropic;
 pub mod moonshot;
 pub mod ollama;
 pub mod openai;
+pub mod openrouter;
 
 // -- Shared provider infrastructure --
+pub mod chat_completions;
 pub mod http;
 pub mod retry;
 pub mod voyage;
@@ -24,6 +26,7 @@ pub use anthropic::{AnthropicConfig, AnthropicProvider};
 pub use moonshot::MoonshotProvider;
 pub use ollama::{OllamaConfig, OllamaProvider};
 pub use openai::{OAuthManager, OpenAIProvider, OpenAIProviderConfig};
+pub use openrouter::OpenRouterProvider;
 pub use voyage::{VoyageConfig, VoyageEmbedder};
 
 /// Create an [`LlmProvider`] from the given configuration.
@@ -36,6 +39,7 @@ pub fn create_provider(config: &LlmConfig) -> anyhow::Result<Arc<dyn LlmProvider
         LlmProviderKind::Anthropic => Ok(Arc::new(AnthropicProvider::from_llm_config(config)?)),
         LlmProviderKind::OpenAI => Ok(Arc::new(OpenAIProvider::from_llm_config(config)?)),
         LlmProviderKind::Moonshot => Ok(Arc::new(MoonshotProvider::from_llm_config(config)?)),
+        LlmProviderKind::OpenRouter => Ok(Arc::new(OpenRouterProvider::from_llm_config(config)?)),
     }
 }
 
@@ -103,5 +107,16 @@ mod tests {
         };
         let provider = create_provider(&config).expect("Moonshot provider should succeed");
         assert_eq!(provider.provider_name(), "moonshot");
+    }
+
+    #[test]
+    fn factory_creates_openrouter_provider_with_key() {
+        let config = LlmConfig {
+            provider: LlmProviderKind::OpenRouter,
+            api_key: Some("test-key".to_string()),
+            ..LlmConfig::default()
+        };
+        let provider = create_provider(&config).expect("OpenRouter provider should succeed");
+        assert_eq!(provider.provider_name(), "openrouter");
     }
 }

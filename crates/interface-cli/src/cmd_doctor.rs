@@ -264,6 +264,19 @@ fn check_llm_provider(config: &AssistantConfig) -> CheckResult {
                 .with_detail("Set api_key in [llm] or MOONSHOT_API_KEY env var")
             }
         }
+        LlmProviderKind::OpenRouter => {
+            let has_key =
+                config.llm.api_key.is_some() || std::env::var("OPENROUTER_API_KEY").is_ok();
+            if has_key {
+                CheckResult::ok("LLM Provider", format!("OpenRouter (model: {model})"))
+            } else {
+                CheckResult::error(
+                    "LLM Provider",
+                    format!("OpenRouter (model: {model}) - no API key"),
+                )
+                .with_detail("Set api_key in [llm] or OPENROUTER_API_KEY env var")
+            }
+        }
     }
 }
 
