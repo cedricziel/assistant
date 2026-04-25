@@ -5,6 +5,7 @@ import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
+import 'package:assistant_app/features/spaces/space_provider.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -747,6 +748,39 @@ void main() {
         state.conversations.length,
         2,
         reason: 'existing conversations should be preserved during reconnect',
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Space-scoping: rebuild on space change
+  // -------------------------------------------------------------------------
+
+  group('space-scoping', () {
+    test('rebuilds (re-subscribes) when space selection changes', () async {
+      final client = _FakeApiClient();
+      final container = ProviderContainer(
+        overrides: [apiClientProvider.overrideWithValue(client)],
+      );
+      addTearDown(container.dispose);
+      final sub = _keepAlive(container);
+      addTearDown(sub.close);
+
+      // Initial subscription.
+      await Future<void>.delayed(Duration.zero);
+      expect(client.streamConversationsCallCount, 1);
+
+      // Change space selection — should trigger a rebuild.
+      container
+          .read(spaceSelectionProvider.notifier)
+          .selectOrg(orgId: 'org-1', orgName: 'Org 1');
+      await Future<void>.delayed(Duration.zero);
+
+      // A new subscription means streamConversations was called again.
+      expect(
+        client.streamConversationsCallCount,
+        greaterThan(1),
+        reason: 'space change should trigger stream re-subscription',
       );
     });
   });

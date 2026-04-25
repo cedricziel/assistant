@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../features/agents/agent_detail_screen.dart';
 import '../features/agents/agents_screen.dart';
+import '../features/admin/admin_screen.dart';
+import '../features/api_keys/api_keys_screen.dart';
 import '../features/analytics/analytics_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/connection/connection_screen.dart';
@@ -11,6 +13,7 @@ import '../features/contexts/models/context_model.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/contexts/screens/context_switcher_screen.dart';
 import '../features/login/login_screen.dart';
+import '../features/onboarding/onboarding_screen.dart';
 import '../features/spaces/space_selector_screen.dart';
 import '../features/logs/logs_screen.dart';
 import '../features/personas/persona_create_screen.dart';
@@ -62,7 +65,10 @@ class AppRoutes {
   static const agentDetail = '/agents/:id';
   static const analytics = '/analytics';
   static const settings = '/settings';
+  static const admin = '/admin';
+  static const apiKeys = '/api-keys';
   static const spaceSelector = '/spaces';
+  static const onboarding = '/onboarding';
 }
 
 /// Provider that creates a single [GoRouter] instance for the application
@@ -152,6 +158,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.spaceSelector,
         builder: (context, state) => const SpaceSelectorScreen(),
+      ),
+
+      // -- Onboarding: persona creation for new users -----------------------
+      GoRoute(
+        path: AppRoutes.onboarding,
+        builder: (context, state) => const OnboardingScreen(),
       ),
 
       // -- Legacy setup route (kept for deep-link compatibility) -------------
@@ -339,6 +351,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.analytics,
             builder: (context, state) => const AnalyticsScreen(),
+          ),
+
+          // -- Admin ---------------------------------------------------------
+          GoRoute(
+            path: AppRoutes.admin,
+            builder: (context, state) => const AdminScreen(),
+          ),
+
+          // -- API Keys -----------------------------------------------------
+          GoRoute(
+            path: AppRoutes.apiKeys,
+            builder: (context, state) => const ApiKeysScreen(),
           ),
 
           // -- Settings -----------------------------------------------------

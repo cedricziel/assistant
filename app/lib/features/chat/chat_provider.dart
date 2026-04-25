@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/api_client.dart';
 import '../../api/models/stream_event.dart';
 import '../connection/connection_provider.dart';
+import '../spaces/space_provider.dart';
 
 // -- Conversation list -------------------------------------------------------
 
@@ -57,6 +58,8 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   @override
   Future<ConversationListState> build() async {
     final api = ref.watch(apiClientProvider);
+    // Rebuild (reconnect stream) when the active space changes.
+    ref.watch(spaceSelectionProvider);
     if (api == null) {
       _resetStream();
       return const ConversationListState();

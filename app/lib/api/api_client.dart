@@ -64,6 +64,7 @@ class ApiClient {
   MembersApi get members => _generatedApi.getMembersApi();
   UsersApi get users => _generatedApi.getUsersApi();
   ApiKeysApi get apiKeys => _generatedApi.getApiKeysApi();
+  CatalogApi get catalog => _generatedApi.getCatalogApi();
   TemplatesApi get templates => _generatedApi.getTemplatesApi();
 
   /// Stream assistant tokens for a conversation message.

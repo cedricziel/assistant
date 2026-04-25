@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
 import '../connection/connection_provider.dart';
+import '../spaces/space_provider.dart';
 import 'persona_constants.dart';
 
 /// State for the personas feature.
@@ -40,6 +41,8 @@ class PersonasNotifier extends AsyncNotifier<PersonasState> {
   @override
   Future<PersonasState> build() async {
     final api = ref.watch(apiClientProvider);
+    // Rebuild (re-fetch) when the active space changes.
+    ref.watch(spaceSelectionProvider);
     if (api == null) return const PersonasState();
     return _fetchPersonas();
   }
