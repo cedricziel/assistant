@@ -549,25 +549,25 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - Check onboarding status on first load
   - Show template picker, create persona, navigate to chat
 
-- [ ] `feat(app): space switcher in navigation`
+- [x] `feat(app): space switcher in navigation`
   - Dropdown/drawer for switching active space
   - Refreshes persona list, conversation list on switch
 
-- [ ] `feat(app): update conversation and persona lists for multi-user scoping`
+- [x] `feat(app): update conversation and persona lists for multi-user scoping`
   - Conversation list filtered by current user + space + persona
   - Persona picker shows granted org personas + own private personas
 
-- [ ] `feat(app): API key management screen`
+- [x] `feat(app): API key management screen`
   - Create, list, revoke API keys
   - Copy-to-clipboard on creation
 
-- [ ] `feat(app): admin screens (user, space, catalog management)`
+- [x] `feat(app): admin screens (user, space, catalog management)`
   - Behind org-admin / space-admin role check
   - User management: invite, list, assign roles
   - Space management: create, list, manage memberships
   - Catalog: publish skills/templates, manage subscriptions
 
-- [ ] `test(app): widget tests for login, space switching, persona scoping`
+- [x] `test(app): widget tests for login, space switching, persona scoping`
 
 - [x] `docs: update authentication.md with OAuth2 flows and API keys`
 
