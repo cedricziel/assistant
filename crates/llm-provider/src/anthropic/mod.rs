@@ -371,6 +371,7 @@ impl LlmProvider for AnthropicProvider {
                 }
                 hosted
             },
+            context_window_tokens: Some(200_000),
         }
     }
 

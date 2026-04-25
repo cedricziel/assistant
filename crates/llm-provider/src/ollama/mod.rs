@@ -104,6 +104,7 @@ impl LlmProvider for OllamaProvider {
             streaming: true,
             vision: false,
             hosted_tools: Vec::new(),
+            context_window_tokens: None, // varies by model
         }
     }
 

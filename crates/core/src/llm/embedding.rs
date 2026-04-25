@@ -128,6 +128,7 @@ mod tests {
                 streaming: false,
                 vision: false,
                 hosted_tools: Vec::new(),
+                context_window_tokens: None,
             }
         }
 
@@ -186,6 +187,7 @@ mod tests {
                 streaming: false,
                 vision: false,
                 hosted_tools: Vec::new(),
+                context_window_tokens: None,
             }
         }
 

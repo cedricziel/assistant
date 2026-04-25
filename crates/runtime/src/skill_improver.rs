@@ -330,6 +330,7 @@ mod tests {
                 streaming: false,
                 vision: false,
                 hosted_tools: vec![],
+                context_window_tokens: None,
             }
         }
 

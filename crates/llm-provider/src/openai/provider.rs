@@ -376,6 +376,7 @@ impl LlmProvider for OpenAIProvider {
             streaming: true,
             vision: true,
             hosted_tools,
+            context_window_tokens: Some(128_000),
         }
     }
 
