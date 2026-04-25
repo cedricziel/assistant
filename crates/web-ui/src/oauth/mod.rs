@@ -5,6 +5,7 @@
 
 pub mod authorize;
 pub mod callback;
+pub mod complete;
 pub mod device;
 pub mod oidc_bridge;
 pub mod oidc_sessions;
@@ -60,6 +61,8 @@ pub fn oauth_router() -> Router<OAuthState> {
         .route("/oauth/authorize", post(authorize::authorize_post))
         // OIDC IdP callback (receives code from external IdP).
         .route("/oauth/callback", get(callback::callback))
+        // Password-mode redirect completion (returns code as JSON).
+        .route("/oauth/complete", get(complete::complete))
         // Token endpoint.
         .route("/oauth/token", post(token::token))
         // Dynamic client registration.

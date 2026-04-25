@@ -111,12 +111,14 @@ class OAuthService {
   }) async {
     // POST credentials to get an auth code via redirect (302/303).
     //
-    // Dio on some platforms (notably iOS) does not reliably honour
-    // `followRedirects: false` — the underlying HttpClient may follow
-    // the redirect or throw a DioException with the redirect status.
-    // We handle both paths: a successful response with a Location header,
-    // and a DioException whose response carries the Location header.
-    String? location;
+    // The server redirects to /oauth/complete?code=... which returns JSON.
+    // We handle three platform-dependent behaviours:
+    //
+    // 1. Dio honours `followRedirects: false` → 303 with Location header.
+    // 2. Dio throws DioException on the 303 → extract Location from error.
+    // 3. Dio follows the redirect (web/iOS) → response body is JSON from
+    //    /oauth/complete containing `{"code": "..."}`.
+    String? code;
 
     try {
       final authResponse = await _dio.post<dynamic>(
@@ -135,40 +137,31 @@ class OAuthService {
               status != null && (status >= 200 && status < 400),
         ),
       );
-      location = authResponse.headers.value('location');
+
+      // Path 1: Redirect captured — extract code from Location header.
+      final location = authResponse.headers.value('location');
+      if (location != null) {
+        code = _extractCodeFromLocation(location, redirectUri);
+      }
+
+      // Path 3: Redirect was followed — extract code from response body.
+      if (code == null && authResponse.data is Map) {
+        code = (authResponse.data as Map)['code'] as String?;
+      }
     } on DioException catch (e) {
-      // Dio threw on the redirect status — extract Location from the
-      // error response if available.
+      // Path 2: Dio threw on the redirect status.
       final status = e.response?.statusCode;
       if (status != null && status >= 300 && status < 400) {
-        location = e.response?.headers.value('location');
+        final location = e.response?.headers.value('location');
+        if (location != null) {
+          code = _extractCodeFromLocation(location, redirectUri);
+        }
       }
-      if (location == null) rethrow;
+      if (code == null) rethrow;
     }
 
-    if (location == null) {
-      throw OAuthException('No redirect location in authorization response');
-    }
-
-    // Validate that the redirect target matches the registered redirect_uri.
-    // A reverse proxy or MITM could inject a different Location header
-    // to steal the authorization code.
-    final locationUri = Uri.parse(location);
-    final expectedUri = Uri.parse(redirectUri);
-    if (locationUri.scheme != expectedUri.scheme ||
-        locationUri.host != expectedUri.host ||
-        locationUri.port != expectedUri.port ||
-        locationUri.path != expectedUri.path) {
-      throw OAuthException(
-        'Redirect location does not match registered redirect_uri',
-      );
-    }
-
-    final code = locationUri.queryParameters['code'];
     if (code == null) {
-      final error = locationUri.queryParameters['error'] ?? 'unknown_error';
-      final desc = locationUri.queryParameters['error_description'] ?? '';
-      throw OAuthException('Authorization failed: $error $desc');
+      throw OAuthException('No authorization code in server response');
     }
 
     // Exchange the auth code for tokens.
@@ -234,6 +227,31 @@ class OAuthService {
   }
 
   // -- Helpers ---------------------------------------------------------------
+
+  /// Extracts the authorization code from a Location header value.
+  ///
+  /// Validates that the redirect target matches the registered [redirectUri]
+  /// to prevent code theft via injected Location headers.
+  String? _extractCodeFromLocation(String location, String redirectUri) {
+    final locationUri = Uri.parse(location);
+    final expectedUri = Uri.parse(redirectUri);
+    if (locationUri.scheme != expectedUri.scheme ||
+        locationUri.host != expectedUri.host ||
+        locationUri.port != expectedUri.port ||
+        locationUri.path != expectedUri.path) {
+      throw OAuthException(
+        'Redirect location does not match registered redirect_uri',
+      );
+    }
+
+    final code = locationUri.queryParameters['code'];
+    if (code == null) {
+      final error = locationUri.queryParameters['error'] ?? 'unknown_error';
+      final desc = locationUri.queryParameters['error_description'] ?? '';
+      throw OAuthException('Authorization failed: $error $desc');
+    }
+    return code;
+  }
 
   OAuthCredentials _parseTokenResponse(
     Map<String, dynamic> data,
