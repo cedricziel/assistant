@@ -11,6 +11,7 @@ import '../features/contexts/models/context_model.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/contexts/screens/context_switcher_screen.dart';
 import '../features/login/login_screen.dart';
+import '../features/spaces/space_selector_screen.dart';
 import '../features/logs/logs_screen.dart';
 import '../features/personas/persona_create_screen.dart';
 import '../features/personas/persona_detail_screen.dart';
@@ -61,6 +62,7 @@ class AppRoutes {
   static const agentDetail = '/agents/:id';
   static const analytics = '/analytics';
   static const settings = '/settings';
+  static const spaceSelector = '/spaces';
 }
 
 /// Provider that creates a single [GoRouter] instance for the application
@@ -144,6 +146,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.login,
         builder: (context, state) => const LoginScreen(),
+      ),
+
+      // -- Space selector: org + space picker after OAuth2 login -------------
+      GoRoute(
+        path: AppRoutes.spaceSelector,
+        builder: (context, state) => const SpaceSelectorScreen(),
       ),
 
       // -- Legacy setup route (kept for deep-link compatibility) -------------

@@ -59,6 +59,12 @@ class ApiClient {
   WorkflowsApi get workflows => _generatedApi.getWorkflowsApi();
   CapabilitiesApi get capabilities => _generatedApi.getCapabilitiesApi();
   CommandsApi get commands => _generatedApi.getCommandsApi();
+  OrgsApi get orgs => _generatedApi.getOrgsApi();
+  SpacesApi get spaces => _generatedApi.getSpacesApi();
+  MembersApi get members => _generatedApi.getMembersApi();
+  UsersApi get users => _generatedApi.getUsersApi();
+  ApiKeysApi get apiKeys => _generatedApi.getApiKeysApi();
+  TemplatesApi get templates => _generatedApi.getTemplatesApi();
 
   /// Stream assistant tokens for a conversation message.
   ///
