@@ -292,8 +292,8 @@ pub async fn migrate_database(base_path: &Path) -> Result<()> {
         }
     }
 
-    // Create org.db at the installation root (next to assistant.db) so the
-    // web-ui startup path finds it at `db_path.with_file_name("org.db")`.
+    // Create org.db at the installation root (next to assistant.db), matching
+    // the path resolved by `OrgPoolFactory::org_db_path()`.
     let org_db_path = base_path.join("org.db");
     let org_storage = crate::org_storage::OrgStorageLayer::new(&org_db_path)
         .await

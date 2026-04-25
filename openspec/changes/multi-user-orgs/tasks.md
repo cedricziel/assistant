@@ -234,7 +234,7 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 - [x] `feat(storage): SQLite auth state stores and org pool factory`
   - `SqliteClientStore`, `SqliteAuthCodeStore`, `SqliteRefreshTokenStore`, `SqliteDeviceCodeStore`
-  - `OrgPoolFactory` resolves `~/.assistant/orgs/{slug}/org.db` paths
+  - `OrgPoolFactory` resolves `~/.assistant/org.db` and `~/.assistant/orgs/{slug}/spaces/{space}/space.db` paths
   - 14 tests
 
 ---
