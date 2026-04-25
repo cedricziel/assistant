@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.139](https://github.com/cedricziel/assistant/compare/v0.1.138...v0.1.139) (2026-04-25)
+
+
+### Features
+
+* **app:** switch OAuthService to generated OauthApi client ([#654](https://github.com/cedricziel/assistant/issues/654)) ([45a8949](https://github.com/cedricziel/assistant/commit/45a89493725b7e500395c70fd1517afba13073ac))
+
+
+### Bug Fixes
+
+* **auth:** harden OAuth2 — mandatory PKCE, redirect validation, open redirect fix ([#653](https://github.com/cedricziel/assistant/issues/653)) ([777d143](https://github.com/cedricziel/assistant/commit/777d14311362e86ea6669bfb32ceb0975ab1d2ed))
+* **web-ui:** use OrgPoolFactory for org.db resolution ([#651](https://github.com/cedricziel/assistant/issues/651)) ([613a429](https://github.com/cedricziel/assistant/commit/613a42952460533b6424abc87faf6fc6af4398f2))
+
 ## [0.1.138](https://github.com/cedricziel/assistant/compare/v0.1.137...v0.1.138) (2026-04-25)
 
 
