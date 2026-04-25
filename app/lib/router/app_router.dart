@@ -11,6 +11,7 @@ import '../features/contexts/models/context_model.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/contexts/screens/context_switcher_screen.dart';
 import '../features/login/login_screen.dart';
+import '../features/onboarding/onboarding_screen.dart';
 import '../features/spaces/space_selector_screen.dart';
 import '../features/logs/logs_screen.dart';
 import '../features/personas/persona_create_screen.dart';
@@ -63,6 +64,7 @@ class AppRoutes {
   static const analytics = '/analytics';
   static const settings = '/settings';
   static const spaceSelector = '/spaces';
+  static const onboarding = '/onboarding';
 }
 
 /// Provider that creates a single [GoRouter] instance for the application
@@ -152,6 +154,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.spaceSelector,
         builder: (context, state) => const SpaceSelectorScreen(),
+      ),
+
+      // -- Onboarding: persona creation for new users -----------------------
+      GoRoute(
+        path: AppRoutes.onboarding,
+        builder: (context, state) => const OnboardingScreen(),
       ),
 
       // -- Legacy setup route (kept for deep-link compatibility) -------------

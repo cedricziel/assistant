@@ -545,7 +545,7 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - Fetch user's orgs and spaces from API
   - Display space picker, persist selection
 
-- [ ] `feat(app): persona creation from template during onboarding`
+- [x] `feat(app): persona creation from template during onboarding`
   - Check onboarding status on first load
   - Show template picker, create persona, navigate to chat
 
