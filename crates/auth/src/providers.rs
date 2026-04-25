@@ -696,7 +696,7 @@ mod tests {
                 client_name: "Test App".into(),
                 redirect_uris: vec!["http://localhost:4040/callback".into()],
                 grant_types: vec!["authorization_code".into()],
-                response_types: None,
+                response_types: Some(vec!["code".into()]),
                 token_endpoint_auth_method: None,
             })
             .await
@@ -744,7 +744,7 @@ mod tests {
                 client_name: "Test App".into(),
                 redirect_uris: vec!["http://localhost:4040/callback".into()],
                 grant_types: vec!["authorization_code".into()],
-                response_types: None,
+                response_types: Some(vec!["code".into()]),
                 token_endpoint_auth_method: None,
             })
             .await
