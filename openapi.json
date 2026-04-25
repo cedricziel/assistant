@@ -6350,6 +6350,9 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid UUID"
+          },
           "404": {
             "description": "Workflow webhook not found"
           }

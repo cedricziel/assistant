@@ -609,7 +609,7 @@ async fn set_active(
 // -- Public webhook trigger --------------------------------------------------
 
 /// Accepted response for a public webhook trigger.
-#[derive(Serialize, utoipa::ToSchema)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct WorkflowWebhookTriggerAccepted {
     workflow_id: String,
     run_id: String,
@@ -633,6 +633,7 @@ pub struct WorkflowWebhookTriggerAccepted {
     request_body(content = serde_json::Value, content_type = "application/json"),
     responses(
         (status = 202, description = "Webhook accepted, run queued", body = WorkflowWebhookTriggerAccepted),
+        (status = 400, description = "Invalid UUID"),
         (status = 404, description = "Workflow webhook not found"),
     )
 )]
