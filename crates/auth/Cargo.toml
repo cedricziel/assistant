@@ -1,6 +1,6 @@
 [package]
 name = "assistant-auth"
-version = "0.1.137"
+version = "0.1.138"
 license.workspace = true
 edition.workspace = true
 description = "Authentication and authorization: OAuth2 server, JWT, password hashing, OIDC, API keys"

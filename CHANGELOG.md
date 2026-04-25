@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.138](https://github.com/cedricziel/assistant/compare/v0.1.137...v0.1.138) (2026-04-25)
+
+
+### Bug Fixes
+
+* **app:** handle Dio redirect exceptions in OAuth2 login ([#649](https://github.com/cedricziel/assistant/issues/649)) ([cc8bb9f](https://github.com/cedricziel/assistant/commit/cc8bb9fc76f2050667125ef1014472365b778188))
+
 ## [0.1.137](https://github.com/cedricziel/assistant/compare/v0.1.136...v0.1.137) (2026-04-25)
 
 
