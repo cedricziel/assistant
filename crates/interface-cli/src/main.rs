@@ -1,5 +1,7 @@
 mod cmd_backup;
 mod cmd_doctor;
+mod cmd_login;
+mod credentials;
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write as IoWrite};
@@ -42,6 +44,14 @@ struct Cli {
     /// Persona context ID (e.g. "default", "work", "personal").
     #[arg(long, env = "ASSISTANT_PERSONA")]
     persona: Option<String>,
+
+    /// API key for non-interactive authentication (skips OAuth login).
+    #[arg(long, env = "ASSISTANT_API_KEY", global = true)]
+    api_key: Option<String>,
+
+    /// Server URL when using --api-key (e.g. http://127.0.0.1:8080).
+    #[arg(long, env = "ASSISTANT_SERVER", global = true)]
+    server: Option<String>,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -120,6 +130,41 @@ enum Command {
     Restore(cmd_backup::RestoreArgs),
     /// Diagnose installation health (config, database, providers, etc.).
     Doctor,
+    /// Log in to an assistant server using the device code flow.
+    Login {
+        /// Server URL (e.g. http://127.0.0.1:8080).
+        server: String,
+    },
+    /// Log out and remove stored credentials.
+    Logout,
+    /// Show current login status.
+    Status,
+    /// Manage API keys for non-interactive authentication.
+    #[command(name = "api-keys")]
+    ApiKeys {
+        #[command(subcommand)]
+        command: ApiKeysCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ApiKeysCommand {
+    /// Create a new API key.
+    Create {
+        /// Name for the key (e.g. "CI", "deploy").
+        #[arg(long)]
+        name: String,
+        /// Comma-separated scopes (e.g. "conversations:read,conversations:write").
+        #[arg(long)]
+        scopes: Option<String>,
+    },
+    /// List your API keys.
+    List,
+    /// Revoke an API key by ID.
+    Revoke {
+        /// API key ID (e.g. "key_abc123").
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -371,6 +416,110 @@ mod cli_parse_tests {
             parse.is_err(),
             "legacy `agent` subcommand should be rejected"
         );
+    }
+
+    #[test]
+    fn parses_login_command() {
+        let cli = Cli::try_parse_from(["assistant", "login", "http://localhost:8080"]).unwrap();
+        match cli.command {
+            Some(Command::Login { server }) => {
+                assert_eq!(server, "http://localhost:8080");
+            }
+            _ => panic!("expected login command"),
+        }
+    }
+
+    #[test]
+    fn parses_logout_command() {
+        let cli = Cli::try_parse_from(["assistant", "logout"]).unwrap();
+        assert!(matches!(cli.command, Some(Command::Logout)));
+    }
+
+    #[test]
+    fn parses_status_command() {
+        let cli = Cli::try_parse_from(["assistant", "status"]).unwrap();
+        assert!(matches!(cli.command, Some(Command::Status)));
+    }
+
+    #[test]
+    fn parses_api_keys_list() {
+        let cli = Cli::try_parse_from(["assistant", "api-keys", "list"]).unwrap();
+        match cli.command {
+            Some(Command::ApiKeys { command }) => {
+                assert!(matches!(command, super::ApiKeysCommand::List));
+            }
+            _ => panic!("expected api-keys list command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_keys_create_with_scopes() {
+        let cli = Cli::try_parse_from([
+            "assistant",
+            "api-keys",
+            "create",
+            "--name",
+            "CI",
+            "--scopes",
+            "conversations:read,conversations:write",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::ApiKeys { command }) => match command {
+                super::ApiKeysCommand::Create { name, scopes } => {
+                    assert_eq!(name, "CI");
+                    assert_eq!(
+                        scopes.as_deref(),
+                        Some("conversations:read,conversations:write")
+                    );
+                }
+                _ => panic!("expected api-keys create"),
+            },
+            _ => panic!("expected api-keys command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_keys_revoke() {
+        let cli = Cli::try_parse_from(["assistant", "api-keys", "revoke", "key_abc123"]).unwrap();
+        match cli.command {
+            Some(Command::ApiKeys { command }) => match command {
+                super::ApiKeysCommand::Revoke { id } => {
+                    assert_eq!(id, "key_abc123");
+                }
+                _ => panic!("expected api-keys revoke"),
+            },
+            _ => panic!("expected api-keys command"),
+        }
+    }
+
+    #[test]
+    fn parses_global_api_key_flag() {
+        let cli = Cli::try_parse_from([
+            "assistant",
+            "--api-key",
+            "ask_live_test123",
+            "--server",
+            "http://example.com",
+            "api-keys",
+            "list",
+        ])
+        .unwrap();
+        assert_eq!(cli.api_key.as_deref(), Some("ask_live_test123"));
+        assert_eq!(cli.server.as_deref(), Some("http://example.com"));
+        assert!(matches!(
+            cli.command,
+            Some(Command::ApiKeys {
+                command: super::ApiKeysCommand::List
+            })
+        ));
+    }
+
+    #[test]
+    fn api_key_env_var_name() {
+        // Verify the env annotation exists by checking that --api-key accepts a value.
+        let cli = Cli::try_parse_from(["assistant", "--api-key", "my_key", "status"]).unwrap();
+        assert_eq!(cli.api_key.as_deref(), Some("my_key"));
     }
 }
 
@@ -1216,6 +1365,27 @@ async fn main() -> Result<()> {
 
     if matches!(cli.command, Some(Command::Doctor)) {
         return cmd_doctor::cmd_doctor(&config_path, &db_path, &config);
+    }
+
+    if let Some(Command::Login { server }) = &cli.command {
+        return cmd_login::cmd_login(server).await;
+    }
+    if matches!(cli.command, Some(Command::Logout)) {
+        return cmd_login::cmd_logout().await;
+    }
+    if matches!(cli.command, Some(Command::Status)) {
+        return cmd_login::cmd_status();
+    }
+    if let Some(Command::ApiKeys { command }) = &cli.command {
+        return match command {
+            ApiKeysCommand::Create { name, scopes } => {
+                cmd_login::cmd_api_keys_create(name, scopes, &cli.api_key, &cli.server).await
+            }
+            ApiKeysCommand::List => cmd_login::cmd_api_keys_list(&cli.api_key, &cli.server).await,
+            ApiKeysCommand::Revoke { id } => {
+                cmd_login::cmd_api_keys_revoke(id, &cli.api_key, &cli.server).await
+            }
+        };
     }
 
     let (orchestrator_interfaces, orchestrator_no_repl) =

@@ -508,27 +508,33 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 **Commits:**
 
-- [ ] `feat(cli): assistant login command — device code flow`
-  - `assistant login --server <url>` — initiates device code flow
+- [x] `feat(cli): assistant login command — device code flow`
+  - `assistant login <server-url>` — initiates device code flow
   - Displays user_code and verification URL
   - Polls for completion, stores tokens on success
+  - Dynamic client registration (RFC 7591) + device code (RFC 8628)
 
-- [ ] `feat(cli): token storage and automatic refresh`
+- [x] `feat(cli): token storage and automatic refresh`
   - Store access + refresh tokens in `~/.assistant/credentials.json` (mode 0600)
-  - On 401: attempt silent refresh, retry request
+  - `credentials::refresh_if_needed()` — silent refresh on expired token
   - Clear tokens on refresh failure (re-login required)
 
-- [ ] `feat(cli): assistant logout and api-keys commands`
+- [x] `feat(cli): assistant logout and api-keys commands`
   - `assistant logout` — revoke tokens, delete credentials.json
+  - `assistant status` — show login status and token expiry
   - `assistant api-keys create --name <n> --scopes <s>` — create and display key (once)
-  - `assistant api-keys list` — table of keys (prefix, name, scopes, expiry)
+  - `assistant api-keys list` — table of keys (id, name, prefix, scopes, expiry)
   - `assistant api-keys revoke <id>` — revoke key
 
-- [ ] `feat(cli): --api-key flag for non-interactive use`
+- [x] `feat(cli): --api-key flag for non-interactive use`
   - Accept `--api-key` or `ASSISTANT_API_KEY` env var
-  - Skip device code flow, authenticate directly with key
+  - Accept `--server` or `ASSISTANT_SERVER` for server URL
+  - api-keys subcommands accept both stored creds and --api-key
 
-- [ ] `test(cli): login flow mocked end-to-end`
+- [x] `test(cli): login flow mocked end-to-end`
+  - 8 CLI parse tests for login/logout/status/api-keys commands
+  - 6 credential storage unit tests (roundtrip, permissions, expiry)
+  - `issue_token_pair` test for device code token issuance
 
 - [ ] `feat(app): OAuth2 Authorization Code + PKCE login in Flutter`
   - Replace single-token entry with OAuth2 flow

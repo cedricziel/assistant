@@ -36,6 +36,8 @@ assistant-backup = { path = "../backup" }
 # CancellationToken for background Nextcloud shutdown
 tokio-util = { workspace = true }
 chrono = { workspace = true }
+serde = { workspace = true }
+reqwest = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
@@ -51,3 +53,6 @@ dirs = { workspace = true }
 clap = { workspace = true }
 # Explicit rustls dep so we can install the ring provider before TLS starts
 rustls = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
