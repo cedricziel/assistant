@@ -7,9 +7,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/context_model.dart';
 import 'shared_credentials_channel.dart';
 
+import '../../auth/oauth_credentials.dart';
+
 const _kContextsKey = 'assistant_contexts';
 const _kActiveContextIdKey = 'assistant_active_context_id';
 const _kTokenPrefix = 'assistant_context_token_';
+const _kOAuthPrefix = 'assistant_context_oauth_';
 
 /// Well-known Keychain keys for native Siri/Shortcuts integration.
 /// Swift App Intent code reads these directly from the Keychain.
@@ -106,8 +109,20 @@ class ContextRepository {
     final result = <AssistantContext>[];
     for (final ctx in contexts) {
       try {
+        var restored = ctx;
         final token = await _secureStorage.read(key: '$_kTokenPrefix${ctx.id}');
-        result.add(token != null ? ctx.copyWith(authToken: token) : ctx);
+        if (token != null) {
+          restored = restored.copyWith(authToken: token);
+        }
+        final oauthJson = await _secureStorage.read(
+          key: '$_kOAuthPrefix${ctx.id}',
+        );
+        if (oauthJson != null) {
+          restored = restored.copyWith(
+            oauthCredentials: OAuthCredentials.fromJsonString(oauthJson),
+          );
+        }
+        result.add(restored);
       } catch (_) {
         result.add(ctx);
       }
@@ -137,6 +152,16 @@ class ContextRepository {
       await _secureStorage.delete(key: '$_kTokenPrefix${context.id}');
     }
 
+    // Persist OAuth credentials.
+    if (context.oauthCredentials != null) {
+      await _secureStorage.write(
+        key: '$_kOAuthPrefix${context.id}',
+        value: context.oauthCredentials!.toJsonString(),
+      );
+    } else {
+      await _secureStorage.delete(key: '$_kOAuthPrefix${context.id}');
+    }
+
     // Keep Siri credentials in sync if this is the active context.
     if (context.id == getActiveContextId()) {
       await syncSiriCredentials();
@@ -156,10 +181,12 @@ class ContextRepository {
     final idx = existing.indexWhere((c) => c.serverUrl == context.serverUrl);
     final AssistantContext toSave;
     if (idx >= 0) {
-      // Preserve ID and createdAt; update name and (below) token.
+      // Preserve ID and createdAt; update name, auth mode, and (below) tokens.
       toSave = existing[idx].copyWith(
         name: context.name,
         authToken: context.authToken,
+        oauthCredentials: context.oauthCredentials,
+        authMode: context.authMode,
       );
       existing[idx] = toSave;
     } else {
@@ -177,6 +204,16 @@ class ContextRepository {
       await _secureStorage.delete(key: '$_kTokenPrefix${toSave.id}');
     }
 
+    // Persist OAuth credentials.
+    if (toSave.oauthCredentials != null) {
+      await _secureStorage.write(
+        key: '$_kOAuthPrefix${toSave.id}',
+        value: toSave.oauthCredentials!.toJsonString(),
+      );
+    } else {
+      await _secureStorage.delete(key: '$_kOAuthPrefix${toSave.id}');
+    }
+
     if (toSave.id == getActiveContextId()) {
       await syncSiriCredentials();
     }
@@ -192,6 +229,7 @@ class ContextRepository {
     existing.removeWhere((c) => c.id == id);
     await _persistMetadata(existing);
     await _secureStorage.delete(key: '$_kTokenPrefix$id');
+    await _secureStorage.delete(key: '$_kOAuthPrefix$id');
 
     if (getActiveContextId() == id) {
       await setActiveContextId(null);

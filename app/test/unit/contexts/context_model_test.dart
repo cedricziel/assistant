@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:assistant_app/features/auth/oauth_credentials.dart';
 import 'package:assistant_app/features/contexts/models/context_model.dart';
 
 void main() {
@@ -116,6 +117,212 @@ void main() {
       final after = DateTime.now().toUtc().add(const Duration(seconds: 1));
       expect(ctx.createdAt.isAfter(before), isTrue);
       expect(ctx.createdAt.isBefore(after), isTrue);
+    });
+
+    // -- AuthMode ---------------------------------------------------------------
+
+    test('default authMode is legacyToken', () {
+      final ctx = makeCtx();
+      expect(ctx.authMode, AuthMode.legacyToken);
+    });
+
+    test('create() accepts authMode parameter', () {
+      final ctx = AssistantContext.create(
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        authMode: AuthMode.oauth2,
+      );
+      expect(ctx.authMode, AuthMode.oauth2);
+    });
+
+    test('toJson includes authMode', () {
+      final ctx = AssistantContext.create(
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        authMode: AuthMode.oauth2,
+      );
+      expect(ctx.toJson()['authMode'], 'oauth2');
+    });
+
+    test('fromJson restores authMode', () {
+      final ctx = AssistantContext.create(
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        authMode: AuthMode.oauth2,
+      );
+      final restored = AssistantContext.fromJson(ctx.toJson());
+      expect(restored.authMode, AuthMode.oauth2);
+    });
+
+    test('fromJson defaults to legacyToken when authMode is missing', () {
+      final json = {
+        'id': 'old-ctx',
+        'name': 'Old',
+        'serverUrl': 'http://old.example.com',
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+      };
+      final restored = AssistantContext.fromJson(json);
+      expect(restored.authMode, AuthMode.legacyToken);
+    });
+
+    test('toJson omits oauthCredentials', () {
+      final creds = OAuthCredentials(
+        accessToken: 'at',
+        refreshToken: 'rt',
+        expiresAt: DateTime.now().toUtc(),
+        clientId: 'cid',
+      );
+      final ctx = AssistantContext.create(
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        oauthCredentials: creds,
+        authMode: AuthMode.oauth2,
+      );
+      final json = ctx.toJson();
+      expect(json.containsKey('oauthCredentials'), isFalse);
+    });
+
+    // -- effectiveToken ---------------------------------------------------------
+
+    test('effectiveToken returns authToken for legacyToken mode', () {
+      final ctx = makeCtx(authToken: 'legacy-tok');
+      expect(ctx.effectiveToken, 'legacy-tok');
+    });
+
+    test('effectiveToken returns null when legacyToken has no token', () {
+      final ctx = makeCtx();
+      expect(ctx.effectiveToken, isNull);
+    });
+
+    test('effectiveToken returns accessToken for oauth2 mode', () {
+      final creds = OAuthCredentials(
+        accessToken: 'oauth-access',
+        refreshToken: 'rt',
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+        clientId: 'cid',
+      );
+      final ctx = AssistantContext(
+        id: 'test',
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        oauthCredentials: creds,
+        authMode: AuthMode.oauth2,
+        createdAt: DateTime.now().toUtc(),
+      );
+      expect(ctx.effectiveToken, 'oauth-access');
+    });
+
+    test('effectiveToken falls back to authToken when oauth2 has no creds', () {
+      final ctx = AssistantContext(
+        id: 'test',
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        authToken: 'fallback',
+        authMode: AuthMode.oauth2,
+        createdAt: DateTime.now().toUtc(),
+      );
+      expect(ctx.effectiveToken, 'fallback');
+    });
+
+    // -- needsTokenRefresh ------------------------------------------------------
+
+    test('needsTokenRefresh is false for legacyToken mode', () {
+      final ctx = makeCtx(authToken: 'tok');
+      expect(ctx.needsTokenRefresh, isFalse);
+    });
+
+    test('needsTokenRefresh is false when oauth2 creds are not expired', () {
+      final creds = OAuthCredentials(
+        accessToken: 'at',
+        refreshToken: 'rt',
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+        clientId: 'cid',
+      );
+      final ctx = AssistantContext(
+        id: 'test',
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        oauthCredentials: creds,
+        authMode: AuthMode.oauth2,
+        createdAt: DateTime.now().toUtc(),
+      );
+      expect(ctx.needsTokenRefresh, isFalse);
+    });
+
+    test('needsTokenRefresh is true when oauth2 creds are expired', () {
+      final creds = OAuthCredentials(
+        accessToken: 'at',
+        refreshToken: 'rt',
+        expiresAt: DateTime.now().toUtc().subtract(const Duration(hours: 1)),
+        clientId: 'cid',
+      );
+      final ctx = AssistantContext(
+        id: 'test',
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        oauthCredentials: creds,
+        authMode: AuthMode.oauth2,
+        createdAt: DateTime.now().toUtc(),
+      );
+      expect(ctx.needsTokenRefresh, isTrue);
+    });
+
+    test('needsTokenRefresh is false when oauth2 has no creds', () {
+      final ctx = AssistantContext(
+        id: 'test',
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        authMode: AuthMode.oauth2,
+        createdAt: DateTime.now().toUtc(),
+      );
+      expect(ctx.needsTokenRefresh, isFalse);
+    });
+
+    // -- copyWith with OAuth fields -------------------------------------------
+
+    test('copyWith preserves oauthCredentials', () {
+      final creds = OAuthCredentials(
+        accessToken: 'at',
+        refreshToken: 'rt',
+        expiresAt: DateTime.now().toUtc(),
+        clientId: 'cid',
+      );
+      final ctx = AssistantContext(
+        id: 'test',
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        oauthCredentials: creds,
+        authMode: AuthMode.oauth2,
+        createdAt: DateTime.now().toUtc(),
+      );
+      final copy = ctx.copyWith(name: 'Updated');
+      expect(copy.oauthCredentials, creds);
+      expect(copy.authMode, AuthMode.oauth2);
+    });
+
+    test('copyWith with clearOAuthCredentials removes creds', () {
+      final creds = OAuthCredentials(
+        accessToken: 'at',
+        refreshToken: 'rt',
+        expiresAt: DateTime.now().toUtc(),
+        clientId: 'cid',
+      );
+      final ctx = AssistantContext(
+        id: 'test',
+        name: 'Test',
+        serverUrl: 'http://localhost',
+        oauthCredentials: creds,
+        authMode: AuthMode.oauth2,
+        createdAt: DateTime.now().toUtc(),
+      );
+      final cleared = ctx.copyWith(clearOAuthCredentials: true);
+      expect(cleared.oauthCredentials, isNull);
+    });
+
+    test('copyWith can change authMode', () {
+      final ctx = makeCtx();
+      final updated = ctx.copyWith(authMode: AuthMode.oauth2);
+      expect(updated.authMode, AuthMode.oauth2);
     });
   });
 }
