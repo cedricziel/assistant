@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../features/agents/agent_detail_screen.dart';
 import '../features/agents/agents_screen.dart';
+import '../features/admin/admin_screen.dart';
+import '../features/api_keys/api_keys_screen.dart';
 import '../features/analytics/analytics_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/connection/connection_screen.dart';
@@ -63,6 +65,8 @@ class AppRoutes {
   static const agentDetail = '/agents/:id';
   static const analytics = '/analytics';
   static const settings = '/settings';
+  static const admin = '/admin';
+  static const apiKeys = '/api-keys';
   static const spaceSelector = '/spaces';
   static const onboarding = '/onboarding';
 }
@@ -347,6 +351,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.analytics,
             builder: (context, state) => const AnalyticsScreen(),
+          ),
+
+          // -- Admin ---------------------------------------------------------
+          GoRoute(
+            path: AppRoutes.admin,
+            builder: (context, state) => const AdminScreen(),
+          ),
+
+          // -- API Keys -----------------------------------------------------
+          GoRoute(
+            path: AppRoutes.apiKeys,
+            builder: (context, state) => const ApiKeysScreen(),
           ),
 
           // -- Settings -----------------------------------------------------
