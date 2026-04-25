@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.137](https://github.com/cedricziel/assistant/compare/v0.1.136...v0.1.137) (2026-04-25)
+
+
+### Bug Fixes
+
+* **storage:** create org.db at install root during migration ([#646](https://github.com/cedricziel/assistant/issues/646)) ([d2752d9](https://github.com/cedricziel/assistant/commit/d2752d9fd48b82adc68f26f3f1b617416a2e55cd))
+* **storage:** OrgPoolFactory.org_db_path() returns root-level path ([#648](https://github.com/cedricziel/assistant/issues/648)) ([8852670](https://github.com/cedricziel/assistant/commit/8852670ae3172cfa49f09be4968158f68bab0941))
+
 ## [0.1.136](https://github.com/cedricziel/assistant/compare/v0.1.135...v0.1.136) (2026-04-25)
 
 
