@@ -8,12 +8,16 @@ the same SQLite database the runtime writes to.
 ## Quick start
 
 ```sh
-# Auth token is required — the server refuses to start without one.
+# Legacy single-token mode (for quick local dev):
 ASSISTANT_WEB_TOKEN=changeme cargo run -p assistant-cli -- webui serve --listen 127.0.0.1:8080
+
+# Multi-user mode is enabled automatically when org.db exists.
+# See docs/authentication.md for OAuth2 setup and docs/multi-user.md for the full model.
 ```
 
-The Flutter web app loads at <http://127.0.0.1:8080>. Enter the server URL
-and token in the connection screen to sign in.
+The Flutter web app loads at <http://127.0.0.1:8080>. In single-token mode,
+enter the server URL and token. In multi-user mode, the app uses OAuth2
+Authorization Code + PKCE to authenticate.
 
 ## CLI options
 
@@ -52,22 +56,59 @@ persona switching, traces, logs, and skills views.
 
 These endpoints power the Flutter app and are also consumable directly:
 
-| Route                              | Method | Description                                       |
-| ---------------------------------- | ------ | ------------------------------------------------- |
-| `/api/conversations`               | GET    | List conversations                                |
-| `/api/conversations`               | POST   | Create conversation                               |
-| `/api/conversations/{id}`          | GET    | Get conversation with messages                    |
-| `/api/conversations/{id}`          | PATCH  | Rename conversation                               |
-| `/api/conversations/{id}`          | DELETE | Delete conversation                               |
-| `/api/conversations/{id}/messages` | POST   | Send message (SSE streaming response)             |
-| `/api/personas`                    | GET    | List personas                                     |
-| `/api/personas/active`             | POST   | Switch active persona                             |
-| `/api/personas/{id}/skills`        | GET    | List skills for a persona                         |
-| `/api/traces`                      | GET    | List traces (supports limit/offset/filter params) |
-| `/api/traces/{id}`                 | GET    | Get trace with span breakdown                     |
-| `/api/logs`                        | GET    | List log entries (supports filter params)         |
+| Route                                  | Method | Description                                       |
+| -------------------------------------- | ------ | ------------------------------------------------- |
+| `/api/conversations`                   | GET    | List conversations                                |
+| `/api/conversations`                   | POST   | Create conversation                               |
+| `/api/conversations/{id}`              | GET    | Get conversation with messages                    |
+| `/api/conversations/{id}`              | PATCH  | Rename conversation                               |
+| `/api/conversations/{id}`              | DELETE | Delete conversation                               |
+| `/api/conversations/{id}/messages`     | POST   | Send message (SSE streaming response)             |
+| `/api/personas`                        | GET    | List personas                                     |
+| `/api/personas/active`                 | POST   | Switch active persona                             |
+| `/api/personas/{id}/skills`            | GET    | List skills for a persona                         |
+| `/api/traces`                          | GET    | List traces (supports limit/offset/filter params) |
+| `/api/traces/{id}`                     | GET    | Get trace with span breakdown                     |
+| `/api/logs`                            | GET    | List log entries (supports filter params)         |
+| `/api/orgs`                            | GET    | List organizations (filtered by user access)      |
+| `/api/orgs`                            | POST   | Create organization                               |
+| `/api/orgs/{id}`                       | GET    | Get organization details                          |
+| `/api/orgs/{id}`                       | PATCH  | Update organization settings                      |
+| `/api/orgs/{org}/users`                | GET    | List users in org                                 |
+| `/api/orgs/{org}/users`                | POST   | Invite user to org                                |
+| `/api/orgs/{org}/users/{uid}`          | GET    | Get user details                                  |
+| `/api/orgs/{org}/users/{uid}`          | PATCH  | Update user (name, role)                          |
+| `/api/orgs/{org}/users/{uid}`          | DELETE | Remove user from org                              |
+| `/api/orgs/{org}/spaces`               | GET    | List spaces (filtered by membership)              |
+| `/api/orgs/{org}/spaces`               | POST   | Create space                                      |
+| `/api/orgs/{org}/spaces/{sid}`         | GET    | Get space details                                 |
+| `/api/orgs/{org}/spaces/{sid}`         | PATCH  | Update space                                      |
+| `/api/orgs/{org}/spaces/{sid}`         | DELETE | Delete space (org-admin only)                     |
+| `/api/orgs/{org}/spaces/{sid}/members` | GET    | List space members                                |
+| `/api/orgs/{org}/spaces/{sid}/members` | POST   | Add user to space with role                       |
+| `/api/users/me/api-keys`               | GET    | List API keys (prefix + name, no secrets)         |
+| `/api/users/me/api-keys`               | POST   | Create scoped API key (returns plaintext once)    |
+| `/api/users/me/api-keys/{kid}`         | DELETE | Revoke API key                                    |
 
 Full OpenAPI spec is served at `/api/openapi.json`; Swagger UI at `/api/docs`.
+
+## OAuth2 endpoints (`/oauth/*`)
+
+These endpoints implement the assistant's OAuth2 Authorization Server.
+See [authentication.md](authentication.md) for flow details.
+
+| Route                                     | Method   | Description                                       |
+| ----------------------------------------- | -------- | ------------------------------------------------- |
+| `/oauth/register`                         | POST     | Dynamic client registration (RFC 7591)            |
+| `/oauth/authorize`                        | GET      | Render login form or redirect to IdP (OIDC)       |
+| `/oauth/authorize`                        | POST     | Validate credentials, redirect with auth code     |
+| `/oauth/token`                            | POST     | Exchange auth code, refresh token, or device code |
+| `/oauth/device`                           | POST     | Initiate device code flow (RFC 8628)              |
+| `/oauth/device/verify`                    | GET/POST | User enters device code and authenticates         |
+| `/oauth/callback`                         | GET      | OIDC IdP callback (server as OIDC client)         |
+| `/oauth/complete`                         | GET      | Auth code delivery as JSON (Flutter web)          |
+| `/oauth/revoke`                           | POST     | Token revocation (RFC 7009)                       |
+| `/.well-known/oauth-authorization-server` | GET      | Server metadata (RFC 8414)                        |
 
 ## Server-side management pages
 
@@ -120,20 +161,33 @@ assistant webui serve
 ├── build.rs            # Runs `flutter build web` before compilation
 ├── src/
 │   ├── flutter_assets.rs   # rust-embed of app/build/web/ → SPA fallback handler
-│   ├── auth.rs             # Bearer token middleware + session cookies
+│   ├── auth.rs             # Auth middleware: JWT, API keys, legacy tokens, session cookies
 │   ├── main.rs             # CLI args, router assembly, CORS layer
+│   ├── oauth/              # OAuth2 Authorization Server endpoints
+│   │   ├── authorize.rs        # GET/POST /oauth/authorize
+│   │   ├── token.rs            # POST /oauth/token
+│   │   ├── register.rs         # POST /oauth/register (RFC 7591)
+│   │   ├── device.rs           # POST /oauth/device + /oauth/device/verify (RFC 8628)
+│   │   ├── callback.rs         # GET /oauth/callback (OIDC IdP callback)
+│   │   ├── complete.rs         # GET /oauth/complete (auth code as JSON)
+│   │   └── revoke.rs           # POST /oauth/revoke + metadata endpoint
 │   ├── api/                # REST API consumed by the Flutter app
 │   │   ├── mod.rs              # /api/conversations + /api/conversations/{id}/messages (SSE)
 │   │   ├── personas.rs         # /api/personas, /api/personas/active
 │   │   ├── skills.rs           # /api/personas/{id}/skills
 │   │   ├── traces.rs           # /api/traces, /api/traces/{id}
-│   │   └── logs.rs             # /api/logs
+│   │   ├── logs.rs             # /api/logs
+│   │   ├── orgs.rs             # /api/orgs CRUD
+│   │   ├── users.rs            # /api/orgs/{org}/users CRUD
+│   │   ├── spaces.rs           # /api/orgs/{org}/spaces CRUD + members
+│   │   └── api_keys.rs         # /api/users/me/api-keys CRUD
 │   ├── a2a/                # A2A protocol endpoints + agent management pages
 │   └── webhooks/           # Webhook management pages
 app/                        # Flutter source (web + macOS targets)
 ```
 
 The Flutter macOS app connects to any `assistant webui serve` instance
-(local or remote) by entering the server URL and token in the connection
-screen. Credentials are stored in the platform keychain via
-`flutter_secure_storage`.
+(local or remote). In multi-user mode it authenticates via OAuth2
+Authorization Code + PKCE; in legacy mode it accepts a server URL and
+token. Credentials (OAuth tokens or legacy token) are stored in the
+platform keychain via `flutter_secure_storage`.
