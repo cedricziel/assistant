@@ -312,6 +312,38 @@ impl OAuth2Server {
             user_id,
         })
     }
+
+    /// Issue a fresh access/refresh token pair for a user and client.
+    ///
+    /// Used by the device code flow where there is no authorization code to
+    /// exchange but the user has already been authenticated via the
+    /// verification step.
+    pub async fn issue_token_pair(
+        &self,
+        user_id: &str,
+        client_id: &str,
+        scopes: Vec<String>,
+    ) -> Result<TokenPair> {
+        let access_token = generate_random_token();
+        let refresh_token = generate_random_token();
+
+        self.refresh_store
+            .store_token(StoredRefreshToken {
+                token: refresh_token.clone(),
+                user_id: user_id.to_string(),
+                client_id: client_id.to_string(),
+                scopes,
+                expires_at: Utc::now() + self.refresh_ttl,
+                consumed: false,
+            })
+            .await?;
+
+        Ok(TokenPair {
+            access_token,
+            refresh_token,
+            user_id: user_id.to_string(),
+        })
+    }
 }
 
 /// Generate a URL-safe random token (32 bytes → 43 base64url chars).
@@ -582,5 +614,23 @@ mod tests {
         // 4. Refresh again with new token.
         let pair3 = server.refresh(&pair2.refresh_token, "webui").await.unwrap();
         assert_ne!(pair2.refresh_token, pair3.refresh_token, "rotated again");
+    }
+
+    #[tokio::test]
+    async fn issue_token_pair_for_device_flow() {
+        let server = make_server();
+
+        let pair = server
+            .issue_token_pair("usr_bob", "cli", vec!["personas:read".into()])
+            .await
+            .unwrap();
+
+        assert!(!pair.access_token.is_empty(), "should get access token");
+        assert!(!pair.refresh_token.is_empty(), "should get refresh token");
+        assert_eq!(pair.user_id, "usr_bob");
+
+        // The refresh token should be usable.
+        let pair2 = server.refresh(&pair.refresh_token, "cli").await.unwrap();
+        assert_ne!(pair.refresh_token, pair2.refresh_token, "should rotate");
     }
 }

@@ -232,7 +232,28 @@ async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::respo
     };
 
     match state.device_manager.poll(&device_code).await {
-        Ok(PollResult::Authorized { user_id, scopes: _ }) => {
+        Ok(PollResult::Authorized { user_id, scopes }) => {
+            let client_id = req.client_id.clone().unwrap_or_else(|| "cli".to_string());
+
+            // Issue a refresh token so the CLI can maintain its session.
+            let pair = match state
+                .oauth2_server
+                .issue_token_pair(&user_id, &client_id, scopes)
+                .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(OAuthError {
+                            error: "server_error",
+                            error_description: e.to_string(),
+                        }),
+                    )
+                        .into_response();
+                }
+            };
+
             let ctx = stub_auth_context(&user_id, "default", "");
             let ttl = state.jwt_manager.access_ttl_secs();
             let jwt = match state.jwt_manager.sign(&ctx, ctx.org_id.as_ref(), &user_id) {
@@ -253,7 +274,7 @@ async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::respo
                 access_token: jwt,
                 token_type: "Bearer",
                 expires_in: ttl,
-                refresh_token: None,
+                refresh_token: Some(pair.refresh_token),
             })
             .into_response()
         }
