@@ -1,8 +1,8 @@
 ## 1. Auth: bulk refresh-token revocation
 
-- [ ] 1.1 Locate the refresh-token store/repo in `crates/auth` and identify how single-token revocation works today (`/oauth/revoke` handler call site).
-- [ ] 1.2 Add a method `revoke_user_refresh_tokens_except(user_id, except_jti)` (or equivalent) to the token store, returning the count revoked.
-- [ ] 1.3 Write a unit test: create three refresh tokens for one user, call the new method excepting one, assert the excepted token still validates and the others do not.
+- [x] 1.1 Locate the refresh-token store/repo in `crates/auth` and identify how single-token revocation works today (`/oauth/revoke` handler call site).
+- [x] 1.2 Add a method `revoke_user_refresh_tokens_except(user_id, except_jti)` (or equivalent) to the token store, returning the count revoked.
+- [x] 1.3 Write a unit test: create three refresh tokens for one user, call the new method excepting one, assert the excepted token still validates and the others do not.
 
 ## 2. Backend: `/api/users/me` capability
 

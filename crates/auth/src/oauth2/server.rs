@@ -74,6 +74,12 @@ pub trait RefreshTokenStore: Send + Sync {
     /// Revoke all refresh tokens for a user+client pair (security measure
     /// when replay is detected).
     async fn revoke_all(&self, user_id: &str, client_id: &str) -> Result<()>;
+
+    /// Revoke all refresh tokens belonging to a user except the specified
+    /// token. Used after a self-service password change to log the user out
+    /// of every other session while keeping the current one alive. Returns
+    /// the number of tokens revoked.
+    async fn revoke_for_user_except(&self, user_id: &str, except_token: &str) -> Result<u64>;
 }
 
 // -- In-memory implementations --
@@ -126,6 +132,13 @@ impl RefreshTokenStore for InMemoryRefreshTokenStore {
             .await
             .retain(|_, t| !(t.user_id == user_id && t.client_id == client_id));
         Ok(())
+    }
+
+    async fn revoke_for_user_except(&self, user_id: &str, except_token: &str) -> Result<u64> {
+        let mut tokens = self.tokens.write().await;
+        let before = tokens.len();
+        tokens.retain(|tok, t| !(t.user_id == user_id && tok != except_token));
+        Ok((before - tokens.len()) as u64)
     }
 }
 
@@ -591,6 +604,70 @@ mod tests {
         // Even the new token is now revoked.
         let err2 = server.refresh(&pair2.refresh_token, "webui").await;
         assert!(err2.is_err(), "all tokens should be revoked after replay");
+    }
+
+    #[tokio::test]
+    async fn revoke_for_user_except_keeps_calling_token() {
+        let store = InMemoryRefreshTokenStore::default();
+        let user = "usr_alice";
+        let now = Utc::now();
+
+        // Three tokens for the same user across different "sessions".
+        let tokens: Vec<String> = (0..3).map(|_| generate_random_token()).collect();
+        for (i, t) in tokens.iter().enumerate() {
+            store
+                .store_token(StoredRefreshToken {
+                    token: t.clone(),
+                    user_id: user.into(),
+                    client_id: format!("client_{i}"),
+                    scopes: vec![],
+                    expires_at: now + Duration::days(30),
+                    consumed: false,
+                })
+                .await
+                .unwrap();
+        }
+
+        // Also a token for a different user — must be untouched.
+        let other_token = generate_random_token();
+        store
+            .store_token(StoredRefreshToken {
+                token: other_token.clone(),
+                user_id: "usr_bob".into(),
+                client_id: "client_x".into(),
+                scopes: vec![],
+                expires_at: now + Duration::days(30),
+                consumed: false,
+            })
+            .await
+            .unwrap();
+
+        // Revoke all of alice's except tokens[1] (the "current" session).
+        let n = store
+            .revoke_for_user_except(user, &tokens[1])
+            .await
+            .unwrap();
+        assert_eq!(n, 2, "should revoke the two non-excepted tokens");
+
+        // Excepted token survives.
+        assert!(
+            store.get_token(&tokens[1]).await.unwrap().is_some(),
+            "excepted token must still validate"
+        );
+        // The two siblings are gone.
+        assert!(
+            store.get_token(&tokens[0]).await.unwrap().is_none(),
+            "non-excepted token must be revoked"
+        );
+        assert!(
+            store.get_token(&tokens[2]).await.unwrap().is_none(),
+            "non-excepted token must be revoked"
+        );
+        // Other user's token untouched.
+        assert!(
+            store.get_token(&other_token).await.unwrap().is_some(),
+            "other user's token must not be touched"
+        );
     }
 
     #[tokio::test]

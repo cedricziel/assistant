@@ -241,6 +241,16 @@ impl RefreshTokenStore for SqliteRefreshTokenStore {
             .await?;
         Ok(())
     }
+
+    async fn revoke_for_user_except(&self, user_id: &str, except_token: &str) -> Result<u64> {
+        let result =
+            sqlx::query("DELETE FROM refresh_tokens WHERE user_id = ? AND token_hash != ?")
+                .bind(user_id)
+                .bind(except_token)
+                .execute(&self.pool)
+                .await?;
+        Ok(result.rows_affected())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -525,6 +535,61 @@ mod tests {
             let found = store.get_token(&format!("tok_{i}")).await.unwrap();
             assert!(found.is_none(), "token tok_{i} should be revoked");
         }
+    }
+
+    #[tokio::test]
+    async fn refresh_token_revoke_for_user_except() {
+        let layer = setup().await;
+        let store = layer.refresh_token_store();
+
+        // Three sessions for usr_1, one for usr_2.
+        for i in 0..3 {
+            store
+                .store_token(StoredRefreshToken {
+                    token: format!("alice_tok_{i}"),
+                    user_id: "usr_1".into(),
+                    client_id: format!("cli_{i}"),
+                    scopes: vec![],
+                    expires_at: Utc::now() + Duration::days(30),
+                    consumed: false,
+                })
+                .await
+                .unwrap();
+        }
+        store
+            .store_token(StoredRefreshToken {
+                token: "bob_tok".into(),
+                user_id: "usr_2".into(),
+                client_id: "cli_x".into(),
+                scopes: vec![],
+                expires_at: Utc::now() + Duration::days(30),
+                consumed: false,
+            })
+            .await
+            .unwrap();
+
+        let n = store
+            .revoke_for_user_except("usr_1", "alice_tok_1")
+            .await
+            .unwrap();
+        assert_eq!(n, 2, "should revoke two of alice's three tokens");
+
+        assert!(
+            store.get_token("alice_tok_1").await.unwrap().is_some(),
+            "excepted token survives"
+        );
+        assert!(
+            store.get_token("alice_tok_0").await.unwrap().is_none(),
+            "non-excepted token revoked"
+        );
+        assert!(
+            store.get_token("alice_tok_2").await.unwrap().is_none(),
+            "non-excepted token revoked"
+        );
+        assert!(
+            store.get_token("bob_tok").await.unwrap().is_some(),
+            "other user's token untouched"
+        );
     }
 
     // -- DeviceCodeStore --
