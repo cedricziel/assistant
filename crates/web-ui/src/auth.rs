@@ -25,10 +25,10 @@ use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
 use serde::Deserialize;
 
-use assistant_auth::api_keys::{self, ApiKeyStore};
+use assistant_auth::api_keys;
 use assistant_auth::jwt::JwtManager;
 use assistant_auth::middleware::{AuthState, RequireScope};
-use assistant_core::auth::AuthContext;
+use assistant_core::auth::{ApiKeyStore, AuthContext};
 use assistant_core::identity::{Action, ResourceKind, SpaceId};
 
 // -- Configuration ----------------------------------------------------------

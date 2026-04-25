@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::Interface;
@@ -265,6 +266,58 @@ pub trait IdentityResolver: Send + Sync {
     /// linked their account).
     async fn resolve(&self, platform: &Interface, platform_user_id: &str)
     -> Result<Option<UserId>>;
+}
+
+// -- Persistence stores --
+//
+// Trait + record definitions for stateful auth resources. Concrete in-memory
+// implementations live in `assistant-auth`; SQLite-backed implementations live
+// in `assistant-storage`. Defining the contracts here keeps `assistant-storage`
+// free of any dependency on `assistant-auth`.
+
+/// Metadata about a stored API key.
+///
+/// Mirrors the public surface of an API key record: `id`, owner, name,
+/// hashed material, prefix, granted scopes, and expiry. The plaintext key
+/// is never stored; only the SHA-256 hash + 8-char prefix.
+#[derive(Clone, Debug)]
+pub struct ApiKeyRecord {
+    /// Unique ID for this key.
+    pub id: String,
+    /// The user who owns this key.
+    pub user_id: UserId,
+    /// Human-readable name.
+    pub name: String,
+    /// SHA-256 hash of the full key (hex-encoded).
+    pub key_hash: String,
+    /// First 8 characters of the key body (for display).
+    pub key_prefix: String,
+    /// The organization this key belongs to.
+    pub org_id: OrgId,
+    /// Space → role mapping inherited from the user at creation time.
+    pub space_roles: HashMap<SpaceId, Role>,
+    /// Granted scopes (may be a subset of the user's full scopes).
+    pub scopes: Vec<Scope>,
+    /// When this key expires.
+    pub expires_at: Option<DateTime<Utc>>,
+    /// When this key was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Persistence trait for API keys.
+///
+/// Implemented by `assistant_auth::api_keys::InMemoryApiKeyStore` (test/dev)
+/// and `assistant_storage::SqliteApiKeyStore` (production).
+#[async_trait]
+pub trait ApiKeyStore: Send + Sync {
+    /// Store a new API key record.
+    async fn store_key(&self, record: ApiKeyRecord) -> Result<()>;
+    /// Look up a key by its hash.
+    async fn get_by_hash(&self, key_hash: &str) -> Result<Option<ApiKeyRecord>>;
+    /// List all keys for a user (without secrets).
+    async fn list_for_user(&self, user_id: &UserId) -> Result<Vec<ApiKeyRecord>>;
+    /// Revoke (delete) a key by ID.
+    async fn revoke(&self, key_id: &str, user_id: &UserId) -> Result<bool>;
 }
 
 #[cfg(test)]

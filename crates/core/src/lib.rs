@@ -25,8 +25,8 @@ pub use attachment::{
 };
 // -- Auth & identity (multi-user) --
 pub use auth::{
-    AuthContext, AuthProvider, AuthorizeRequest, AuthorizeResponse, ClientInfo, ClientRegistration,
-    IdentityResolver, TokenGrant, TokenResponse,
+    ApiKeyRecord, ApiKeyStore, AuthContext, AuthProvider, AuthorizeRequest, AuthorizeResponse,
+    ClientInfo, ClientRegistration, IdentityResolver, TokenGrant, TokenResponse,
 };
 pub use bus::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
 pub use bus_messages::{

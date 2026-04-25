@@ -19,8 +19,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use assistant_auth::api_keys::{self, ApiKeyRecord, ApiKeyStore};
-use assistant_core::auth::AuthContext;
+use assistant_auth::api_keys;
+use assistant_core::auth::{ApiKeyRecord, ApiKeyStore, AuthContext};
 use assistant_core::identity::Scope;
 
 // -- State -------------------------------------------------------------------
