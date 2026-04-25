@@ -76,8 +76,7 @@ pub struct VerifyQuery {
     security(()),
     params(VerifyQuery),
     responses(
-        (status = 200, description = "Device verification form HTML"),
-        (status = 400, description = "Bad request"),
+        (status = 200, description = "Device verification form HTML", content_type = "text/html"),
     )
 )]
 pub async fn device_verify_page(Query(params): Query<VerifyQuery>) -> impl IntoResponse {
@@ -131,9 +130,11 @@ pub struct DeviceVerifyForm {
     path = "/oauth/device/verify",
     tag = "oauth",
     security(()),
+    request_body(content = DeviceVerifyForm, content_type = "application/x-www-form-urlencoded"),
     responses(
-        (status = 200, description = "Device authorized"),
-        (status = 400, description = "Invalid or expired code"),
+        (status = 200, description = "Device authorized", content_type = "text/html"),
+        (status = 400, description = "Invalid or expired code", content_type = "text/html"),
+        (status = 401, description = "Invalid credentials", content_type = "text/html"),
     )
 )]
 pub async fn device_verify_submit(

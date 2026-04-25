@@ -301,7 +301,8 @@ mod tests {
         let reg_body = serde_json::json!({
             "client_name": "Form Test",
             "redirect_uris": ["http://localhost/cb"],
-            "grant_types": ["authorization_code"]
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"]
         });
         let resp = app
             .oneshot(
@@ -416,7 +417,8 @@ mod tests {
         let reg_body = serde_json::json!({
             "client_name": "OIDC Test",
             "redirect_uris": ["http://localhost/cb"],
-            "grant_types": ["authorization_code"]
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"]
         });
         let resp = app
             .oneshot(
@@ -474,7 +476,8 @@ mod tests {
         let body = serde_json::json!({
             "client_name": "Test App",
             "redirect_uris": ["http://localhost/cb"],
-            "grant_types": ["authorization_code"]
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"]
         });
 
         let resp = app
@@ -570,7 +573,8 @@ mod tests {
         let reg_body = serde_json::json!({
             "client_name": "Flow Test",
             "redirect_uris": ["http://localhost/cb"],
-            "grant_types": ["authorization_code"]
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"]
         });
         let resp = app
             .oneshot(
@@ -673,7 +677,8 @@ mod tests {
         let reg_body = serde_json::json!({
             "client_name": "Cookie Test",
             "redirect_uris": ["http://localhost/cb"],
-            "grant_types": ["authorization_code"]
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"]
         });
         let resp = app
             .oneshot(
@@ -775,7 +780,8 @@ mod tests {
         let reg_body = serde_json::json!({
             "client_name": "Refresh Cookie Test",
             "redirect_uris": ["http://localhost/cb"],
-            "grant_types": ["authorization_code"]
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"]
         });
         let resp = app
             .oneshot(
