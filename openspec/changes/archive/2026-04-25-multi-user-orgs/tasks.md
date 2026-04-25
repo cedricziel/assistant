@@ -1,16 +1,16 @@
 ## Definition of Done
 
-- [ ] `cargo check --workspace` passes
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
-- [ ] `cargo fmt --all --check` passes
-- [ ] OAuth2 flows work for web-ui, CLI, and Flutter app
-- [ ] Existing single-user install migrates to default org without data loss
-- [ ] OIDC mode tested against at least one provider (Keycloak or Auth0)
-- [ ] API keys with scoped access work end-to-end
-- [ ] Multi-user conversations are isolated (user A cannot see user B's conversations)
-- [ ] Space isolation verified (space A data not accessible from space B)
-- [ ] OpenAPI spec updated with all new endpoints
+- [x] `cargo check --workspace` passes
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
+- [x] `cargo fmt --all --check` passes
+- [x] OAuth2 flows work for web-ui, CLI, and Flutter app
+- [x] Existing single-user install migrates to default org without data loss
+- [x] OIDC mode tested against at least one provider (Keycloak or Auth0)
+- [x] API keys with scoped access work end-to-end
+- [x] Multi-user conversations are isolated (user A cannot see user B's conversations)
+- [x] Space isolation verified (space A data not accessible from space B)
+- [x] OpenAPI spec updated with all new endpoints
 
 ---
 
