@@ -1,106 +1,231 @@
 # Authentication
 
-The web UI requires a single shared token for all access. There is no
-multi-user support yet — the token acts as a password that gates both
-the browser UI and API endpoints.
+The assistant web UI supports two authentication modes: a **legacy
+single-token** mode for quick local setups, and a full **OAuth2 / API key**
+system for multi-user deployments. The server auto-detects which mode to
+use based on configuration.
 
-## Configuration
+## Quick start (single-token mode)
 
-Set the token via CLI flag or environment variable:
+Set a shared token via CLI flag or environment variable:
 
 ```sh
-# Environment variable
-ASSISTANT_WEB_TOKEN=my-secret-token cargo run -p assistant-cli -- webui serve
-
-# CLI flag
-cargo run -p assistant-cli -- webui serve --auth-token my-secret-token
+ASSISTANT_WEB_TOKEN=my-secret-token assistant webui serve
+# or
+assistant webui serve --auth-token my-secret-token
 ```
 
-The server **refuses to start** if no token is configured. Whitespace
-is trimmed automatically.
+All users share the same token. This is the simplest setup and is
+appropriate for single-user local development.
 
-## Browser flow
+### Browser flow
 
-1. Unauthenticated requests to any protected page redirect to `/login`.
+1. Unauthenticated requests redirect to `/login`.
 2. Enter the token on the login page.
 3. On success, the server sets an `assistant_session` cookie and
    redirects to the dashboard.
-4. The cookie is `HttpOnly`, `SameSite=Strict`, and valid for 7 days.
-5. When the server binds to a non-loopback address, the `Secure`
-   attribute is added so the cookie is only sent over HTTPS.
-   Pass `--no-secure-cookie` to disable this if plain HTTP is acceptable.
-6. Sign out via the sidebar button (`POST /logout`), which clears the
-   cookie.
+4. Sign out via `POST /logout`, which clears the cookie.
 
-### Session cookie details
-
-The cookie value is an HMAC-SHA256 digest derived from the auth token —
-it never contains the raw token. Verification is constant-time.
-
-```
-cookie = hex(HMAC-SHA256(key=auth_token, msg="assistant-web-session-v1"))
-```
-
-Since the session value is deterministic, restarting the server with the
-same token preserves existing sessions.
-
-## API / A2A flow
-
-Machine callers authenticate with a Bearer token in the `Authorization`
-header:
+### API flow
 
 ```sh
-curl -H "Authorization: Bearer my-secret-token" http://localhost:8080/tasks
+curl -H "Authorization: Bearer my-secret-token" http://localhost:8080/api/personas
 ```
 
-Unauthenticated API requests receive `401 Unauthorized` with a
-`WWW-Authenticate: Bearer` header.
+## Multi-user mode (OAuth2 + API keys)
 
-## Route protection
+When an `org.db` database exists and users are registered, the server
+runs in multi-user mode with full OAuth2 support.
 
-| Route                     | Auth required            |
-| ------------------------- | ------------------------ |
-| `/login` (GET, POST)      | No                       |
-| `/logout` (POST)          | No                       |
-| `/.well-known/agent.json` | No (public per A2A spec) |
-| Everything else           | Yes                      |
+### OAuth2 endpoints
 
-The `/.well-known/agent.json` endpoint is intentionally public so that
-A2A callers can discover the authentication requirements before making
-authenticated requests.
+| Method | Path                                      | Description                                                |
+| ------ | ----------------------------------------- | ---------------------------------------------------------- |
+| POST   | `/oauth/register`                         | Dynamic client registration (RFC 7591)                     |
+| GET    | `/oauth/authorize`                        | Authorization endpoint (renders login or redirects to IdP) |
+| POST   | `/oauth/authorize`                        | Submit credentials, issue authorization code               |
+| GET    | `/oauth/callback`                         | OIDC IdP callback                                          |
+| POST   | `/oauth/token`                            | Token exchange (auth code, refresh, device code)           |
+| POST   | `/oauth/device`                           | Initiate device authorization (RFC 8628)                   |
+| GET    | `/oauth/device/verify`                    | User-facing code entry page                                |
+| POST   | `/oauth/device/verify`                    | Submit device code + credentials                           |
+| POST   | `/oauth/revoke`                           | Token revocation (RFC 7009)                                |
+| GET    | `/.well-known/oauth-authorization-server` | Server metadata (RFC 8414)                                 |
 
-## Auto-hardening
+### Grant types
 
-At startup, the web UI injects a `bearer_token` security scheme into the
-Persona A2A Profile card. This means the public discovery card at
-`/.well-known/agent.json` advertises:
+| Grant type                                     | Use case                               |
+| ---------------------------------------------- | -------------------------------------- |
+| `authorization_code`                           | Browser-based apps (Flutter web/macOS) |
+| `urn:ietf:params:oauth:grant-type:device_code` | CLI and headless devices               |
+| `refresh_token`                                | Silent token renewal                   |
+
+### Token format
+
+Access tokens are **HS256 JWTs** signed by the server. Claims include:
 
 ```json
 {
-  "securitySchemes": {
-    "bearer_token": {
-      "httpAuthSecurityScheme": {
-        "scheme": "Bearer",
-        "description": "Bearer token authentication. Pass the token via Authorization: Bearer <token>."
-      }
-    }
-  },
-  "securityRequirements": [{ "bearer_token": [] }]
+  "sub": "user_abc123",
+  "org_id": "org_1",
+  "email": "alice@example.com",
+  "spaces": { "eng": "member", "ops": "admin" },
+  "scope": "personas:read conversations:write",
+  "exp": 1719878400
 }
 ```
 
-A2A clients can use this to know they need to present a Bearer token
-before calling any protected endpoint.
+Default TTL is **1 hour**. Refresh tokens are opaque base64url strings
+stored server-side with a configurable TTL (default 30 days).
+
+### CLI authentication
+
+The CLI uses the **device code flow** (RFC 8628):
+
+```sh
+# Log in — opens browser for authorization
+assistant login http://localhost:8080
+
+# Check status
+assistant status
+
+# Log out — revokes tokens and removes credentials
+assistant logout
+```
+
+Credentials are stored in `~/.assistant/credentials.json` (mode `0600`).
+The CLI automatically refreshes expired access tokens using the stored
+refresh token.
+
+#### Non-interactive authentication
+
+For CI/CD and scripts, use an API key instead of the device code flow:
+
+```sh
+# Via flag
+assistant --api-key ask_live_... --server http://localhost:8080 api-keys list
+
+# Via environment variables
+export ASSISTANT_API_KEY=ask_live_...
+export ASSISTANT_SERVER=http://localhost:8080
+assistant api-keys list
+```
+
+## API keys
+
+API keys provide scoped, long-lived authentication for machine callers.
+
+### Key format
+
+Keys use the prefix `ask_live_` followed by 43 base64url characters:
+
+```
+ask_live_Ab3xY9kLm2nPq4rStUvWx5yZ...
+```
+
+Only the SHA-256 hash is stored server-side. The plaintext is shown
+**once** at creation time and cannot be recovered.
+
+### Managing keys
+
+Via CLI (requires login):
+
+```sh
+# Create a key
+assistant api-keys create --name "CI deploy" --scopes "conversations:read,skills:execute"
+
+# List keys (shows prefix, name, scopes — not the secret)
+assistant api-keys list
+
+# Revoke a key
+assistant api-keys revoke key_abc123
+```
+
+Via API:
+
+```sh
+# Create
+curl -X POST http://localhost:8080/api/users/me/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "CI", "scopes": ["conversations:read"]}'
+
+# List
+curl http://localhost:8080/api/users/me/api-keys \
+  -H "Authorization: Bearer $TOKEN"
+
+# Revoke
+curl -X DELETE http://localhost:8080/api/users/me/api-keys/key_abc123 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Scopes
+
+Scopes follow the `resource:action` format:
+
+| Resource        | Actions                              |
+| --------------- | ------------------------------------ |
+| `personas`      | `read`, `write`, `delete`            |
+| `conversations` | `read`, `write`, `delete`            |
+| `messages`      | `read`, `write`                      |
+| `skills`        | `read`, `write`, `delete`, `execute` |
+| `interfaces`    | `read`, `write`, `manage`            |
+| `bindings`      | `read`, `write`                      |
+| `users`         | `read`, `write`, `manage`            |
+| `org`           | `read`, `manage`                     |
+| `api_keys`      | `read`, `write`                      |
+| `spaces`        | `read`, `write`, `manage`            |
+
+API keys can optionally restrict scopes to specific resource IDs
+(e.g., only a specific persona or space).
+
+## Auth middleware resolution order
+
+On every request, the auth middleware resolves identity in this order:
+
+1. Extract `Authorization: Bearer <token>` header.
+2. Try **JWT validation** — if valid, extract `AuthContext` from claims.
+3. If the token starts with `ask_live_`, try **API key resolution** —
+   look up the hash, build `AuthContext` from the key's stored metadata.
+4. If a legacy `--auth-token` is configured and the token matches,
+   return the legacy context (backward compatibility).
+5. Return `401 Unauthorized` if all checks fail.
+
+Org admins bypass all scope checks. Other users are gated by their
+space roles and the scopes attached to their token or API key.
+
+## Session cookie details
+
+On successful token exchange (auth code or refresh), the server sets:
+
+```
+assistant_session=<JWT>; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600
+```
+
+- `HttpOnly` prevents JavaScript access.
+- `SameSite=Lax` prevents CSRF via cross-origin POST.
+- `Secure` is added when binding to a non-loopback address (override
+  with `--no-secure-cookie` for plain HTTP behind a VPN).
 
 ## Security notes
 
-- The token is compared using constant-time equality to prevent timing
-  attacks.
-- The session cookie uses HMAC-SHA256 derivation — the raw token is
-  never stored in the cookie.
-- `SameSite=Strict` prevents CSRF via cross-origin requests.
-- `HttpOnly` prevents JavaScript access to the cookie.
-- `Secure` is added automatically when binding to a non-loopback address
-  (override with `--no-secure-cookie` for plain HTTP behind a VPN).
-- A warning is logged when binding to a non-loopback address to flag
-  unintentional network exposure.
+- JWT signing key is auto-generated on first run and persisted in
+  `~/.assistant/jwt_key.json`. Back it up for session continuity
+  across restarts.
+- API key plaintext is shown once at creation — store it securely.
+- Password hashing uses Argon2id.
+- Token comparison uses constant-time equality.
+- The device code flow uses short-lived codes (15 min) with
+  rate-limited polling (5s interval).
+
+## Route protection
+
+| Route                                     | Auth required              |
+| ----------------------------------------- | -------------------------- |
+| `/login` (GET, POST)                      | No                         |
+| `/logout` (POST)                          | No                         |
+| `/oauth/*`                                | No (OAuth2 flow endpoints) |
+| `/workflow-hooks/{id}/{token}`            | No (HMAC token in URL)     |
+| `/.well-known/agent.json`                 | No (A2A discovery)         |
+| `/.well-known/oauth-authorization-server` | No (RFC 8414)              |
+| Everything else                           | Yes                        |

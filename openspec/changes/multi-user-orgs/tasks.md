@@ -569,12 +569,12 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 - [ ] `test(app): widget tests for login, space switching, persona scoping`
 
-- [ ] `docs: update authentication.md with OAuth2 flows and API keys`
+- [x] `docs: update authentication.md with OAuth2 flows and API keys`
 
-- [ ] `docs: add multi-user.md — org/space/user model, roles, setup guide`
+- [x] `docs: add multi-user.md — org/space/user model, roles, setup guide`
 
-- [ ] `docs: add ADR for multi-user-orgs architectural decision`
+- [x] `docs: add ADR for multi-user-orgs architectural decision`
 
-- [ ] `docs: update CLAUDE.md workspace structure with assistant-auth crate`
+- [x] `docs: update CLAUDE.md workspace structure with assistant-auth crate`
 
 - [ ] `chore: final OpenAPI spec update with all new endpoints`

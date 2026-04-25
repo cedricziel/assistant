@@ -121,6 +121,7 @@ Multiple crates under `crates/`, one root crate. Edition 2021, resolver 2.
 | Crate (package name)            | Path                                   | Purpose                                                                |
 | ------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
 | `assistant-core`                | `crates/core`                          | Shared types, LLM traits (LlmProvider, EmbeddingProvider), ToolHandler |
+| `assistant-auth`                | `crates/auth`                          | OAuth2 server, JWT, API keys, OIDC federation, Axum auth middleware    |
 | `assistant-llm-provider`        | `crates/llm-provider`                  | All LlmProvider implementations (Ollama, Anthropic, OpenAI, Moonshot)  |
 | `assistant-skills`              | `crates/skills`                        | Skill parsing, validation, embedded builtins                           |
 | `assistant-storage`             | `crates/storage`                       | SQLite (sqlx), SkillRegistry, TraceStore, SqliteMessageBus             |
@@ -146,6 +147,8 @@ interface-cli -> runtime -> core
                     |-> bus-nats -> core  (optional, feature = "nats")
                     |-> tool-executor -> core, storage
                     '-> mcp-server, interfaces -> core, runtime, storage, transcription
+web-ui -> auth -> core, storage
+            '-> jwt, oauth2, oidc, api_keys, middleware
 ```
 
 ## Architecture Decisions
