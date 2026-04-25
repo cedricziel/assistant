@@ -25,7 +25,7 @@ class ServerProfileNotifier extends AsyncNotifier<ServerConnectionState> {
     if (activeContext == null) return const ServerConnectionState();
     final profile = ServerProfile(
       baseUrl: activeContext.serverUrl,
-      token: activeContext.authToken ?? '',
+      token: activeContext.effectiveToken ?? '',
       label: activeContext.name,
     );
     return ServerConnectionState(profile: profile);
