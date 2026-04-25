@@ -117,6 +117,7 @@ impl From<CommandEventRow> for CommandEventResponse {
     operation_id = "list_commands",
     responses(
         (status = 200, description = "List of available commands", body = Vec<CommandDefResponse>),
+        (status = 401, description = "Unauthorized"),
     ),
     security(("bearer_token" = []))
 )]

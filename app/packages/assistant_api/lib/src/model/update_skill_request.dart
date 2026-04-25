@@ -11,10 +11,11 @@ part 'update_skill_request.g.dart';
 /// Body for `PUT /api/skills/{name}`.
 ///
 /// Properties:
-/// * [body] 
-/// * [description] 
+/// * [body]
+/// * [description]
 @BuiltValue()
-abstract class UpdateSkillRequest implements Built<UpdateSkillRequest, UpdateSkillRequestBuilder> {
+abstract class UpdateSkillRequest
+    implements Built<UpdateSkillRequest, UpdateSkillRequestBuilder> {
   @BuiltValueField(wireName: r'body')
   String get body;
 
@@ -23,16 +24,19 @@ abstract class UpdateSkillRequest implements Built<UpdateSkillRequest, UpdateSki
 
   UpdateSkillRequest._();
 
-  factory UpdateSkillRequest([void updates(UpdateSkillRequestBuilder b)]) = _$UpdateSkillRequest;
+  factory UpdateSkillRequest([void updates(UpdateSkillRequestBuilder b)]) =
+      _$UpdateSkillRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(UpdateSkillRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<UpdateSkillRequest> get serializer => _$UpdateSkillRequestSerializer();
+  static Serializer<UpdateSkillRequest> get serializer =>
+      _$UpdateSkillRequestSerializer();
 }
 
-class _$UpdateSkillRequestSerializer implements PrimitiveSerializer<UpdateSkillRequest> {
+class _$UpdateSkillRequestSerializer
+    implements PrimitiveSerializer<UpdateSkillRequest> {
   @override
   final Iterable<Type> types = const [UpdateSkillRequest, _$UpdateSkillRequest];
 
@@ -62,7 +66,9 @@ class _$UpdateSkillRequestSerializer implements PrimitiveSerializer<UpdateSkillR
     UpdateSkillRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -119,4 +125,3 @@ class _$UpdateSkillRequestSerializer implements PrimitiveSerializer<UpdateSkillR
     return result.build();
   }
 }
-

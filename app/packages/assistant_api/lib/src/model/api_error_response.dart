@@ -14,7 +14,8 @@ part 'api_error_response.g.dart';
 /// * [code] - Numeric error code.
 /// * [message] - Human-readable error message.
 @BuiltValue()
-abstract class ApiErrorResponse implements Built<ApiErrorResponse, ApiErrorResponseBuilder> {
+abstract class ApiErrorResponse
+    implements Built<ApiErrorResponse, ApiErrorResponseBuilder> {
   /// Numeric error code.
   @BuiltValueField(wireName: r'code')
   int get code;
@@ -25,16 +26,19 @@ abstract class ApiErrorResponse implements Built<ApiErrorResponse, ApiErrorRespo
 
   ApiErrorResponse._();
 
-  factory ApiErrorResponse([void updates(ApiErrorResponseBuilder b)]) = _$ApiErrorResponse;
+  factory ApiErrorResponse([void updates(ApiErrorResponseBuilder b)]) =
+      _$ApiErrorResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(ApiErrorResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ApiErrorResponse> get serializer => _$ApiErrorResponseSerializer();
+  static Serializer<ApiErrorResponse> get serializer =>
+      _$ApiErrorResponseSerializer();
 }
 
-class _$ApiErrorResponseSerializer implements PrimitiveSerializer<ApiErrorResponse> {
+class _$ApiErrorResponseSerializer
+    implements PrimitiveSerializer<ApiErrorResponse> {
   @override
   final Iterable<Type> types = const [ApiErrorResponse, _$ApiErrorResponse];
 
@@ -64,7 +68,9 @@ class _$ApiErrorResponseSerializer implements PrimitiveSerializer<ApiErrorRespon
     ApiErrorResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -121,4 +127,3 @@ class _$ApiErrorResponseSerializer implements PrimitiveSerializer<ApiErrorRespon
     return result.build();
   }
 }
-

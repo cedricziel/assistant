@@ -86,6 +86,7 @@ pub fn api_keys_router() -> Router<ApiKeysApiState> {
     security(("bearer_token" = []), ("oauth2" = ["api_keys:read"])),
     responses(
         (status = 200, description = "List of API keys", body = Vec<ApiKeySummary>),
+        (status = 401, description = "Unauthorized"),
     )
 )]
 pub async fn list_api_keys(

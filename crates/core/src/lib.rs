@@ -45,8 +45,11 @@ pub use context::{
 pub use identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId, UserId};
 // -- Multi-tenant stores --
 pub use store::{
-    InMemoryMembershipStore, InMemoryOrgStore, InMemorySpaceStore, InMemoryUserStore,
-    MembershipStore, OrgStore, Organization, Space, SpaceMembership, SpaceStore, User, UserStore,
+    BindingStore, CatalogItem, CatalogItemStore, CatalogSubscription, CatalogSubscriptionStore,
+    InMemoryBindingStore, InMemoryCatalogItemStore, InMemoryCatalogSubscriptionStore,
+    InMemoryInterfaceInstanceStore, InMemoryMembershipStore, InMemoryOrgStore, InMemorySpaceStore,
+    InMemoryUserStore, InterfaceInstance, InterfaceInstanceStore, MembershipStore, OrgStore,
+    Organization, PersonaBinding, Space, SpaceMembership, SpaceStore, User, UserStore,
 };
 // -- LLM abstractions (types, traits, streaming) --
 pub use llm::embedding::{EmbeddingProvider, LlmEmbedder, WithEmbeddingOverride};

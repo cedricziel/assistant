@@ -16,7 +16,8 @@ part 'send_message_response.g.dart';
 /// * [message] - A message from the agent.
 /// * [task] - The task created or updated by the message.
 @BuiltValue()
-abstract class SendMessageResponse implements Built<SendMessageResponse, SendMessageResponseBuilder> {
+abstract class SendMessageResponse
+    implements Built<SendMessageResponse, SendMessageResponseBuilder> {
   /// A message from the agent.
   @BuiltValueField(wireName: r'message')
   Message? get message;
@@ -27,18 +28,24 @@ abstract class SendMessageResponse implements Built<SendMessageResponse, SendMes
 
   SendMessageResponse._();
 
-  factory SendMessageResponse([void updates(SendMessageResponseBuilder b)]) = _$SendMessageResponse;
+  factory SendMessageResponse([void updates(SendMessageResponseBuilder b)]) =
+      _$SendMessageResponse;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(SendMessageResponseBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<SendMessageResponse> get serializer => _$SendMessageResponseSerializer();
+  static Serializer<SendMessageResponse> get serializer =>
+      _$SendMessageResponseSerializer();
 }
 
-class _$SendMessageResponseSerializer implements PrimitiveSerializer<SendMessageResponse> {
+class _$SendMessageResponseSerializer
+    implements PrimitiveSerializer<SendMessageResponse> {
   @override
-  final Iterable<Type> types = const [SendMessageResponse, _$SendMessageResponse];
+  final Iterable<Type> types = const [
+    SendMessageResponse,
+    _$SendMessageResponse
+  ];
 
   @override
   final String wireName = r'SendMessageResponse';
@@ -70,7 +77,9 @@ class _$SendMessageResponseSerializer implements PrimitiveSerializer<SendMessage
     SendMessageResponse object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -129,4 +138,3 @@ class _$SendMessageResponseSerializer implements PrimitiveSerializer<SendMessage
     return result.build();
   }
 }
-

@@ -18,7 +18,8 @@ part 'agent_extension.g.dart';
 /// * [required_] - If true, the client must understand and comply with the extension.
 /// * [uri] - The unique URI identifying the extension.
 @BuiltValue()
-abstract class AgentExtension implements Built<AgentExtension, AgentExtensionBuilder> {
+abstract class AgentExtension
+    implements Built<AgentExtension, AgentExtensionBuilder> {
   /// A human-readable description of how this agent uses the extension.
   @BuiltValueField(wireName: r'description')
   String? get description;
@@ -37,16 +38,19 @@ abstract class AgentExtension implements Built<AgentExtension, AgentExtensionBui
 
   AgentExtension._();
 
-  factory AgentExtension([void updates(AgentExtensionBuilder b)]) = _$AgentExtension;
+  factory AgentExtension([void updates(AgentExtensionBuilder b)]) =
+      _$AgentExtension;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(AgentExtensionBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<AgentExtension> get serializer => _$AgentExtensionSerializer();
+  static Serializer<AgentExtension> get serializer =>
+      _$AgentExtensionSerializer();
 }
 
-class _$AgentExtensionSerializer implements PrimitiveSerializer<AgentExtension> {
+class _$AgentExtensionSerializer
+    implements PrimitiveSerializer<AgentExtension> {
   @override
   final Iterable<Type> types = const [AgentExtension, _$AgentExtension];
 
@@ -69,7 +73,8 @@ class _$AgentExtensionSerializer implements PrimitiveSerializer<AgentExtension> 
       yield r'params';
       yield serializers.serialize(
         object.params,
-        specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+        specifiedType: const FullType.nullable(
+            BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
       );
     }
     if (object.required_ != null) {
@@ -92,7 +97,9 @@ class _$AgentExtensionSerializer implements PrimitiveSerializer<AgentExtension> 
     AgentExtension object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -118,7 +125,8 @@ class _$AgentExtensionSerializer implements PrimitiveSerializer<AgentExtension> 
         case r'params':
           final valueDes = serializers.deserialize(
             value,
-            specifiedType: const FullType.nullable(BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
+            specifiedType: const FullType.nullable(
+                BuiltMap, [FullType(String), FullType.nullable(JsonObject)]),
           ) as BuiltMap<String, JsonObject?>?;
           if (valueDes == null) continue;
           result.params.replace(valueDes);
@@ -165,4 +173,3 @@ class _$AgentExtensionSerializer implements PrimitiveSerializer<AgentExtension> 
     return result.build();
   }
 }
-

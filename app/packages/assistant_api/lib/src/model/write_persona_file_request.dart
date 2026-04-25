@@ -11,26 +11,34 @@ part 'write_persona_file_request.g.dart';
 /// Body for `PUT /api/personas/{id}/files/{filename}`.
 ///
 /// Properties:
-/// * [content] 
+/// * [content]
 @BuiltValue()
-abstract class WritePersonaFileRequest implements Built<WritePersonaFileRequest, WritePersonaFileRequestBuilder> {
+abstract class WritePersonaFileRequest
+    implements Built<WritePersonaFileRequest, WritePersonaFileRequestBuilder> {
   @BuiltValueField(wireName: r'content')
   String get content;
 
   WritePersonaFileRequest._();
 
-  factory WritePersonaFileRequest([void updates(WritePersonaFileRequestBuilder b)]) = _$WritePersonaFileRequest;
+  factory WritePersonaFileRequest(
+          [void updates(WritePersonaFileRequestBuilder b)]) =
+      _$WritePersonaFileRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WritePersonaFileRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WritePersonaFileRequest> get serializer => _$WritePersonaFileRequestSerializer();
+  static Serializer<WritePersonaFileRequest> get serializer =>
+      _$WritePersonaFileRequestSerializer();
 }
 
-class _$WritePersonaFileRequestSerializer implements PrimitiveSerializer<WritePersonaFileRequest> {
+class _$WritePersonaFileRequestSerializer
+    implements PrimitiveSerializer<WritePersonaFileRequest> {
   @override
-  final Iterable<Type> types = const [WritePersonaFileRequest, _$WritePersonaFileRequest];
+  final Iterable<Type> types = const [
+    WritePersonaFileRequest,
+    _$WritePersonaFileRequest
+  ];
 
   @override
   final String wireName = r'WritePersonaFileRequest';
@@ -53,7 +61,9 @@ class _$WritePersonaFileRequestSerializer implements PrimitiveSerializer<WritePe
     WritePersonaFileRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -103,4 +113,3 @@ class _$WritePersonaFileRequestSerializer implements PrimitiveSerializer<WritePe
     return result.build();
   }
 }
-

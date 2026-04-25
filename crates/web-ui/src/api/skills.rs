@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tracing::warn;
 
+use assistant_core::auth::AuthContext;
 use assistant_storage::registry::SkillRegistry;
 
 // -- State -------------------------------------------------------------------
@@ -99,13 +100,27 @@ pub fn skills_router() -> Router<SkillsApiState> {
     security(("bearer_token" = []))
 )]
 pub async fn list_persona_skills(
+    Extension(ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Path(persona_id): Path<String>,
 ) -> Response {
     let persona_store = assistant_storage::personas::PersonaStore::new(state.pool.clone());
 
-    // Verify the persona exists.
+    // Verify the persona exists and the caller owns it.
     match persona_store.get(&persona_id).await {
+        Ok(Some(persona)) => {
+            if persona
+                .owner_user_id
+                .as_ref()
+                .is_some_and(|owner| owner != &ctx.user_id.0)
+            {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({"error": "Access denied"})),
+                )
+                    .into_response();
+            }
+        }
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -117,7 +132,6 @@ pub async fn list_persona_skills(
             warn!("Failed to get persona {persona_id}: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
-        _ => {}
     }
 
     let skill_access_store =
@@ -166,7 +180,10 @@ pub async fn list_persona_skills(
     ),
     security(("bearer_token" = []))
 )]
-pub async fn list_skills(State(state): State<SkillsApiState>) -> Response {
+pub async fn list_skills(
+    Extension(_ctx): Extension<AuthContext>,
+    State(state): State<SkillsApiState>,
+) -> Response {
     let skills = state.registry.list().await;
     let details: Vec<SkillDetail> = skills
         .into_iter()
@@ -198,6 +215,7 @@ pub async fn list_skills(State(state): State<SkillsApiState>) -> Response {
     security(("bearer_token" = []))
 )]
 pub async fn create_skill(
+    Extension(_ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Json(body): Json<CreateSkillRequest>,
 ) -> Response {
@@ -245,7 +263,11 @@ pub async fn create_skill(
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_skill(State(state): State<SkillsApiState>, Path(name): Path<String>) -> Response {
+pub async fn get_skill(
+    Extension(_ctx): Extension<AuthContext>,
+    State(state): State<SkillsApiState>,
+    Path(name): Path<String>,
+) -> Response {
     match state.registry.get(&name).await {
         Some(skill) => {
             let is_builtin = skill.is_builtin();
@@ -282,6 +304,7 @@ pub async fn get_skill(State(state): State<SkillsApiState>, Path(name): Path<Str
     security(("bearer_token" = []))
 )]
 pub async fn update_skill(
+    Extension(_ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Path(name): Path<String>,
     Json(body): Json<UpdateSkillRequest>,
@@ -346,6 +369,7 @@ pub async fn update_skill(
     security(("bearer_token" = []))
 )]
 pub async fn delete_skill(
+    Extension(_ctx): Extension<AuthContext>,
     State(state): State<SkillsApiState>,
     Path(name): Path<String>,
 ) -> Response {
@@ -370,16 +394,31 @@ pub async fn delete_skill(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
+    use axum::Extension;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
+    use assistant_core::auth::AuthContext;
+    use assistant_core::identity::{OrgId, UserId};
     use assistant_storage::{StorageLayer, registry::SkillRegistry};
 
     use super::{SkillsApiState, skills_router};
+
+    fn make_test_ctx() -> AuthContext {
+        AuthContext {
+            user_id: UserId::from("test-user"),
+            org_id: OrgId::from("org_1"),
+            email: "test@test.local".into(),
+            space_roles: HashMap::new(),
+            scopes: vec![],
+            client_id: "test".into(),
+        }
+    }
 
     async fn test_state() -> (SkillsApiState, Arc<StorageLayer>) {
         let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
@@ -393,7 +432,9 @@ mod tests {
     }
 
     fn app(state: SkillsApiState) -> axum::Router {
-        skills_router().with_state(state)
+        skills_router()
+            .with_state(state)
+            .layer(Extension(make_test_ctx()))
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -623,5 +664,34 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn list_persona_skills_other_user_denied() {
+        let (state, storage) = test_state().await;
+
+        // Create a persona owned by another user.
+        let persona_store = storage.persona_store();
+        persona_store
+            .create_owned("persona_other", "Other Persona", "other-user")
+            .await
+            .unwrap();
+
+        // Our test user is "test-user" (from make_test_ctx), not "other-user".
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/personas/persona_other/skills")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "listing skills for another user's persona must be denied"
+        );
     }
 }

@@ -12,9 +12,9 @@ part 'agent_detail.g.dart';
 /// Full agent detail, including the serialized agent card.
 ///
 /// Properties:
-/// * [card] 
-/// * [id] 
-/// * [isDefault] 
+/// * [card]
+/// * [id]
+/// * [isDefault]
 @BuiltValue()
 abstract class AgentDetail implements Built<AgentDetail, AgentDetailBuilder> {
   @BuiltValueField(wireName: r'card')
@@ -50,10 +50,12 @@ class _$AgentDetailSerializer implements PrimitiveSerializer<AgentDetail> {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
     yield r'card';
-    yield object.card == null ? null : serializers.serialize(
-      object.card,
-      specifiedType: const FullType.nullable(JsonObject),
-    );
+    yield object.card == null
+        ? null
+        : serializers.serialize(
+            object.card,
+            specifiedType: const FullType.nullable(JsonObject),
+          );
     yield r'id';
     yield serializers.serialize(
       object.id,
@@ -72,7 +74,9 @@ class _$AgentDetailSerializer implements PrimitiveSerializer<AgentDetail> {
     AgentDetail object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -137,4 +141,3 @@ class _$AgentDetailSerializer implements PrimitiveSerializer<AgentDetail> {
     return result.build();
   }
 }
-

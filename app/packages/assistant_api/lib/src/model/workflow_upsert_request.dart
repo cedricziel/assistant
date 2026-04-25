@@ -12,12 +12,13 @@ part 'workflow_upsert_request.g.dart';
 /// Body for `POST /api/workflows` and `PUT /api/workflows/{id}`.
 ///
 /// Properties:
-/// * [active] 
-/// * [description] 
-/// * [graph] 
-/// * [name] 
+/// * [active]
+/// * [description]
+/// * [graph]
+/// * [name]
 @BuiltValue()
-abstract class WorkflowUpsertRequest implements Built<WorkflowUpsertRequest, WorkflowUpsertRequestBuilder> {
+abstract class WorkflowUpsertRequest
+    implements Built<WorkflowUpsertRequest, WorkflowUpsertRequestBuilder> {
   @BuiltValueField(wireName: r'active')
   bool? get active;
 
@@ -32,18 +33,24 @@ abstract class WorkflowUpsertRequest implements Built<WorkflowUpsertRequest, Wor
 
   WorkflowUpsertRequest._();
 
-  factory WorkflowUpsertRequest([void updates(WorkflowUpsertRequestBuilder b)]) = _$WorkflowUpsertRequest;
+  factory WorkflowUpsertRequest(
+      [void updates(WorkflowUpsertRequestBuilder b)]) = _$WorkflowUpsertRequest;
 
   @BuiltValueHook(initializeBuilder: true)
   static void _defaults(WorkflowUpsertRequestBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<WorkflowUpsertRequest> get serializer => _$WorkflowUpsertRequestSerializer();
+  static Serializer<WorkflowUpsertRequest> get serializer =>
+      _$WorkflowUpsertRequestSerializer();
 }
 
-class _$WorkflowUpsertRequestSerializer implements PrimitiveSerializer<WorkflowUpsertRequest> {
+class _$WorkflowUpsertRequestSerializer
+    implements PrimitiveSerializer<WorkflowUpsertRequest> {
   @override
-  final Iterable<Type> types = const [WorkflowUpsertRequest, _$WorkflowUpsertRequest];
+  final Iterable<Type> types = const [
+    WorkflowUpsertRequest,
+    _$WorkflowUpsertRequest
+  ];
 
   @override
   final String wireName = r'WorkflowUpsertRequest';
@@ -68,10 +75,12 @@ class _$WorkflowUpsertRequestSerializer implements PrimitiveSerializer<WorkflowU
       );
     }
     yield r'graph';
-    yield object.graph == null ? null : serializers.serialize(
-      object.graph,
-      specifiedType: const FullType.nullable(JsonObject),
-    );
+    yield object.graph == null
+        ? null
+        : serializers.serialize(
+            object.graph,
+            specifiedType: const FullType.nullable(JsonObject),
+          );
     yield r'name';
     yield serializers.serialize(
       object.name,
@@ -85,7 +94,9 @@ class _$WorkflowUpsertRequestSerializer implements PrimitiveSerializer<WorkflowU
     WorkflowUpsertRequest object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(serializers, object, specifiedType: specifiedType).toList();
+    return _serializeProperties(serializers, object,
+            specifiedType: specifiedType)
+        .toList();
   }
 
   void _deserializeProperties(
@@ -157,4 +168,3 @@ class _$WorkflowUpsertRequestSerializer implements PrimitiveSerializer<WorkflowU
     return result.build();
   }
 }
-

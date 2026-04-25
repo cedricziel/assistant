@@ -127,3 +127,4 @@ generate-flutter-client: openapi.json
 	  -o app/packages/assistant_api \
 	  -c app/openapi-generator.yaml \
 	  --skip-validate-spec
+	cd app && dart format packages/assistant_api/lib packages/assistant_api/test
