@@ -265,6 +265,19 @@ async function createSkill(page: Page): Promise<string> {
   return name;
 }
 
+/** Create a persona via the REST API and return its id. */
+async function createPersona(page: Page): Promise<string> {
+  const id = `e2e-persona-${Date.now()}`;
+  const { body, status } = await apiPost(page, "/api/personas", {
+    id,
+    name: `E2E Persona ${Date.now()}`,
+  });
+  if (status !== 201) {
+    throw new Error(`Failed to create persona: ${JSON.stringify(body)}`);
+  }
+  return id;
+}
+
 /** Create an agent via the REST API and return its id. */
 async function createAgent(page: Page): Promise<string> {
   const { body } = await apiPost(page, "/api/agents", {
@@ -422,6 +435,48 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("skill create form", async ({ page }) => {
+    await navigateAndSettle(page, "/skills/new");
+    await expect(page).toHaveScreenshot("skill-create-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("skill edit form", async ({ page }) => {
+    const skillName = await createSkill(page);
+    await navigateAndSettle(page, `/skills/${skillName}/edit`);
+    await expect(page).toHaveScreenshot("skill-edit-form.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("personas list page", async ({ page }) => {
+    await navigateAndSettle(page, "/personas");
+    await expect(page).toHaveScreenshot("personas-list.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("persona detail screen", async ({ page }) => {
+    const personaId = await createPersona(page);
+    await navigateAndSettle(page, `/personas/${personaId}`);
+    await expect(page).toHaveScreenshot("persona-detail.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
+  test("settings screen", async ({ page }) => {
+    await navigateAndSettle(page, "/settings");
+    await expect(page).toHaveScreenshot("settings.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
   test("REST API: GET /api/personas returns JSON array", async ({ page }) => {
     const { status, body } = await apiGet(page, "/api/personas");
     expect(status, "GET /api/personas should return 200").toBe(200);
@@ -567,6 +622,8 @@ test.describe("Authenticated pages", () => {
       "/workflows",
       // /contexts is redirected to /chat on web — excluded from overflow check.
       "/skills",
+      "/personas",
+      "/settings",
     ];
 
     for (const route of routes) {
