@@ -11,9 +11,11 @@ import '../features/chat/chat_provider.dart';
 import '../features/contexts/providers/context_providers.dart';
 import '../features/notifications/agent_event_listener.dart';
 import '../features/pwa/pwa_provider.dart';
+import '../features/spaces/space_provider.dart';
 import '../features/updater/update_banner.dart';
 import '../router/app_router.dart';
 import 'platform/platform.dart';
+import 'space_switcher.dart';
 
 /// Breakpoint above which the navigation rail is shown instead of bottom nav.
 const double _kNavRailBreakpoint = 768;
@@ -120,6 +122,12 @@ const List<_NavDest> _overflowDestinations = [
     icon: Icons.bar_chart_outlined,
     selectedIcon: Icons.bar_chart,
     label: 'Analytics',
+  ),
+  _NavDest(
+    path: '/admin',
+    icon: Icons.admin_panel_settings_outlined,
+    selectedIcon: Icons.admin_panel_settings,
+    label: 'Admin',
   ),
 ];
 
@@ -260,7 +268,16 @@ class _NavShellState extends ConsumerState<NavShell> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
-                  // Contexts switcher is the first item in the More sheet on mobile.
+                  // Space switcher at the top of the More sheet.
+                  ListTile(
+                    leading: const Icon(Icons.workspaces_outlined),
+                    title: const Text('Switch space'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      context.go(AppRoutes.spaceSelector);
+                    },
+                  ),
+                  // Contexts switcher.
                   ListTile(
                     leading: Icon(_contextsDestination.icon),
                     title: Text(_contextsDestination.label),
@@ -324,6 +341,13 @@ class _NavShellState extends ConsumerState<NavShell> {
         return CupertinoActionSheet(
           title: const Text('More'),
           actions: [
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.of(popupContext).pop();
+                context.go(AppRoutes.spaceSelector);
+              },
+              child: const Text('Switch space'),
+            ),
             ..._overflowDestinations.map(
               (d) => CupertinoActionSheetAction(
                 onPressed: () {
@@ -411,6 +435,7 @@ class _NavShellState extends ConsumerState<NavShell> {
                       isExpanded: !collapsed,
                       child: CupertinoSidebar(
                         selectedIndex: appleSelected,
+                        navigationBar: _CupertinoSpaceSwitcher(),
                         onDestinationSelected: (i) {
                           final dest = _appleSidebarDestinations[i];
                           context.go(dest.path);
@@ -612,6 +637,7 @@ class _NavShellState extends ConsumerState<NavShell> {
                       ),
                       // Sticky trailing section
                       const Divider(height: 1),
+                      SpaceSwitcher(collapsed: collapsed),
                       if (!kIsWeb)
                         _MaterialSidebarItem(
                           icon: _contextsDestination.icon,
@@ -1002,6 +1028,27 @@ class _SafariStep extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(child: Text(text)),
       ],
+    );
+  }
+}
+
+/// Cupertino-styled space switcher used as the [CupertinoSidebar.navigationBar].
+///
+/// Wraps [SidebarNavigationBar] (which renders a [CupertinoSliverNavigationBar])
+/// so it integrates as a proper sliver inside the sidebar's [CustomScrollView].
+class _CupertinoSpaceSwitcher extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selection = ref.watch(spaceSelectionProvider);
+    final spaceName = selection.spaceName;
+
+    return SidebarNavigationBar(
+      title: Text(spaceName ?? 'Spaces'),
+      trailing: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: () => context.go(AppRoutes.spaceSelector),
+        child: const Icon(CupertinoIcons.arrow_2_squarepath, size: 20),
+      ),
     );
   }
 }
