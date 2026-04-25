@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.140](https://github.com/cedricziel/assistant/compare/v0.1.139...v0.1.140) (2026-04-25)
+
+
+### Bug Fixes
+
+* **oauth:** OpenAPI annotation fixes and client registration hardening ([#655](https://github.com/cedricziel/assistant/issues/655)) ([d2fafd5](https://github.com/cedricziel/assistant/commit/d2fafd595fbe3459d5e9143e42261cc50b086621))
+
 ## [0.1.139](https://github.com/cedricziel/assistant/compare/v0.1.138...v0.1.139) (2026-04-25)
 
 
