@@ -13,6 +13,7 @@ import 'package:assistant_app/features/contexts/models/context_model.dart';
 import 'package:assistant_app/features/contexts/providers/context_providers.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
 import 'package:assistant_app/features/contexts/screens/context_switcher_screen.dart';
+import 'package:assistant_app/features/login/login_screen.dart';
 import 'package:assistant_app/router/app_router.dart';
 import 'package:assistant_app/shared/loading_screen.dart';
 
@@ -112,7 +113,7 @@ void main() {
     });
 
     testWidgets(
-      'settled with no context → loading screen absent, context switcher shown',
+      'settled with no context → loading screen absent, login shown',
       (tester) async {
         final repo = await makeRepo();
 
@@ -120,17 +121,15 @@ void main() {
         // Let the provider load, redirect fire, and page transition complete.
         await tester.pumpAndSettle();
 
-        // Provider settled with null context → context switcher, no loading.
+        // Provider settled with null context → login screen, no loading.
         expect(find.byType(LoadingScreen), findsNothing);
-        expect(find.byType(ContextSwitcherScreen), findsOneWidget);
+        expect(find.byType(LoginScreen), findsOneWidget);
       },
     );
   });
 
   group('Router redirect', () {
-    testWidgets('redirects to /contexts when no active context', (
-      tester,
-    ) async {
+    testWidgets('redirects to /login when no active context', (tester) async {
       final repo = await makeRepo();
       await tester.pumpWidget(buildApp(repo));
       // Pump several frames: loading → provider settles → redirect → render.
@@ -138,23 +137,22 @@ void main() {
         await tester.pump();
       }
 
-      // Should be on the ContextSwitcherScreen (AppBar title "Contexts").
-      expect(find.text('Contexts'), findsWidgets);
+      // Should be on the LoginScreen.
+      expect(find.byType(LoginScreen), findsOneWidget);
     });
 
-    testWidgets(
-      'stays on /contexts when already on it with no active context',
-      (tester) async {
-        final repo = await makeRepo();
-        await tester.pumpWidget(buildApp(repo));
-        for (var i = 0; i < 5; i++) {
-          await tester.pump();
-        }
+    testWidgets('stays on /login when already on it with no active context', (
+      tester,
+    ) async {
+      final repo = await makeRepo();
+      await tester.pumpWidget(buildApp(repo));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump();
+      }
 
-        // Still on Contexts screen — no redirect loop.
-        expect(find.text('Contexts'), findsWidgets);
-      },
-    );
+      // Still on Login screen — no redirect loop.
+      expect(find.byType(LoginScreen), findsOneWidget);
+    });
 
     testWidgets(
       'with active context, /contexts is accessible (no auto-redirect to /chat)',
@@ -241,44 +239,43 @@ void main() {
       },
     );
 
-    testWidgets(
-      'auth resolves with no context → redirects to context switcher',
-      (tester) async {
-        final completer = Completer<AssistantContext?>();
+    testWidgets('auth resolves with no context → redirects to login', (
+      tester,
+    ) async {
+      final completer = Completer<AssistantContext?>();
 
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [
-              activeContextProvider.overrideWith(
-                () => _ControllableContextNotifier(completer.future),
-              ),
-              capabilitiesProvider.overrideWith(
-                (ref) async => ServerCapabilities.disabled,
-              ),
-              apiClientProvider.overrideWithValue(null),
-            ],
-            child: Consumer(
-              builder: (context, ref, child) {
-                final router = ref.watch(routerProvider);
-                return MaterialApp.router(routerConfig: router);
-              },
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            activeContextProvider.overrideWith(
+              () => _ControllableContextNotifier(completer.future),
             ),
+            capabilitiesProvider.overrideWith(
+              (ref) async => ServerCapabilities.disabled,
+            ),
+            apiClientProvider.overrideWithValue(null),
+          ],
+          child: Consumer(
+            builder: (context, ref, child) {
+              final router = ref.watch(routerProvider);
+              return MaterialApp.router(routerConfig: router);
+            },
           ),
-        );
+        ),
+      );
 
-        await tester.pump();
-        expect(find.byType(LoadingScreen), findsOneWidget);
+      await tester.pump();
+      expect(find.byType(LoadingScreen), findsOneWidget);
 
-        // Resolve auth with no context → should go to /contexts (native).
-        completer.complete(null);
-        await tester.pump(const Duration(milliseconds: 100));
-        await tester.pump(const Duration(milliseconds: 500));
-        await tester.pump(const Duration(milliseconds: 500));
+      // Resolve auth with no context → should go to /login.
+      completer.complete(null);
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
 
-        expect(find.byType(LoadingScreen), findsNothing);
-        expect(find.byType(ContextSwitcherScreen), findsOneWidget);
-      },
-    );
+      expect(find.byType(LoadingScreen), findsNothing);
+      expect(find.byType(LoginScreen), findsOneWidget);
+    });
   });
 }
 

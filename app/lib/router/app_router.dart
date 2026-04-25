@@ -113,25 +113,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       final onSetup = matchedPath == AppRoutes.setup;
       final onLogin = matchedPath == AppRoutes.login;
 
-      // On web, /contexts is replaced by the login flow — redirect away.
-      if (kIsWeb && onContextSwitcher) {
-        return hasContext ? AppRoutes.chat : AppRoutes.login;
-      }
-
       // Once loading is done, navigate away from the loading scaffold to
       // the correct destination (restoring any pending deep-link).
       if (onLoading) {
         final pending = pendingRedirect;
         pendingRedirect = null;
-        final fallback = hasContext
-            ? AppRoutes.chat
-            : (kIsWeb ? AppRoutes.login : AppRoutes.contexts);
+        final fallback = hasContext ? AppRoutes.chat : AppRoutes.login;
         return hasContext && pending != null ? pending : fallback;
       }
 
       // If no active context and not already on an auth screen, redirect.
       if (!hasContext && !onLogin && !onContextSwitcher && !onSetup) {
-        return kIsWeb ? AppRoutes.login : AppRoutes.contexts;
+        return AppRoutes.login;
       }
 
       // Already authenticated — redirect away from login/setup screens.
