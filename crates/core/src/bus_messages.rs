@@ -78,6 +78,17 @@ pub struct TurnRequest {
     /// [`AttachmentStore`] at LLM-call time.
     #[serde(default)]
     pub attachment_ids: Vec<Uuid>,
+
+    // -- Identity (multi-user) ------------------------------------------------
+    /// The authenticated user who initiated this turn.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// The organisation context for this turn.
+    #[serde(default)]
+    pub org_id: Option<String>,
+    /// The space context for this turn.
+    #[serde(default)]
+    pub space_id: Option<String>,
 }
 
 /// The final result of a completed turn.
@@ -254,6 +265,9 @@ mod tests {
                 "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
             ),
             attachment_ids: vec![],
+            user_id: None,
+            org_id: None,
+            space_id: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         let back: TurnRequest = serde_json::from_value(json).unwrap();

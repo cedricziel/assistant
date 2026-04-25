@@ -321,6 +321,9 @@ mod tests {
             interactive: false,
             allowed_tools: None,
             depth: 0,
+            user_id: None,
+            org_id: None,
+            space_id: None,
         }
     }
 
@@ -333,6 +336,9 @@ mod tests {
             interactive: false,
             allowed_tools: Some(allowed.into_iter().map(String::from).collect()),
             depth: 0,
+            user_id: None,
+            org_id: None,
+            space_id: None,
         }
     }
 

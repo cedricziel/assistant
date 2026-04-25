@@ -188,6 +188,9 @@ mod tests {
             interactive: false,
             allowed_tools: None,
             depth,
+            user_id: None,
+            org_id: None,
+            space_id: None,
         }
     }
 

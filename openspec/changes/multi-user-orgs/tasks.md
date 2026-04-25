@@ -399,35 +399,35 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
   - CRUD happy paths
   - Permission enforcement: member can't create spaces, viewer can't invite users
 
-- [ ] `feat(web-ui): catalog management endpoints`
+- [x] `feat(web-ui): catalog management endpoints`
   - `POST /api/orgs/{org_id}/catalog/skills` — publish skill to catalog
   - `POST /api/orgs/{org_id}/catalog/templates` — publish template to catalog
   - `GET /api/orgs/{org_id}/catalog/{type}` — list catalog resources
   - `DELETE /api/orgs/{org_id}/catalog/{type}/{id}` — remove from catalog
 
-- [ ] `feat(web-ui): catalog subscription endpoints`
+- [x] `feat(web-ui): catalog subscription endpoints`
   - `POST /api/orgs/{org_id}/spaces/{space_id}/subscriptions` — subscribe space to catalog resource
   - `GET /api/orgs/{org_id}/spaces/{space_id}/subscriptions` — list subscriptions
   - `DELETE /api/orgs/{org_id}/spaces/{space_id}/subscriptions/{id}` — unsubscribe
 
-- [ ] `feat(web-ui): interface instance endpoints`
+- [x] `feat(web-ui): interface instance endpoints`
   - `POST /api/orgs/{org_id}/spaces/{space_id}/interfaces` — create interface instance (type, config, owner: org|user)
   - `GET /api/orgs/{org_id}/spaces/{space_id}/interfaces` — list instances
   - `DELETE /api/orgs/{org_id}/spaces/{space_id}/interfaces/{id}` — remove instance
 
-- [ ] `feat(web-ui): persona ↔ interface binding endpoints`
+- [x] `feat(web-ui): persona ↔ interface binding endpoints`
   - `POST /api/orgs/{org_id}/spaces/{space_id}/bindings` — bind persona to interface instance
   - `GET /api/orgs/{org_id}/spaces/{space_id}/bindings` — list bindings
   - `DELETE /api/orgs/{org_id}/spaces/{space_id}/bindings/{id}` — unbind
 
-- [ ] `feat(web-ui): persona template instantiation and onboarding`
+- [x] `feat(web-ui): persona template instantiation and onboarding`
   - `GET /api/orgs/{org_id}/catalog/templates` — list templates (filtered by user's allowed_templates quota)
   - `POST /api/orgs/{org_id}/spaces/{space_id}/personas/from-template` — create persona from template, enforce max_personas quota
   - `GET /api/users/me/onboarding-status` — has user created at least one persona?
 
-- [ ] `test(web-ui): catalog, subscriptions, interfaces, bindings, and template instantiation`
+- [x] `test(web-ui): catalog, subscriptions, interfaces, bindings, and template instantiation`
 
-- [ ] `refactor(web-ui): update existing API handlers to enforce AuthContext`
+- [x] `refactor(web-ui): update existing API handlers to enforce AuthContext`
   - Conversations, messages, personas, skills endpoints
   - Scope queries by user_id + space from AuthContext
   - Return 403 when user lacks access
@@ -443,41 +443,41 @@ PR 10 ─── CLI OAuth2 login + Flutter OAuth2 + docs
 
 **Commits:**
 
-- [ ] `feat(storage): detect legacy layout`
+- [x] `feat(storage): detect legacy layout`
   - Create `crates/storage/src/migration.rs`
   - `is_legacy_layout(base_path) -> bool` — checks for `assistant.db` without `orgs/` directory
 
-- [ ] `feat(storage): create backup before migration`
+- [x] `feat(storage): create backup before migration`
   - `backup_legacy(base_path) -> Result<PathBuf>` — tar.gz of entire `~/.assistant/`
   - Reuse existing backup logic from `crates/backup/`
 
-- [ ] `feat(storage): migrate filesystem layout to default org`
+- [x] `feat(storage): migrate filesystem layout to default org`
   - Create `orgs/default/spaces/default/` structure
   - Copy `agents/` → `orgs/default/spaces/default/agents/`
   - Copy `skills/` → `orgs/default/spaces/default/skills/`
   - Split `config.toml` → `server.toml` + `orgs/default/org.toml`
   - Convert interface config sections to instance files in `orgs/default/spaces/default/interfaces/`
 
-- [ ] `feat(storage): migrate database to org/space split`
+- [x] `feat(storage): migrate database to org/space split`
   - Copy `assistant.db` → `orgs/default/spaces/default/space.db`
   - Create `orgs/default/org.db` with schema, populate with default org + initial admin user
   - Assign all existing conversations to admin user
 
-- [ ] `feat(storage): initial admin user creation during migration`
+- [x] `feat(storage): initial admin user creation during migration`
   - If `ASSISTANT_WEB_TOKEN` is set: create admin user with that as temporary password
   - Otherwise: generate random password, print to stdout
   - Log clear instructions for the operator
 
-- [ ] `test(storage): full migration round-trip on fixture data`
+- [x] `test(storage): full migration round-trip on fixture data`
   - Create a fixture legacy layout (db + files)
   - Run migration
   - Verify: all conversations accessible, personas intact, skills present, org.db has admin user
 
-- [ ] `feat(runtime): extend ExecutionContext with identity fields`
+- [x] `feat(runtime): extend ExecutionContext with identity fields`
   - Add `user_id: Option<UserId>`, `org_id: Option<OrgId>`, `space_id: Option<SpaceId>` to `ExecutionContext`
 
-- [ ] `feat(runtime): thread AuthContext through Orchestrator.run_turn_with_tools()`
-  - Accept `AuthContext` parameter (or extract from ExecutionContext)
+- [x] `feat(runtime): thread TurnIdentity through Orchestrator.run_turn_with_tools()`
+  - Accept `TurnIdentity` parameter (or extract from ExecutionContext)
   - Pass through to tool handlers via execution context
 
 - [ ] `feat(runtime): ChannelRunner resolves platform identity before dispatch`

@@ -13,6 +13,7 @@ pub mod logs;
 pub mod memory_chunks;
 pub mod message_bus;
 pub mod metrics;
+pub mod migration;
 pub mod org_storage;
 pub mod org_store;
 pub mod persona_skill_access;

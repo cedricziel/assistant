@@ -8,6 +8,7 @@ description = "SQLite-backed storage layer: skill registry, traces, memory, and 
 [dependencies]
 assistant-core = { path = "../core" }
 assistant-auth = { path = "../auth" }
+assistant-backup = { path = "../backup" }
 assistant-skills = { path = "../skills" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
@@ -18,6 +19,7 @@ tracing = { workspace = true }
 sqlx = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
 dirs = { workspace = true }
+rand = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 cron = { workspace = true }

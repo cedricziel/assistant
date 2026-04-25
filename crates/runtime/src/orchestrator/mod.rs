@@ -9,8 +9,8 @@ use anyhow::Result;
 use assistant_core::{
     Attachment, AttachmentMeta, ChatHistoryMessage, ChatRole, ContentBlock, ExecutionContext,
     Interface, LlmProvider, LlmResponse, MemoryLoader, Message, MessageBus, StreamChunk,
-    ToolHandler, ToolSpec, context::agent_base_dir, is_resizable_mime_type, is_supported_mime_type,
-    is_text_mime_type, strip_html_comments,
+    ToolHandler, ToolSpec, TurnIdentity, context::agent_base_dir, is_resizable_mime_type,
+    is_supported_mime_type, is_text_mime_type, strip_html_comments,
 };
 use assistant_storage::{SkillRegistry, StorageLayer, conversations::ConversationStore};
 use assistant_tool_executor::ToolExecutor;
@@ -365,6 +365,7 @@ impl Orchestrator {
         trace_cx: Option<&OtelContext>,
         attachments: Vec<ContentBlock>,
         attachment_ids: Vec<Uuid>,
+        identity: TurnIdentity,
     ) -> Result<TurnResult> {
         let turn_span = info_span!(
             "conversation_turn",
@@ -381,6 +382,7 @@ impl Orchestrator {
             attachments,
             None,
             attachment_ids,
+            identity,
         )
         .instrument(turn_span)
         .await
@@ -402,6 +404,7 @@ impl Orchestrator {
         attachments: Vec<ContentBlock>,
         token_sink: mpsc::Sender<OrchestratorEvent>,
         attachment_ids: Vec<Uuid>,
+        identity: TurnIdentity,
     ) -> Result<TurnResult> {
         let turn_span = info_span!(
             "conversation_turn",
@@ -419,6 +422,7 @@ impl Orchestrator {
             attachments,
             Some(token_sink),
             attachment_ids,
+            identity,
         )
         .instrument(turn_span)
         .await
@@ -432,6 +436,7 @@ impl Orchestrator {
         interface: Interface,
         trace_cx: Option<&OtelContext>,
         attachment_ids: Vec<Uuid>,
+        identity: TurnIdentity,
     ) -> Result<TurnResult> {
         self.run_turn_core(
             user_message,
@@ -440,11 +445,13 @@ impl Orchestrator {
             None,
             trace_cx,
             attachment_ids,
+            identity,
         )
         .await
     }
 
     /// Like [`run_turn`] but streams final-answer tokens through `token_sink`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_turn_streaming(
         &self,
         user_message: &str,
@@ -453,6 +460,7 @@ impl Orchestrator {
         token_sink: mpsc::Sender<OrchestratorEvent>,
         trace_cx: Option<&OtelContext>,
         attachment_ids: Vec<Uuid>,
+        identity: TurnIdentity,
     ) -> Result<TurnResult> {
         self.run_turn_core(
             user_message,
@@ -461,6 +469,7 @@ impl Orchestrator {
             Some(token_sink),
             trace_cx,
             attachment_ids,
+            identity,
         )
         .await
     }
@@ -478,6 +487,7 @@ impl Orchestrator {
         attachments: Vec<ContentBlock>,
         token_sink: Option<mpsc::Sender<OrchestratorEvent>>,
         attachment_ids: Vec<Uuid>,
+        identity: TurnIdentity,
     ) -> Result<TurnResult> {
         // Clear active skill at turn boundary so stale skill context doesn't leak.
         *self.active_skill.write().await = None;
@@ -572,6 +582,9 @@ impl Orchestrator {
                 interactive: false,
                 allowed_tools: None,
                 depth: 0,
+                user_id: identity.user_id.clone(),
+                org_id: identity.org_id.clone(),
+                space_id: identity.space_id.clone(),
             };
 
             let mut llm_span = crate::otel_spans::start_llm_span(
@@ -870,6 +883,7 @@ impl Orchestrator {
     }
 
     /// Shared implementation for [`run_turn`] and [`run_turn_streaming`].
+    #[allow(clippy::too_many_arguments)]
     async fn run_turn_core(
         &self,
         user_message: &str,
@@ -878,6 +892,7 @@ impl Orchestrator {
         token_sink: Option<mpsc::Sender<OrchestratorEvent>>,
         trace_cx: Option<&OtelContext>,
         attachment_ids: Vec<Uuid>,
+        identity: TurnIdentity,
     ) -> Result<TurnResult> {
         // Clear active skill at turn boundary so stale skill context doesn't leak.
         *self.active_skill.write().await = None;
@@ -944,6 +959,9 @@ impl Orchestrator {
                 interactive: matches!(interface, Interface::Cli),
                 allowed_tools: None,
                 depth: 0,
+                user_id: identity.user_id.clone(),
+                org_id: identity.org_id.clone(),
+                space_id: identity.space_id.clone(),
             };
 
             let mut llm_span = crate::otel_spans::start_llm_span(

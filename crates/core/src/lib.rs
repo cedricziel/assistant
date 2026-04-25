@@ -75,6 +75,6 @@ pub use types::{
     NotificationsConfig, ObservabilityConfig, OpenAIAuthMode, OpenAIOptions, OpenAIUserLocation,
     OpenAIWebSearchOptions, OpenRouterOptions, OtelExporter, PartitionGranularity, SignalConfig,
     SkillsConfig, SlackConfig, SlackListenMode, StorageConfig, TranscriptionConfig,
-    TranscriptionProviderKind, TtsConfig, TtsProviderKind,
+    TranscriptionProviderKind, TtsConfig, TtsProviderKind, TurnIdentity,
 };
 pub use upload::resolve_upload_bytes;

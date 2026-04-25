@@ -88,6 +88,59 @@ pub struct ExecutionContext {
     pub allowed_tools: Option<Vec<String>>,
     /// Current subagent nesting depth.  The root agent has depth `0`.
     pub depth: u32,
+
+    // -- Identity fields (multi-user) ----------------------------------------
+    /// The authenticated user executing this turn. `None` for legacy
+    /// single-user or system-originated turns.
+    pub user_id: Option<crate::identity::UserId>,
+    /// The organization context. `None` for legacy single-user mode.
+    pub org_id: Option<crate::identity::OrgId>,
+    /// The space context. `None` for legacy single-user mode.
+    pub space_id: Option<crate::identity::SpaceId>,
+}
+
+impl ExecutionContext {
+    /// Populate the identity fields from an [`AuthContext`](crate::auth::AuthContext).
+    ///
+    /// Copies `user_id` and `org_id` directly; leaves `space_id` as-is since
+    /// it depends on the routing context rather than the token.
+    pub fn with_auth(mut self, auth: &crate::auth::AuthContext) -> Self {
+        self.user_id = Some(auth.user_id.clone());
+        self.org_id = Some(auth.org_id.clone());
+        self
+    }
+
+    /// Populate the identity fields from a [`TurnIdentity`].
+    pub fn with_identity(mut self, id: &TurnIdentity) -> Self {
+        self.user_id = id.user_id.clone();
+        self.org_id = id.org_id.clone();
+        self.space_id = id.space_id.clone();
+        self
+    }
+}
+
+/// Lightweight bundle of optional identity fields threaded through the
+/// orchestrator turn pipeline.
+///
+/// Callers that have an authenticated user populate this from
+/// [`AuthContext`](crate::auth::AuthContext); legacy / system turns use
+/// [`Default`].
+#[derive(Debug, Clone, Default)]
+pub struct TurnIdentity {
+    pub user_id: Option<crate::identity::UserId>,
+    pub org_id: Option<crate::identity::OrgId>,
+    pub space_id: Option<crate::identity::SpaceId>,
+}
+
+impl TurnIdentity {
+    /// Build a `TurnIdentity` from an [`AuthContext`](crate::auth::AuthContext).
+    pub fn from_auth(auth: &crate::auth::AuthContext) -> Self {
+        Self {
+            user_id: Some(auth.user_id.clone()),
+            org_id: Some(auth.org_id.clone()),
+            space_id: None,
+        }
+    }
 }
 
 /// Which interface originated the request
