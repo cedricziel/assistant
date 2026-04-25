@@ -67,6 +67,7 @@ export 'package:assistant_api/src/model/client_registration_schema.dart';
 export 'package:assistant_api/src/model/command_arg_response.dart';
 export 'package:assistant_api/src/model/command_def_response.dart';
 export 'package:assistant_api/src/model/command_event_response.dart';
+export 'package:assistant_api/src/model/complete_response.dart';
 export 'package:assistant_api/src/model/conversation_detail.dart';
 export 'package:assistant_api/src/model/conversation_summary.dart';
 export 'package:assistant_api/src/model/create_api_key_request.dart';

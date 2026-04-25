@@ -1,3 +1,6 @@
+import 'package:assistant_api/assistant_api.dart'
+    show AssistantApi, ClientRegistrationSchema, OauthApi, TokenResponse;
+import 'package:built_collection/built_collection.dart';
 import 'package:dio/dio.dart';
 
 import 'oauth_credentials.dart';
@@ -6,14 +9,27 @@ import 'pkce.dart';
 /// Handles the OAuth2 Authorization Code + PKCE flow against the assistant
 /// server's OAuth2 endpoints.
 ///
+/// Uses the generated [OauthApi] client for typed requests and response
+/// parsing.  The only exception is [login], which needs custom redirect
+/// handling that the generated client cannot express.
+///
 /// This service is stateless — it takes a server URL and performs HTTP calls
 /// via [Dio]. Token storage is handled by the caller ([ContextRepository]).
 class OAuthService {
-  OAuthService({required this.serverUrl, Dio? dio})
-    : _dio = dio ?? Dio(BaseOptions(baseUrl: serverUrl));
+  OAuthService({required this.serverUrl, Dio? dio}) {
+    // When a pre-configured Dio is supplied (e.g. for tests with a mock
+    // interceptor) we pass it through to AssistantApi so both the raw Dio
+    // calls in login() and the generated OauthApi share the same instance.
+    _api = AssistantApi(dio: dio, basePathOverride: serverUrl);
+    _oauthApi = _api.getOauthApi();
+  }
 
   final String serverUrl;
-  final Dio _dio;
+  late final AssistantApi _api;
+  late final OauthApi _oauthApi;
+
+  /// The underlying [Dio] instance (for the custom redirect flow in [login]).
+  Dio get _dio => _api.dio;
 
   // -- Dynamic Client Registration (RFC 7591) --------------------------------
 
@@ -25,20 +41,21 @@ class OAuthService {
     required String clientName,
     required List<String> redirectUris,
   }) async {
-    final response = await _dio.post<Map<String, dynamic>>(
-      '/oauth/register',
-      data: {
-        'client_name': clientName,
-        'redirect_uris': redirectUris,
-        'grant_types': ['authorization_code', 'refresh_token'],
-        'response_types': ['code'],
-        'token_endpoint_auth_method': 'none',
-      },
-      options: Options(contentType: 'application/json'),
+    final response = await _oauthApi.register(
+      clientRegistrationSchema: ClientRegistrationSchema(
+        (b) => b
+          ..clientName = clientName
+          ..redirectUris = ListBuilder<String>(redirectUris)
+          ..grantTypes = ListBuilder<String>([
+            'authorization_code',
+            'refresh_token',
+          ])
+          ..responseTypes = ListBuilder<String>(['code'])
+          ..tokenEndpointAuthMethod = 'none',
+      ),
     );
 
-    final data = response.data!;
-    return data['client_id'] as String;
+    return response.data!.clientId;
   }
 
   // -- Authorization Code + PKCE flow ----------------------------------------
@@ -80,19 +97,15 @@ class OAuthService {
     required String redirectUri,
     required String pkceVerifier,
   }) async {
-    final response = await _dio.post<Map<String, dynamic>>(
-      '/oauth/token',
-      data: {
-        'grant_type': 'authorization_code',
-        'code': code,
-        'client_id': clientId,
-        'redirect_uri': redirectUri,
-        'code_verifier': pkceVerifier,
-      },
-      options: Options(contentType: 'application/x-www-form-urlencoded'),
+    final response = await _oauthApi.token(
+      grantType: 'authorization_code',
+      code: code,
+      clientId: clientId,
+      redirectUri: redirectUri,
+      codeVerifier: pkceVerifier,
     );
 
-    return _parseTokenResponse(response.data!, clientId);
+    return _toCredentials(response.data!, clientId);
   }
 
   // -- Direct login (email + password → auth code → tokens) ------------------
@@ -102,6 +115,9 @@ class OAuthService {
   ///
   /// This is a convenience for web/macOS where we can show an in-app login
   /// form rather than redirecting to a browser.
+  ///
+  /// Uses raw [Dio] because the generated client cannot express the
+  /// `followRedirects: false` + Location-header capture flow.
   Future<OAuthCredentials> login({
     required String email,
     required String password,
@@ -164,7 +180,7 @@ class OAuthService {
       throw OAuthException('No authorization code in server response');
     }
 
-    // Exchange the auth code for tokens.
+    // Exchange the auth code for tokens via the generated client.
     return exchangeCode(
       code: code,
       clientId: clientId,
@@ -183,31 +199,23 @@ class OAuthService {
     required String refreshToken,
     required String clientId,
   }) async {
-    final response = await _dio.post<Map<String, dynamic>>(
-      '/oauth/token',
-      data: {
-        'grant_type': 'refresh_token',
-        'refresh_token': refreshToken,
-        'client_id': clientId,
-      },
-      options: Options(contentType: 'application/x-www-form-urlencoded'),
+    final response = await _oauthApi.token(
+      grantType: 'refresh_token',
+      refreshToken: refreshToken,
+      clientId: clientId,
     );
 
-    return _parseTokenResponse(response.data!, clientId);
+    return _toCredentials(response.data!, clientId);
   }
 
   // -- Token revocation ------------------------------------------------------
 
   /// Revokes a refresh token, invalidating the session.
   Future<void> revoke({required String token, String? clientId}) async {
-    await _dio.post<void>(
-      '/oauth/revoke',
-      data: {
-        'token': token,
-        'client_id': ?clientId,
-        'token_type_hint': 'refresh_token',
-      },
-      options: Options(contentType: 'application/x-www-form-urlencoded'),
+    await _oauthApi.revoke(
+      token: token,
+      clientId: clientId,
+      tokenTypeHint: 'refresh_token',
     );
   }
 
@@ -217,9 +225,7 @@ class OAuthService {
   /// metadata endpoint. Returns `true` if the endpoint responds successfully.
   Future<bool> supportsOAuth() async {
     try {
-      final response = await _dio.get<dynamic>(
-        '/.well-known/oauth-authorization-server',
-      );
+      final response = await _oauthApi.metadata();
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -253,22 +259,16 @@ class OAuthService {
     return code;
   }
 
-  OAuthCredentials _parseTokenResponse(
-    Map<String, dynamic> data,
-    String clientId,
-  ) {
-    final accessToken = data['access_token'] as String;
-    final refreshToken = data['refresh_token'] as String?;
-    final expiresIn = data['expires_in'] as int;
-
-    if (refreshToken == null) {
+  /// Converts a generated [TokenResponse] into our [OAuthCredentials].
+  OAuthCredentials _toCredentials(TokenResponse token, String clientId) {
+    if (token.refreshToken == null) {
       throw OAuthException('Server did not return a refresh token');
     }
 
     return OAuthCredentials(
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-      expiresAt: DateTime.now().toUtc().add(Duration(seconds: expiresIn)),
+      accessToken: token.accessToken,
+      refreshToken: token.refreshToken!,
+      expiresAt: DateTime.now().toUtc().add(Duration(seconds: token.expiresIn)),
       clientId: clientId,
     );
   }

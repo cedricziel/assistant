@@ -451,7 +451,19 @@ void main() {
           '/.well-known/oauth-authorization-server',
           respond: const MockResponse(
             statusCode: 200,
-            data: {'issuer': 'http://localhost:8080'},
+            data: {
+              'issuer': 'http://localhost:8080',
+              'authorization_endpoint': 'http://localhost:8080/oauth/authorize',
+              'token_endpoint': 'http://localhost:8080/oauth/token',
+              'registration_endpoint': 'http://localhost:8080/oauth/register',
+              'revocation_endpoint': 'http://localhost:8080/oauth/revoke',
+              'device_authorization_endpoint':
+                  'http://localhost:8080/oauth/device',
+              'response_types_supported': ['code'],
+              'grant_types_supported': ['authorization_code', 'refresh_token'],
+              'token_endpoint_auth_methods_supported': ['none'],
+              'code_challenge_methods_supported': ['S256'],
+            },
           ),
         );
 

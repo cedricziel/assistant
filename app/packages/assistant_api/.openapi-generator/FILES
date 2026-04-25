@@ -39,6 +39,7 @@ doc/CommandArgResponse.md
 doc/CommandDefResponse.md
 doc/CommandEventResponse.md
 doc/CommandsApi.md
+doc/CompleteResponse.md
 doc/ConversationDetail.md
 doc/ConversationSummary.md
 doc/ConversationsApi.md
@@ -240,6 +241,7 @@ lib/src/model/client_registration_schema.dart
 lib/src/model/command_arg_response.dart
 lib/src/model/command_def_response.dart
 lib/src/model/command_event_response.dart
+lib/src/model/complete_response.dart
 lib/src/model/conversation_detail.dart
 lib/src/model/conversation_summary.dart
 lib/src/model/create_api_key_request.dart
@@ -361,3 +363,4 @@ lib/src/model/workflow_webhook_trigger_accepted.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
+test/complete_response_test.dart
