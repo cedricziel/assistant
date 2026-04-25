@@ -11,7 +11,7 @@ pub(crate) mod push;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -190,6 +190,19 @@ async fn run_with_args(args: Args) -> Result<()> {
         Some(p) => p,
         None => anyhow::bail!("Cannot determine default DB path. Specify --db-path."),
     };
+
+    // Before opening databases, check for a legacy single-user layout and
+    // auto-migrate to the new org/space directory structure.  The migration
+    // must run before StorageLayer opens `assistant.db` so the backup gets a
+    // clean WAL checkpoint without contention.
+    let base_path = db_path.parent().unwrap_or(Path::new("."));
+    if assistant_storage::migration::is_legacy_layout(base_path) {
+        info!("detected legacy single-user layout — running auto-migration");
+        let backup = assistant_storage::migration::run_migration(base_path)
+            .await
+            .context("legacy → multi-org auto-migration failed")?;
+        info!("migration complete — backup at {}", backup.display());
+    }
 
     let storage = Arc::new(StorageLayer::new(&db_path).await?);
 
