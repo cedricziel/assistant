@@ -1,6 +1,6 @@
 [package]
 name = "assistant-skills"
-version = "0.1.140"
+version = "0.1.141"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
