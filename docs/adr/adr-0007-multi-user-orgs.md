@@ -156,3 +156,12 @@ fine-grained control for API keys without complicating the role model.
   Loss means all active sessions are invalidated. It should be backed up.
 - **Token in URL** — the workflow webhook endpoint carries an HMAC token
   in the URL path. Access logs must be configured to redact this.
+
+## Operations
+
+The migration from a legacy single-user install to the multi-org layout
+is automatic on first startup. Operational details — what changes on
+disk, how to verify with `assistant doctor`, when to run
+`assistant migrate finalize`, the meaning of `assistant.db.legacy`, and
+the rollback procedure — are documented in
+[`docs/operations/multi-org-cutover.md`](../operations/multi-org-cutover.md).

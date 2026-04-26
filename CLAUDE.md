@@ -34,7 +34,7 @@ All runtime data lives under `~/.assistant/`. The multi-org layout:
 - `orgs/{slug}/spaces/{space}/skills/` — space-local skills
 - `orgs/{slug}/catalog/` — org-level shared skills, templates, interfaces
 
-Legacy single-user installs are auto-migrated to `orgs/default/spaces/default/` on first startup.
+Legacy single-user installs are auto-migrated to `orgs/default/spaces/default/` on first startup. The migration renames the original `assistant.db` to `assistant.db.legacy` — a frozen snapshot retained for safety. Operators may delete it once `assistant doctor` reports no drift between the legacy and runtime databases. If a host was migrated by an old binary that kept writing to `assistant.db` afterwards, run `assistant migrate finalize` to cut over (see `docs/operations/multi-org-cutover.md`).
 
 ## Authentication
 

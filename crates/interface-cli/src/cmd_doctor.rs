@@ -463,10 +463,95 @@ fn check_learning(config: &AssistantConfig) -> CheckResult {
     }
 }
 
+/// Compare `messages` row counts between `assistant.db.legacy` and the live
+/// runtime database. Warns when they differ — this happens when a host was
+/// migrated by an old binary that copied the DB but never renamed the
+/// original, then continued writing to `assistant.db` while `space.db`
+/// went stale. The fix is `assistant migrate finalize`.
+async fn check_drift(base_path: &Path, db_path: &Path) -> CheckResult {
+    let legacy_path = base_path.join("assistant.db.legacy");
+
+    if !legacy_path.exists() {
+        return CheckResult::skipped(
+            "Migration Drift",
+            "no assistant.db.legacy present (nothing to compare)",
+        );
+    }
+    if !db_path.exists() {
+        return CheckResult::skipped(
+            "Migration Drift",
+            "runtime database not yet created (nothing to compare)",
+        );
+    }
+
+    let legacy_count = match count_messages_readonly(&legacy_path).await {
+        Ok(c) => c,
+        Err(e) => {
+            return CheckResult::warning("Migration Drift", "could not read assistant.db.legacy")
+                .with_detail(format!("{e}"))
+                .with_detail(format!("Path: {}", legacy_path.display()));
+        }
+    };
+    let runtime_count = match count_messages_readonly(db_path).await {
+        Ok(c) => c,
+        Err(e) => {
+            return CheckResult::warning("Migration Drift", "could not read runtime database")
+                .with_detail(format!("{e}"))
+                .with_detail(format!("Path: {}", db_path.display()));
+        }
+    };
+
+    if legacy_count == runtime_count {
+        CheckResult::ok(
+            "Migration Drift",
+            format!("legacy and runtime row counts match ({legacy_count} messages)"),
+        )
+    } else {
+        CheckResult::warning(
+            "Migration Drift",
+            format!(
+                "row count drift: legacy has {legacy_count} messages, runtime has {runtime_count}",
+            ),
+        )
+        .with_detail(format!("Legacy:  {}", legacy_path.display()))
+        .with_detail(format!("Runtime: {}", db_path.display()))
+        .with_detail(
+            "Run `assistant migrate finalize` to overwrite the runtime DB with legacy content",
+        )
+    }
+}
+
+/// Open a SQLite file read-only and count rows in the `messages` table.
+/// Read-only mode (`mode=ro`) is critical: it prevents sqlx from creating
+/// `*-wal` / `*-shm` sidecars against `assistant.db.legacy`, which would
+/// confuse a future `migrate finalize` run.
+async fn count_messages_readonly(path: &Path) -> Result<i64> {
+    use std::str::FromStr;
+
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    let opts = SqliteConnectOptions::from_str(&format!("sqlite:{}", path.display()))?
+        .read_only(true)
+        .create_if_missing(false);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
+        .await?;
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages")
+        .fetch_one(&pool)
+        .await?;
+    pool.close().await;
+    Ok(row.0)
+}
+
 // ── Public entry point ───────────────────────────────────────────────────────
 
 /// Run all diagnostic checks and print the report.
-pub fn cmd_doctor(config_path: &Path, db_path: &Path, config: &AssistantConfig) -> Result<()> {
+pub async fn cmd_doctor(
+    config_path: &Path,
+    db_path: &Path,
+    config: &AssistantConfig,
+) -> Result<()> {
     let assistant_dir = config_path
         .parent()
         .unwrap_or_else(|| Path::new("~/.assistant"));
@@ -474,6 +559,7 @@ pub fn cmd_doctor(config_path: &Path, db_path: &Path, config: &AssistantConfig) 
     let checks = vec![
         check_config(config_path),
         check_database(db_path),
+        check_drift(assistant_dir, db_path).await,
         check_llm_provider(config),
         check_embeddings(config),
         check_mcp_servers(config),
@@ -680,6 +766,81 @@ mod tests {
         assert!(
             r.status == CheckStatus::Ok || r.status == CheckStatus::Skipped,
             "should be ok or skipped depending on default"
+        );
+    }
+
+    // -- Migration drift check --
+
+    /// Helper: create a minimal SQLite DB at `path` with a `messages` table
+    /// containing `n` rows. Used by the drift-check tests below.
+    async fn seed_messages_db(path: &std::path::Path, n: usize) {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        use std::str::FromStr;
+
+        let opts = SqliteConnectOptions::from_str(&format!("sqlite:{}", path.display()))
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for i in 0..n {
+            sqlx::query("INSERT INTO messages (body) VALUES (?)")
+                .bind(format!("msg-{i}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn check_drift_skipped_when_no_legacy() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = dir.path().join("space.db");
+        seed_messages_db(&runtime, 3).await;
+
+        let r = check_drift(dir.path(), &runtime).await;
+        assert_eq!(r.status, CheckStatus::Skipped);
+    }
+
+    #[tokio::test]
+    async fn check_drift_ok_when_counts_match() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let legacy = dir.path().join("assistant.db.legacy");
+        let runtime = dir.path().join("space.db");
+        seed_messages_db(&legacy, 5).await;
+        seed_messages_db(&runtime, 5).await;
+
+        let r = check_drift(dir.path(), &runtime).await;
+        assert_eq!(r.status, CheckStatus::Ok);
+        assert!(r.message.contains("5 messages"));
+    }
+
+    #[tokio::test]
+    async fn check_drift_warns_when_counts_differ() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let legacy = dir.path().join("assistant.db.legacy");
+        let runtime = dir.path().join("space.db");
+        seed_messages_db(&legacy, 10).await;
+        seed_messages_db(&runtime, 3).await;
+
+        let r = check_drift(dir.path(), &runtime).await;
+        assert_eq!(
+            r.status,
+            CheckStatus::Warning,
+            "drift between legacy and runtime should warn"
+        );
+        assert!(r.message.contains("10"));
+        assert!(r.message.contains("3"));
+        assert!(
+            r.details.iter().any(|d| d.contains("migrate finalize")),
+            "warning should suggest running `assistant migrate finalize`"
         );
     }
 }

@@ -302,6 +302,29 @@ pub async fn migrate_database(base_path: &Path) -> Result<(OrgStorageLayer, OrgI
         .context("creating default space")?;
     info!("created default space: {}", space.id);
 
+    // Cut over: rename assistant.db so any process re-resolving the legacy
+    // path fails loudly instead of silently diverging from space.db. The
+    // sidecar files no longer correspond to a live database after rename;
+    // remove them so the legacy SQLite WAL state can't be reused.
+    let renamed = base_path.join("assistant.db.legacy");
+    tokio::fs::rename(&legacy_db, &renamed)
+        .await
+        .with_context(|| format!("renaming {} → {}", legacy_db.display(), renamed.display()))?;
+    info!("renamed {} → {}", legacy_db.display(), renamed.display());
+
+    for suffix in &["-wal", "-shm"] {
+        let sidecar = base_path.join(format!("assistant.db{suffix}"));
+        if sidecar.exists()
+            && let Err(e) = tokio::fs::remove_file(&sidecar).await
+        {
+            warn!(
+                path = %sidecar.display(),
+                error = %e,
+                "failed to remove legacy sidecar"
+            );
+        }
+    }
+
     Ok((org_storage, org.id, space.id))
 }
 
@@ -566,6 +589,73 @@ enabled = true
         assert!(
             users.is_empty(),
             "migrate_database should not seed users (caller bootstraps admin)"
+        );
+    }
+
+    #[tokio::test]
+    async fn migrate_database_renames_legacy_after_copy() {
+        let dir = TempDir::new().unwrap();
+
+        let legacy_db = dir.path().join("assistant.db");
+        let storage = crate::StorageLayer::new(&legacy_db).await.unwrap();
+        drop(storage);
+
+        // Sidecars may or may not exist after drop depending on WAL state;
+        // create them explicitly so the test asserts removal regardless.
+        std::fs::write(dir.path().join("assistant.db-wal"), b"fake wal").unwrap();
+        std::fs::write(dir.path().join("assistant.db-shm"), b"fake shm").unwrap();
+
+        migrate_database(dir.path()).await.unwrap();
+
+        let space_db = dir.path().join("orgs/default/spaces/default/space.db");
+        assert!(space_db.exists(), "space.db should exist after migration");
+
+        let renamed = dir.path().join("assistant.db.legacy");
+        assert!(
+            renamed.exists(),
+            "assistant.db should be renamed to assistant.db.legacy"
+        );
+
+        assert!(
+            !legacy_db.exists(),
+            "assistant.db should not exist after cutover"
+        );
+        assert!(
+            !dir.path().join("assistant.db-wal").exists(),
+            "assistant.db-wal sidecar should be removed"
+        );
+        assert!(
+            !dir.path().join("assistant.db-shm").exists(),
+            "assistant.db-shm sidecar should be removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn migrate_database_failure_does_not_rename() {
+        let dir = TempDir::new().unwrap();
+
+        let legacy_db = dir.path().join("assistant.db");
+        let storage = crate::StorageLayer::new(&legacy_db).await.unwrap();
+        drop(storage);
+
+        // Pre-create the destination as a directory so tokio::fs::copy fails
+        // on write — simulates a broken target without exotic filesystems.
+        let space_db_path = dir.path().join("orgs/default/spaces/default/space.db");
+        std::fs::create_dir_all(&space_db_path).unwrap();
+
+        let result = migrate_database(dir.path()).await;
+        assert!(
+            result.is_err(),
+            "migrate_database should fail when space.db destination is unwritable"
+        );
+
+        assert!(
+            legacy_db.exists(),
+            "assistant.db must remain in place when migration fails"
+        );
+        assert!(
+            !dir.path().join("assistant.db.legacy").exists(),
+            "no rename should happen when migration fails"
         );
     }
 

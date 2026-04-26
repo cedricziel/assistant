@@ -55,6 +55,10 @@ dirs = { workspace = true }
 clap = { workspace = true }
 # Explicit rustls dep so we can install the ring provider before TLS starts
 rustls = { workspace = true }
+# SQLite WAL checkpoint during `assistant migrate finalize`
+sqlx = { workspace = true }
+# Process detection for `assistant migrate finalize`
+sysinfo = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
