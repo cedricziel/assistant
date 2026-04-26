@@ -1,8 +1,33 @@
 //! Database pool factory for org/space resolution.
 //!
 //! Resolves org and space slugs to their respective database paths under
-//! `~/.assistant/`. `org.db` lives at the install root (next to `assistant.db`)
-//! while space databases live under `orgs/{slug}/spaces/{space_slug}/space.db`.
+//! `~/.assistant/`. `org.db` lives at the install root (next to the
+//! post-cutover `assistant.db.legacy` snapshot) while space databases live
+//! under `orgs/{slug}/spaces/{space_slug}/space.db`.
+//!
+//! ## Production callers
+//!
+//! After the multi-org runtime cutover (`openspec/changes/multi-org-runtime-cutover/`)
+//! the runtime path resolution lives in exactly these places:
+//!
+//! - `crates/interface-cli/src/main.rs` — orchestrator startup. Resolves
+//!   the runtime database via `OrgPoolFactory::space_db_path("default",
+//!   "default")` unless `config.storage.db_path` is set (deprecated dev
+//!   override). Also calls `assistant_web_ui::install::ensure_migrated`
+//!   before opening the database.
+//! - `crates/interface-cli/src/cmd_migrate.rs` — `assistant migrate
+//!   finalize` resolves the same `space.db` path to overwrite it from a
+//!   live legacy database during recovery.
+//! - `crates/web-ui/src/main.rs` — `assistant webui serve`. Uses the
+//!   factory for both `org_db_path` (`OrgStorageLayer::new`) and
+//!   `space_db_path("default", "default")` for `StorageLayer::new`.
+//!   Like the CLI it honors `--db-path` only as a deprecated dev override.
+//! - `crates/storage/src/migration.rs` — the `migrate_database` step of
+//!   the legacy-to-multi-org migration writes the initial `space.db` at
+//!   the path resolved by these helpers.
+//!
+//! Tests outside the crate may also call `space_db_path` to seed fixtures
+//! against tempdirs; those are not part of the production runtime path.
 
 use std::path::{Path, PathBuf};
 
