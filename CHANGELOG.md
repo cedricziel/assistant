@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.142](https://github.com/cedricziel/assistant/compare/v0.1.141...v0.1.142) (2026-04-26)
+
+
+### Features
+
+* **packaging:** ship assistant-matrix systemd user unit ([bb57a92](https://github.com/cedricziel/assistant/commit/bb57a9239cc9b0e14adada77ad826040a04b3c25))
+
 ## [0.1.141](https://github.com/cedricziel/assistant/compare/v0.1.140...v0.1.141) (2026-04-26)
 
 
