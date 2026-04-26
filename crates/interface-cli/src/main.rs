@@ -2,6 +2,7 @@ mod cmd_account;
 mod cmd_backup;
 mod cmd_doctor;
 mod cmd_login;
+mod cmd_migrate;
 mod credentials;
 
 use std::collections::{HashMap, HashSet};
@@ -33,7 +34,8 @@ use assistant_runtime::{
 };
 use assistant_skills::SkillSource;
 use assistant_storage::{
-    PersonaSkillAccessStore, PersonaStore, RefinementStatus, StorageLayer, registry::SkillRegistry,
+    OrgPoolFactory, PersonaSkillAccessStore, PersonaStore, RefinementStatus, StorageLayer,
+    registry::SkillRegistry,
 };
 use assistant_tool_executor::{ToolExecutor, install_skill_from_source};
 
@@ -150,6 +152,24 @@ enum Command {
     Account {
         #[command(subcommand)]
         command: AccountCommand,
+    },
+    /// Manage migrations between assistant data layouts.
+    Migrate {
+        #[command(subcommand)]
+        command: MigrateCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum MigrateCommand {
+    /// Finalize a partially-migrated install: copy live `assistant.db` into
+    /// `space.db`, rename the legacy file to `assistant.db.legacy`, and remove
+    /// `*-shm`/`*-wal` sidecars. Refuses to run when an `assistant`
+    /// orchestrator or webui process is detected unless `--force` is passed.
+    Finalize {
+        /// Skip the running-process check.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -1424,12 +1444,62 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("Failed to create workspace at {}", workspace_dir.display()))?;
 
-    let db_path: PathBuf = config
-        .storage
-        .db_path
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| assistant_dir.join("assistant.db"));
+    // `assistant migrate finalize` is the recovery path for installs that
+    // were partially migrated to the multi-org layout but never cut over.
+    // It must run *before* `ensure_migrated`, which assumes the install is
+    // either fully legacy or fully migrated.
+    if let Some(Command::Migrate {
+        command: MigrateCommand::Finalize { force },
+    }) = &cli.command
+    {
+        return cmd_migrate::cmd_migrate_finalize(*force, &assistant_dir).await;
+    }
+
+    // Run the legacy-to-multi-org migration before opening any database. The
+    // helper short-circuits when the install is already migrated, so this is
+    // a cheap no-op on healthy hosts. Lives in `assistant-web-ui` because it
+    // composes auth, backup, and storage helpers.
+    if let Some(outcome) = assistant_web_ui::install::ensure_migrated(&assistant_dir).await? {
+        info!("created admin user: {}", outcome.admin.user_id);
+        match outcome.admin_credentials_file.as_ref() {
+            Some(creds_path) => {
+                info!("============================================================");
+                info!("  Migration complete - initial admin credentials written to:");
+                info!("    {}", creds_path.display());
+                info!("  (file permissions: 0600 — owner read/write only)");
+                info!("  Email: {}", outcome.admin.email);
+                info!("  Change this password after first login and delete the file.");
+                info!("============================================================");
+            }
+            None => {
+                info!("============================================================");
+                info!("  Migration complete - admin user created.");
+                info!("    Email:    {}", outcome.admin.email);
+                info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
+                info!("============================================================");
+            }
+        }
+        info!(
+            "migration complete — backup at {}",
+            outcome.backup_path.display()
+        );
+    }
+
+    // Resolve the runtime database path. Production hosts use the per-space
+    // path under `orgs/default/spaces/default/space.db` (multi-org layout);
+    // `config.storage.db_path` is preserved as a deprecated dev/test override.
+    let db_path: PathBuf = match config.storage.db_path.as_deref() {
+        Some(p) => {
+            warn!(
+                path = p,
+                "config.storage.db_path is deprecated — runtime should use the per-space \
+                 database under orgs/default/spaces/default/space.db. This override is kept \
+                 for tests and dev-mode only and will be removed in a future release."
+            );
+            PathBuf::from(p)
+        }
+        None => OrgPoolFactory::new(assistant_dir.clone()).space_db_path("default", "default"),
+    };
 
     // 3. Handle Reset early — does not need heavy resources.
     if let Some(Command::Reset { yes }) = &cli.command {
@@ -1460,7 +1530,7 @@ async fn main() -> Result<()> {
     }
 
     if matches!(cli.command, Some(Command::Doctor)) {
-        return cmd_doctor::cmd_doctor(&config_path, &db_path, &config);
+        return cmd_doctor::cmd_doctor(&config_path, &db_path, &config).await;
     }
 
     if let Some(Command::Login { server }) = &cli.command {
@@ -1545,6 +1615,11 @@ async fn main() -> Result<()> {
         Arc::new(CliConfirmation)
     };
 
+    if let Some(parent) = db_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("creating db parent directory {}", parent.display()))?;
+    }
     let storage = Arc::new(
         StorageLayer::new(&db_path)
             .await

@@ -4,6 +4,7 @@ pub(crate) mod audio_store;
 pub mod auth;
 pub(crate) mod backends;
 mod flutter_assets;
+pub mod install;
 mod oauth;
 mod openapi;
 pub(crate) mod push;
@@ -24,8 +25,8 @@ use assistant_core::{
 use assistant_runtime::bootstrap::AutoDenyConfirmation;
 use assistant_runtime::{Orchestrator, init_tracing};
 use assistant_skills::SkillSource;
+use assistant_storage::StorageLayer;
 use assistant_storage::registry::SkillRegistry;
-use assistant_storage::{StorageLayer, default_db_path};
 use assistant_tool_executor::ToolExecutor;
 use assistant_transcription::{build_provider as build_transcription_provider, build_tts_provider};
 use assistant_workflow::{
@@ -186,78 +187,75 @@ async fn run_with_args(args: Args) -> Result<()> {
     let addr: SocketAddr = args.listen.parse()?;
     let secure_cookie = !addr.ip().is_loopback() && !args.no_secure_cookie;
 
-    let db_path = match args.db_path.or_else(default_db_path) {
-        Some(p) => p,
-        None => anyhow::bail!("Cannot determine default DB path. Specify --db-path."),
+    // Resolve the install root (default: ~/.assistant). Migration and the
+    // multi-org factory both work against this path; the runtime db_path is
+    // derived from it below.
+    let base_path: PathBuf = match args.db_path.as_ref() {
+        Some(p) => p
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| Path::new(".").to_path_buf()),
+        None => dirs::home_dir()
+            .map(|h| h.join(".assistant"))
+            .context("Cannot determine default base path. Specify --db-path.")?,
     };
 
     // Before opening databases, check for a legacy single-user layout and
-    // auto-migrate to the new org/space directory structure.  The migration
-    // must run before StorageLayer opens `assistant.db` so the backup gets a
-    // clean WAL checkpoint without contention.
-    let base_path = db_path.parent().unwrap_or(Path::new("."));
-    if assistant_storage::migration::is_legacy_layout(base_path) {
-        info!("detected legacy single-user layout — running auto-migration");
-
-        // Step 1: backup (lives in assistant-backup so storage doesn't depend
-        // on the backup engine).
-        let backup_path = assistant_backup::backup_legacy_install(base_path)
-            .await
-            .context("creating pre-migration backup")?;
-
-        // Step 2: filesystem layout migration.
-        assistant_storage::migration::migrate_filesystem(base_path)
-            .await
-            .context("legacy → multi-org filesystem migration failed")?;
-
-        // Step 3: database migration. Returns the opened org storage layer
-        // plus the seeded org/space ids so we can bootstrap the admin user.
-        let (org_storage_for_bootstrap, org_id, space_id) =
-            assistant_storage::migration::migrate_database(base_path)
-                .await
-                .context("legacy → multi-org database migration failed")?;
-
-        // Step 4: bootstrap the initial admin user (lives in assistant-auth so
-        // storage doesn't depend on auth-domain logic).
-        let user_store = org_storage_for_bootstrap.user_store();
-        let membership_store = org_storage_for_bootstrap.membership_store();
-        let creds = assistant_auth::bootstrap::create_admin_user(
-            &user_store,
-            &membership_store,
-            &org_id,
-            &space_id,
-        )
-        .await
-        .context("creating initial admin user")?;
-        drop(org_storage_for_bootstrap);
-
-        info!("created admin user: {}", creds.user_id);
-        if let Some(pw) = creds.generated_password.as_ref() {
-            let creds_path = base_path.join("admin-credentials.txt");
-            write_admin_credentials_file(&creds_path, &creds.email, pw).with_context(|| {
-                format!("writing admin credentials to {}", creds_path.display())
-            })?;
-            info!("============================================================");
-            info!("  Migration complete - initial admin credentials written to:");
-            info!("    {}", creds_path.display());
-            info!("  (file permissions: 0600 — owner read/write only)");
-            info!("  Email: {}", creds.email);
-            info!("  Change this password after first login and delete the file.");
-            info!("============================================================");
-        } else {
-            info!("============================================================");
-            info!("  Migration complete - admin user created.");
-            info!("    Email:    {}", creds.email);
-            info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
-            info!("============================================================");
+    // auto-migrate to the new org/space directory structure. The helper runs
+    // backup → filesystem migration → DB cutover → admin bootstrap as a single
+    // unit; it must complete before StorageLayer opens any database file.
+    if let Some(outcome) = install::ensure_migrated(&base_path).await? {
+        info!("created admin user: {}", outcome.admin.user_id);
+        match outcome.admin_credentials_file.as_ref() {
+            Some(creds_path) => {
+                info!("============================================================");
+                info!("  Migration complete - initial admin credentials written to:");
+                info!("    {}", creds_path.display());
+                info!("  (file permissions: 0600 — owner read/write only)");
+                info!("  Email: {}", outcome.admin.email);
+                info!("  Change this password after first login and delete the file.");
+                info!("============================================================");
+            }
+            None => {
+                info!("============================================================");
+                info!("  Migration complete - admin user created.");
+                info!("    Email:    {}", outcome.admin.email);
+                info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
+                info!("============================================================");
+            }
         }
-        info!("migration complete — backup at {}", backup_path.display());
+        info!(
+            "migration complete — backup at {}",
+            outcome.backup_path.display()
+        );
+    }
+
+    // -- Org-level storage (users, spaces, auth state) --------------------------
+    let pool_factory = assistant_storage::OrgPoolFactory::new(base_path.clone());
+
+    // Resolve the runtime database path. Production hosts use the per-space
+    // path under `orgs/default/spaces/default/space.db`; explicit `--db-path`
+    // (or `ASSISTANT_DB_PATH`) is preserved as a deprecated dev/test override.
+    let db_path: PathBuf = match args.db_path.as_ref() {
+        Some(p) => {
+            warn!(
+                path = %p.display(),
+                "explicit --db-path bypasses the multi-org per-space layout — \
+                 keep for tests/dev only; production should use the factory-resolved \
+                 space.db at orgs/default/spaces/default/space.db"
+            );
+            p.clone()
+        }
+        None => pool_factory.space_db_path("default", "default"),
+    };
+    if let Some(parent) = db_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("creating db parent directory {}", parent.display()))?;
     }
 
     let storage = Arc::new(StorageLayer::new(&db_path).await?);
 
-    // -- Org-level storage (users, spaces, auth state) --------------------------
-    let pool_factory = assistant_storage::OrgPoolFactory::new(base_path);
     let org_storage = Arc::new(
         pool_factory
             .org_storage()
@@ -1121,42 +1119,4 @@ fn harden_agent_card(card: &mut assistant_a2a_json_schema::agent_card::AgentCard
     }
 
     info!("Auto-hardened agent card with Bearer auth security scheme");
-}
-
-/// Write the generated admin credentials to disk with mode 0600 so the password
-/// is never sent through the tracing/log pipeline. Fails loudly if the file
-/// can't be created — the password would otherwise be lost.
-fn write_admin_credentials_file(path: &Path, email: &str, password: &str) -> Result<()> {
-    use std::io::Write as _;
-
-    let mut opts = std::fs::OpenOptions::new();
-    // `create_new` refuses to follow symlinks or overwrite an existing file,
-    // which is essential for a 0600-mode secrets file written into a shared
-    // base path.
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        opts.mode(0o600);
-    }
-    let mut f = opts
-        .open(path)
-        .with_context(|| format!("opening {} for writing", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("restricting permissions on {}", path.display()))?;
-    }
-    writeln!(
-        f,
-        "# Initial admin credentials for assistant web-ui.\n\
-         # Delete this file after recording the password and changing it on first login.\n\
-         email={email}\n\
-         password={password}"
-    )
-    .with_context(|| format!("writing credentials to {}", path.display()))?;
-    f.sync_all()
-        .with_context(|| format!("fsync of {}", path.display()))?;
-    Ok(())
 }
