@@ -224,10 +224,14 @@ pub async fn update_current_user(
     };
 
     let previous_email = user.email.clone();
+    let mut changed = false;
     let mut email_changed = false;
 
-    if let Some(name) = body.name {
+    if let Some(name) = body.name
+        && name != user.name
+    {
         user.name = name;
+        changed = true;
     }
     if let Some(new_email) = body.email {
         if let Err(reason) = validate_email(&new_email) {
@@ -246,14 +250,17 @@ pub async fn update_current_user(
                 }
             }
             user.email = new_email;
+            changed = true;
             email_changed = true;
         }
     }
 
-    user.updated_at = Utc::now();
-    if let Err(e) = user_store.update_user(&user).await {
-        tracing::error!("failed to update user: {e}");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "failed to update user");
+    if changed {
+        user.updated_at = Utc::now();
+        if let Err(e) = user_store.update_user(&user).await {
+            tracing::error!("failed to update user: {e}");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "failed to update user");
+        }
     }
 
     let resp = UpdateCurrentUserResponse {
@@ -333,18 +340,25 @@ pub async fn change_password(
     // Revoke every refresh token for this user. The empty-string sentinel
     // ensures no real token is excepted (no token's value is the empty
     // string), so all sessions get logged out on next refresh.
+    //
+    // The password commit above has already succeeded. If revocation now
+    // fails (e.g. transient SQLite error), surfacing a 500 to the client
+    // would be a false negative — the user's password *did* change, but
+    // they'd be told the operation failed and might try the old password.
+    // Instead, we log loudly so operators can investigate, and return the
+    // same 204 the client would have seen on full success. Worst case the
+    // siblings outlive the password change until their natural 30-day
+    // refresh-token TTL.
     if let Err(e) = state
         .refresh_token_store
         .revoke_for_user_except(&ctx.user_id.0, "")
         .await
     {
-        tracing::error!("failed to revoke refresh tokens: {e}");
-        // The password is already changed; do not roll back. Surface a 500
-        // so the client knows something went sideways with sessions, but the
-        // password is committed.
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "password changed but session revocation failed",
+        tracing::error!(
+            user_id = %ctx.user_id.0,
+            error = %e,
+            "password changed but failed to revoke sibling refresh tokens — \
+             stale sessions may persist until natural TTL"
         );
     }
 
@@ -591,7 +605,15 @@ mod tests {
     #[tokio::test]
     async fn patch_empty_body_is_noop() {
         let state = setup_password_state().await;
-        let app = test_app(state, ctx_for(USER_ID, "alice@test.local"));
+        let original_updated_at = state
+            .org_storage
+            .user_store()
+            .get_user(&UserId::from(USER_ID))
+            .await
+            .unwrap()
+            .unwrap()
+            .updated_at;
+        let app = test_app(state.clone(), ctx_for(USER_ID, "alice@test.local"));
 
         let resp = app
             .oneshot(
@@ -608,6 +630,61 @@ mod tests {
         let body: UpdateCurrentUserResponse = body_json(resp).await;
         assert_eq!(body.user.email, "alice@test.local");
         assert!(body.previous_email.is_none());
+
+        // No-op must not bump updated_at.
+        let after = state
+            .org_storage
+            .user_store()
+            .get_user(&UserId::from(USER_ID))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.updated_at, original_updated_at,
+            "empty-body PATCH must not write to the database"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_same_values_is_noop() {
+        // Submitting the existing name/email should also avoid a write.
+        let state = setup_password_state().await;
+        let original_updated_at = state
+            .org_storage
+            .user_store()
+            .get_user(&UserId::from(USER_ID))
+            .await
+            .unwrap()
+            .unwrap()
+            .updated_at;
+        let app = test_app(state.clone(), ctx_for(USER_ID, "alice@test.local"));
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/users/me")
+                    .header("content-type", "application/json")
+                    .body(json_body(
+                        &serde_json::json!({"name": "alice", "email": "alice@test.local"}),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let after = state
+            .org_storage
+            .user_store()
+            .get_user(&UserId::from(USER_ID))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.updated_at, original_updated_at,
+            "PATCH with unchanged values must not write to the database"
+        );
     }
 
     #[tokio::test]
