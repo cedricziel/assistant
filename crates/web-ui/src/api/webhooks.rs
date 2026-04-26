@@ -602,6 +602,7 @@ fn is_private_ip(ip: std::net::IpAddr) -> bool {
 }
 
 /// Generate a 32-byte random hex secret.
+#[allow(clippy::expect_used, reason = "OS RNG failure means a broken system")]
 fn generate_secret() -> String {
     use std::fmt::Write as _;
     let mut buf = [0u8; 32];
@@ -614,6 +615,7 @@ fn generate_secret() -> String {
 }
 
 /// Compute HMAC-SHA256 of `body` using `secret`, returning hex.
+#[allow(clippy::expect_used, reason = "HMAC-SHA256 accepts keys of any length")]
 fn compute_signature(secret: &str, body: &str) -> String {
     use hmac::{Hmac, KeyInit, Mac};
     type HmacSha256 = Hmac<sha2::Sha256>;
