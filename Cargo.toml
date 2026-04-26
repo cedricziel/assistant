@@ -171,7 +171,7 @@ parquet = { version = "57.3", default-features = false, features = ["arrow", "as
 # Authentication
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 argon2 = { version = "0.5", features = ["std"] }
-rand = "0.9"
+rand = "0.10"
 # Constant-time comparison (API key verification)
 subtle = "2"
 # Internal crates
