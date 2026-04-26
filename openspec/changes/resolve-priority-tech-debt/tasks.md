@@ -94,5 +94,5 @@ single-call-site bug fix.
 
 - [ ] 4.1 Run `make precommit` on the merged worktree.
 - [ ] 4.2 Run `make test-integration` (Ollama-dependent; `continue-on-error: true` is acceptable).
-- [ ] 4.3 Update `CLAUDE.md` to remove the stale claim that `matrix-sdk` remains in `Cargo.toml` (already fully removed) — small piggyback fix surfaced by the audit.
+- [x] 4.3 Update `AGENTS.md` to remove the stale claim that `matrix-sdk` remains in `Cargo.toml` (already fully removed). The line lived in `AGENTS.md` (referenced from `CLAUDE.md`), not in `CLAUDE.md` itself.
 - [ ] 4.4 Archive this OpenSpec change with `/opsx:archive resolve-priority-tech-debt` once all three slices have shipped.
