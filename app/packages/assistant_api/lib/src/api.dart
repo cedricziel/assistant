@@ -9,6 +9,7 @@ import 'package:assistant_api/src/auth/api_key_auth.dart';
 import 'package:assistant_api/src/auth/basic_auth.dart';
 import 'package:assistant_api/src/auth/bearer_auth.dart';
 import 'package:assistant_api/src/auth/oauth.dart';
+import 'package:assistant_api/src/api/account_api.dart';
 import 'package:assistant_api/src/api/agent_card_api.dart';
 import 'package:assistant_api/src/api/agents_api.dart';
 import 'package:assistant_api/src/api/analytics_api.dart';
@@ -100,6 +101,12 @@ class AssistantApi {
               as ApiKeyAuthInterceptor)
           .apiKeys[name] = apiKey;
     }
+  }
+
+  /// Get AccountApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  AccountApi getAccountApi() {
+    return AccountApi(dio, serializers);
   }
 
   /// Get AgentCardApi instance, base route and serializer can be overridden by a given but be careful,

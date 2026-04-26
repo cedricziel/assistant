@@ -761,6 +761,10 @@ async fn run_with_args(args: Args) -> Result<()> {
         org_storage: org_storage.clone(),
     };
     let api_keys_api_state = api::api_keys::ApiKeysApiState { api_key_store };
+    let account_api_state = api::account::AccountApiState {
+        org_storage: org_storage.clone(),
+        refresh_token_store: Arc::new(org_storage.refresh_token_store()),
+    };
     let catalog_api_state = api::catalog::CatalogApiState {
         org_storage: org_storage.clone(),
     };
@@ -814,6 +818,7 @@ async fn run_with_args(args: Args) -> Result<()> {
                 .merge(api::spaces::spaces_api_router().with_state(spaces_api_state))
                 .merge(api::members::members_api_router().with_state(members_api_state))
                 .merge(api::api_keys::api_keys_router().with_state(api_keys_api_state))
+                .merge(api::account::account_router().with_state(account_api_state))
                 .merge(api::catalog::catalog_api_router().with_state(catalog_api_state))
                 .merge(api::interfaces::interfaces_api_router().with_state(interfaces_api_state))
                 .merge(api::bindings::bindings_api_router().with_state(bindings_api_state))
