@@ -35,6 +35,7 @@ contents:
   # systemd user unit files — enable per-user with:
   #   systemctl --user enable --now assistant-slack
   #   systemctl --user enable --now assistant-mattermost
+  #   systemctl --user enable --now assistant-matrix
   #   systemctl --user enable --now assistant-web-ui
   #   systemctl --user enable --now assistant-nextcloud
   - src: packaging/systemd/user/assistant-slack.service
@@ -44,6 +45,11 @@ contents:
 
   - src: packaging/systemd/user/assistant-mattermost.service
     dst: /usr/lib/systemd/user/assistant-mattermost.service
+    file_info:
+      mode: 0644
+
+  - src: packaging/systemd/user/assistant-matrix.service
+    dst: /usr/lib/systemd/user/assistant-matrix.service
     file_info:
       mode: 0644
 

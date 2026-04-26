@@ -27,7 +27,7 @@ if [ "$action" = "configure" ] && [ -n "$2" ]; then
         if [ "$user_id" -lt 1000 ] 2>/dev/null; then
             continue
         fi
-        for svc in assistant-slack assistant-mattermost assistant-nextcloud assistant-web-ui; do
+        for svc in assistant-slack assistant-mattermost assistant-matrix assistant-nextcloud assistant-web-ui; do
             # Only restart if the unit file exists and was previously enabled.
             if systemctl --user -M "${user_id}@.host" is-enabled "$svc" 2>/dev/null | grep -q enabled; then
                 systemctl --user -M "${user_id}@.host" daemon-reload 2>/dev/null || true
@@ -47,6 +47,7 @@ for your user account:
 
        systemctl --user enable --now assistant-slack
        systemctl --user enable --now assistant-mattermost
+       systemctl --user enable --now assistant-matrix
        systemctl --user enable --now assistant-nextcloud
        systemctl --user enable --now assistant-web-ui
 
@@ -57,6 +58,7 @@ for your user account:
   View logs with:
     journalctl --user -u assistant-slack -f
     journalctl --user -u assistant-mattermost -f
+    journalctl --user -u assistant-matrix -f
     journalctl --user -u assistant-nextcloud -f
     journalctl --user -u assistant-web-ui -f
 
