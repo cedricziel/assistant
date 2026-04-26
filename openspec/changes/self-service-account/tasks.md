@@ -17,10 +17,10 @@
 
 ## 3. OpenAPI + generated Flutter client
 
-- [ ] 3.1 Register the three new operations in `crates/web-ui/src/openapi.rs` `paths(...)` and `schemas(...)` sections.
-- [ ] 3.2 Run `make dump-openapi` and verify `openapi.json` now contains the three operations with snake_case operationIds.
-- [ ] 3.3 Run `make generate-flutter-client` and verify `app/packages/assistant_api/lib/src/api/users_api.dart` (or a new `account_api.dart`) exposes `getCurrentUser`, `updateCurrentUser`, `changePassword`.
-- [ ] 3.4 Add a generated-client smoke test under `app/packages/assistant_api/test/` that calls the three operations against a mocked dio and asserts request shapes.
+- [x] 3.1 Register the three new operations in `crates/web-ui/src/openapi.rs` `paths(...)` and `schemas(...)` sections.
+- [x] 3.2 Run `make dump-openapi` and verify `openapi.json` now contains the three operations with snake_case operationIds.
+- [x] 3.3 Run `make generate-flutter-client` and verify `app/packages/assistant_api/lib/src/api/users_api.dart` (or a new `account_api.dart`) exposes `getCurrentUser`, `updateCurrentUser`, `changePassword`. Generator emitted a new `account_api.dart` with all three methods.
+- [~] 3.4 ~~Add a generated-client smoke test under `app/packages/assistant_api/test/`~~ — **deferred to §5.6**. The `assistant_api` package contains only auto-generated stubs that get overwritten on every regen, and no dio-mock dev dependency exists. The codebase convention is to mock the API at the application/provider layer in `app/test/`. §5.6's widget test will exercise `AccountApi` against a mocked `Dio` from there.
 
 ## 4. Web UI: Account section in Settings
 

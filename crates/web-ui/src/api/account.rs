@@ -55,7 +55,6 @@ pub struct UpdateCurrentUserRequest {
 /// actually changed.
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct UpdateCurrentUserResponse {
-    #[serde(flatten)]
     pub user: UserDetail,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_email: Option<String>,

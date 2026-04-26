@@ -44,6 +44,7 @@ use crate::api::{
     SseSubagentThinkingEvent, SseSubagentTokenEvent, SseSubagentToolResultEvent, SseThinkingEvent,
     SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery, ToolCallSummary,
     UpdateConversationRequest,
+    account::{ChangePasswordRequest, UpdateCurrentUserRequest, UpdateCurrentUserResponse},
     agents::{AgentDetail, AgentSummary, RegisterAgentRequest, UpdateAgentRequest},
     analytics::{
         AnalyticsSummaryResponse, ModelUsageResponse, TimeSeriesResponse, ToolUsageResponse,
@@ -277,6 +278,10 @@ pub struct ApiErrorResponse {
         crate::api::users::get_user,
         crate::api::users::update_user,
         crate::api::users::delete_user,
+        // Self-service account
+        crate::api::account::get_current_user,
+        crate::api::account::update_current_user,
+        crate::api::account::change_password,
         // Space management
         crate::api::spaces::list_spaces,
         crate::api::spaces::create_space,
@@ -466,6 +471,10 @@ pub struct ApiErrorResponse {
             UserDetail,
             CreateUserRequest,
             UpdateUserRequest,
+            // Self-service account types
+            UpdateCurrentUserRequest,
+            UpdateCurrentUserResponse,
+            ChangePasswordRequest,
             // Space management types
             SpaceSummary,
             SpaceDetail,
@@ -534,6 +543,8 @@ pub struct ApiErrorResponse {
          description = "Organization management — list, create, update organizations"),
         (name = "users",
          description = "User management — list, create, update, delete users within an organization"),
+        (name = "account",
+         description = "Self-service account — view and update the caller's own profile and password"),
         (name = "spaces",
          description = "Space management — list, create, update, delete spaces within an organization"),
         (name = "members",

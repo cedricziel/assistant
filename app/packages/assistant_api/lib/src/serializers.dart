@@ -37,6 +37,7 @@ import 'package:assistant_api/src/model/authorization_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/binding_response.dart';
 import 'package:assistant_api/src/model/cancel_task_request.dart';
 import 'package:assistant_api/src/model/catalog_item_response.dart';
+import 'package:assistant_api/src/model/change_password_request.dart';
 import 'package:assistant_api/src/model/client_credentials_o_auth_flow.dart';
 import 'package:assistant_api/src/model/client_info_schema.dart';
 import 'package:assistant_api/src/model/client_registration_schema.dart';
@@ -141,6 +142,8 @@ import 'package:assistant_api/src/model/trace_summary_response.dart';
 import 'package:assistant_api/src/model/unsubscribe_request.dart';
 import 'package:assistant_api/src/model/update_agent_request.dart';
 import 'package:assistant_api/src/model/update_conversation_request.dart';
+import 'package:assistant_api/src/model/update_current_user_request.dart';
+import 'package:assistant_api/src/model/update_current_user_response.dart';
 import 'package:assistant_api/src/model/update_member_request.dart';
 import 'package:assistant_api/src/model/update_org_request.dart';
 import 'package:assistant_api/src/model/update_skill_request.dart';
@@ -189,6 +192,7 @@ part 'serializers.g.dart';
   BindingResponse,
   CancelTaskRequest,
   CatalogItemResponse,
+  ChangePasswordRequest,
   ClientCredentialsOAuthFlow,
   ClientInfoSchema,
   ClientRegistrationSchema,
@@ -293,6 +297,8 @@ part 'serializers.g.dart';
   UnsubscribeRequest,
   UpdateAgentRequest,
   UpdateConversationRequest,
+  UpdateCurrentUserRequest,
+  UpdateCurrentUserResponse,
   UpdateMemberRequest,
   UpdateOrgRequest,
   UpdateSkillRequest,

@@ -4237,6 +4237,88 @@
         ]
       }
     },
+    "/api/users/me": {
+      "get": {
+        "tags": [
+          "account"
+        ],
+        "summary": "`GET /api/users/me` — return the caller's `UserDetail`. Works in any\n`auth_mode`.",
+        "operationId": "get_current_user",
+        "responses": {
+          "200": {
+            "description": "Current user detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "users:read"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "account"
+        ],
+        "summary": "`PATCH /api/users/me` — update the caller's name and/or email.",
+        "operationId": "update_current_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCurrentUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCurrentUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "Email collision or OIDC-managed account"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "users:write"
+            ]
+          }
+        ]
+      }
+    },
     "/api/users/me/api-keys": {
       "get": {
         "tags": [
@@ -4382,6 +4464,49 @@
           },
           {
             "oauth2": []
+          }
+        ]
+      }
+    },
+    "/api/users/me/password": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "`POST /api/users/me/password` — change the caller's password and revoke\nall their refresh tokens. The current access JWT keeps working until it\nnaturally expires; API keys are untouched.",
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Password changed"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Current password incorrect or unauthorized"
+          },
+          "409": {
+            "description": "OIDC-managed account"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          },
+          {
+            "oauth2": [
+              "users:write"
+            ]
           }
         ]
       }
@@ -7320,6 +7445,22 @@
           }
         }
       },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/users/me/password`.",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "properties": {
+          "current_password": {
+            "type": "string"
+          },
+          "new_password": {
+            "type": "string"
+          }
+        }
+      },
       "ClientCredentialsOAuthFlow": {
         "type": "object",
         "description": "OAuth 2.0 Client Credentials flow configuration.",
@@ -10164,6 +10305,42 @@
           }
         }
       },
+      "UpdateCurrentUserRequest": {
+        "type": "object",
+        "description": "Body for `PATCH /api/users/me`. All fields optional; an empty body is a\nno-op that returns the current `UserDetail`.",
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UpdateCurrentUserResponse": {
+        "type": "object",
+        "description": "Response for `PATCH /api/users/me`. Contains the (possibly updated)\n`UserDetail` plus a `previous_email` field present only when the email\nactually changed.",
+        "required": [
+          "user"
+        ],
+        "properties": {
+          "previous_email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserDetail"
+          }
+        }
+      },
       "UpdateMemberRequest": {
         "type": "object",
         "description": "Body for `PATCH /api/orgs/{org_id}/spaces/{space_id}/members/{user_id}`.",
@@ -10849,6 +11026,10 @@
     {
       "name": "users",
       "description": "User management — list, create, update, delete users within an organization"
+    },
+    {
+      "name": "account",
+      "description": "Self-service account — view and update the caller's own profile and password"
     },
     {
       "name": "spaces",

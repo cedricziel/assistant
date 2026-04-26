@@ -1,6 +1,7 @@
 .gitignore
 README.md
 analysis_options.yaml
+doc/AccountApi.md
 doc/AddMemberRequest.md
 doc/AddSkillAccessRequest.md
 doc/AgentCapabilities.md
@@ -32,6 +33,7 @@ doc/CancelTaskRequest.md
 doc/CapabilitiesApi.md
 doc/CatalogApi.md
 doc/CatalogItemResponse.md
+doc/ChangePasswordRequest.md
 doc/ClientCredentialsOAuthFlow.md
 doc/ClientInfoSchema.md
 doc/ClientRegistrationSchema.md
@@ -151,6 +153,8 @@ doc/TracesApi.md
 doc/UnsubscribeRequest.md
 doc/UpdateAgentRequest.md
 doc/UpdateConversationRequest.md
+doc/UpdateCurrentUserRequest.md
+doc/UpdateCurrentUserResponse.md
 doc/UpdateMemberRequest.md
 doc/UpdateOrgRequest.md
 doc/UpdateSkillRequest.md
@@ -178,6 +182,7 @@ doc/WorkflowsApi.md
 doc/WritePersonaFileRequest.md
 lib/assistant_api.dart
 lib/src/api.dart
+lib/src/api/account_api.dart
 lib/src/api/agent_card_api.dart
 lib/src/api/agents_api.dart
 lib/src/api/analytics_api.dart
@@ -235,6 +240,7 @@ lib/src/model/authorization_code_o_auth_flow.dart
 lib/src/model/binding_response.dart
 lib/src/model/cancel_task_request.dart
 lib/src/model/catalog_item_response.dart
+lib/src/model/change_password_request.dart
 lib/src/model/client_credentials_o_auth_flow.dart
 lib/src/model/client_info_schema.dart
 lib/src/model/client_registration_schema.dart
@@ -340,6 +346,8 @@ lib/src/model/trace_summary_response.dart
 lib/src/model/unsubscribe_request.dart
 lib/src/model/update_agent_request.dart
 lib/src/model/update_conversation_request.dart
+lib/src/model/update_current_user_request.dart
+lib/src/model/update_current_user_response.dart
 lib/src/model/update_member_request.dart
 lib/src/model/update_org_request.dart
 lib/src/model/update_skill_request.dart
