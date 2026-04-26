@@ -113,6 +113,11 @@ pub struct TurnResult {
     /// The UUID of the persisted assistant message in the database.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_id: Option<Uuid>,
+    /// Whether any tool dispatched during the turn produced an error.
+    ///
+    /// Gates downstream signals like skill-learner evaluation.
+    #[serde(default)]
+    pub had_errors: bool,
 }
 
 /// A status update emitted during turn processing.

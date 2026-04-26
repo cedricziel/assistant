@@ -233,11 +233,16 @@ async fn run_with_args(args: Args) -> Result<()> {
 
         info!("created admin user: {}", creds.user_id);
         if let Some(pw) = creds.generated_password.as_ref() {
+            let creds_path = base_path.join("admin-credentials.txt");
+            write_admin_credentials_file(&creds_path, &creds.email, pw).with_context(|| {
+                format!("writing admin credentials to {}", creds_path.display())
+            })?;
             info!("============================================================");
-            info!("  Migration complete - initial admin credentials:");
-            info!("    Email:    {}", creds.email);
-            info!("    Password: {pw}");
-            info!("  Change this password after first login.");
+            info!("  Migration complete - initial admin credentials written to:");
+            info!("    {}", creds_path.display());
+            info!("  (file permissions: 0600 — owner read/write only)");
+            info!("  Email: {}", creds.email);
+            info!("  Change this password after first login and delete the file.");
             info!("============================================================");
         } else {
             info!("============================================================");
@@ -1116,4 +1121,31 @@ fn harden_agent_card(card: &mut assistant_a2a_json_schema::agent_card::AgentCard
     }
 
     info!("Auto-hardened agent card with Bearer auth security scheme");
+}
+
+/// Write the generated admin credentials to disk with mode 0600 so the password
+/// is never sent through the tracing/log pipeline. Fails loudly if the file
+/// can't be created — the password would otherwise be lost.
+fn write_admin_credentials_file(path: &Path, email: &str, password: &str) -> Result<()> {
+    use std::io::Write as _;
+
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(0o600);
+    }
+    let mut f = opts
+        .open(path)
+        .with_context(|| format!("opening {} for writing", path.display()))?;
+    writeln!(
+        f,
+        "# Initial admin credentials for assistant web-ui.\n\
+         # Delete this file after recording the password and changing it on first login.\n\
+         email={email}\n\
+         password={password}"
+    )
+    .with_context(|| format!("writing credentials to {}", path.display()))?;
+    Ok(())
 }

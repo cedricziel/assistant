@@ -707,6 +707,7 @@ impl Orchestrator {
                         &interface,
                         &ext_map,
                         &conv_store,
+                        turn_had_errors,
                     )
                     .await?;
                     match outcome {

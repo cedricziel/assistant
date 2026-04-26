@@ -297,6 +297,7 @@ impl Orchestrator {
                                 turn: 0,
                                 attachment_ids: turn_result.attachment_ids,
                                 message_id: turn_result.message_id,
+                                had_errors: turn_result.had_errors,
                             };
 
                             // Propagate batch_id from the request so submit_turn
@@ -455,6 +456,7 @@ impl Orchestrator {
                                 turn: 0,
                                 attachment_ids: vec![],
                                 message_id: None,
+                                had_errors: true,
                             };
                             let mut pub_req = PublishRequest::new(
                                 topic::TURN_RESULT,
@@ -846,7 +848,7 @@ impl Orchestrator {
                     attachments: vec![],
                     attachment_ids: bus_result.attachment_ids,
                     message_id: bus_result.message_id,
-                    had_errors: false,
+                    had_errors: bus_result.had_errors,
                 });
             }
 
