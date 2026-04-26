@@ -479,6 +479,12 @@ test.describe("Authenticated pages", () => {
 
   test("account screen", async ({ page }) => {
     await navigateAndSettle(page, "/settings/account");
+    // Account screen depends on two async API calls (getCurrentUser + getOrg)
+    // before the form renders. In the e2e environment the test-token mode
+    // returns 404 from /api/users/me (no real user record), so the screen
+    // settles into its error state. Wait long enough for Dio to surface
+    // the error so we don't bake in the transient loading spinner.
+    await page.waitForTimeout(FLUTTER_SETTLE_MS * 2);
     await expect(page).toHaveScreenshot("account.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
