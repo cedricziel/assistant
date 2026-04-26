@@ -507,16 +507,22 @@ name = "assistant-integration-tests"
 version = "0.1.142"
 dependencies = [
  "anyhow",
+ "assistant-auth",
  "assistant-core",
  "assistant-llm-provider",
  "assistant-runtime",
  "assistant-skills",
  "assistant-storage",
  "assistant-tool-executor",
+ "assistant-web-ui",
+ "axum",
+ "chrono",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "testcontainers",
  "tokio",
+ "tower",
  "tracing-subscriber",
  "uuid",
 ]
