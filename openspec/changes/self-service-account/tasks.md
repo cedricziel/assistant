@@ -42,14 +42,14 @@ The `web-ui` crate has no HTML/template Account page. It serves the Flutter web 
 
 ## 6. CLI: `account` subcommand
 
-- [ ] 6.1 Add `rpassword` to `[workspace.dependencies]` in root `Cargo.toml` and depend on it from `crates/interface-cli/Cargo.toml`.
-- [ ] 6.2 Promote `authenticated_client` from private inside `cmd_login.rs` to a `pub(crate)` helper (or move to `credentials.rs`) so `cmd_account.rs` can reuse it.
-- [ ] 6.3 Create `crates/interface-cli/src/cmd_account.rs` with four functions: `cmd_account_show`, `cmd_account_set_email`, `cmd_account_set_name`, `cmd_account_change_password`.
-- [ ] 6.4 Implement `cmd_account_show` — `GET /api/users/me`, print email/name/org_id/auth_mode in a friendly block; support `--json` for raw `UserDetail`.
-- [ ] 6.5 Implement `cmd_account_set_email` and `cmd_account_set_name` — `PATCH /api/users/me`, on success print `<Field> changed from <old> to <new>.` (use `previous_email` when present).
-- [ ] 6.6 Implement `cmd_account_change_password` — use `rpassword::prompt_password` for current + new + confirm; reject mismatch locally; submit to `POST /api/users/me/password`; on `409` (OIDC), print actionable message naming issuer; on success print `Password changed.`.
-- [ ] 6.7 Wire up `Account { command: AccountCommand }` enum and `AccountCommand::{Show, SetEmail, SetName, ChangePassword}` variants in `crates/interface-cli/src/main.rs` and dispatch to the new handlers.
-- [ ] 6.8 Add CLI parsing tests in `main.rs` `#[cfg(test)] mod tests` for `account show`, `account set-email foo@bar`, `account set-name "X"`, `account change-password` (mirror existing `parses_api_keys_*` tests).
+- [x] 6.1 Add `rpassword` to `[workspace.dependencies]` in root `Cargo.toml` and depend on it from `crates/interface-cli/Cargo.toml`.
+- [x] 6.2 Promote `authenticated_client` from private inside `cmd_login.rs` to a `pub(crate)` helper (or move to `credentials.rs`) so `cmd_account.rs` can reuse it.
+- [x] 6.3 Create `crates/interface-cli/src/cmd_account.rs` with four functions: `cmd_account_show`, `cmd_account_set_email`, `cmd_account_set_name`, `cmd_account_change_password`.
+- [x] 6.4 Implement `cmd_account_show` — `GET /api/users/me`, print email/name/org_id/auth_mode in a friendly block; support `--json` for raw `UserDetail`.
+- [x] 6.5 Implement `cmd_account_set_email` and `cmd_account_set_name` — `PATCH /api/users/me`, on success print `<Field> changed from <old> to <new>.` (use `previous_email` when present).
+- [x] 6.6 Implement `cmd_account_change_password` — use `rpassword::prompt_password` for current + new + confirm; reject mismatch locally; submit to `POST /api/users/me/password`; on `409` (OIDC), print actionable message naming issuer; on success print `Password changed.`.
+- [x] 6.7 Wire up `Account { command: AccountCommand }` enum and `AccountCommand::{Show, SetEmail, SetName, ChangePassword}` variants in `crates/interface-cli/src/main.rs` and dispatch to the new handlers.
+- [x] 6.8 Add CLI parsing tests in `main.rs` `#[cfg(test)] mod tests` for `account show`, `account set-email foo@bar`, `account set-name "X"`, `account change-password` (mirror existing `parses_api_keys_*` tests).
 
 ## 7. Integration test (cross-cutting)
 

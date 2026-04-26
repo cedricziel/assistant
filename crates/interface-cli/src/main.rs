@@ -1,3 +1,4 @@
+mod cmd_account;
 mod cmd_backup;
 mod cmd_doctor;
 mod cmd_login;
@@ -145,6 +146,33 @@ enum Command {
         #[command(subcommand)]
         command: ApiKeysCommand,
     },
+    /// Manage your own account (name, email, password).
+    Account {
+        #[command(subcommand)]
+        command: AccountCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AccountCommand {
+    /// Show the current user (email, name, org, auth mode).
+    Show {
+        /// Print the raw `UserDetail` JSON instead of a friendly block.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Change your email address.
+    SetEmail {
+        /// New email.
+        email: String,
+    },
+    /// Change your display name.
+    SetName {
+        /// New display name.
+        name: String,
+    },
+    /// Change your password (prompts for current + new + confirm).
+    ChangePassword,
 }
 
 #[derive(Subcommand)]
@@ -520,6 +548,74 @@ mod cli_parse_tests {
         // Verify the env annotation exists by checking that --api-key accepts a value.
         let cli = Cli::try_parse_from(["assistant", "--api-key", "my_key", "status"]).unwrap();
         assert_eq!(cli.api_key.as_deref(), Some("my_key"));
+    }
+
+    #[test]
+    fn parses_account_show() {
+        let cli = Cli::try_parse_from(["assistant", "account", "show"]).unwrap();
+        match cli.command {
+            Some(Command::Account { command }) => {
+                assert!(matches!(
+                    command,
+                    super::AccountCommand::Show { json: false }
+                ));
+            }
+            _ => panic!("expected account show command"),
+        }
+    }
+
+    #[test]
+    fn parses_account_show_json() {
+        let cli = Cli::try_parse_from(["assistant", "account", "show", "--json"]).unwrap();
+        match cli.command {
+            Some(Command::Account { command }) => {
+                assert!(matches!(
+                    command,
+                    super::AccountCommand::Show { json: true }
+                ));
+            }
+            _ => panic!("expected account show --json command"),
+        }
+    }
+
+    #[test]
+    fn parses_account_set_email() {
+        let cli =
+            Cli::try_parse_from(["assistant", "account", "set-email", "foo@bar.com"]).unwrap();
+        match cli.command {
+            Some(Command::Account { command }) => match command {
+                super::AccountCommand::SetEmail { email } => {
+                    assert_eq!(email, "foo@bar.com");
+                }
+                _ => panic!("expected account set-email"),
+            },
+            _ => panic!("expected account command"),
+        }
+    }
+
+    #[test]
+    fn parses_account_set_name() {
+        let cli = Cli::try_parse_from(["assistant", "account", "set-name", "Jane Doe"]).unwrap();
+        match cli.command {
+            Some(Command::Account { command }) => match command {
+                super::AccountCommand::SetName { name } => {
+                    assert_eq!(name, "Jane Doe");
+                }
+                _ => panic!("expected account set-name"),
+            },
+            _ => panic!("expected account command"),
+        }
+    }
+
+    #[test]
+    fn parses_account_change_password() {
+        let cli = Cli::try_parse_from(["assistant", "account", "change-password"]).unwrap();
+        match cli.command {
+            Some(Command::Account { command }) => {
+                assert!(matches!(command, super::AccountCommand::ChangePassword));
+            }
+            _ => panic!("expected account change-password command"),
+        }
     }
 }
 
@@ -1384,6 +1480,22 @@ async fn main() -> Result<()> {
             ApiKeysCommand::List => cmd_login::cmd_api_keys_list(&cli.api_key, &cli.server).await,
             ApiKeysCommand::Revoke { id } => {
                 cmd_login::cmd_api_keys_revoke(id, &cli.api_key, &cli.server).await
+            }
+        };
+    }
+    if let Some(Command::Account { command }) = &cli.command {
+        return match command {
+            AccountCommand::Show { json } => {
+                cmd_account::cmd_account_show(*json, &cli.api_key, &cli.server).await
+            }
+            AccountCommand::SetEmail { email } => {
+                cmd_account::cmd_account_set_email(email, &cli.api_key, &cli.server).await
+            }
+            AccountCommand::SetName { name } => {
+                cmd_account::cmd_account_set_name(name, &cli.api_key, &cli.server).await
+            }
+            AccountCommand::ChangePassword => {
+                cmd_account::cmd_account_change_password(&cli.api_key, &cli.server).await
             }
         };
     }

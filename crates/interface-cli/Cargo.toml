@@ -45,6 +45,8 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 # Terminal line editor
 reedline = { workspace = true }
+# TTY-safe password prompt (used by `assistant account change-password`)
+rpassword = { workspace = true }
 # Config file parsing
 toml = { workspace = true }
 # Home directory
