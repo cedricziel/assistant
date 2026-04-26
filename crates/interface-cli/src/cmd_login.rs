@@ -274,7 +274,7 @@ pub fn cmd_status() -> Result<()> {
 ///
 /// If `api_key` and `server_url` are provided, uses them directly (no
 /// stored credentials needed). Otherwise falls back to `credentials.json`.
-async fn authenticated_client(
+pub(crate) async fn authenticated_client(
     api_key: &Option<String>,
     server_override: &Option<String>,
 ) -> Result<(String, reqwest::Client, String)> {

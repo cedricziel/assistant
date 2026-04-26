@@ -89,6 +89,8 @@ axum = { version = "0.8", features = ["macros", "multipart"] }
 futures = "0.3"
 # Terminal line editor
 reedline = "0.47"
+# TTY-safe password prompt (used by `assistant account change-password`)
+rpassword = "7"
 # YAML frontmatter parser
 gray_matter = "0.3"
 # YAML serialization (for writing agent card frontmatter)
