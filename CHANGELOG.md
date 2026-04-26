@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.141](https://github.com/cedricziel/assistant/compare/v0.1.140...v0.1.141) (2026-04-26)
+
+
+### Features
+
+* **app:** self-service Account screen for name/email/password ([#662](https://github.com/cedricziel/assistant/issues/662)) ([68160ef](https://github.com/cedricziel/assistant/commit/68160eff277a87f75aed4a773111644f8a44c9bd))
+* **auth:** self-service-account proposal + bulk refresh-token revocation ([#658](https://github.com/cedricziel/assistant/issues/658)) ([7cb55fe](https://github.com/cedricziel/assistant/commit/7cb55fedb0557c3024bf2803308b890339ef3e9f))
+* **cli:** `assistant account` subcommand ([#663](https://github.com/cedricziel/assistant/issues/663)) ([35e4df1](https://github.com/cedricziel/assistant/commit/35e4df1f291914ab86857508c35876dddee8cd55))
+* **web-ui:** self-service /api/users/me account endpoints ([#660](https://github.com/cedricziel/assistant/issues/660)) ([f007aa2](https://github.com/cedricziel/assistant/commit/f007aa206164c98bad463448cedeb6e77489ed3d))
+
 ## [0.1.140](https://github.com/cedricziel/assistant/compare/v0.1.139...v0.1.140) (2026-04-25)
 
 
