@@ -1130,7 +1130,10 @@ fn write_admin_credentials_file(path: &Path, email: &str, password: &str) -> Res
     use std::io::Write as _;
 
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    // `create_new` refuses to follow symlinks or overwrite an existing file,
+    // which is essential for a 0600-mode secrets file written into a shared
+    // base path.
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -1139,6 +1142,12 @@ fn write_admin_credentials_file(path: &Path, email: &str, password: &str) -> Res
     let mut f = opts
         .open(path)
         .with_context(|| format!("opening {} for writing", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("restricting permissions on {}", path.display()))?;
+    }
     writeln!(
         f,
         "# Initial admin credentials for assistant web-ui.\n\
@@ -1147,5 +1156,7 @@ fn write_admin_credentials_file(path: &Path, email: &str, password: &str) -> Res
          password={password}"
     )
     .with_context(|| format!("writing credentials to {}", path.display()))?;
+    f.sync_all()
+        .with_context(|| format!("fsync of {}", path.display()))?;
     Ok(())
 }
