@@ -1,6 +1,6 @@
 ## 1. Audit hardcoded `assistant.db` references
 
-- [ ] 1.1 `grep -rn '"assistant.db"' crates/` and inventory every literal — split
+- [x] 1.1 `grep -rn '"assistant.db"' crates/` and inventory every literal — split
       into "runtime path" (must move to `OrgPoolFactory`), "legacy fallback"
       (kept under deprecation), and "log/error message" (cosmetic).
 - [ ] 1.2 Update the inventory comment block at the top of
@@ -42,17 +42,17 @@
 
 ## 5. Atomic cutover in `migrate_database`
 
-- [ ] 5.1 Write failing unit test in `crates/storage/src/migration.rs` that
+- [x] 5.1 Write failing unit test in `crates/storage/src/migration.rs` that
       runs `migrate_database` against a tempdir with `assistant.db`,
       `assistant.db-shm`, `assistant.db-wal` and asserts post-conditions:
       `space.db` exists, `assistant.db.legacy` exists, the three legacy paths
       no longer exist.
-- [ ] 5.2 After the existing copy step in `migrate_database`, add
+- [x] 5.2 After the existing copy step in `migrate_database`, add
       `tokio::fs::rename(assistant.db, assistant.db.legacy)` and remove the
       `*-shm` / `*-wal` sidecars.
-- [ ] 5.3 Add a failure-mode test: when the copy fails, neither the rename nor
+- [x] 5.3 Add a failure-mode test: when the copy fails, neither the rename nor
       the sidecar removal happens.
-- [ ] 5.4 Confirm tests pass.
+- [x] 5.4 Confirm tests pass.
 
 ## 6. `assistant migrate finalize` subcommand
 
@@ -89,7 +89,7 @@
 
 - [ ] 8.1 Add `docs/operations/multi-org-cutover.md` covering: what changed,
       how to verify with `assistant doctor`, when to run `assistant migrate
-    finalize`, the meaning of `assistant.db.legacy`, and a rollback
+finalize`, the meaning of `assistant.db.legacy`, and a rollback
       procedure.
 - [ ] 8.2 Update the runtime-data section in `CLAUDE.md` to mention that
       `assistant.db.legacy` is the post-cutover artifact and may be removed
