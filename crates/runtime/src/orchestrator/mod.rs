@@ -67,6 +67,9 @@ pub struct TurnResult {
     /// The UUID of the persisted assistant message in the database.
     /// `None` when the message could not be saved or the ID was unavailable.
     pub message_id: Option<Uuid>,
+    /// `true` if any tool dispatch in this turn returned an `Err(...)`.
+    /// Used to gate post-turn skill-learner evaluation.
+    pub had_errors: bool,
 }
 
 // ── Internal enums ────────────────────────────────────────────────────────────
@@ -93,7 +96,7 @@ pub(crate) enum DispatchOutcome {
     /// The user denied execution via the confirmation gate.
     Denied,
     /// The tool was executed and its result finalized.
-    Executed,
+    Executed { had_error: bool },
 }
 
 /// Per-conversation extension tool registration consumed by the worker.
@@ -571,6 +574,7 @@ impl Orchestrator {
         let mut replied = false;
         let mut turn_attachments: Vec<Attachment> = Vec::new();
         let mut turn_attachment_ids: Vec<Uuid> = Vec::new();
+        let mut turn_had_errors = false;
 
         // 5. Tool-calling loop.
         for iteration in 0..self.max_iterations {
@@ -703,6 +707,7 @@ impl Orchestrator {
                         &interface,
                         &ext_map,
                         &conv_store,
+                        turn_had_errors,
                     )
                     .await?;
                     match outcome {
@@ -803,22 +808,24 @@ impl Orchestrator {
                             let exec_result = handler.run(params_map, &ctx).await;
                             let elapsed = start.elapsed();
 
-                            self.finalize_tool_result(
-                                &name,
-                                Some(&params),
-                                exec_result,
-                                elapsed,
-                                &mut otel_span,
-                                &mut history,
-                                &conv_store,
-                                conversation_id,
-                                turn_index,
-                                &mut turn_attachments,
-                                &mut turn_attachment_ids,
-                                token_sink.as_ref(),
-                                tool_call_id.as_deref(),
-                            )
-                            .await;
+                            let finalized = self
+                                .finalize_tool_result(
+                                    &name,
+                                    Some(&params),
+                                    exec_result,
+                                    elapsed,
+                                    &mut otel_span,
+                                    &mut history,
+                                    &conv_store,
+                                    conversation_id,
+                                    turn_index,
+                                    &mut turn_attachments,
+                                    &mut turn_attachment_ids,
+                                    token_sink.as_ref(),
+                                    tool_call_id.as_deref(),
+                                )
+                                .await;
+                            turn_had_errors |= finalized.had_error;
                         } else {
                             // Global executor path.
                             let builtin_span = info_span!(
@@ -844,8 +851,11 @@ impl Orchestrator {
                                     tool_call_id.as_deref(),
                                 )
                                 .await;
-                            if matches!(outcome, DispatchOutcome::Denied) {
-                                continue;
+                            match outcome {
+                                DispatchOutcome::Denied => continue,
+                                DispatchOutcome::Executed { had_error } => {
+                                    turn_had_errors |= had_error;
+                                }
                             }
                         }
 
@@ -867,6 +877,7 @@ impl Orchestrator {
                             attachments: turn_attachments,
                             attachment_ids: turn_attachment_ids,
                             message_id: None,
+                            had_errors: turn_had_errors,
                         });
                     }
                 }
@@ -959,7 +970,7 @@ impl Orchestrator {
         let mut turn_attachments: Vec<Attachment> = Vec::new();
         let mut turn_attachment_ids: Vec<Uuid> = Vec::new();
         let mut turn_tool_count: usize = 0;
-        let turn_had_errors = false; // TODO: track via tool dispatch error signals
+        let mut turn_had_errors = false;
 
         for iteration in 0..self.max_iterations {
             let iteration_span = info_span!("turn_iteration", iteration);
@@ -1140,6 +1151,7 @@ impl Orchestrator {
                         attachments: turn_attachments,
                         attachment_ids: turn_attachment_ids,
                         message_id: saved_message_id,
+                        had_errors: turn_had_errors,
                     });
                 }
 
@@ -1207,8 +1219,11 @@ impl Orchestrator {
                                 tool_call_id.as_deref(),
                             )
                             .await;
-                        if matches!(outcome, DispatchOutcome::Denied) {
-                            continue;
+                        match outcome {
+                            DispatchOutcome::Denied => continue,
+                            DispatchOutcome::Executed { had_error } => {
+                                turn_had_errors |= had_error;
+                            }
                         }
                         turn_tool_count += 1;
                     }

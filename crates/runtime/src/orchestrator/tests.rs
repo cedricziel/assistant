@@ -3372,3 +3372,161 @@ async fn turn_identity_reaches_tool_handler() {
         "space_id should reach tool handler"
     );
 }
+
+// ── Slice C: turn_had_errors signal ───────────────────────────────────────
+
+/// Tool that always returns an `Err(...)` — used to drive the
+/// `turn_had_errors` signal in the orchestrator turn loop.
+struct FailingTool;
+
+#[async_trait]
+impl ToolHandler for FailingTool {
+    fn name(&self) -> &str {
+        "failing-tool"
+    }
+
+    fn description(&self) -> &str {
+        "always errors"
+    }
+
+    fn params_schema(&self) -> Value {
+        json!({ "type": "object", "properties": {}, "required": [] })
+    }
+
+    async fn run(
+        &self,
+        _params: HashMap<String, Value>,
+        _ctx: &ExecutionContext,
+    ) -> anyhow::Result<ToolOutput> {
+        anyhow::bail!("simulated tool failure")
+    }
+}
+
+#[tokio::test]
+async fn run_turn_marks_had_errors_when_tool_fails() {
+    let server = MockServer::start().await;
+
+    // 1st LLM call: model invokes the failing tool.
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["failing-tool"])),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    // 2nd LLM call: final answer (model recovers from the tool error).
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("recovered")))
+        .mount(&server)
+        .await;
+
+    let (orch, _, executor) = build_with_executor(&server.uri()).await;
+    executor.register_ambient_tool(Arc::new(FailingTool));
+
+    let result = orch
+        .run_turn(
+            "trigger error",
+            Uuid::new_v4(),
+            Interface::Cli,
+            None,
+            vec![],
+            TurnIdentity::default(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.answer, "recovered",
+        "turn should still return the recovered final answer after a failing tool"
+    );
+    assert!(
+        result.had_errors,
+        "TurnResult.had_errors should be true after a tool returned Err"
+    );
+}
+
+#[tokio::test]
+async fn run_turn_clears_had_errors_when_no_tool_fails() {
+    let server = MockServer::start().await;
+    mount_answer(&server, "all good").await;
+
+    let (orch, _, _executor) = build_with_executor(&server.uri()).await;
+
+    let result = orch
+        .run_turn(
+            "no tool calls",
+            Uuid::new_v4(),
+            Interface::Cli,
+            None,
+            vec![],
+            TurnIdentity::default(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.answer, "all good",
+        "turn without tool failures should return the model answer"
+    );
+    assert!(
+        !result.had_errors,
+        "TurnResult.had_errors should be false when no tool errored"
+    );
+}
+
+#[tokio::test]
+async fn run_turn_with_tools_marks_had_errors_when_extension_fails() {
+    // Exercises the Slack/Mattermost extension-tool path: a failing extension
+    // handler must propagate `had_errors = true` through
+    // `handle_final_answer_with_extensions` and the per-turn accumulator,
+    // mirroring `run_turn_marks_had_errors_when_tool_fails` for `run_turn`.
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ollama_tool_calls(&["failing-tool"])),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ollama_answer("recovered")))
+        .mount(&server)
+        .await;
+
+    let (orch, _) = build(&server.uri()).await;
+    let failing_ext: Arc<dyn ToolHandler> = Arc::new(FailingTool);
+
+    // Use Cli interface so a plain final-answer turn is accepted without a
+    // `reply` extension tool; the focus of this test is the extension-handler
+    // failure path, not the messenger reply protocol.
+    //
+    // `run_turn_with_tools_impl` always returns `answer: String::new()` (the
+    // assistant text is persisted to the conversation store, not surfaced
+    // through TurnResult), so we only assert on `had_errors`.
+    let result = orch
+        .run_turn_with_tools(
+            "trigger error",
+            Uuid::new_v4(),
+            Interface::Cli,
+            vec![failing_ext],
+            None,
+            vec![],
+            vec![],
+            TurnIdentity::default(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        result.had_errors,
+        "TurnResult.had_errors must be true after a failing extension tool \
+         (covers the run_turn_with_tools_impl wiring)"
+    );
+}

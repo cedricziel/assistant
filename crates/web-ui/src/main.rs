@@ -198,10 +198,60 @@ async fn run_with_args(args: Args) -> Result<()> {
     let base_path = db_path.parent().unwrap_or(Path::new("."));
     if assistant_storage::migration::is_legacy_layout(base_path) {
         info!("detected legacy single-user layout — running auto-migration");
-        let backup = assistant_storage::migration::run_migration(base_path)
+
+        // Step 1: backup (lives in assistant-backup so storage doesn't depend
+        // on the backup engine).
+        let backup_path = assistant_backup::backup_legacy_install(base_path)
             .await
-            .context("legacy → multi-org auto-migration failed")?;
-        info!("migration complete — backup at {}", backup.display());
+            .context("creating pre-migration backup")?;
+
+        // Step 2: filesystem layout migration.
+        assistant_storage::migration::migrate_filesystem(base_path)
+            .await
+            .context("legacy → multi-org filesystem migration failed")?;
+
+        // Step 3: database migration. Returns the opened org storage layer
+        // plus the seeded org/space ids so we can bootstrap the admin user.
+        let (org_storage_for_bootstrap, org_id, space_id) =
+            assistant_storage::migration::migrate_database(base_path)
+                .await
+                .context("legacy → multi-org database migration failed")?;
+
+        // Step 4: bootstrap the initial admin user (lives in assistant-auth so
+        // storage doesn't depend on auth-domain logic).
+        let user_store = org_storage_for_bootstrap.user_store();
+        let membership_store = org_storage_for_bootstrap.membership_store();
+        let creds = assistant_auth::bootstrap::create_admin_user(
+            &user_store,
+            &membership_store,
+            &org_id,
+            &space_id,
+        )
+        .await
+        .context("creating initial admin user")?;
+        drop(org_storage_for_bootstrap);
+
+        info!("created admin user: {}", creds.user_id);
+        if let Some(pw) = creds.generated_password.as_ref() {
+            let creds_path = base_path.join("admin-credentials.txt");
+            write_admin_credentials_file(&creds_path, &creds.email, pw).with_context(|| {
+                format!("writing admin credentials to {}", creds_path.display())
+            })?;
+            info!("============================================================");
+            info!("  Migration complete - initial admin credentials written to:");
+            info!("    {}", creds_path.display());
+            info!("  (file permissions: 0600 — owner read/write only)");
+            info!("  Email: {}", creds.email);
+            info!("  Change this password after first login and delete the file.");
+            info!("============================================================");
+        } else {
+            info!("============================================================");
+            info!("  Migration complete - admin user created.");
+            info!("    Email:    {}", creds.email);
+            info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
+            info!("============================================================");
+        }
+        info!("migration complete — backup at {}", backup_path.display());
     }
 
     let storage = Arc::new(StorageLayer::new(&db_path).await?);
@@ -1071,4 +1121,42 @@ fn harden_agent_card(card: &mut assistant_a2a_json_schema::agent_card::AgentCard
     }
 
     info!("Auto-hardened agent card with Bearer auth security scheme");
+}
+
+/// Write the generated admin credentials to disk with mode 0600 so the password
+/// is never sent through the tracing/log pipeline. Fails loudly if the file
+/// can't be created — the password would otherwise be lost.
+fn write_admin_credentials_file(path: &Path, email: &str, password: &str) -> Result<()> {
+    use std::io::Write as _;
+
+    let mut opts = std::fs::OpenOptions::new();
+    // `create_new` refuses to follow symlinks or overwrite an existing file,
+    // which is essential for a 0600-mode secrets file written into a shared
+    // base path.
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(0o600);
+    }
+    let mut f = opts
+        .open(path)
+        .with_context(|| format!("opening {} for writing", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("restricting permissions on {}", path.display()))?;
+    }
+    writeln!(
+        f,
+        "# Initial admin credentials for assistant web-ui.\n\
+         # Delete this file after recording the password and changing it on first login.\n\
+         email={email}\n\
+         password={password}"
+    )
+    .with_context(|| format!("writing credentials to {}", path.display()))?;
+    f.sync_all()
+        .with_context(|| format!("fsync of {}", path.display()))?;
+    Ok(())
 }

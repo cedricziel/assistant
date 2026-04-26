@@ -1,25 +1,29 @@
 //! Legacy-to-multi-org migration for existing single-user installations.
 //!
 //! Detects the legacy `~/.assistant/` layout (flat `assistant.db` + `agents/` +
-//! `skills/` + `config.toml`) and migrates it to the new org/space directory
-//! structure introduced by the multi-user feature.
+//! `skills/` + `config.toml`) and migrates the filesystem and databases to the
+//! new org/space directory structure introduced by the multi-user feature.
 //!
-//! ## Migration steps
+//! Storage owns the schema-shaped migration steps:
 //!
 //! 1. **Detect** — [`is_legacy_layout`] checks for `assistant.db` without `orgs/`.
-//! 2. **Backup** — [`backup_legacy`] creates a `.tar.gz` snapshot via the backup crate.
-//! 3. **Filesystem** — [`migrate_filesystem`] creates `orgs/default/spaces/default/`
+//! 2. **Filesystem** — [`migrate_filesystem`] creates `orgs/default/spaces/default/`
 //!    and copies `agents/`, `skills/`, interface configs.
-//! 4. **Database** — [`migrate_database`] copies `assistant.db` → `space.db`, creates
-//!    `org.db` with the default org, space, and initial admin user.
-//! 5. **Admin user** — [`create_admin_user`] seeds the first admin account.
+//! 3. **Database** — [`migrate_database`] copies `assistant.db` → `space.db` and
+//!    seeds `org.db` with the default org and space.
+//!
+//! The pre-migration backup (provided by `assistant-backup::backup_legacy_install`)
+//! and admin-user bootstrap (provided by `assistant-auth::bootstrap::create_admin_user`)
+//! are sequenced by the caller so this crate keeps a clean dependency boundary.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use tracing::{info, warn};
 
-use assistant_backup::{BackupEngine, BackupOptions};
+use assistant_core::identity::{OrgId, SpaceId};
+
+use crate::org_storage::OrgStorageLayer;
 
 // -- Constants ---------------------------------------------------------------
 
@@ -42,45 +46,6 @@ pub fn is_legacy_layout(base_path: &Path) -> bool {
     let has_db = base_path.join("assistant.db").exists();
     let has_orgs = base_path.join("orgs").is_dir();
     has_db && !has_orgs
-}
-
-// -- Backup ------------------------------------------------------------------
-
-/// Create a `.tar.gz` backup of the entire legacy installation before migrating.
-///
-/// Returns the path to the created archive. Uses the existing [`BackupEngine`]
-/// so all discovery, WAL checkpoint, and manifest logic is reused.
-pub async fn backup_legacy(base_path: &Path) -> Result<PathBuf> {
-    let backups_dir = base_path.join("backups");
-    tokio::fs::create_dir_all(&backups_dir)
-        .await
-        .with_context(|| format!("creating backups directory: {}", backups_dir.display()))?;
-
-    let archive_name = format!(
-        "pre-migration-{}.tar.gz",
-        chrono::Utc::now().format("%Y%m%d-%H%M%S")
-    );
-    let output_path = backups_dir.join(&archive_name);
-
-    let opts = BackupOptions {
-        install_dir: base_path.to_path_buf(),
-        output_path: output_path.clone(),
-        db_path: Some(base_path.join("assistant.db")),
-    };
-
-    let result = BackupEngine::new()
-        .run(opts)
-        .await
-        .context("creating pre-migration backup")?;
-
-    info!(
-        "pre-migration backup created: {} ({} files, {} bytes)",
-        result.output_path.display(),
-        result.entry_count,
-        result.archive_size
-    );
-
-    Ok(result.output_path)
 }
 
 // -- Filesystem migration ----------------------------------------------------
@@ -251,17 +216,20 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
 // -- Database migration ------------------------------------------------------
 
-/// Copy `assistant.db` to `space.db` and create `org.db` with the default
-/// org, space, and initial admin user.
+/// Copy `assistant.db` to `space.db` and create `org.db` seeded with the
+/// default org and space.
 ///
 /// - `assistant.db` → `orgs/default/spaces/default/space.db` (verbatim copy;
 ///   existing space-level migrations will apply on next startup).
 /// - Creates `org.db` (at the installation root) with org schema populated with:
 ///   - Default organization row
 ///   - Default space row
-///   - Admin user (see [`create_admin_user`])
-///   - Admin's space membership (OrgAdmin role)
-pub async fn migrate_database(base_path: &Path) -> Result<()> {
+///
+/// Returns the opened [`OrgStorageLayer`] together with the seeded
+/// [`OrgId`]/[`SpaceId`] so the caller can layer auth-domain bootstrap
+/// (admin user creation) on top without forcing storage to depend on
+/// `assistant-auth`.
+pub async fn migrate_database(base_path: &Path) -> Result<(OrgStorageLayer, OrgId, SpaceId)> {
     let legacy_db = base_path.join("assistant.db");
     let org_dir = base_path.join("orgs").join(DEFAULT_ORG_SLUG);
     let space_dir = org_dir.join("spaces").join(DEFAULT_SPACE_SLUG);
@@ -295,12 +263,11 @@ pub async fn migrate_database(base_path: &Path) -> Result<()> {
     // Create org.db at the installation root (next to assistant.db), matching
     // the path resolved by `OrgPoolFactory::org_db_path()`.
     let org_db_path = base_path.join("org.db");
-    let org_storage = crate::org_storage::OrgStorageLayer::new(&org_db_path)
+    let org_storage = OrgStorageLayer::new(&org_db_path)
         .await
         .context("creating org.db")?;
 
     // Seed default org.
-    use assistant_core::identity::{OrgId, SpaceId};
     use assistant_core::store::{OrgStore, Organization, Space, SpaceStore};
     let now = chrono::Utc::now();
 
@@ -335,145 +302,7 @@ pub async fn migrate_database(base_path: &Path) -> Result<()> {
         .context("creating default space")?;
     info!("created default space: {}", space.id);
 
-    // Create admin user and membership.
-    let creds = create_admin_user(&org_storage, &org.id.0, &space.id.0).await?;
-    info!("created admin user: {}", creds.user_id);
-
-    if let Some(ref pw) = creds.generated_password {
-        info!("============================================================");
-        info!("  Migration complete - initial admin credentials:");
-        info!("    Email:    {}", creds.email);
-        info!("    Password: {pw}");
-        info!("  Change this password after first login.");
-        info!("============================================================");
-    } else {
-        info!("============================================================");
-        info!("  Migration complete - admin user created.");
-        info!("    Email:    {}", creds.email);
-        info!("    Password: (your ASSISTANT_WEB_TOKEN value)");
-        info!("============================================================");
-    }
-
-    Ok(())
-}
-
-// -- Admin user creation -----------------------------------------------------
-
-/// Credentials returned by [`create_admin_user`] so the caller can display
-/// them through the appropriate output channel (e.g. `info!` log, CLI
-/// banner, etc.) instead of writing directly to stdout from library code.
-#[derive(Debug)]
-pub struct AdminCredentials {
-    pub user_id: String,
-    pub email: String,
-    /// `Some(password)` when a random password was generated.
-    /// `None` when `ASSISTANT_WEB_TOKEN` was used (caller already knows it).
-    pub generated_password: Option<String>,
-}
-
-/// Create the initial admin user during migration.
-///
-/// - If `ASSISTANT_WEB_TOKEN` is set, uses it as a temporary password.
-/// - Otherwise, generates a random 24-character password.
-///
-/// Returns [`AdminCredentials`] so the caller can display them.
-pub async fn create_admin_user(
-    org_storage: &crate::org_storage::OrgStorageLayer,
-    org_id: &str,
-    space_id: &str,
-) -> Result<AdminCredentials> {
-    use assistant_auth::password::hash_password;
-    use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
-    use assistant_core::store::{MembershipStore, SpaceMembership, User, UserStore};
-    use rand::Rng;
-
-    let now = chrono::Utc::now();
-
-    // Determine password source.
-    let (password, was_generated) = match std::env::var("ASSISTANT_WEB_TOKEN") {
-        Ok(token) if !token.is_empty() => {
-            info!("using ASSISTANT_WEB_TOKEN as initial admin password");
-            (token, false)
-        }
-        _ => {
-            // Generate a random 24-character alphanumeric password.
-            let pw: String = rand::rng()
-                .sample_iter(&rand::distr::Alphanumeric)
-                .take(24)
-                .map(char::from)
-                .collect();
-            (pw, true)
-        }
-    };
-
-    let password_hash = hash_password(&password).context("hashing admin password")?;
-
-    let user_id = format!("usr_{}", uuid::Uuid::new_v4());
-    let user = User {
-        id: UserId::from(user_id.clone()),
-        org_id: OrgId::from(org_id),
-        email: "admin@localhost".into(),
-        name: "Admin".into(),
-        password_hash,
-        idp_issuer: None,
-        idp_subject: None,
-        created_at: now,
-        updated_at: now,
-    };
-
-    org_storage
-        .user_store()
-        .create_user(&user)
-        .await
-        .context("creating admin user")?;
-
-    // Grant OrgAdmin role in default space.
-    let membership = SpaceMembership {
-        user_id: UserId::from(user_id.clone()),
-        space_id: SpaceId::from(space_id),
-        role: Role::OrgAdmin,
-        created_at: now,
-    };
-    org_storage
-        .membership_store()
-        .add_membership(&membership)
-        .await
-        .context("granting admin membership")?;
-
-    Ok(AdminCredentials {
-        user_id,
-        email: "admin@localhost".into(),
-        generated_password: if was_generated { Some(password) } else { None },
-    })
-}
-
-// -- Full migration entry point ----------------------------------------------
-
-/// Run the complete legacy → multi-org migration.
-///
-/// 1. Detect legacy layout (caller should check [`is_legacy_layout`] first).
-/// 2. Create a pre-migration backup.
-/// 3. Migrate filesystem layout.
-/// 4. Migrate database (copy + create org.db with admin user).
-///
-/// Returns the path to the pre-migration backup archive.
-pub async fn run_migration(base_path: &Path) -> Result<PathBuf> {
-    info!(
-        "starting legacy → multi-org migration at {}",
-        base_path.display()
-    );
-
-    // Step 1: Backup
-    let backup_path = backup_legacy(base_path).await?;
-
-    // Step 2: Filesystem migration (dirs, config split)
-    migrate_filesystem(base_path).await?;
-
-    // Step 3: Database migration (copy + org.db creation)
-    migrate_database(base_path).await?;
-
-    info!("migration complete. Backup at: {}", backup_path.display());
-    Ok(backup_path)
+    Ok((org_storage, org.id, space.id))
 }
 
 // -- Tests -------------------------------------------------------------------
@@ -637,29 +466,6 @@ enabled = true
         assert_eq!(content, "world");
     }
 
-    // -- backup_legacy tests -------------------------------------------------
-
-    #[tokio::test]
-    async fn backup_legacy_creates_archive() {
-        let dir = TempDir::new().unwrap();
-
-        // Seed a minimal legacy layout.
-        std::fs::write(dir.path().join("assistant.db"), b"fake-db-content").unwrap();
-        std::fs::write(
-            dir.path().join("config.toml"),
-            b"[llm]\nprovider = \"ollama\"",
-        )
-        .unwrap();
-
-        let archive_path = backup_legacy(dir.path()).await.unwrap();
-
-        assert!(archive_path.exists(), "backup archive should be created");
-        assert!(
-            archive_path.to_string_lossy().contains("pre-migration"),
-            "archive name should contain 'pre-migration'"
-        );
-    }
-
     // -- migrate_filesystem tests --------------------------------------------
 
     #[tokio::test]
@@ -723,7 +529,7 @@ enabled = true
         let storage = crate::StorageLayer::new(&legacy_db).await.unwrap();
         drop(storage);
 
-        migrate_database(dir.path()).await.unwrap();
+        let (org_storage, org_id, space_id) = migrate_database(dir.path()).await.unwrap();
 
         let space_db = dir.path().join("orgs/default/spaces/default/space.db");
         assert!(
@@ -735,12 +541,10 @@ enabled = true
         assert!(org_db.exists(), "org.db should be created at install root");
 
         // Verify org.db has a default organization.
-        let org_storage = crate::org_storage::OrgStorageLayer::new(&org_db)
-            .await
-            .unwrap();
         let orgs = org_storage.org_store().list_orgs().await.unwrap();
         assert_eq!(orgs.len(), 1, "org.db should have exactly one organization");
         assert_eq!(orgs[0].slug, "default");
+        assert_eq!(orgs[0].id, org_id);
 
         // Verify there's a default space.
         let spaces = org_storage
@@ -750,19 +554,19 @@ enabled = true
             .unwrap();
         assert_eq!(spaces.len(), 1, "org.db should have exactly one space");
         assert_eq!(spaces[0].slug, "default");
+        assert_eq!(spaces[0].id, space_id);
 
-        // Verify admin user exists.
+        // No users should be created — that is now the caller's responsibility
+        // (handled via assistant_auth::bootstrap::create_admin_user).
         let users = org_storage
             .user_store()
             .list_users(&orgs[0].id)
             .await
             .unwrap();
-        assert_eq!(
-            users.len(),
-            1,
-            "org.db should have exactly one user (admin)"
+        assert!(
+            users.is_empty(),
+            "migrate_database should not seed users (caller bootstraps admin)"
         );
-        assert_eq!(users[0].email, "admin@localhost");
     }
 
     // -- full migration round-trip -------------------------------------------
@@ -817,9 +621,30 @@ enabled = true
         // Verify it's detected as legacy.
         assert!(is_legacy_layout(dir.path()), "should be legacy layout");
 
-        // Run full migration.
-        let backup_path = run_migration(dir.path()).await.unwrap();
+        // Compose the full migration the way the production caller does:
+        //   1. backup    (assistant_backup::backup_legacy_install)
+        //   2. fs        (storage::migration::migrate_filesystem)
+        //   3. database  (storage::migration::migrate_database)
+        //   4. admin     (assistant_auth::bootstrap::create_admin_user)
+        let backup_path = assistant_backup::backup_legacy_install(dir.path())
+            .await
+            .unwrap();
         assert!(backup_path.exists(), "backup archive should exist");
+
+        migrate_filesystem(dir.path()).await.unwrap();
+        let (org_storage_for_bootstrap, org_id, space_id) =
+            migrate_database(dir.path()).await.unwrap();
+        let user_store = org_storage_for_bootstrap.user_store();
+        let membership_store = org_storage_for_bootstrap.membership_store();
+        assistant_auth::bootstrap::create_admin_user(
+            &user_store,
+            &membership_store,
+            &org_id,
+            &space_id,
+        )
+        .await
+        .unwrap();
+        drop(org_storage_for_bootstrap);
 
         // After migration, it should no longer be detected as legacy.
         assert!(

@@ -16,6 +16,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 assistant-a2a-json-schema = { path = "../a2a-json-schema", features = ["utoipa"] }
 assistant-auth = { path = "../auth" }
+assistant-backup = { path = "../backup" }
 assistant-core = { path = "../core" }
 assistant-llm-provider = { path = "../llm-provider" }
 assistant-runtime = { path = "../runtime" }

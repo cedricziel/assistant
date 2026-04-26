@@ -7,8 +7,6 @@ description = "SQLite-backed storage layer: skill registry, traces, memory, and 
 
 [dependencies]
 assistant-core = { path = "../core" }
-assistant-auth = { path = "../auth" }
-assistant-backup = { path = "../backup" }
 assistant-skills = { path = "../skills" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
@@ -19,11 +17,16 @@ tracing = { workspace = true }
 sqlx = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
 dirs = { workspace = true }
-rand = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 cron = { workspace = true }
 
 [dev-dependencies]
+# Auth and backup are dev-only — the migration round-trip test composes the
+# external bootstrap and backup helpers to mirror the production caller.
+# Production code in this crate must NOT depend on either.
+assistant-auth = { path = "../auth" }
+assistant-backup = { path = "../backup" }
 tokio = { workspace = true }
 tempfile = { workspace = true }
+toml = { workspace = true }

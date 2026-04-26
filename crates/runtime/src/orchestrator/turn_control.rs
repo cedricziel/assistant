@@ -35,6 +35,7 @@ impl Orchestrator {
         interface: &Interface,
         ext_map: &HashMap<String, Arc<dyn ToolHandler>>,
         conv_store: &ConversationStore,
+        turn_had_errors: bool,
     ) -> Result<FinalAnswerOutcome> {
         let turn_index = base_turn + iteration as i64 + 1;
 
@@ -51,6 +52,7 @@ impl Orchestrator {
                 attachments: Vec::new(),
                 attachment_ids: Vec::new(),
                 message_id: None,
+                had_errors: turn_had_errors,
             }));
         }
 
@@ -142,6 +144,7 @@ impl Orchestrator {
             attachments: Vec::new(),
             attachment_ids: Vec::new(),
             message_id: None,
+            had_errors: turn_had_errors,
         }))
     }
 

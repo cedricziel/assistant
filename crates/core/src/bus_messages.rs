@@ -113,6 +113,11 @@ pub struct TurnResult {
     /// The UUID of the persisted assistant message in the database.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_id: Option<Uuid>,
+    /// Whether any tool dispatched during the turn produced an error.
+    ///
+    /// Gates downstream signals like skill-learner evaluation.
+    #[serde(default)]
+    pub had_errors: bool,
 }
 
 /// A status update emitted during turn processing.
@@ -295,6 +300,7 @@ mod tests {
             turn: 3,
             attachment_ids: vec![],
             message_id: None,
+            had_errors: false,
         };
         let json = serde_json::to_value(&res).unwrap();
         let back: TurnResult = serde_json::from_value(json).unwrap();
@@ -312,6 +318,7 @@ mod tests {
             turn: 1,
             attachment_ids: vec![],
             message_id: Some(mid),
+            had_errors: false,
         };
         let json = serde_json::to_value(&res).unwrap();
         // message_id should be present in the serialised form.
@@ -334,6 +341,23 @@ mod tests {
         });
         let res: TurnResult = serde_json::from_value(json).unwrap();
         assert!(res.message_id.is_none());
+    }
+
+    #[test]
+    fn turn_result_had_errors_absent_deserialises_as_false() {
+        // Pre-Slice-C payloads omit had_errors; serde(default) must keep
+        // that contract so skill-learner gating doesn't see a deserialise
+        // error against an older worker.
+        let json = serde_json::json!({
+            "conversation_id": Uuid::new_v4().to_string(),
+            "content": "old server",
+            "turn": 0,
+        });
+        let res: TurnResult = serde_json::from_value(json).unwrap();
+        assert!(
+            !res.had_errors,
+            "had_errors should default to false when absent from JSON"
+        );
     }
 
     #[test]

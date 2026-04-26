@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
-use assistant_auth::api_keys::{ApiKeyRecord, ApiKeyStore};
+use assistant_core::auth::{ApiKeyRecord, ApiKeyStore};
 use assistant_core::identity::{OrgId, Role, Scope, SpaceId, UserId};
 
 /// SQLite-backed API key store.

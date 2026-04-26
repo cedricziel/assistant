@@ -1,3 +1,32 @@
+//! Storage layer: SQLite-backed implementations of `assistant-core` traits.
+//!
+//! # Dependency boundary
+//!
+//! This crate depends only on `assistant-core` (and `assistant-skills` for
+//! the skill registry helpers) in production. It must NOT depend on
+//! `assistant-auth` or `assistant-backup`:
+//!
+//! - All auth-domain trait contracts (`ApiKeyStore`, `ClientStore`,
+//!   `AuthCodeStore`, `RefreshTokenStore`, `DeviceCodeStore`) live in
+//!   [`assistant_core::auth`]; the SQLite-backed implementations here
+//!   simply implement them.
+//! - The legacy → multi-org migration (see [`migration`]) is intentionally
+//!   schema-shaped: filesystem layout, SQLite copy, and seeding the
+//!   default org/space. Pre-migration backup creation lives in
+//!   `assistant-backup` (`backup_legacy_install`) and the initial admin
+//!   user is bootstrapped by `assistant-auth` (`bootstrap::create_admin_user`).
+//!   Production callers (e.g. `assistant-web-ui`) compose these four steps.
+//!
+//! `assistant-auth` and `assistant-backup` are present as `[dev-dependencies]`
+//! so the round-trip migration test in [`migration`] can exercise the same
+//! composition the production caller uses. The `dep_boundary` integration
+//! test enforces this boundary at compile time.
+
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
+
 pub mod agents;
 pub mod api_key_store;
 pub mod attachments;

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::Interface;
@@ -265,6 +266,154 @@ pub trait IdentityResolver: Send + Sync {
     /// linked their account).
     async fn resolve(&self, platform: &Interface, platform_user_id: &str)
     -> Result<Option<UserId>>;
+}
+
+// -- Persistence stores --
+//
+// Trait + record definitions for stateful auth resources. Concrete in-memory
+// implementations live in `assistant-auth`; SQLite-backed implementations live
+// in `assistant-storage`. Defining the contracts here keeps `assistant-storage`
+// free of any dependency on `assistant-auth`.
+
+/// Metadata about a stored API key.
+///
+/// Mirrors the public surface of an API key record: `id`, owner, name,
+/// hashed material, prefix, granted scopes, and expiry. The plaintext key
+/// is never stored; only the SHA-256 hash + 8-char prefix.
+#[derive(Clone, Debug)]
+pub struct ApiKeyRecord {
+    /// Unique ID for this key.
+    pub id: String,
+    /// The user who owns this key.
+    pub user_id: UserId,
+    /// Human-readable name.
+    pub name: String,
+    /// SHA-256 hash of the full key (hex-encoded).
+    pub key_hash: String,
+    /// First 8 characters of the key body (for display).
+    pub key_prefix: String,
+    /// The organization this key belongs to.
+    pub org_id: OrgId,
+    /// Space → role mapping inherited from the user at creation time.
+    pub space_roles: HashMap<SpaceId, Role>,
+    /// Granted scopes (may be a subset of the user's full scopes).
+    pub scopes: Vec<Scope>,
+    /// When this key expires.
+    pub expires_at: Option<DateTime<Utc>>,
+    /// When this key was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Persistence trait for API keys.
+///
+/// Implemented by `assistant_auth::api_keys::InMemoryApiKeyStore` (test/dev)
+/// and `assistant_storage::SqliteApiKeyStore` (production).
+#[async_trait]
+pub trait ApiKeyStore: Send + Sync {
+    /// Store a new API key record.
+    async fn store_key(&self, record: ApiKeyRecord) -> Result<()>;
+    /// Look up a key by its hash.
+    async fn get_by_hash(&self, key_hash: &str) -> Result<Option<ApiKeyRecord>>;
+    /// List all keys for a user (without secrets).
+    async fn list_for_user(&self, user_id: &UserId) -> Result<Vec<ApiKeyRecord>>;
+    /// Revoke (delete) a key by ID.
+    async fn revoke(&self, key_id: &str, user_id: &UserId) -> Result<bool>;
+}
+
+/// Storage backend for registered OAuth2 clients.
+#[async_trait]
+pub trait ClientStore: Send + Sync {
+    /// Register a new client.
+    async fn register(&self, info: ClientInfo) -> Result<()>;
+    /// Look up a client by ID.
+    async fn get(&self, client_id: &str) -> Result<Option<ClientInfo>>;
+    /// List all registered clients.
+    async fn list(&self) -> Result<Vec<ClientInfo>>;
+}
+
+/// A pending authorization code waiting to be exchanged for tokens.
+///
+/// `user_id` is intentionally `String` here rather than the typed `UserId`
+/// newtype used by `ApiKeyRecord` and `AuthContext`. Migrating it is planned
+/// follow-up work — see openspec change `auth-typed-ids` (TODO) — and was
+/// deferred from this slice to keep the OAuth2 token/refresh/device flow
+/// touch-points minimal. Same reasoning applies to `StoredRefreshToken` and
+/// `DeviceState::authorized_user` below.
+#[derive(Clone, Debug)]
+pub struct AuthCode {
+    pub code: String,
+    pub user_id: String,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub scopes: Vec<String>,
+    pub pkce_challenge: Option<String>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Storage backend for OAuth2 authorization codes.
+#[async_trait]
+pub trait AuthCodeStore: Send + Sync {
+    /// Store a new authorization code.
+    async fn store_code(&self, code: AuthCode) -> Result<()>;
+    /// Look up and consume an authorization code (single-use).
+    async fn take_code(&self, code: &str) -> Result<Option<AuthCode>>;
+}
+
+/// A stored refresh token.
+#[derive(Clone, Debug)]
+pub struct StoredRefreshToken {
+    pub token: String,
+    pub user_id: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub expires_at: DateTime<Utc>,
+    /// Whether this token has been consumed (for rotation detection).
+    pub consumed: bool,
+}
+
+/// Storage backend for refresh tokens.
+#[async_trait]
+pub trait RefreshTokenStore: Send + Sync {
+    /// Store a new refresh token.
+    async fn store_token(&self, token: StoredRefreshToken) -> Result<()>;
+    /// Look up a refresh token without consuming it.
+    async fn get_token(&self, token: &str) -> Result<Option<StoredRefreshToken>>;
+    /// Mark a refresh token as consumed (for rotation).
+    async fn consume_token(&self, token: &str) -> Result<()>;
+    /// Revoke all refresh tokens for a user+client pair (security measure when
+    /// replay is detected).
+    async fn revoke_all(&self, user_id: &str, client_id: &str) -> Result<()>;
+    /// Revoke all refresh tokens belonging to a user except the specified
+    /// token. Used after a self-service password change to log the user out
+    /// of every other session while keeping the current one alive. Returns
+    /// the number of tokens revoked.
+    async fn revoke_for_user_except(&self, user_id: &str, except_token: &str) -> Result<u64>;
+}
+
+/// Externalized device flow state for storage backends.
+#[derive(Clone, Debug)]
+pub struct DeviceState {
+    pub device_code: String,
+    pub user_code: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub expires_at: DateTime<Utc>,
+    pub authorized_user: Option<String>,
+}
+
+/// Storage backend for OAuth2 device authorization grant state (RFC 8628).
+#[async_trait]
+pub trait DeviceCodeStore: Send + Sync {
+    /// Store a new pending device authorization.
+    async fn store(&self, device_code: &str, state: DeviceState) -> Result<()>;
+    /// Look up a pending device authorization by device code.
+    async fn get_by_device_code(&self, device_code: &str) -> Result<Option<DeviceState>>;
+    /// Look up a pending device authorization by user code.
+    async fn get_by_user_code(&self, user_code: &str) -> Result<Option<DeviceState>>;
+    /// Update the state (e.g., mark as authorized).
+    async fn update(&self, device_code: &str, state: DeviceState) -> Result<()>;
+    /// Remove a device code entry.
+    async fn remove(&self, device_code: &str) -> Result<()>;
 }
 
 #[cfg(test)]

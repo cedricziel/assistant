@@ -7,36 +7,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use tokio::sync::RwLock;
 
 use super::pkce;
 
+// `AuthCode`, `StoredRefreshToken`, `AuthCodeStore`, and `RefreshTokenStore`
+// live in `assistant_core::auth`; re-export here for back-compat.
+pub use assistant_core::auth::{AuthCode, AuthCodeStore, RefreshTokenStore, StoredRefreshToken};
+
 // -- Types --
-
-/// A pending authorization code waiting to be exchanged for tokens.
-#[derive(Clone, Debug)]
-pub struct AuthCode {
-    pub code: String,
-    pub user_id: String,
-    pub client_id: String,
-    pub redirect_uri: String,
-    pub scopes: Vec<String>,
-    pub pkce_challenge: Option<String>,
-    pub expires_at: DateTime<Utc>,
-}
-
-/// A stored refresh token.
-#[derive(Clone, Debug)]
-pub struct StoredRefreshToken {
-    pub token: String,
-    pub user_id: String,
-    pub client_id: String,
-    pub scopes: Vec<String>,
-    pub expires_at: DateTime<Utc>,
-    /// Whether this token has been consumed (for rotation detection).
-    pub consumed: bool,
-}
 
 /// The result of exchanging an auth code or refreshing tokens.
 #[derive(Clone, Debug)]
@@ -45,41 +25,6 @@ pub struct TokenPair {
     pub refresh_token: String,
     /// The user who authorized the token.
     pub user_id: String,
-}
-
-// -- AuthCodeStore trait --
-
-/// Storage backend for authorization codes.
-#[async_trait::async_trait]
-pub trait AuthCodeStore: Send + Sync {
-    /// Store a new authorization code.
-    async fn store_code(&self, code: AuthCode) -> Result<()>;
-
-    /// Look up and consume an authorization code (single-use).
-    async fn take_code(&self, code: &str) -> Result<Option<AuthCode>>;
-}
-
-/// Storage backend for refresh tokens.
-#[async_trait::async_trait]
-pub trait RefreshTokenStore: Send + Sync {
-    /// Store a new refresh token.
-    async fn store_token(&self, token: StoredRefreshToken) -> Result<()>;
-
-    /// Look up a refresh token without consuming it.
-    async fn get_token(&self, token: &str) -> Result<Option<StoredRefreshToken>>;
-
-    /// Mark a refresh token as consumed (for rotation).
-    async fn consume_token(&self, token: &str) -> Result<()>;
-
-    /// Revoke all refresh tokens for a user+client pair (security measure
-    /// when replay is detected).
-    async fn revoke_all(&self, user_id: &str, client_id: &str) -> Result<()>;
-
-    /// Revoke all refresh tokens belonging to a user except the specified
-    /// token. Used after a self-service password change to log the user out
-    /// of every other session while keeping the current one alive. Returns
-    /// the number of tokens revoked.
-    async fn revoke_for_user_except(&self, user_id: &str, except_token: &str) -> Result<u64>;
 }
 
 // -- In-memory implementations --

@@ -8,12 +8,10 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use sqlx::{Row, SqlitePool};
 
-use assistant_auth::oauth2::clients::ClientStore;
-use assistant_auth::oauth2::device::{DeviceCodeStore, DeviceState};
-use assistant_auth::oauth2::server::{
-    AuthCode, AuthCodeStore, RefreshTokenStore, StoredRefreshToken,
+use assistant_core::auth::{
+    AuthCode, AuthCodeStore, ClientInfo, ClientStore, DeviceCodeStore, DeviceState,
+    RefreshTokenStore, StoredRefreshToken,
 };
-use assistant_core::auth::ClientInfo;
 
 // ---------------------------------------------------------------------------
 // JSON helpers

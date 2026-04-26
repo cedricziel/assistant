@@ -9,18 +9,21 @@
 //! enables identification and scanning. Only the SHA-256 hash is stored; the
 //! plaintext is shown exactly once at creation time.
 
-use std::collections::HashMap;
 use std::sync::Mutex;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
 use assistant_core::auth::AuthContext;
-use assistant_core::identity::{OrgId, Role, Scope, SpaceId, UserId};
+use assistant_core::identity::UserId;
+
+// Canonical home for these is now `assistant_core::auth`. Re-export from this
+// module for backwards-compatibility with existing imports.
+pub use assistant_core::auth::{ApiKeyRecord, ApiKeyStore};
 
 // -- Constants --
 
@@ -42,31 +45,6 @@ pub struct GeneratedKey {
     pub key_hash: String,
     /// First 8 characters of the key (after prefix). Stored for display.
     pub key_prefix: String,
-}
-
-/// Metadata about a stored API key.
-#[derive(Clone, Debug)]
-pub struct ApiKeyRecord {
-    /// Unique ID for this key.
-    pub id: String,
-    /// The user who owns this key.
-    pub user_id: UserId,
-    /// Human-readable name.
-    pub name: String,
-    /// SHA-256 hash of the full key (hex-encoded).
-    pub key_hash: String,
-    /// First 8 characters of the key body (for display).
-    pub key_prefix: String,
-    /// The organization this key belongs to.
-    pub org_id: OrgId,
-    /// Space → role mapping inherited from the user at creation time.
-    pub space_roles: HashMap<SpaceId, Role>,
-    /// Granted scopes (may be a subset of the user's full scopes).
-    pub scopes: Vec<Scope>,
-    /// When this key expires.
-    pub expires_at: Option<DateTime<Utc>>,
-    /// When this key was created.
-    pub created_at: DateTime<Utc>,
 }
 
 // -- Key generation --
@@ -100,21 +78,6 @@ pub fn hash_key(key: &str) -> String {
     hasher.update(key.as_bytes());
     let result = hasher.finalize();
     hex::encode(result)
-}
-
-// -- Store trait --
-
-/// Trait for API key persistence.
-#[async_trait::async_trait]
-pub trait ApiKeyStore: Send + Sync {
-    /// Store a new API key record.
-    async fn store_key(&self, record: ApiKeyRecord) -> Result<()>;
-    /// Look up a key by its hash.
-    async fn get_by_hash(&self, key_hash: &str) -> Result<Option<ApiKeyRecord>>;
-    /// List all keys for a user (without secrets).
-    async fn list_for_user(&self, user_id: &UserId) -> Result<Vec<ApiKeyRecord>>;
-    /// Revoke (delete) a key by ID.
-    async fn revoke(&self, key_id: &str, user_id: &UserId) -> Result<bool>;
 }
 
 // -- Resolution --
@@ -206,9 +169,11 @@ impl ApiKeyStore for InMemoryApiKeyStore {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
-    use assistant_core::identity::{Action, ResourceKind};
+    use assistant_core::identity::{Action, OrgId, ResourceKind, Role, Scope, SpaceId};
 
     fn make_test_record(key: &GeneratedKey, scopes: Vec<Scope>) -> ApiKeyRecord {
         let mut space_roles = HashMap::new();
