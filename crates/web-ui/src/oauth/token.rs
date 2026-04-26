@@ -11,6 +11,7 @@ use axum::http::StatusCode;
 use axum::http::header::{HeaderValue, SET_COOKIE};
 use axum::response::{IntoResponse, Json};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use assistant_auth::oauth2::device::PollResult;
 
@@ -156,6 +157,11 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
             .into_response();
             if let Some(cookie) = cookie {
                 resp.headers_mut().insert(SET_COOKIE, cookie);
+            } else {
+                warn!(
+                    "handle_authorization_code: skipping Set-Cookie header — \
+                     session_cookie returned None (invalid header value)"
+                );
             }
             resp
         }
@@ -221,6 +227,11 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
             .into_response();
             if let Some(cookie) = cookie {
                 resp.headers_mut().insert(SET_COOKIE, cookie);
+            } else {
+                warn!(
+                    "handle_refresh: skipping Set-Cookie header — \
+                     session_cookie returned None (invalid header value)"
+                );
             }
             resp
         }

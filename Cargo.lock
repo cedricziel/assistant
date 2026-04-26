@@ -686,6 +686,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "uuid",
 ]

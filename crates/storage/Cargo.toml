@@ -29,3 +29,4 @@ assistant-auth = { path = "../auth" }
 assistant-backup = { path = "../backup" }
 tokio = { workspace = true }
 tempfile = { workspace = true }
+toml = { workspace = true }

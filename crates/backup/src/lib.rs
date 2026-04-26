@@ -545,9 +545,14 @@ pub async fn backup_legacy_install(base_path: &Path) -> Result<PathBuf> {
         .await
         .with_context(|| format!("creating backups directory: {}", backups_dir.display()))?;
 
+    // Millisecond precision (`%Y%m%d-%H%M%S%.3f` would include the dot;
+    // we drop it to keep filenames POSIX-friendly) so two invocations within
+    // the same second don't collide on archive name.
+    let now = Utc::now();
     let archive_name = format!(
-        "pre-migration-{}.tar.gz",
-        Utc::now().format("%Y%m%d-%H%M%S")
+        "pre-migration-{}-{:03}.tar.gz",
+        now.format("%Y%m%d-%H%M%S"),
+        now.timestamp_subsec_millis()
     );
     let output_path = backups_dir.join(&archive_name);
 

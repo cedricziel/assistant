@@ -315,7 +315,6 @@ impl Orchestrator {
     /// in OTel/history/DB when refused, and otherwise executes and finalizes
     /// the result.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn dispatch_global_tool(
         &self,
         name: &str,

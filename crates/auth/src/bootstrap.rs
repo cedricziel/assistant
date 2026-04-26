@@ -19,7 +19,7 @@ use crate::password::hash_password;
 /// banner, etc.) instead of writing directly to stdout from library code.
 #[derive(Debug)]
 pub struct AdminCredentials {
-    pub user_id: String,
+    pub user_id: UserId,
     pub email: String,
     /// `Some(password)` when a random password was generated.
     /// `None` when `ASSISTANT_WEB_TOKEN` was used (caller already knows it).
@@ -36,8 +36,8 @@ pub struct AdminCredentials {
 pub async fn create_admin_user(
     user_store: &dyn UserStore,
     membership_store: &dyn MembershipStore,
-    org_id: &str,
-    space_id: &str,
+    org_id: &OrgId,
+    space_id: &SpaceId,
 ) -> Result<AdminCredentials> {
     let now = chrono::Utc::now();
 
@@ -60,10 +60,10 @@ pub async fn create_admin_user(
 
     let password_hash = hash_password(&password).context("hashing admin password")?;
 
-    let user_id = format!("usr_{}", uuid::Uuid::new_v4());
+    let user_id = UserId::from(format!("usr_{}", uuid::Uuid::new_v4()));
     let user = User {
-        id: UserId::from(user_id.clone()),
-        org_id: OrgId::from(org_id),
+        id: user_id.clone(),
+        org_id: org_id.clone(),
         email: "admin@localhost".into(),
         name: "Admin".into(),
         password_hash,
@@ -80,8 +80,8 @@ pub async fn create_admin_user(
 
     // Grant OrgAdmin role in default space.
     let membership = SpaceMembership {
-        user_id: UserId::from(user_id.clone()),
-        space_id: SpaceId::from(space_id),
+        user_id: user_id.clone(),
+        space_id: space_id.clone(),
         role: Role::OrgAdmin,
         created_at: now,
     };

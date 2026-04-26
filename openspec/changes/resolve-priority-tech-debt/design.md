@@ -92,11 +92,22 @@ Three independent slices, each landable separately:
    d. Add a CI job (or rely on the per-file deny) to prevent regression.
 
 3. **Slice C — TurnContext (PR 3, ~M-L):**
+
+   **Status (2026-04):** the _error-signal_ half is **already shipped** in
+   the same PR as Slices A/B — concretely:
+   - `TurnResult.had_errors: bool` field added (`mod.rs:54`).
+   - `FinalizedTool { had_error }` returned from `dispatch.rs::finalize_tool_result`.
+   - `DispatchOutcome::Executed { had_error }` named-field variant.
+   - `turn_had_errors` accumulator threaded through `run_turn_with_tools_impl`
+     and `run_turn_core`, propagated through `handle_final_answer_with_extensions`
+     (extension-tools path) and `bus_messages::TurnResult` (worker bus path).
+   - Unit tests `run_turn_marks_had_errors_when_tool_fails` and
+     `run_turn_clears_had_errors_when_no_tool_fails` cover the contract.
+
+   **Still remaining for a follow-up Slice C PR** (deferred — significant
+   public-API churn, aesthetic refactor):
    a. Introduce `TurnContext<'a>` and `TurnState`. Add `for_test(...)` builder.
    b. Migrate `mod.rs` entry points first, then `dispatch.rs`, `worker.rs`, `turn_control.rs`. Delete each `#[allow(clippy::too_many_arguments)]` as the function it guards is migrated.
-   c. Wire `record_tool_error` at every dispatch error site.
-   d. Replace `let turn_had_errors = false` at `mod.rs:962` with `ctx.state.turn_had_errors()`.
-   e. Add a test in `tests.rs` that asserts `turn_had_errors` is `true` after a tool returns `ToolOutput::error(...)`.
 
 Rollback: each slice is a single PR; revert is `git revert`. No data migrations, no flag flips.
 

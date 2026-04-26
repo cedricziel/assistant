@@ -825,9 +825,7 @@ impl Orchestrator {
                                     tool_call_id.as_deref(),
                                 )
                                 .await;
-                            if finalized.had_error {
-                                turn_had_errors = true;
-                            }
+                            turn_had_errors |= finalized.had_error;
                         } else {
                             // Global executor path.
                             let builtin_span = info_span!(
@@ -856,9 +854,7 @@ impl Orchestrator {
                             match outcome {
                                 DispatchOutcome::Denied => continue,
                                 DispatchOutcome::Executed { had_error } => {
-                                    if had_error {
-                                        turn_had_errors = true;
-                                    }
+                                    turn_had_errors |= had_error;
                                 }
                             }
                         }
@@ -1226,9 +1222,7 @@ impl Orchestrator {
                         match outcome {
                             DispatchOutcome::Denied => continue,
                             DispatchOutcome::Executed { had_error } => {
-                                if had_error {
-                                    turn_had_errors = true;
-                                }
+                                turn_had_errors |= had_error;
                             }
                         }
                         turn_tool_count += 1;

@@ -639,8 +639,8 @@ enabled = true
         assistant_auth::bootstrap::create_admin_user(
             &user_store,
             &membership_store,
-            &org_id.0,
-            &space_id.0,
+            &org_id,
+            &space_id,
         )
         .await
         .unwrap();
