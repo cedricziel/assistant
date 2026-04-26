@@ -2,7 +2,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../router/app_router.dart';
 import '../../shared/platform/platform.dart';
 import '../notifications/notification_preferences.dart';
 import '../notifications/notification_service.dart';
@@ -16,6 +18,15 @@ class SettingsScreen extends ConsumerWidget {
     final prefsAsync = ref.watch(notificationPreferencesProvider);
 
     final bodyChildren = [
+      // -- Account -----------------------------------------------------
+      const _SectionHeader('Account'),
+      ListTile(
+        leading: const Icon(Icons.person_outline),
+        title: const Text('Account'),
+        subtitle: const Text('Name, email, and password'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => context.push(AppRoutes.settingsAccount),
+      ),
       // -- Notifications -----------------------------------------------
       const _SectionHeader('Notifications'),
       prefsAsync.when(
@@ -82,6 +93,20 @@ class SettingsScreen extends ConsumerWidget {
         body: CustomScrollView(
           slivers: [
             const CupertinoSliverNavigationBar(largeTitle: Text('Settings')),
+            SliverToBoxAdapter(
+              child: CupertinoListSection.insetGrouped(
+                header: const Text('Account'),
+                children: [
+                  CupertinoListTile(
+                    leading: const Icon(CupertinoIcons.person),
+                    title: const Text('Account'),
+                    subtitle: const Text('Name, email, and password'),
+                    trailing: const CupertinoListTileChevron(),
+                    onTap: () => context.push(AppRoutes.settingsAccount),
+                  ),
+                ],
+              ),
+            ),
             SliverToBoxAdapter(
               child: prefsAsync.when(
                 loading: () =>

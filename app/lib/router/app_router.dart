@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/account/account_screen.dart';
 import '../features/agents/agent_detail_screen.dart';
 import '../features/agents/agents_screen.dart';
 import '../features/admin/admin_screen.dart';
@@ -65,6 +66,7 @@ class AppRoutes {
   static const agentDetail = '/agents/:id';
   static const analytics = '/analytics';
   static const settings = '/settings';
+  static const settingsAccount = '/settings/account';
   static const admin = '/admin';
   static const apiKeys = '/api-keys';
   static const spaceSelector = '/spaces';
@@ -362,6 +364,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.settings,
             builder: (context, state) => const SettingsScreen(),
+            routes: [
+              GoRoute(
+                path: 'account',
+                builder: (context, state) => const AccountScreen(),
+              ),
+            ],
           ),
         ],
       ),

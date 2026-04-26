@@ -22,21 +22,23 @@
 - [x] 3.3 Run `make generate-flutter-client` and verify `app/packages/assistant_api/lib/src/api/users_api.dart` (or a new `account_api.dart`) exposes `getCurrentUser`, `updateCurrentUser`, `changePassword`. Generator emitted a new `account_api.dart` with all three methods.
 - [~] 3.4 ~~Add a generated-client smoke test under `app/packages/assistant_api/test/`~~ — **deferred to §5.6**. The `assistant_api` package contains only auto-generated stubs that get overwritten on every regen, and no dio-mock dev dependency exists. The codebase convention is to mock the API at the application/provider layer in `app/test/`. §5.6's widget test will exercise `AccountApi` against a mocked `Dio` from there.
 
-## 4. Web UI: Account section in Settings
+## 4. Web UI: Account section in Settings — **N/A**
 
-- [ ] 4.1 Identify where the existing web Settings page lives (web-ui crate's HTML templates if applicable, or note that the Web UI = the Flutter web build and §5 covers it).
-- [ ] 4.2 If a separate Web UI HTML/template exists, add an "Account" section with name, email (with confirm), and change-password (current + new + confirm) forms; otherwise mark this group as N/A and document why.
-- [ ] 4.3 Wire OIDC banner display when `auth_mode == "oidc"` (read from `GET /api/users/me` + `GET /api/orgs/<id>` or equivalent).
-- [ ] 4.4 Manually test in browser: change name, change email (verify previous-email banner), change password (verify other browser session is logged out, current stays in).
+The `web-ui` crate has no HTML/template Account page. It serves the Flutter web build (via `rust-embed`) as the Web UI, so the Account screen built in §5 is the Web UI Account section. The OAuth login/consent pages live in `crates/auth` and are unrelated to user self-service.
+
+- [~] 4.1 ~~Identify where the existing web Settings page lives.~~ Verified: no `*.html`/`*.tera`/`*.hbs` templates under `crates/web-ui/` or `crates/auth/`. Web UI = Flutter web build.
+- [~] 4.2 ~~Add an "Account" section.~~ N/A — covered by §5.
+- [~] 4.3 ~~Wire OIDC banner.~~ N/A — covered by §5.3.
+- [~] 4.4 ~~Manually test in browser.~~ Folded into §9.4 (manual exercise via Flutter web build).
 
 ## 5. Flutter app: Account screen
 
-- [ ] 5.1 Create `app/lib/features/account/account_provider.dart` with an `AsyncNotifier` exposing the current user and methods `updateName`, `updateEmail`, `changePassword` that call the generated client.
-- [ ] 5.2 Create `app/lib/features/account/account_screen.dart` with three sections: Name (text field + save), Email (new + confirm + save), Password (current + new + confirm + save). Use adaptive widgets per project convention.
-- [ ] 5.3 Render OIDC banner (read-only fields, hidden password section, "Managed by <issuer>" text) when the org's `auth_mode == "oidc"`.
-- [ ] 5.4 Add an "Account" tile to `app/lib/features/settings/settings_screen.dart` with `Icons.person_outline` / `CupertinoIcons.person` that navigates to `/settings/account`.
-- [ ] 5.5 Register the `/settings/account` route in `app/lib/router/app_router.dart` (after the existing `/settings` entry).
-- [ ] 5.6 Add a widget test under `app/test/widget/account_screen_test.dart` covering: form rendering, OIDC banner toggle, email-confirmation mismatch blocks submit, successful save shows confirmation.
+- [x] 5.1 Create `app/lib/features/account/account_provider.dart` with an `AsyncNotifier` exposing the current user and methods `updateName`, `updateEmail`, `changePassword` that call the generated client.
+- [x] 5.2 Create `app/lib/features/account/account_screen.dart` with three sections: Name (text field + save), Email (new + confirm + save), Password (current + new + confirm + save). Use adaptive widgets per project convention.
+- [x] 5.3 Render OIDC banner (read-only fields, hidden password section, "Managed by <issuer>" text) when the org's `auth_mode == "oidc"`.
+- [x] 5.4 Add an "Account" tile to `app/lib/features/settings/settings_screen.dart` with `Icons.person_outline` / `CupertinoIcons.person` that navigates to `/settings/account`.
+- [x] 5.5 Register the `/settings/account` route in `app/lib/router/app_router.dart` (after the existing `/settings` entry).
+- [x] 5.6 Add a widget test under `app/test/widget/account_screen_test.dart` covering: form rendering, OIDC banner toggle, email-confirmation mismatch blocks submit, successful save shows confirmation.
 
 ## 6. CLI: `account` subcommand
 
