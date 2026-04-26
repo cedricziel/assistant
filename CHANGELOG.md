@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.143](https://github.com/cedricziel/assistant/compare/v0.1.142...v0.1.143) (2026-04-26)
+
+
+### Features
+
+* **multi-org:** runtime cutover, migrate finalize, doctor drift ([#668](https://github.com/cedricziel/assistant/issues/668)) ([a5bba84](https://github.com/cedricziel/assistant/commit/a5bba84f1c2a35ace9598f3cddc8f1c219f1a8a9))
+
 ## [0.1.142](https://github.com/cedricziel/assistant/compare/v0.1.141...v0.1.142) (2026-04-26)
 
 
