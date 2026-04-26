@@ -846,6 +846,7 @@ impl Orchestrator {
                     attachments: vec![],
                     attachment_ids: bus_result.attachment_ids,
                     message_id: bus_result.message_id,
+                    had_errors: false,
                 });
             }
 

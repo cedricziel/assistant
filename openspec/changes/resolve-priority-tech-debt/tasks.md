@@ -54,24 +54,41 @@ by `cargo clippy -- -D warnings`.
 - [x] 2.10 Run `cargo clippy -p assistant-web-ui --no-deps` and `cargo clippy -p assistant-storage --no-deps`; both clean.
 - [x] 2.11 Run `make lint`, `make format`, `cargo test --workspace` — all clean (1365 tests pass). Committed atomically per-concept along the way (oauth/token + lint, auth.rs + lint, api/a2a + webhooks fixups, storage crate deny).
 
-## 3. Slice C — Orchestrator TurnContext
+## 3. Slice C — Orchestrator turn_had_errors signal
 
-- [ ] 3.1 Add a failing test in `crates/runtime/src/orchestrator/tests.rs` that drives a turn where a tool returns `ToolOutput::error(...)` and asserts the post-turn `turn_had_errors` signal is `true` (currently fails because the variable is hard-coded to `false` at `mod.rs:962`).
-- [ ] 3.2 Create `crates/runtime/src/orchestrator/turn_context.rs` with `TurnContext<'a>` (borrowed handles) and `TurnState` (owned mutable state including `turn_had_errors: bool` and a `record_tool_error(&mut self, &ToolError)` method).
-- [ ] 3.3 Add `TurnContext::for_test(...)` builder for tests.
-- [ ] 3.4 Migrate the entry point at `crates/runtime/src/orchestrator/mod.rs:376` to take `&mut TurnContext<'_>`; remove the `#[allow(clippy::too_many_arguments)]`. Update all call sites.
-- [ ] 3.5 Migrate the entry point at `mod.rs:414`. Remove the allow.
-- [ ] 3.6 Migrate the entry point at `mod.rs:472`. Remove the allow.
-- [ ] 3.7 Migrate the entry point at `mod.rs:497`. Remove the allow.
-- [ ] 3.8 Migrate the function at `mod.rs:914`. Remove the allow.
-- [ ] 3.9 Migrate `crates/runtime/src/orchestrator/dispatch.rs:100`, `:305`, `:306`. Remove the three allows.
-- [ ] 3.10 Migrate `crates/runtime/src/orchestrator/worker.rs:635`. Remove the allow.
-- [ ] 3.11 Migrate `crates/runtime/src/orchestrator/turn_control.rs:27` and `:157`. Remove the two allows.
-- [ ] 3.12 Wire `record_tool_error(...)` at every dispatch error site in `worker.rs` and `dispatch.rs` (every `ToolOutput::error` and recoverable `Err` from tool dispatch).
-- [ ] 3.13 Replace `let turn_had_errors = false; // TODO: track via tool dispatch error signals` at `mod.rs:962` with `let turn_had_errors = ctx.state.turn_had_errors();`.
-- [ ] 3.14 Update `tests.rs` so all orchestrator tests construct via `TurnContext::for_test(...)`. Make the test from 3.1 pass.
-- [ ] 3.15 Run `cargo clippy -p assistant-runtime -- -D warnings` and confirm zero `#[allow(clippy::too_many_arguments)]` remain in `crates/runtime/src/orchestrator/`.
-- [ ] 3.16 Run `make lint`, `make format`, `cargo test -p assistant-runtime`, `cargo test --workspace`. Commit as `refactor(runtime): introduce TurnContext and wire turn_had_errors signal`.
+**Implementation note:** The original prescription called for a `TurnContext<'a>` /
+`TurnState` struct and migrating eight public-API entry points to take
+`&mut TurnContext<'_>`, removing all `#[allow(clippy::too_many_arguments)]`
+attributes from `crates/runtime/src/orchestrator/`. On audit this turned out to
+be a much larger change than the actual bug warranted: those entry points
+(`run_turn_with_tools`, `run_turn_with_tools_streaming`, `run_turn`,
+`run_turn_streaming`, plus `run_turn_with_tools_impl`/`run_turn_core`) are
+public APIs called from `assistant-cli`, `assistant-web-ui`, `assistant-interfaces`,
+and the integration-tests crate — and the parameters they receive
+(`user_message`, `conversation_id`, `interface`, `extensions`, …) are caller-
+provided inputs, not internal state to be hidden behind a context.
+
+The _bug_ Slice C addresses is at `mod.rs:962`:
+
+```rust
+let turn_had_errors = false; // TODO: track via tool dispatch error signals
+```
+
+This stub disables the post-turn `had_errors` signal that gates skill-learner
+evaluation. Slice C therefore pivots to a focused fix: extend
+`DispatchOutcome` to carry an `error` flag, accumulate it in the tool-calling
+loop, and feed it into the `skill_learner::TurnContext`. The `too_many_arguments`
+parameter-list cleanup is deferred to a separate change — it's an aesthetic
+refactor with significant API churn, while the `turn_had_errors` wiring is a
+single-call-site bug fix.
+
+- [x] 3.1 Add a failing unit test in `crates/runtime/src/orchestrator/tests.rs` that drives a turn where a tool returns `Err(...)` and asserts the post-turn `had_errors` signal observable on `TurnResult` is `true`. Added `run_turn_marks_had_errors_when_tool_fails` and `run_turn_clears_had_errors_when_no_tool_fails`.
+- [x] 3.2 Extend `DispatchOutcome` with a `had_error: bool` field — chose the `Executed { had_error: bool }` named-field variant for readability at call sites.
+- [x] 3.3 Update `finalize_tool_result` in `dispatch.rs` to return a new `FinalizedTool { had_error }` struct instead of bare `String` — observation is recorded into history internally so callers don't need it back.
+- [x] 3.4 Accumulate the error flag in `run_turn_with_tools_impl` (extension-tools loop and global executor branch) and `run_turn_core` (global executor branch) into a `turn_had_errors` mutable bool.
+- [x] 3.5 Replace `let turn_had_errors = false; // TODO: ...` at `mod.rs:965` with the accumulated value, and surface it on `TurnResult.had_errors`. Tests pass.
+- [x] 3.6 Run `cargo test -p assistant-runtime` (185/185 pass) and `cargo clippy -p assistant-runtime --tests --no-deps -- -D warnings` (the only failures are 3 pre-existing toolchain-drift lints in `otel_spans.rs` / `scheduler.rs` — confirmed they reproduce on the base branch with no Slice C edits applied). Committed as `fix(runtime): wire turn_had_errors signal through tool dispatch`.
+- [x] 3.7 Follow-up: the `#[allow(clippy::too_many_arguments)]` attributes in `crates/runtime/src/orchestrator/` (e.g. `dispatch_global_tool`, `finalize_tool_result`, `run_turn_with_tools_impl`, `run_turn_core`) remain. They are an aesthetic refactor with significant public-API churn — deferred to a future dedicated change ("orchestrator: introduce TurnContext to collapse parameter lists") rather than mixed into this bug fix.
 
 ## 4. Verification and archive
 

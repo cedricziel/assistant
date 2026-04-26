@@ -19,6 +19,16 @@ use uuid::Uuid;
 use super::{DispatchOutcome, Orchestrator, OrchestratorEvent, value_to_params_map};
 use crate::webhook_dispatch;
 
+/// Result of [`Orchestrator::finalize_tool_result`].
+///
+/// Carries a flag indicating whether the tool execution failed, so the
+/// caller can update the per-turn `had_errors` accumulator. The
+/// observation string is recorded into history and persisted internally
+/// by `finalize_tool_result`, so callers do not need it back.
+pub(crate) struct FinalizedTool {
+    pub had_error: bool,
+}
+
 impl Orchestrator {
     /// Filter tool specs based on provider capabilities.
     ///
@@ -113,7 +123,7 @@ impl Orchestrator {
         turn_attachment_ids: &mut Vec<Uuid>,
         event_sink: Option<&mpsc::Sender<OrchestratorEvent>>,
         tool_call_id: Option<&str>,
-    ) -> String {
+    ) -> FinalizedTool {
         let duration_ms = elapsed.as_millis() as i64;
         let span_name = format!("execute_tool {tool_name}");
         self.metrics
@@ -152,6 +162,7 @@ impl Orchestrator {
             None
         };
 
+        let mut had_error = false;
         let observation = match exec_result {
             Ok(output) => {
                 debug!(tool = %tool_name, duration_ms, "Tool execution completed");
@@ -203,6 +214,7 @@ impl Orchestrator {
                 otel_span.set_attribute(KeyValue::new("tool_status", "error"));
                 otel_span.set_attribute(KeyValue::new("tool_error", msg.clone()));
                 tool_status = "error";
+                had_error = true;
                 format!("Error executing '{tool_name}': {msg}")
             }
         };
@@ -293,7 +305,7 @@ impl Orchestrator {
             }
         }
 
-        observation
+        FinalizedTool { had_error }
     }
 
     /// Dispatch a single tool call through the global executor, applying the
@@ -381,23 +393,26 @@ impl Orchestrator {
             .await;
         let elapsed = start.elapsed();
 
-        self.finalize_tool_result(
-            name,
-            Some(params),
-            exec_result,
-            elapsed,
-            otel_span,
-            history,
-            conv_store,
-            conversation_id,
-            turn_index,
-            turn_attachments,
-            turn_attachment_ids,
-            event_sink,
-            tool_call_id,
-        )
-        .await;
+        let result = self
+            .finalize_tool_result(
+                name,
+                Some(params),
+                exec_result,
+                elapsed,
+                otel_span,
+                history,
+                conv_store,
+                conversation_id,
+                turn_index,
+                turn_attachments,
+                turn_attachment_ids,
+                event_sink,
+                tool_call_id,
+            )
+            .await;
 
-        DispatchOutcome::Executed
+        DispatchOutcome::Executed {
+            had_error: result.had_error,
+        }
     }
 }
