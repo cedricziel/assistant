@@ -344,6 +344,23 @@ mod tests {
     }
 
     #[test]
+    fn turn_result_had_errors_absent_deserialises_as_false() {
+        // Pre-Slice-C payloads omit had_errors; serde(default) must keep
+        // that contract so skill-learner gating doesn't see a deserialise
+        // error against an older worker.
+        let json = serde_json::json!({
+            "conversation_id": Uuid::new_v4().to_string(),
+            "content": "old server",
+            "turn": 0,
+        });
+        let res: TurnResult = serde_json::from_value(json).unwrap();
+        assert!(
+            !res.had_errors,
+            "had_errors should default to false when absent from JSON"
+        );
+    }
+
+    #[test]
     fn turn_status_phase_serializes_snake_case() {
         let status = TurnStatus {
             conversation_id: Uuid::new_v4(),

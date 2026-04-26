@@ -332,6 +332,13 @@ pub trait ClientStore: Send + Sync {
 }
 
 /// A pending authorization code waiting to be exchanged for tokens.
+///
+/// `user_id` is intentionally `String` here rather than the typed `UserId`
+/// newtype used by `ApiKeyRecord` and `AuthContext`. Migrating it is planned
+/// follow-up work — see openspec change `auth-typed-ids` (TODO) — and was
+/// deferred from this slice to keep the OAuth2 token/refresh/device flow
+/// touch-points minimal. Same reasoning applies to `StoredRefreshToken` and
+/// `DeviceState::authorized_user` below.
 #[derive(Clone, Debug)]
 pub struct AuthCode {
     pub code: String,
