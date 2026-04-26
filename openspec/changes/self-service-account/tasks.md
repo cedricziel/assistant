@@ -63,7 +63,7 @@ The `web-ui` crate has no HTML/template Account page. It serves the Flutter web 
 
 ## 9. Polish & verification
 
-- [ ] 9.1 Run `make lint` and `make format` — fix any issues.
-- [ ] 9.2 Run `make test` and `make test-flutter` — all green.
-- [ ] 9.3 Run `make precommit` — all hooks pass.
+- [x] 9.1 Run `make lint` and `make format` — fix any issues. Clippy clean with `-D warnings`; `cargo fmt --all` produced no diff.
+- [x] 9.2 Run `make test` and `make test-flutter` — all green. Rust workspace tests pass (validated on `main` after #665 and #666 landed). `make test-flutter` validated by `flutter` CI on each Flutter-touching PR (no Flutter changes since §5).
+- [x] 9.3 Run `make precommit` — all hooks pass. Validated on PRs #658, #660–#663, #665, #666 — every commit on this change has gone through the pre-commit hook chain (rustfmt, clippy, machete, dart_pre_commit, flutter test).
 - [ ] 9.4 Manually exercise CLI happy path against a local `assistant webui serve` instance: `assistant account show`, `set-email`, `set-name`, `change-password`. Verify the next `assistant login` (or session refresh) on a second machine fails until re-login.
