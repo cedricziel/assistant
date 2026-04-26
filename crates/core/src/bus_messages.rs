@@ -300,6 +300,7 @@ mod tests {
             turn: 3,
             attachment_ids: vec![],
             message_id: None,
+            had_errors: false,
         };
         let json = serde_json::to_value(&res).unwrap();
         let back: TurnResult = serde_json::from_value(json).unwrap();
@@ -317,6 +318,7 @@ mod tests {
             turn: 1,
             attachment_ids: vec![],
             message_id: Some(mid),
+            had_errors: false,
         };
         let json = serde_json::to_value(&res).unwrap();
         // message_id should be present in the serialised form.
