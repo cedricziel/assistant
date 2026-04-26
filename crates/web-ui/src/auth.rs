@@ -14,6 +14,11 @@
 //! it maps to a default org-admin context so existing single-user deployments
 //! continue to work without reconfiguration.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
+
 use std::sync::Arc;
 
 use axum::Form;
@@ -22,7 +27,7 @@ use axum::extract::{Request, State};
 use axum::http::header::{COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use assistant_auth::api_keys;
@@ -161,17 +166,14 @@ pub async fn require_auth(
         .unwrap_or(false);
 
     if accepts_html {
-        Response::builder()
-            .status(StatusCode::SEE_OTHER)
-            .header(LOCATION, "/login")
-            .body(Body::empty())
-            .unwrap()
+        Redirect::to("/login").into_response()
     } else {
-        Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header("WWW-Authenticate", "Bearer")
-            .body(Body::from("Unauthorized"))
-            .unwrap()
+        (
+            StatusCode::UNAUTHORIZED,
+            [("WWW-Authenticate", "Bearer")],
+            "Unauthorized",
+        )
+            .into_response()
     }
 }
 
@@ -197,10 +199,7 @@ pub async fn require_same_origin_mutation(request: Request, next: Next) -> Respo
     }
 
     let Some(host) = request.headers().get(HOST).and_then(|h| h.to_str().ok()) else {
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body(Body::from("Forbidden"))
-            .unwrap();
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     };
 
     let origin_host = request
@@ -217,17 +216,11 @@ pub async fn require_same_origin_mutation(request: Request, next: Next) -> Respo
         });
 
     let Some(origin_host) = origin_host else {
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body(Body::from("Forbidden"))
-            .unwrap();
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     };
 
     if !origin_host.eq_ignore_ascii_case(host) {
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body(Body::from("Forbidden"))
-            .unwrap();
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
 
     next.run(request).await
@@ -320,11 +313,12 @@ where
 
         Box::pin(async move {
             let Some(ctx) = request.extensions().get::<AuthContext>() else {
-                return Ok(Response::builder()
-                    .status(StatusCode::UNAUTHORIZED)
-                    .header("WWW-Authenticate", "Bearer")
-                    .body(Body::from("Unauthorized"))
-                    .unwrap());
+                return Ok((
+                    StatusCode::UNAUTHORIZED,
+                    [("WWW-Authenticate", "Bearer")],
+                    "Unauthorized",
+                )
+                    .into_response());
             };
 
             if let Err(err) = scope.check(ctx) {
@@ -430,12 +424,7 @@ pub(crate) async fn login_submit(
                 "{}={}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}{}",
                 SESSION_COOKIE, jwt, ttl, secure,
             );
-            Response::builder()
-                .status(StatusCode::SEE_OTHER)
-                .header(LOCATION, "/")
-                .header(SET_COOKIE, cookie)
-                .body(Body::empty())
-                .unwrap()
+            redirect_with_cookie("/", &cookie)
         }
         None => login_html(Some("Invalid token.")).into_response(),
     }
@@ -448,12 +437,25 @@ pub async fn logout(State(config): State<WebAuthConfig>) -> Response {
         "{}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{}",
         SESSION_COOKIE, secure,
     );
-    Response::builder()
-        .status(StatusCode::SEE_OTHER)
-        .header(LOCATION, "/login")
-        .header(SET_COOKIE, cookie)
-        .body(Body::empty())
-        .unwrap()
+    redirect_with_cookie("/login", &cookie)
+}
+
+/// Build a 303 See-Other response that sets a cookie and redirects to `location`.
+///
+/// If either header value contains bytes `HeaderValue` rejects, the offending
+/// header is dropped rather than panicking. `location` and `cookie` are built
+/// from controlled inputs (constants and a JWT we just signed), so this is
+/// defense-in-depth, not an expected branch.
+fn redirect_with_cookie(location: &str, cookie: &str) -> Response {
+    let mut resp = Response::new(Body::empty());
+    *resp.status_mut() = StatusCode::SEE_OTHER;
+    if let Ok(value) = axum::http::HeaderValue::from_str(location) {
+        resp.headers_mut().insert(LOCATION, value);
+    }
+    if let Ok(value) = axum::http::HeaderValue::from_str(cookie) {
+        resp.headers_mut().insert(SET_COOKIE, value);
+    }
+    resp
 }
 
 // -- Helpers ----------------------------------------------------------------
