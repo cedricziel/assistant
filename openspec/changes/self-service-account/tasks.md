@@ -53,7 +53,7 @@ The `web-ui` crate has no HTML/template Account page. It serves the Flutter web 
 
 ## 7. Integration test (cross-cutting)
 
-- [ ] 7.1 Add `crates/integration-tests/tests/account.rs` (or extend `smoke.rs`) covering: log in, get-me, patch email, patch name, change password, verify old refresh token is revoked but current session continues, verify API keys still work.
+- [x] 7.1 Add `crates/integration-tests/tests/account.rs` (or extend `smoke.rs`) covering: log in, get-me, patch email, patch name, change password, verify old refresh token is revoked but current session continues, verify API keys still work.
 
 ## 8. Documentation
 

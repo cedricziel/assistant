@@ -11,6 +11,12 @@ assistant-storage = { path = "../storage" }
 assistant-runtime = { path = "../runtime" }
 assistant-skills = { path = "../skills" }
 assistant-tool-executor = { path = "../tool-executor" }
+assistant-auth = { path = "../auth" }
+assistant-web-ui = { path = "../web-ui", default-features = false }
+axum = { workspace = true }
+tower = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true }
