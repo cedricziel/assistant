@@ -57,9 +57,9 @@ The `web-ui` crate has no HTML/template Account page. It serves the Flutter web 
 
 ## 8. Documentation
 
-- [ ] 8.1 Add a "Changing your account" section to `docs/authentication.md` describing the three endpoints, OIDC behavior, and refresh-token revocation semantics.
-- [ ] 8.2 Add a CLI usage block to whatever README/CLI doc covers `assistant login` (likely `crates/interface-cli/README.md` or top-level `README.md`).
-- [ ] 8.3 Note the new Account screen in user-facing app documentation (if `docs/` has an app-tour section, otherwise skip).
+- [x] 8.1 Add a "Changing your account" section to `docs/authentication.md` describing the three endpoints, OIDC behavior, and refresh-token revocation semantics.
+- [x] 8.2 Add a CLI usage block to whatever README/CLI doc covers `assistant login` (likely `crates/interface-cli/README.md` or top-level `README.md`). Folded into §8.1's new section in `docs/authentication.md`, which is the doc that already covers `assistant login`.
+- [~] 8.3 ~~Note the new Account screen in user-facing app documentation.~~ Skipped — `docs/` has no app-tour section. `docs/multi-user.md` is a setup/architecture guide, not a feature walkthrough.
 
 ## 9. Polish & verification
 
