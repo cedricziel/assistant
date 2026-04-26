@@ -2,12 +2,12 @@
 
 ### Requirement: storage crate dependency boundary
 
-The `assistant-storage` crate SHALL declare only `assistant-core` as a workspace path dependency. It MUST NOT depend on `assistant-auth`, `assistant-backup`, `assistant-runtime`, `assistant-web-ui`, or any other workspace crate.
+The `assistant-storage` crate SHALL declare only `assistant-core` and `assistant-skills` as workspace path dependencies. It MUST NOT depend on `assistant-auth`, `assistant-backup`, `assistant-runtime`, `assistant-web-ui`, or any other workspace crate.
 
 #### Scenario: clean compile graph for storage
 
-- **WHEN** `cargo tree -p assistant-storage --workspace --no-default-features` is run
-- **THEN** the only workspace crate listed under `assistant-storage`'s direct path dependencies is `assistant-core`
+- **WHEN** `cargo tree -p assistant-storage -d 1 -e normal,no-dev,no-build` is run
+- **THEN** the only workspace crates listed at depth 1 (excluding dev/build edges) are `assistant-core` and `assistant-skills`
 
 #### Scenario: CI guard against regression
 

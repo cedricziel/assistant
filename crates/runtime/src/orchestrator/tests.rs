@@ -3438,7 +3438,10 @@ async fn run_turn_marks_had_errors_when_tool_fails() {
         .await
         .unwrap();
 
-    assert_eq!(result.answer, "recovered");
+    assert_eq!(
+        result.answer, "recovered",
+        "turn should still return the recovered final answer after a failing tool"
+    );
     assert!(
         result.had_errors,
         "TurnResult.had_errors should be true after a tool returned Err"
@@ -3464,7 +3467,10 @@ async fn run_turn_clears_had_errors_when_no_tool_fails() {
         .await
         .unwrap();
 
-    assert_eq!(result.answer, "all good");
+    assert_eq!(
+        result.answer, "all good",
+        "turn without tool failures should return the model answer"
+    );
     assert!(
         !result.had_errors,
         "TurnResult.had_errors should be false when no tool errored"

@@ -4,7 +4,7 @@
 
 `assistant-runtime` SHALL define a `TurnContext` struct that aggregates the parameters currently passed individually through the ReAct loop entry points in `crates/runtime/src/orchestrator/{mod,worker,dispatch,turn_control}.rs`. Functions in those modules SHALL accept `TurnContext` (or `&TurnContext`/`&mut TurnContext`) instead of long argument lists.
 
-#### Scenario: no too_many_arguments allows in orchestrator
+#### Scenario: no `clippy::too_many_arguments` allow attributes in orchestrator
 
 - **WHEN** `cargo clippy -p assistant-runtime -- -D warnings` is run
 - **THEN** there are zero `#[allow(clippy::too_many_arguments)]` annotations remaining in `crates/runtime/src/orchestrator/{mod,worker,dispatch,turn_control}.rs`
