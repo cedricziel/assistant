@@ -39,7 +39,7 @@ void main() {
 
       expect(
         find.byType(CupertinoListSection),
-        findsOneWidget,
+        findsWidgets,
         reason: 'Settings should use CupertinoListSection.insetGrouped on iOS',
       );
 

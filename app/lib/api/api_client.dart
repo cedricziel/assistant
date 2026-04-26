@@ -63,6 +63,7 @@ class ApiClient {
   SpacesApi get spaces => _generatedApi.getSpacesApi();
   MembersApi get members => _generatedApi.getMembersApi();
   UsersApi get users => _generatedApi.getUsersApi();
+  AccountApi get account => _generatedApi.getAccountApi();
   ApiKeysApi get apiKeys => _generatedApi.getApiKeysApi();
   CatalogApi get catalog => _generatedApi.getCatalogApi();
   TemplatesApi get templates => _generatedApi.getTemplatesApi();
