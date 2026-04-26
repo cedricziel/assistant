@@ -179,6 +179,107 @@ Scopes follow the `resource:action` format:
 API keys can optionally restrict scopes to specific resource IDs
 (e.g., only a specific persona or space).
 
+## Changing your account
+
+Authenticated users can update their own name, email, and password without
+involving an admin. Three endpoints implement this; all are mounted under
+`/api` and require a valid bearer token (JWT or API key).
+
+| Method | Path                     | Description             | Status codes                                          |
+| ------ | ------------------------ | ----------------------- | ----------------------------------------------------- |
+| GET    | `/api/users/me`          | Get own user record     | 200, 401                                              |
+| PATCH  | `/api/users/me`          | Update own name / email | 200, 400 (invalid email), 401, 409 (collision / OIDC) |
+| POST   | `/api/users/me/password` | Change own password     | 204, 400 (empty new), 401 (wrong current), 409 (OIDC) |
+
+### Update name or email
+
+```sh
+curl -X PATCH http://localhost:8080/api/users/me \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "new@example.com"}'
+```
+
+The response is a `UpdateCurrentUserResponse`:
+
+```json
+{
+  "user": {
+    "id": "...",
+    "email": "new@example.com",
+    "name": "...",
+    "...": "..."
+  },
+  "previous_email": "old@example.com"
+}
+```
+
+`previous_email` is only present when the email actually changed. Email
+collisions (another user in the same org already has that address) return
+`409 Conflict`. Empty body, or body with values matching current state, is
+a no-op that returns `200 OK` without writing to storage.
+
+### Change password
+
+```sh
+curl -X POST http://localhost:8080/api/users/me/password \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"current_password": "old-pw", "new_password": "new-pw"}'
+```
+
+On success the response is `204 No Content`.
+
+**Refresh-token revocation.** A successful password change revokes **every
+refresh token** belonging to the user. Sessions on other browsers and
+devices stop being able to refresh and must re-log-in. The calling access
+token (the JWT in the `Authorization` header) keeps working until its
+natural expiry — typically 1 hour — so the user is not abruptly logged
+out of the session that performed the change.
+
+**API keys are not affected.** Long-lived `ask_live_*` keys continue to
+authenticate after a password change. To revoke an API key, use the
+explicit revoke endpoint (`DELETE /api/users/me/api-keys/{id}`).
+
+### CLI usage
+
+The `assistant account` subcommand wraps the same three endpoints:
+
+```sh
+# Show your current profile (email, name, org, auth mode).
+assistant account show
+assistant account show --json   # raw UserDetail JSON
+
+# Update name or email.
+assistant account set-name "New Name"
+assistant account set-email new@example.com
+
+# Change password — prompts for current + new + confirm via TTY.
+assistant account change-password
+```
+
+`change-password` reads passwords from the TTY via `rpassword` so they
+never appear in shell history. It rejects locally if the new password and
+confirmation don't match.
+
+### OIDC-managed accounts
+
+When a user's organization runs in OIDC mode (`auth_mode = "oidc"`),
+identity is owned by the upstream identity provider. The PATCH and
+password-change endpoints return:
+
+```http
+HTTP/1.1 409 Conflict
+Content-Type: application/json
+
+{"error": "account managed by identity provider <issuer>"}
+```
+
+`<issuer>` is taken from the user's `idp_issuer` claim when available,
+otherwise a generic phrase. `GET /api/users/me` works in both modes — the
+read path is never blocked, so OIDC users can still discover their own
+profile.
+
 ## Auth middleware resolution order
 
 On every request, the auth middleware resolves identity in this order:
