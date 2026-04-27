@@ -802,6 +802,7 @@ mod tests {
         .unwrap();
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_custom_span(
         pool: &SqlitePool,
         trace_id: &str,

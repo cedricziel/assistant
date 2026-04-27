@@ -400,10 +400,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(&format!(
-                        "/orgs/org_1/spaces/sp_eng/bindings/{}",
-                        binding.id
-                    ))
+                    .uri(format!("/orgs/org_1/spaces/sp_eng/bindings/{}", binding.id))
                     .body(Body::empty())
                     .unwrap(),
             )

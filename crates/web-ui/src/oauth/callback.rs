@@ -434,7 +434,7 @@ q2HMPOhMSkWZ+rP+jJ76H6s=
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(&format!(
+                    .uri(format!(
                         "/oauth/callback?code=idp-auth-code&state={oidc_state_param}"
                     ))
                     .body(Body::empty())

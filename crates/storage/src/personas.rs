@@ -261,6 +261,35 @@ impl PersonaStore {
     }
 }
 
+fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
+    let home_interface: Option<String> = row.try_get("home_interface").unwrap_or(None);
+    let home_channel_val: Option<String> = row.try_get("home_channel").unwrap_or(None);
+    let home_channel = match (home_interface, home_channel_val) {
+        (Some(iface), Some(chan)) if !iface.is_empty() && !chan.is_empty() => Some(HomeChannel {
+            home_interface: iface,
+            home_channel: chan,
+        }),
+        _ => None,
+    };
+
+    Ok(PersonaRecord {
+        id: row.get("id"),
+        name: row.get("name"),
+        is_default: row.get::<i64, _>("is_default") != 0,
+        skill_access_mode: row
+            .try_get("skill_access_mode")
+            .unwrap_or_else(|_| "all".to_string()),
+        turn_timeout_secs: row
+            .try_get::<Option<i64>, _>("turn_timeout_secs")
+            .unwrap_or(None)
+            .map(|v| v as u64),
+        home_channel,
+        owner_user_id: row.try_get("owner_user_id").unwrap_or(None),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::StorageLayer;
@@ -633,33 +662,4 @@ mod tests {
         let result = store.get_accessible("any", "").await;
         assert!(result.is_err(), "empty user_id should be rejected");
     }
-}
-
-fn row_to_record(row: sqlx::sqlite::SqliteRow) -> Result<PersonaRecord> {
-    let home_interface: Option<String> = row.try_get("home_interface").unwrap_or(None);
-    let home_channel_val: Option<String> = row.try_get("home_channel").unwrap_or(None);
-    let home_channel = match (home_interface, home_channel_val) {
-        (Some(iface), Some(chan)) if !iface.is_empty() && !chan.is_empty() => Some(HomeChannel {
-            home_interface: iface,
-            home_channel: chan,
-        }),
-        _ => None,
-    };
-
-    Ok(PersonaRecord {
-        id: row.get("id"),
-        name: row.get("name"),
-        is_default: row.get::<i64, _>("is_default") != 0,
-        skill_access_mode: row
-            .try_get("skill_access_mode")
-            .unwrap_or_else(|_| "all".to_string()),
-        turn_timeout_secs: row
-            .try_get::<Option<i64>, _>("turn_timeout_secs")
-            .unwrap_or(None)
-            .map(|v| v as u64),
-        home_channel,
-        owner_user_id: row.try_get("owner_user_id").unwrap_or(None),
-        created_at: row.get("created_at"),
-        updated_at: row.get("updated_at"),
-    })
 }

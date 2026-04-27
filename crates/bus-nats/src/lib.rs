@@ -40,7 +40,8 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use assistant_core::{
-    BusConfig, BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest,
+    BusConfig, BusMessage, ClaimFilter, MAX_TURN_REDELIVERIES, MessageBus, MessageStatus,
+    PublishRequest,
 };
 
 // -- Header keys ------------------------------------------------------------
@@ -73,6 +74,11 @@ const STREAM_MAX_AGE: Duration = Duration::from_secs(86_400); // 24 h
 /// returning whatever it has. Prevents indefinite blocking when there are
 /// fewer messages than `FETCH_BATCH`.
 const FETCH_EXPIRES: Duration = Duration::from_secs(5);
+/// Maximum number of times JetStream redelivers a single message before giving
+/// up. Mirrors [`assistant_core::MAX_TURN_REDELIVERIES`] so the broker and the
+/// worker terminate at the same point. JetStream uses `i64`; the cast is safe
+/// for any sensible cap value.
+const MAX_DELIVER: i64 = MAX_TURN_REDELIVERIES as i64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ResolvedNatsAuth {
@@ -176,24 +182,52 @@ impl NatsMessageBus {
     }
 
     /// Build or retrieve a durable pull consumer for `(worker_id, topic)`.
+    ///
+    /// `get_or_create_consumer` only honors the supplied config when the
+    /// consumer is *new*. If a pre-existing consumer (e.g. from a release
+    /// shipped before the redelivery cap landed) has `max_deliver = -1`,
+    /// NATS leaves the old config in place and we'd silently keep the
+    /// unbounded retry loop. To reconcile, we fetch `consumer_info` after the
+    /// get-or-create call; if `max_deliver` doesn't match
+    /// [`MAX_DELIVER`], we delete the stale consumer and re-create it with
+    /// the current config. At most one reconciliation pass per call.
     async fn consumer_for(&self, worker_id: &str, topic: &str) -> Result<Consumer<pull::Config>> {
         let name = format!("{}-{}", worker_id, topic.replace('.', "-"));
+        let cfg = pull::Config {
+            durable_name: Some(name.clone()),
+            filter_subject: format!("bus.{topic}"),
+            ack_wait: ACK_WAIT,
+            max_deliver: MAX_DELIVER,
+            ..Default::default()
+        };
 
-        let consumer = self
+        let mut consumer = self
             .stream
-            .get_or_create_consumer(
-                &name,
-                pull::Config {
-                    durable_name: Some(name.clone()),
-                    filter_subject: format!("bus.{topic}"),
-                    ack_wait: ACK_WAIT,
-                    ..Default::default()
-                },
-            )
+            .get_or_create_consumer(&name, cfg.clone())
             .await
             .map_err(|e| anyhow::anyhow!("failed to create NATS consumer {name}: {e}"))?;
 
-        Ok(consumer)
+        let mismatch = match consumer.info().await {
+            Ok(info) => info.config.max_deliver != MAX_DELIVER,
+            Err(_) => false,
+        };
+        if !mismatch {
+            return Ok(consumer);
+        }
+
+        warn!(
+            consumer = %name,
+            "NATS consumer max_deliver mismatch — recreating with new cap"
+        );
+        self.stream
+            .delete_consumer(&name)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to delete stale NATS consumer {name}: {e}"))?;
+
+        self.stream
+            .get_or_create_consumer(&name, cfg)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to recreate NATS consumer {name}: {e}"))
     }
 }
 
@@ -923,5 +957,59 @@ mod tests {
 
         let result = bus.claim("empty.topic", "w1").await.unwrap();
         assert!(result.is_none(), "should return None on empty topic");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Docker"]
+    async fn consumer_carries_max_deliver_cap() {
+        let (_container, url) = start_nats().await;
+        let bus = NatsMessageBus::new(&url).await.unwrap();
+
+        let mut consumer = bus.consumer_for("worker", "cap.topic").await.unwrap();
+        let info = consumer.info().await.unwrap();
+        assert_eq!(
+            info.config.max_deliver, MAX_DELIVER,
+            "consumer must carry the configured max_deliver cap"
+        );
+        assert_eq!(
+            MAX_DELIVER, MAX_TURN_REDELIVERIES as i64,
+            "MAX_DELIVER must mirror MAX_TURN_REDELIVERIES"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Docker"]
+    async fn consumer_for_reconciles_legacy_unbounded_config() {
+        let (_container, url) = start_nats().await;
+        let bus = NatsMessageBus::new(&url).await.unwrap();
+
+        // Pre-create a consumer with the OLD (unbounded) config to simulate
+        // what's running on schorschvm pre-deploy.
+        let name = "legacy-reconcile-topic".to_string();
+        let legacy_cfg = pull::Config {
+            durable_name: Some(name.clone()),
+            filter_subject: "bus.reconcile.topic".to_string(),
+            ack_wait: ACK_WAIT,
+            // explicitly unbounded — no max_deliver
+            ..Default::default()
+        };
+        let mut legacy = bus
+            .stream
+            .get_or_create_consumer(&name, legacy_cfg)
+            .await
+            .expect("create legacy consumer");
+        let legacy_info = legacy.info().await.expect("legacy info");
+        assert_eq!(
+            legacy_info.config.max_deliver, -1,
+            "legacy consumer should start unbounded"
+        );
+
+        // consumer_for must reconcile by deleting and recreating with the cap.
+        let mut reconciled = bus.consumer_for("legacy", "reconcile.topic").await.unwrap();
+        let info = reconciled.info().await.unwrap();
+        assert_eq!(
+            info.config.max_deliver, MAX_DELIVER,
+            "consumer_for must reconcile a stale consumer to the configured cap"
+        );
     }
 }

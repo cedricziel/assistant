@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assistant_core::{
-    ClaimFilter, ContentBlock, Interface, OrgId, PublishRequest, SpaceId, ToolHandler,
-    TurnIdentity, UserId, bus_messages, topic,
+    ClaimFilter, ContentBlock, Interface, MAX_TURN_REDELIVERIES, OrgId, PublishRequest, SpaceId,
+    ToolHandler, TurnIdentity, UserId, bus_messages, topic,
 };
 use chrono::{DateTime, Local, Utc};
 use opentelemetry::{
@@ -420,39 +420,68 @@ impl Orchestrator {
                             // Transient LLM errors (429 rate-limit, overload,
                             // etc.) are retried silently via NATS redelivery
                             // with exponential backoff — no error published to
-                            // the caller.
-                            if is_transient_turn_error(&e) {
-                                let delay = transient_nack_delay(msg.delivery_count);
-                                warn!(
+                            // the caller. Past `MAX_TURN_REDELIVERIES` we give
+                            // up and surface the error to the conversation so
+                            // the user sees something instead of silent
+                            // infinite retry.
+                            let action = classify_turn_failure(
+                                is_transient_turn_error(&e),
+                                msg.delivery_count,
+                            );
+                            let terminate_reason = match action {
+                                TurnFailureAction::NackForRetry(delay) => {
+                                    warn!(
+                                        error = %e,
+                                        conversation_id = %conv_id,
+                                        worker_id,
+                                        delivery = msg.delivery_count,
+                                        delay_secs = delay.as_secs(),
+                                        "Transient turn error — nacking for redelivery"
+                                    );
+                                    // Re-register extension tools so the
+                                    // redelivered message dispatches correctly.
+                                    if let Some(reg) = ext_for_retry {
+                                        self.extension_registrations
+                                            .write()
+                                            .await
+                                            .insert(conv_id, reg);
+                                    }
+                                    let _ = self.bus.nack_delayed(msg.id, delay).await;
+                                    bus_consume_cx.span().set_attribute(KeyValue::new(
+                                        "bus.status",
+                                        "transient_retry",
+                                    ));
+                                    bus_consume_cx.span().end();
+                                    continue;
+                                }
+                                TurnFailureAction::Terminate(reason) => reason,
+                            };
+
+                            if terminate_reason == TerminateReason::ExceededRetryCap {
+                                error!(
                                     error = %e,
                                     conversation_id = %conv_id,
                                     worker_id,
                                     delivery = msg.delivery_count,
-                                    delay_secs = delay.as_secs(),
-                                    "Transient turn error — nacking for redelivery"
+                                    "Transient turn error exceeded retry cap — terminating"
                                 );
-                                // Re-register extension tools so the
-                                // redelivered message dispatches correctly.
-                                if let Some(reg) = ext_for_retry {
-                                    self.extension_registrations
-                                        .write()
-                                        .await
-                                        .insert(conv_id, reg);
-                                }
-                                let _ = self.bus.nack_delayed(msg.id, delay).await;
-                                bus_consume_cx
-                                    .span()
-                                    .set_attribute(KeyValue::new("bus.status", "transient_retry"));
-                                bus_consume_cx.span().end();
-                                continue;
                             }
 
-                            // Permanent error — publish a failure TurnResult so
-                            // submit_turn callers get an immediate error instead
-                            // of waiting until timeout.
+                            // Terminal error — publish a failure TurnResult so
+                            // submit_turn callers get an immediate error
+                            // instead of waiting until timeout. Either the
+                            // error is permanent or we've exhausted the
+                            // redelivery cap; in both cases we terminate the
+                            // bus message so JetStream stops redelivering.
+                            let err_content = match terminate_reason {
+                                TerminateReason::ExceededRetryCap => {
+                                    format!("exceeded retry cap: {e}")
+                                }
+                                TerminateReason::Permanent => format!("Turn failed: {e}"),
+                            };
                             let err_result = bus_messages::TurnResult {
                                 conversation_id: conv_id,
-                                content: format!("Turn failed: {e}"),
+                                content: err_content,
                                 turn: 0,
                                 attachment_ids: vec![],
                                 message_id: None,
@@ -886,4 +915,105 @@ fn transient_nack_delay(delivery_count: u32) -> Duration {
         _ => 240,
     };
     Duration::from_secs(secs)
+}
+
+/// What the worker should do with a failed turn message.
+#[derive(Debug, PartialEq, Eq)]
+enum TurnFailureAction {
+    /// Transient error; nack with the given delay so JetStream redelivers.
+    NackForRetry(Duration),
+    /// Terminate the message: publish a terminal `TurnResult` and ack with
+    /// `AckKind::Term` so JetStream stops redelivering. Reason distinguishes
+    /// permanent errors from cap exhaustion for the user-facing message.
+    Terminate(TerminateReason),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TerminateReason {
+    /// Classifier reports the error is permanent (billing, auth, etc.).
+    Permanent,
+    /// Error is transient but the message has been redelivered too many times.
+    ExceededRetryCap,
+}
+
+/// Decide what to do with a failed turn message. Pure function — exists so
+/// the cap/permanent decision can be unit-tested without wiring a full bus.
+fn classify_turn_failure(transient: bool, delivery_count: u32) -> TurnFailureAction {
+    if !transient {
+        return TurnFailureAction::Terminate(TerminateReason::Permanent);
+    }
+    if delivery_count >= MAX_TURN_REDELIVERIES {
+        return TurnFailureAction::Terminate(TerminateReason::ExceededRetryCap);
+    }
+    TurnFailureAction::NackForRetry(transient_nack_delay(delivery_count))
+}
+
+#[cfg(test)]
+mod transient_failure_tests {
+    use super::*;
+
+    #[test]
+    fn transient_below_cap_nacks_with_backoff() {
+        assert_eq!(
+            classify_turn_failure(true, 1),
+            TurnFailureAction::NackForRetry(Duration::from_secs(30))
+        );
+        assert_eq!(
+            classify_turn_failure(true, 2),
+            TurnFailureAction::NackForRetry(Duration::from_secs(60))
+        );
+        assert_eq!(
+            classify_turn_failure(true, 3),
+            TurnFailureAction::NackForRetry(Duration::from_secs(120))
+        );
+        assert_eq!(
+            classify_turn_failure(true, 4),
+            TurnFailureAction::NackForRetry(Duration::from_secs(240))
+        );
+        assert_eq!(
+            classify_turn_failure(true, MAX_TURN_REDELIVERIES - 1),
+            TurnFailureAction::NackForRetry(Duration::from_secs(240))
+        );
+    }
+
+    #[test]
+    fn transient_at_cap_terminates_with_cap_reason() {
+        assert_eq!(
+            classify_turn_failure(true, MAX_TURN_REDELIVERIES),
+            TurnFailureAction::Terminate(TerminateReason::ExceededRetryCap)
+        );
+        assert_eq!(
+            classify_turn_failure(true, MAX_TURN_REDELIVERIES + 1),
+            TurnFailureAction::Terminate(TerminateReason::ExceededRetryCap)
+        );
+    }
+
+    #[test]
+    fn permanent_terminates_immediately_regardless_of_count() {
+        assert_eq!(
+            classify_turn_failure(false, 1),
+            TurnFailureAction::Terminate(TerminateReason::Permanent)
+        );
+        assert_eq!(
+            classify_turn_failure(false, 0),
+            TurnFailureAction::Terminate(TerminateReason::Permanent)
+        );
+    }
+
+    #[test]
+    fn permanent_billing_error_is_classified_permanent() {
+        let e = anyhow::anyhow!(
+            "API error (429 Too Many Requests): Your account is suspended due to insufficient balance, please recharge"
+        );
+        assert!(
+            !is_transient_turn_error(&e),
+            "billing-suspension 429 must classify as permanent so the worker terminates"
+        );
+    }
+
+    #[test]
+    fn ordinary_429_remains_transient() {
+        let e = anyhow::anyhow!("API error 429: Too Many Requests");
+        assert!(is_transient_turn_error(&e));
+    }
 }

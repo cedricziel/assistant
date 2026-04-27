@@ -869,10 +869,10 @@ mod tests {
             .build();
 
         let mut conn = pool.acquire().await.unwrap();
-        let id1 = SqliteMetricExporter::ensure_resource(&mut *conn, &resource)
+        let id1 = SqliteMetricExporter::ensure_resource(&mut conn, &resource)
             .await
             .unwrap();
-        let id2 = SqliteMetricExporter::ensure_resource(&mut *conn, &resource)
+        let id2 = SqliteMetricExporter::ensure_resource(&mut conn, &resource)
             .await
             .unwrap();
         assert_eq!(id1, id2, "same resource must return same id");
@@ -893,10 +893,10 @@ mod tests {
             .build();
 
         let mut conn = pool.acquire().await.unwrap();
-        let id1 = SqliteMetricExporter::ensure_scope(&mut *conn, &scope)
+        let id1 = SqliteMetricExporter::ensure_scope(&mut conn, &scope)
             .await
             .unwrap();
-        let id2 = SqliteMetricExporter::ensure_scope(&mut *conn, &scope)
+        let id2 = SqliteMetricExporter::ensure_scope(&mut conn, &scope)
             .await
             .unwrap();
         assert_eq!(id1, id2, "same scope must return same id");

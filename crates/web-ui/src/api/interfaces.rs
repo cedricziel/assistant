@@ -383,7 +383,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(&format!("/orgs/org_1/spaces/sp_eng/interfaces/{}", inst.id))
+                    .uri(format!("/orgs/org_1/spaces/sp_eng/interfaces/{}", inst.id))
                     .body(Body::empty())
                     .unwrap(),
             )

@@ -719,7 +719,7 @@ mod tests {
         let task = tasks.iter().find(|t| t.id == id).unwrap();
         assert!(task.enabled, "recurring task must stay enabled");
         assert!(
-            task.next_run.map_or(false, |nr| nr > Utc::now()),
+            task.next_run.is_some_and(|nr| nr > Utc::now()),
             "next_run must be advanced into the future"
         );
     }

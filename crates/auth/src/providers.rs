@@ -540,6 +540,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn make_test_infra() -> (
         Arc<JwtManager>,
         Arc<OAuth2Server>,

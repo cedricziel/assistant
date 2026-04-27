@@ -20,6 +20,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+// -- Retry caps --------------------------------------------------------------
+
+/// Maximum number of times a single bus message may be redelivered before the
+/// platform terminates it. Shared by the broker (e.g. JetStream `max_deliver`)
+/// and the orchestrator worker so the two layers agree on the cap.
+///
+/// A value of `10` paired with the worker's 30/60/120/240-second backoff
+/// schedule allows ~28 minutes of retry for genuinely transient provider
+/// outages while still bounding spend for permanent failures that slip past
+/// the classifier.
+pub const MAX_TURN_REDELIVERIES: u32 = 10;
+
 // -- Message Status ---------------------------------------------------------
 
 /// Lifecycle state of a bus message.
