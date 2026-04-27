@@ -897,6 +897,25 @@ fn parse_response_json(json: &Value, meta: LlmResponseMeta) -> anyhow::Result<Ll
     Ok(LlmResponse::FinalAnswer(text_parts.join(""), meta))
 }
 
+/// Extract [`LlmResponseMeta`] from an Anthropic non-streaming JSON response.
+///
+/// Top-level fields: `model`, `id`, `stop_reason`, `usage.input_tokens`,
+/// `usage.output_tokens`.
+fn extract_anthropic_meta(json: &Value) -> LlmResponseMeta {
+    LlmResponseMeta {
+        model: json.get("model").and_then(|v| v.as_str()).map(String::from),
+        response_id: json.get("id").and_then(|v| v.as_str()).map(String::from),
+        finish_reason: json
+            .get("stop_reason")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        input_tokens: json.pointer("/usage/input_tokens").and_then(|v| v.as_u64()),
+        output_tokens: json
+            .pointer("/usage/output_tokens")
+            .and_then(|v| v.as_u64()),
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1141,24 +1160,5 @@ mod tests {
         // Third: plain text assistant
         assert_eq!(messages[2]["content"], "I see an image");
         assert_eq!(messages[2]["role"], "assistant");
-    }
-}
-
-/// Extract [`LlmResponseMeta`] from an Anthropic non-streaming JSON response.
-///
-/// Top-level fields: `model`, `id`, `stop_reason`, `usage.input_tokens`,
-/// `usage.output_tokens`.
-fn extract_anthropic_meta(json: &Value) -> LlmResponseMeta {
-    LlmResponseMeta {
-        model: json.get("model").and_then(|v| v.as_str()).map(String::from),
-        response_id: json.get("id").and_then(|v| v.as_str()).map(String::from),
-        finish_reason: json
-            .get("stop_reason")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        input_tokens: json.pointer("/usage/input_tokens").and_then(|v| v.as_u64()),
-        output_tokens: json
-            .pointer("/usage/output_tokens")
-            .and_then(|v| v.as_u64()),
     }
 }

@@ -426,6 +426,7 @@ fn interface_selected(selected: &HashSet<String>, interface: &str) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod cli_parse_tests {
     use clap::Parser;
 

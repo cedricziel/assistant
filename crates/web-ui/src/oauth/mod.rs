@@ -330,7 +330,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(&format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&code_challenge={challenge}&code_challenge_method=S256"))
+                    .uri(format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&code_challenge={challenge}&code_challenge_method=S256"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -447,7 +447,7 @@ mod tests {
         let app = build_app(state);
         let resp = app.oneshot(
             Request::builder()
-                .uri(&format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&state=mystate&code_challenge={challenge}&code_challenge_method=S256"))
+                .uri(format!("/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri=http://localhost/cb&state=mystate&code_challenge={challenge}&code_challenge_method=S256"))
                 .body(Body::empty())
                 .unwrap(),
         ).await.unwrap();

@@ -162,6 +162,22 @@ impl ScheduledTaskStore {
     }
 }
 
+fn parse_row(r: sqlx::sqlite::SqliteRow) -> Result<ScheduledTask> {
+    let raw_id: String = r.get("id");
+    Ok(ScheduledTask {
+        id: Uuid::parse_str(&raw_id)?,
+        agent_id: r.get("agent_id"),
+        name: r.get("name"),
+        cron_expr: r.get("cron_expr"),
+        prompt: r.get("prompt"),
+        enabled: r.get("enabled"),
+        once: r.get("once"),
+        last_run: r.get("last_run"),
+        next_run: r.get("next_run"),
+        created_at: r.get("created_at"),
+    })
+}
+
 // -- Tests ------------------------------------------------------------------
 
 #[cfg(test)]
@@ -353,20 +369,4 @@ mod tests {
         assert_eq!(all.len(), 1, "list_all must include disabled tasks");
         assert!(!all[0].enabled);
     }
-}
-
-fn parse_row(r: sqlx::sqlite::SqliteRow) -> Result<ScheduledTask> {
-    let raw_id: String = r.get("id");
-    Ok(ScheduledTask {
-        id: Uuid::parse_str(&raw_id)?,
-        agent_id: r.get("agent_id"),
-        name: r.get("name"),
-        cron_expr: r.get("cron_expr"),
-        prompt: r.get("prompt"),
-        enabled: r.get("enabled"),
-        once: r.get("once"),
-        last_run: r.get("last_run"),
-        next_run: r.get("next_run"),
-        created_at: r.get("created_at"),
-    })
 }

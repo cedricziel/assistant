@@ -608,10 +608,10 @@ mod tests {
         extra_content: serde_json::Value,
     ) -> serde_json::Value {
         let mut content = serde_json::json!({ "msgtype": msgtype });
-        if let serde_json::Value::Object(ref mut map) = content {
-            if let serde_json::Value::Object(extra) = extra_content {
-                map.extend(extra);
-            }
+        if let serde_json::Value::Object(ref mut map) = content
+            && let serde_json::Value::Object(extra) = extra_content
+        {
+            map.extend(extra);
         }
         serde_json::json!({
             "next_batch": "s1",

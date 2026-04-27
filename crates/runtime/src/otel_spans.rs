@@ -429,7 +429,7 @@ mod tests {
             .with_simple_exporter(exporter)
             .build();
         // start_tool_span uses global::tracer(), so we must set the global provider.
-        let _prev = opentelemetry::global::set_tracer_provider(provider.clone());
+        opentelemetry::global::set_tracer_provider(provider.clone());
 
         let conversation_id = Uuid::new_v4();
         let params = serde_json::json!({"name": "my-skill"});
@@ -483,7 +483,7 @@ mod tests {
         let provider = SdkTracerProvider::builder()
             .with_simple_exporter(exporter)
             .build();
-        let _prev = opentelemetry::global::set_tracer_provider(provider.clone());
+        opentelemetry::global::set_tracer_provider(provider.clone());
 
         let conversation_id = Uuid::new_v4();
         let params = serde_json::json!({"query": "hello"});

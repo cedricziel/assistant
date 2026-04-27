@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn default_constants_are_sensible() {
         assert_eq!(DEFAULT_BASE_URL, "https://api.moonshot.ai/v1");
-        assert!(DEFAULT_MAX_TOKENS > 0);
+        const { assert!(DEFAULT_MAX_TOKENS > 0) };
     }
 
     // ── Capabilities ─────────────────────────────────────────────────────

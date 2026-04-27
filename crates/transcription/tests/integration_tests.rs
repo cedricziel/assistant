@@ -217,7 +217,7 @@ async fn test_converter_custom_settings() {
 
     // We can't easily test the actual conversion with custom settings
     // without a real FFmpeg binary, but we can verify the builder pattern works
-    assert_eq!(converter.check_ffmpeg().await.is_err(), true); // Invalid path
+    assert!(converter.check_ffmpeg().await.is_err()); // Invalid path
 }
 
 #[tokio::test]

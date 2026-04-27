@@ -478,7 +478,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use anyhow::Result;
     use sqlx::{Row, SqlitePool};
@@ -517,7 +517,7 @@ mod tests {
         Ok(())
     }
 
-    async fn seed_database_through_016(db_path: &PathBuf) -> Result<()> {
+    async fn seed_database_through_016(db_path: &Path) -> Result<()> {
         let url = format!("sqlite://{}?mode=rwc", db_path.display());
         let pool = SqlitePool::connect(&url).await?;
 

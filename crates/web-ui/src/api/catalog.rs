@@ -710,7 +710,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(&format!(
+                    .uri(format!(
                         "/orgs/org_1/spaces/sp_eng/subscriptions/{}",
                         sub.id
                     ))
