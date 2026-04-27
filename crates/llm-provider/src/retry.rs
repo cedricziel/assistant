@@ -65,13 +65,62 @@ pub fn is_transient_status(status: u16) -> bool {
     matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 529)
 }
 
+/// Markers that identify *permanent* upstream failures even when the message
+/// also looks transient (e.g. an HTTP 429 from a billing-suspended account).
+///
+/// Match is case-insensitive substring against the error message. The list is
+/// intentionally narrow — entries should originate from real provider error
+/// bodies seen in production, not speculation. Adding too many markers risks
+/// classifying a genuinely transient hiccup as permanent.
+const PERMANENT_BILLING_MARKERS: &[&str] = &[
+    "insufficient balance",   // Moonshot
+    "insufficient quota",     // OpenAI (with space)
+    "insufficient_quota",     // OpenAI (snake-case)
+    "account is suspended",   // Moonshot variant
+    "account suspended",      // generic
+    "quota exceeded",         // OpenAI / generic
+    "please recharge",        // Moonshot
+    "payment required",       // HTTP 402 in spirit
+    "billing required",       // OpenAI billing prompts
+    "billing hard limit",     // OpenAI hard cap
+    "billing limit exceeded", // generic phrasing
+];
+
+/// Returns `true` when the (already lowercased) error message contains any
+/// marker indicating a permanent billing/quota/suspension failure that must
+/// not be retried.
+fn contains_permanent_billing_marker(lower: &str) -> bool {
+    PERMANENT_BILLING_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+/// Returns `true` when `msg` indicates a permanent billing/quota/suspension
+/// failure from the upstream provider. Used to short-circuit retry of errors
+/// whose HTTP code (e.g. `429`) would otherwise be classified as transient
+/// but whose body identifies a permanent state (account suspended, quota
+/// exhausted, payment required, etc.).
+pub fn is_permanent_billing_error(msg: &str) -> bool {
+    contains_permanent_billing_marker(&msg.to_lowercase())
+}
+
 /// Check whether an error message from an SDK (like `async-openai`) indicates
 /// a transient failure that should be retried.
 ///
 /// This is a heuristic fallback for SDKs that don't expose structured HTTP
 /// status codes.  It scans the error string for known transient status codes
-/// and keywords.
+/// and keywords. Permanent billing/quota errors short-circuit to `false` even
+/// when the message also contains a transient-looking status code such as
+/// `429` — see [`is_permanent_billing_error`].
 pub fn is_transient_error_message(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+
+    // Permanent billing errors must never be retried, regardless of the
+    // accompanying HTTP status code.
+    if contains_permanent_billing_marker(&lower) {
+        return false;
+    }
+
     // Check for numeric status codes embedded in the error message.
     for code in ["408", "429", "500", "502", "503", "504", "529"] {
         if msg.contains(code) {
@@ -80,7 +129,6 @@ pub fn is_transient_error_message(msg: &str) -> bool {
     }
 
     // Check for common transient-error keywords.
-    let lower = msg.to_lowercase();
     lower.contains("rate limit")
         || lower.contains("too many requests")
         || lower.contains("overloaded")
@@ -227,6 +275,49 @@ mod tests {
         assert!(!is_transient_error_message("Invalid API key"));
         assert!(!is_transient_error_message("400 Bad Request"));
         assert!(!is_transient_error_message("permission denied"));
+    }
+
+    #[test]
+    fn moonshot_insufficient_balance_429_is_permanent() {
+        let msg = "API error (429 Too Many Requests): Your account org-abc \
+                   is suspended due to insufficient balance, please recharge";
+        assert!(
+            is_permanent_billing_error(msg),
+            "Moonshot insufficient-balance must classify as permanent"
+        );
+        assert!(
+            !is_transient_error_message(msg),
+            "Moonshot insufficient-balance must not be retried even though it carries 429"
+        );
+    }
+
+    #[test]
+    fn openai_insufficient_quota_429_is_permanent() {
+        let msg = "API error: 429 — insufficient_quota: You exceeded your current quota";
+        assert!(is_permanent_billing_error(msg));
+        assert!(!is_transient_error_message(msg));
+    }
+
+    #[test]
+    fn real_transient_429_remains_transient() {
+        let msg = "API error 429: Too Many Requests — please retry after 30s";
+        assert!(!is_permanent_billing_error(msg));
+        assert!(is_transient_error_message(msg));
+    }
+
+    #[test]
+    fn real_transient_503_unaffected() {
+        let msg = "503 Service Unavailable";
+        assert!(!is_permanent_billing_error(msg));
+        assert!(is_transient_error_message(msg));
+    }
+
+    #[test]
+    fn permanent_marker_case_insensitive() {
+        assert!(is_permanent_billing_error("ACCOUNT IS SUSPENDED"));
+        assert!(is_permanent_billing_error("Insufficient_Quota"));
+        assert!(is_permanent_billing_error("Quota Exceeded"));
+        assert!(is_permanent_billing_error("Payment Required"));
     }
 
     #[tokio::test]

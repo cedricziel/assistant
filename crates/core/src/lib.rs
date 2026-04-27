@@ -30,7 +30,9 @@ pub use auth::{
     DeviceCodeStore, DeviceState, IdentityResolver, RefreshTokenStore, StoredRefreshToken,
     TokenGrant, TokenResponse,
 };
-pub use bus::{BusMessage, ClaimFilter, MessageBus, MessageStatus, PublishRequest};
+pub use bus::{
+    BusMessage, ClaimFilter, MAX_TURN_REDELIVERIES, MessageBus, MessageStatus, PublishRequest,
+};
 pub use bus_messages::{
     AgentReport, AgentReportStatus, AgentSpawn, ToolExecute, ToolResult, TurnPhase, TurnRequest,
     TurnResult, TurnStatus, topic,
