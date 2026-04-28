@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.145](https://github.com/cedricziel/assistant/compare/v0.1.144...v0.1.145) (2026-04-28)
+
+
+### Bug Fixes
+
+* **web-ui:** JWT carries real org_id from user record ([#676](https://github.com/cedricziel/assistant/issues/676)) ([a60c431](https://github.com/cedricziel/assistant/commit/a60c4312f467cad9e0d6d04eaeba58786fa194cd))
+
 ## [0.1.144](https://github.com/cedricziel/assistant/compare/v0.1.143...v0.1.144) (2026-04-28)
 
 
