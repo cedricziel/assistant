@@ -29,6 +29,8 @@ use assistant_auth::oauth2::device::DeviceCodeManager;
 use assistant_auth::oauth2::server::OAuth2Server;
 use assistant_auth::oidc::OidcProvider;
 use assistant_core::auth::AuthContext;
+use assistant_core::identity::UserId;
+use assistant_core::store::{MembershipStore, UserStore};
 use assistant_storage::OrgStorageLayer;
 
 use self::oidc_sessions::PendingOidcSessionStore;
@@ -152,6 +154,67 @@ pub(crate) fn stub_auth_context(user_id: &str, org_id: &str, email: &str) -> Aut
         space_roles: std::collections::HashMap::new(),
         scopes: vec![],
         client_id: String::new(),
+    }
+}
+
+/// Build an [`AuthContext`] for a user who has just authenticated, populating
+/// the real `org_id`, `email`, and `space_roles` from the org-level store.
+///
+/// Falls back to [`stub_auth_context`] (with `org_id="default"` and empty
+/// roles) only when the user record cannot be loaded — this preserves
+/// the legacy behaviour for callers that still rely on it but means an
+/// authenticated user with a missing DB row still gets a (degraded) JWT
+/// rather than a 500 response.
+pub(crate) async fn build_auth_context_for_user(
+    org_storage: &OrgStorageLayer,
+    user_id: &str,
+    client_id: &str,
+) -> AuthContext {
+    let user_id_typed = UserId::from(user_id);
+
+    let user = match org_storage.user_store().get_user(&user_id_typed).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            tracing::warn!(
+                user_id = %user_id,
+                "user record not found while issuing JWT — falling back to stub context"
+            );
+            let mut ctx = stub_auth_context(user_id, "default", "");
+            ctx.client_id = client_id.to_string();
+            return ctx;
+        }
+        Err(e) => {
+            tracing::error!(
+                user_id = %user_id,
+                error = %e,
+                "user lookup failed while issuing JWT — falling back to stub context"
+            );
+            let mut ctx = stub_auth_context(user_id, "default", "");
+            ctx.client_id = client_id.to_string();
+            return ctx;
+        }
+    };
+
+    let space_roles = org_storage
+        .membership_store()
+        .get_space_roles(&user_id_typed)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!(
+                user_id = %user_id,
+                error = %e,
+                "membership lookup failed while issuing JWT — proceeding with empty roles"
+            );
+            std::collections::HashMap::new()
+        });
+
+    AuthContext {
+        user_id: user.id,
+        org_id: user.org_id,
+        email: user.email,
+        space_roles,
+        scopes: vec![],
+        client_id: client_id.to_string(),
     }
 }
 
@@ -879,5 +942,100 @@ mod tests {
             set_cookie.contains("assistant_session="),
             "cookie should be named assistant_session: {set_cookie}"
         );
+    }
+
+    /// Regression: an auth-code exchange must produce a JWT whose `org_id`
+    /// claim matches the user's actual org, not a hardcoded "default".
+    /// Otherwise `/api/orgs` returns an empty list and the user is stuck on
+    /// the org/space selector.
+    #[tokio::test]
+    async fn auth_code_jwt_carries_real_org_id() {
+        use assistant_auth::jwt::JwtKeyPair;
+
+        let state = test_state().await;
+        let (verifier, challenge) = test_pkce();
+
+        // Register a client.
+        let app = build_app(state.clone());
+        let reg_body = serde_json::json!({
+            "client_name": "Org ID Test",
+            "redirect_uris": ["http://localhost/cb"],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+        });
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let client_id = client["client_id"].as_str().unwrap();
+
+        // Authorize.
+        let app = build_app(state.clone());
+        let form = format!(
+            "email=alice%40example.com&password=secret123&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge={challenge}"
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let location = resp.headers().get("location").unwrap().to_str().unwrap();
+        let code = location
+            .split("code=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap();
+
+        // Exchange.
+        let app = build_app(state.clone());
+        let token_form = format!(
+            "grant_type=authorization_code&code={code}&client_id={client_id}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_verifier={verifier}"
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(token_form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let tokens: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let access_token = tokens["access_token"].as_str().unwrap();
+
+        // Decode the JWT and check the org_id claim is the user's real org.
+        let claims = state.jwt_manager.validate(access_token).unwrap();
+        assert_eq!(
+            claims.org_id, "org_test",
+            "JWT should carry the user's real org_id, not a hardcoded value"
+        );
+        assert_eq!(claims.email, "alice@example.com");
+        // sanity-check: signature checks pass through the existing key pair.
+        let _ = JwtKeyPair::generate();
     }
 }

@@ -15,7 +15,7 @@ use tracing::warn;
 
 use assistant_auth::oauth2::device::PollResult;
 
-use super::{OAuthError, OAuthErrorResponse, OAuthState, stub_auth_context};
+use super::{OAuthError, OAuthErrorResponse, OAuthState, build_auth_context_for_user};
 
 /// Standard OAuth2 token request (form-encoded per RFC 6749 §4.1.3).
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -128,7 +128,8 @@ async fn handle_auth_code(state: OAuthState, req: TokenRequest) -> axum::respons
     {
         Ok(pair) => {
             // Sign a JWT access token for the user.
-            let ctx = stub_auth_context(&pair.user_id, "default", "");
+            let ctx =
+                build_auth_context_for_user(&state.org_storage, &pair.user_id, &client_id).await;
             let ttl = state.jwt_manager.access_ttl_secs();
             let jwt = match state
                 .jwt_manager
@@ -198,7 +199,8 @@ async fn handle_refresh(state: OAuthState, req: TokenRequest) -> axum::response:
         .await
     {
         Ok(pair) => {
-            let ctx = stub_auth_context(&pair.user_id, "default", "");
+            let ctx =
+                build_auth_context_for_user(&state.org_storage, &pair.user_id, &client_id).await;
             let ttl = state.jwt_manager.access_ttl_secs();
             let jwt = match state
                 .jwt_manager
@@ -297,7 +299,7 @@ async fn handle_device_code(state: OAuthState, req: TokenRequest) -> axum::respo
                 }
             };
 
-            let ctx = stub_auth_context(&user_id, "default", "");
+            let ctx = build_auth_context_for_user(&state.org_storage, &user_id, &client_id).await;
             let ttl = state.jwt_manager.access_ttl_secs();
             let jwt = match state.jwt_manager.sign(&ctx, ctx.org_id.as_ref(), &user_id) {
                 Ok(t) => t,
