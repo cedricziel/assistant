@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.144](https://github.com/cedricziel/assistant/compare/v0.1.143...v0.1.144) (2026-04-28)
+
+
+### Features
+
+* **runtime:** bound LLM retry/redelivery to prevent credit drain ([#672](https://github.com/cedricziel/assistant/issues/672)) ([fc77ef5](https://github.com/cedricziel/assistant/commit/fc77ef5d88d698cb816953af166e290afac09ab8))
+
 ## [0.1.143](https://github.com/cedricziel/assistant/compare/v0.1.142...v0.1.143) (2026-04-26)
 
 
