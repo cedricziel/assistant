@@ -64,9 +64,9 @@ base64 = "0.22"
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
 # Force vendored OpenSSL for static linking when cross-compiling (e.g. musl targets).
 # openssl-sys builds from source rather than requiring a system installation.
-reqwest-middleware = { version = "0.4", features = ["json", "multipart"] }
-reqwest-retry = "0.8"
-reqwest-tracing = "0.5"
+reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
+reqwest-retry = "0.9"
+reqwest-tracing = "0.7"
 # OpenAI-compatible client (used by provider-openai and provider-moonshot)
 async-openai = { version = "0.35", features = ["chat-completion", "embedding", "responses"] }
 # TLS — explicit dep so binaries can install_default() when both aws-lc-rs and ring are in tree
