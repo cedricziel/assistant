@@ -63,6 +63,7 @@ import 'package:assistant_api/src/model/create_user_request.dart';
 import 'package:assistant_api/src/model/create_webhook_request.dart';
 import 'package:assistant_api/src/model/device_code_o_auth_flow.dart';
 import 'package:assistant_api/src/model/device_code_response_schema.dart';
+import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/execute_command_request.dart';
 import 'package:assistant_api/src/model/http_auth_security_scheme.dart';
 import 'package:assistant_api/src/model/implicit_o_auth_flow.dart';
@@ -218,6 +219,7 @@ part 'serializers.g.dart';
   CreateWebhookRequest,
   DeviceCodeOAuthFlow,
   DeviceCodeResponseSchema,
+  ErrorBody,
   ExecuteCommandRequest,
   HttpAuthSecurityScheme,
   ImplicitOAuthFlow,

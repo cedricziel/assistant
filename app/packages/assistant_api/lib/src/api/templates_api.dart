@@ -10,6 +10,7 @@ import 'package:dio/dio.dart';
 
 import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/create_from_template_request.dart';
+import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/onboarding_status_response.dart';
 import 'package:assistant_api/src/model/persona_from_template_response.dart';
 import 'package:assistant_api/src/model/template_response.dart';

@@ -10,6 +10,7 @@ import 'package:dio/dio.dart';
 
 import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/create_space_request.dart';
+import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/space_detail.dart';
 import 'package:assistant_api/src/model/space_summary.dart';
 import 'package:assistant_api/src/model/update_space_request.dart';

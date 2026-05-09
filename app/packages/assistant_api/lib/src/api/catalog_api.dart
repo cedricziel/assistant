@@ -11,6 +11,7 @@ import 'package:dio/dio.dart';
 import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/catalog_item_response.dart';
 import 'package:assistant_api/src/model/create_subscription_request.dart';
+import 'package:assistant_api/src/model/error_body.dart';
 import 'package:assistant_api/src/model/publish_catalog_item_request.dart';
 import 'package:assistant_api/src/model/subscription_response.dart';
 import 'package:built_collection/built_collection.dart';

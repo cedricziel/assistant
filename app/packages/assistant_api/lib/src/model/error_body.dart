@@ -6,58 +6,44 @@
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
-part 'api_error_response.g.dart';
+part 'error_body.g.dart';
 
-/// Legacy error envelope. Replaced by [`ErrorBody`] across all `/api` routes. Removed in phase 3 of this change once no handler references it.
+/// Standard error envelope returned for every 4xx/5xx response from `/api/...` endpoints. Matches the project convention documented in `AGENTS.md`: `{\"error\": \"...message...\"}`.  OAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`] (RFC 6749 §5.2) and are intentionally exempt.
 ///
 /// Properties:
-/// * [code] - Numeric error code.
-/// * [message] - Human-readable error message.
+/// * [error] - Human-readable error message.
 @BuiltValue()
-abstract class ApiErrorResponse
-    implements Built<ApiErrorResponse, ApiErrorResponseBuilder> {
-  /// Numeric error code.
-  @BuiltValueField(wireName: r'code')
-  int get code;
-
+abstract class ErrorBody implements Built<ErrorBody, ErrorBodyBuilder> {
   /// Human-readable error message.
-  @BuiltValueField(wireName: r'message')
-  String get message;
+  @BuiltValueField(wireName: r'error')
+  String get error;
 
-  ApiErrorResponse._();
+  ErrorBody._();
 
-  factory ApiErrorResponse([void updates(ApiErrorResponseBuilder b)]) =
-      _$ApiErrorResponse;
+  factory ErrorBody([void updates(ErrorBodyBuilder b)]) = _$ErrorBody;
 
   @BuiltValueHook(initializeBuilder: true)
-  static void _defaults(ApiErrorResponseBuilder b) => b;
+  static void _defaults(ErrorBodyBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<ApiErrorResponse> get serializer =>
-      _$ApiErrorResponseSerializer();
+  static Serializer<ErrorBody> get serializer => _$ErrorBodySerializer();
 }
 
-class _$ApiErrorResponseSerializer
-    implements PrimitiveSerializer<ApiErrorResponse> {
+class _$ErrorBodySerializer implements PrimitiveSerializer<ErrorBody> {
   @override
-  final Iterable<Type> types = const [ApiErrorResponse, _$ApiErrorResponse];
+  final Iterable<Type> types = const [ErrorBody, _$ErrorBody];
 
   @override
-  final String wireName = r'ApiErrorResponse';
+  final String wireName = r'ErrorBody';
 
   Iterable<Object?> _serializeProperties(
     Serializers serializers,
-    ApiErrorResponse object, {
+    ErrorBody object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
-    yield r'code';
+    yield r'error';
     yield serializers.serialize(
-      object.code,
-      specifiedType: const FullType(int),
-    );
-    yield r'message';
-    yield serializers.serialize(
-      object.message,
+      object.error,
       specifiedType: const FullType(String),
     );
   }
@@ -65,7 +51,7 @@ class _$ApiErrorResponseSerializer
   @override
   Object serialize(
     Serializers serializers,
-    ApiErrorResponse object, {
+    ErrorBody object, {
     FullType specifiedType = FullType.unspecified,
   }) {
     return _serializeProperties(serializers, object,
@@ -78,26 +64,19 @@ class _$ApiErrorResponseSerializer
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
     required List<Object?> serializedList,
-    required ApiErrorResponseBuilder result,
+    required ErrorBodyBuilder result,
     required List<Object?> unhandled,
   }) {
     for (var i = 0; i < serializedList.length; i += 2) {
       final key = serializedList[i] as String;
       final value = serializedList[i + 1];
       switch (key) {
-        case r'code':
-          final valueDes = serializers.deserialize(
-            value,
-            specifiedType: const FullType(int),
-          ) as int;
-          result.code = valueDes;
-          break;
-        case r'message':
+        case r'error':
           final valueDes = serializers.deserialize(
             value,
             specifiedType: const FullType(String),
           ) as String;
-          result.message = valueDes;
+          result.error = valueDes;
           break;
         default:
           unhandled.add(key);
@@ -108,12 +87,12 @@ class _$ApiErrorResponseSerializer
   }
 
   @override
-  ApiErrorResponse deserialize(
+  ErrorBody deserialize(
     Serializers serializers,
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    final result = ApiErrorResponseBuilder();
+    final result = ErrorBodyBuilder();
     final serializedList = (serialized as Iterable<Object?>).toList();
     final unhandled = <Object?>[];
     _deserializeProperties(
