@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 /// Generate a cryptographically random code verifier (43-128 chars, URL-safe).
 pub fn generate_verifier() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
     let mut bytes = [0u8; 32];
     rng.fill(&mut bytes);

@@ -308,7 +308,7 @@ impl OAuth2Server {
 fn generate_random_token() -> String {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use rand::Rng;
+    use rand::RngExt;
 
     let mut rng = rand::rng();
     let mut bytes = [0u8; 32];

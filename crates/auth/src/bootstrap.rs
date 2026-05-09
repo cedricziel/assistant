@@ -6,7 +6,7 @@
 //! mechanics.
 
 use anyhow::{Context, Result};
-use rand::Rng;
+use rand::RngExt;
 use tracing::info;
 
 use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
