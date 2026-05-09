@@ -54,7 +54,7 @@ pub struct GeneratedKey {
 /// Returns the plaintext (show once), the hash (for storage), and the prefix
 /// (for display in listings).
 pub fn generate_key() -> GeneratedKey {
-    use rand::Rng;
+    use rand::RngExt;
 
     let mut rng = rand::rng();
     let mut random_bytes = vec![0u8; KEY_RANDOM_BYTES];

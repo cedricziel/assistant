@@ -120,7 +120,7 @@ impl JwtKeyPair {
 
 /// Generate a 256-bit random secret.
 fn generate_secret() -> Vec<u8> {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
     let mut secret = vec![0u8; 32];
     rng.fill(&mut secret[..]);
