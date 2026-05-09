@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.146](https://github.com/cedricziel/assistant/compare/v0.1.145...v0.1.146) (2026-05-09)
+
+
+### Features
+
+* **web-ui:** document 401 on multi-org endpoints + ErrorBody envelope ([#686](https://github.com/cedricziel/assistant/issues/686)) ([69fa27f](https://github.com/cedricziel/assistant/commit/69fa27fe8e35f3727e2a641845043fabce64f843))
+
+
+### Bug Fixes
+
+* **app:** handle 401s and space-selector race conditions ([#685](https://github.com/cedricziel/assistant/issues/685)) ([14a6d34](https://github.com/cedricziel/assistant/commit/14a6d34360f4c23ef34d4b65b59a380a5e7dfc59))
+* **integration-tests:** bump LLM timeout and cap iterations for CPU CI ([#683](https://github.com/cedricziel/assistant/issues/683)) ([72d0e0f](https://github.com/cedricziel/assistant/commit/72d0e0ff53ab817cd71a6401f24617aa2cf54526))
+
 ## [0.1.145](https://github.com/cedricziel/assistant/compare/v0.1.144...v0.1.145) (2026-04-28)
 
 
