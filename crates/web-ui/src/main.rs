@@ -3,6 +3,7 @@ pub mod api;
 pub(crate) mod audio_store;
 pub mod auth;
 pub(crate) mod backends;
+pub(crate) mod errors;
 mod flutter_assets;
 pub mod install;
 mod oauth;

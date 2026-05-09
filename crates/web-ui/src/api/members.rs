@@ -27,6 +27,9 @@ use assistant_core::identity::{OrgId, Role, SpaceId, UserId};
 use assistant_core::store::SpaceMembership;
 use assistant_storage::OrgStorageLayer;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -116,7 +119,8 @@ fn can_manage_members(ctx: &AuthContext, space_id: &SpaceId) -> bool {
     ),
     responses(
         (status = 200, description = "List of members", body = Vec<MemberEntry>),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_members(
@@ -126,13 +130,13 @@ pub async fn list_members(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
 
     if !ctx.is_org_admin() && ctx.role_in(&space_id).is_none() {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let store = state.org_storage.membership_store();
@@ -151,7 +155,7 @@ pub async fn list_members(
         }
         Err(e) => {
             tracing::error!("failed to list members: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -169,8 +173,9 @@ pub async fn list_members(
     request_body = AddMemberRequest,
     responses(
         (status = 201, description = "Member added", body = MemberEntry),
-        (status = 400, description = "Invalid role"),
-        (status = 403, description = "Forbidden"),
+        (status = 400, description = "Invalid role", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn add_member(
@@ -181,27 +186,23 @@ pub async fn add_member(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
 
     if !can_manage_members(&ctx, &space_id) {
-        return (StatusCode::FORBIDDEN, "space admin or org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
     }
 
     let role = match parse_role(&body.role) {
         Some(r) => r,
-        None => return (StatusCode::BAD_REQUEST, "invalid role").into_response(),
+        None => return json_error(StatusCode::BAD_REQUEST, "invalid role"),
     };
 
     // Only org admins can grant SpaceAdmin.
     if role == Role::SpaceAdmin && !ctx.is_org_admin() {
-        return (
-            StatusCode::FORBIDDEN,
-            "only org admins can grant space-admin",
-        )
-            .into_response();
+        return json_error(StatusCode::FORBIDDEN, "only org admins can grant space-admin");
     }
 
     let now = Utc::now();
@@ -215,7 +216,7 @@ pub async fn add_member(
     let store = state.org_storage.membership_store();
     if let Err(e) = store.add_membership(&membership).await {
         tracing::error!("failed to add member: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to add member").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to add member");
     }
 
     let entry = MemberEntry {
@@ -241,8 +242,9 @@ pub async fn add_member(
     request_body = UpdateMemberRequest,
     responses(
         (status = 200, description = "Role updated", body = MemberEntry),
-        (status = 400, description = "Invalid role"),
-        (status = 403, description = "Forbidden"),
+        (status = 400, description = "Invalid role", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn update_member(
@@ -253,28 +255,24 @@ pub async fn update_member(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
     let user_id = UserId::from(user_id);
 
     if !can_manage_members(&ctx, &space_id) {
-        return (StatusCode::FORBIDDEN, "space admin or org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
     }
 
     let role = match parse_role(&body.role) {
         Some(r) => r,
-        None => return (StatusCode::BAD_REQUEST, "invalid role").into_response(),
+        None => return json_error(StatusCode::BAD_REQUEST, "invalid role"),
     };
 
     // Only org admins can grant SpaceAdmin.
     if role == Role::SpaceAdmin && !ctx.is_org_admin() {
-        return (
-            StatusCode::FORBIDDEN,
-            "only org admins can grant space-admin",
-        )
-            .into_response();
+        return json_error(StatusCode::FORBIDDEN, "only org admins can grant space-admin");
     }
 
     let store = state.org_storage.membership_store();
@@ -284,18 +282,18 @@ pub async fn update_member(
         Ok(members) => members.into_iter().find(|m| m.user_id == user_id),
         Err(e) => {
             tracing::error!("failed to look up membership: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     };
     let original_created_at = match existing {
         Some(m) => m.created_at,
-        None => return (StatusCode::NOT_FOUND, "membership not found").into_response(),
+        None => return json_error(StatusCode::NOT_FOUND, "membership not found"),
     };
 
     // Remove old membership and add new one with updated role.
     if let Err(e) = store.remove_membership(&user_id, &space_id).await {
         tracing::error!("failed to remove old membership: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to update role").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update role");
     }
 
     let membership = SpaceMembership {
@@ -307,7 +305,7 @@ pub async fn update_member(
 
     if let Err(e) = store.add_membership(&membership).await {
         tracing::error!("failed to update member role: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to update role").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update role");
     }
 
     let entry = MemberEntry {
@@ -332,8 +330,9 @@ pub async fn update_member(
     ),
     responses(
         (status = 204, description = "Member removed"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn remove_member(
@@ -343,23 +342,23 @@ pub async fn remove_member(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
     let user_id = UserId::from(user_id);
 
     if !can_manage_members(&ctx, &space_id) {
-        return (StatusCode::FORBIDDEN, "space admin or org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
     }
 
     let store = state.org_storage.membership_store();
     match store.remove_membership(&user_id, &space_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => (StatusCode::NOT_FOUND, "membership not found").into_response(),
+        Ok(false) => json_error(StatusCode::NOT_FOUND, "membership not found"),
         Err(e) => {
             tracing::error!("failed to remove member: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "failed to remove member").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to remove member")
         }
     }
 }

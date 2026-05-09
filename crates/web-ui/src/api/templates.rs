@@ -26,6 +26,9 @@ use assistant_core::identity::OrgId;
 use assistant_core::store::CatalogItemStore;
 use assistant_storage::OrgStorageLayer;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -88,7 +91,8 @@ pub fn templates_api_router() -> Router<TemplatesApiState> {
     params(("org_id" = String, Path, description = "Organization ID")),
     responses(
         (status = 200, description = "Templates", body = Vec<TemplateResponse>),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_templates(
@@ -98,7 +102,7 @@ pub async fn list_templates(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let store = state.org_storage.catalog_item_store();
@@ -120,7 +124,7 @@ pub async fn list_templates(
         }
         Err(e) => {
             tracing::error!("failed to list templates: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -138,9 +142,10 @@ pub async fn list_templates(
     request_body = CreateFromTemplateRequest,
     responses(
         (status = 201, description = "Persona created", body = PersonaFromTemplateResponse),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Template not found"),
+        (status = 400, description = "Invalid request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Template not found", body = ErrorBody),
     )
 )]
 pub async fn create_from_template(
@@ -151,7 +156,7 @@ pub async fn create_from_template(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     // Resolve the template from the catalog.
@@ -163,16 +168,16 @@ pub async fn create_from_template(
             item
         }
         Ok(Some(item)) if item.resource_type != CatalogResourceType::Template => {
-            return (StatusCode::BAD_REQUEST, "catalog item is not a template").into_response();
+            return json_error(StatusCode::BAD_REQUEST, "catalog item is not a template");
         }
         Ok(Some(_)) => {
             // Item exists but belongs to another org — treat as not found.
-            return (StatusCode::NOT_FOUND, "template not found").into_response();
+            return json_error(StatusCode::NOT_FOUND, "template not found");
         }
-        Ok(None) => return (StatusCode::NOT_FOUND, "template not found").into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "template not found"),
         Err(e) => {
             tracing::error!("failed to get template: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     };
 
@@ -195,11 +200,7 @@ pub async fn create_from_template(
 
     if let Err(e) = result {
         tracing::error!("failed to create persona from template: {e}");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "failed to create persona",
-        )
-            .into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create persona");
     }
 
     let resp = PersonaFromTemplateResponse {
@@ -217,7 +218,7 @@ pub async fn create_from_template(
     security(("bearer_token" = []), ("oauth2" = [])),
     responses(
         (status = 200, description = "Onboarding status", body = OnboardingStatusResponse),
-        (status = 401, description = "Unauthorized"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
     )
 )]
 pub async fn onboarding_status(
@@ -233,7 +234,7 @@ pub async fn onboarding_status(
             Ok(v) => v,
             Err(e) => {
                 tracing::error!("failed to query onboarding status: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+                return json_error(StatusCode::INTERNAL_SERVER_ERROR, "database error");
             }
         };
 

@@ -28,6 +28,9 @@ use assistant_core::identity::{OrgId, UserId};
 use assistant_core::store::User;
 use assistant_storage::OrgStorageLayer;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -94,7 +97,8 @@ pub fn users_api_router() -> Router<UsersApiState> {
     params(("org_id" = String, Path, description = "Organization ID")),
     responses(
         (status = 200, description = "List of users", body = Vec<UserSummary>),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_users(
@@ -104,10 +108,10 @@ pub async fn list_users(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
     let store = state.org_storage.user_store();
     match store.list_users(&org_id).await {
@@ -124,7 +128,7 @@ pub async fn list_users(
         }
         Err(e) => {
             tracing::error!("failed to list users: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -139,9 +143,10 @@ pub async fn list_users(
     request_body = CreateUserRequest,
     responses(
         (status = 201, description = "User created", body = UserDetail),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Forbidden"),
-        (status = 409, description = "Duplicate email"),
+        (status = 400, description = "Invalid request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 409, description = "Duplicate email", body = ErrorBody),
     )
 )]
 pub async fn create_user(
@@ -152,26 +157,26 @@ pub async fn create_user(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
 
     if body.email.is_empty() || body.name.is_empty() {
-        return (StatusCode::BAD_REQUEST, "email and name are required").into_response();
+        return json_error(StatusCode::BAD_REQUEST, "email and name are required");
     }
 
     // Check for duplicate email in this org.
     let store = state.org_storage.user_store();
     match store.get_user_by_email(&org_id, &body.email).await {
         Ok(Some(_)) => {
-            return (StatusCode::CONFLICT, "email already exists in this org").into_response();
+            return json_error(StatusCode::CONFLICT, "email already exists in this org");
         }
         Ok(None) => {}
         Err(e) => {
             tracing::error!("duplicate check failed: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     }
 
@@ -181,8 +186,7 @@ pub async fn create_user(
             Ok(h) => h,
             Err(e) => {
                 tracing::error!("password hashing failed: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-                    .into_response();
+                return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
             }
         },
         _ => String::new(),
@@ -203,7 +207,7 @@ pub async fn create_user(
 
     if let Err(e) = store.create_user(&user).await {
         tracing::error!("failed to create user: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to create user").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create user");
     }
 
     let detail = UserDetail {
@@ -229,8 +233,9 @@ pub async fn create_user(
     ),
     responses(
         (status = 200, description = "User detail", body = UserDetail),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn get_user(
@@ -240,14 +245,14 @@ pub async fn get_user(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let user_id = UserId::from(id);
 
     // Users can see their own profile; org admins can see anyone in the same org.
     if ctx.user_id != user_id && !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let store = state.org_storage.user_store();
@@ -263,10 +268,10 @@ pub async fn get_user(
             };
             Json(detail).into_response()
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "user not found").into_response(),
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "user not found"),
         Err(e) => {
             tracing::error!("failed to get user: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -284,8 +289,9 @@ pub async fn get_user(
     request_body = UpdateUserRequest,
     responses(
         (status = 200, description = "User updated", body = UserDetail),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn update_user(
@@ -296,23 +302,23 @@ pub async fn update_user(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let user_id = UserId::from(id);
 
     // Users can update their own profile; org admins can update anyone in the same org.
     if ctx.user_id != user_id && !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let store = state.org_storage.user_store();
     let mut user = match store.get_user(&user_id).await {
         Ok(Some(u)) => u,
-        Ok(None) => return (StatusCode::NOT_FOUND, "user not found").into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "user not found"),
         Err(e) => {
             tracing::error!("failed to get user: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     };
 
@@ -326,7 +332,7 @@ pub async fn update_user(
 
     if let Err(e) = store.update_user(&user).await {
         tracing::error!("failed to update user: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to update user").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update user");
     }
 
     let detail = UserDetail {
@@ -352,8 +358,9 @@ pub async fn update_user(
     ),
     responses(
         (status = 204, description = "User deleted"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn delete_user(
@@ -363,10 +370,10 @@ pub async fn delete_user(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
 
     let user_id = UserId::from(id);
@@ -374,10 +381,10 @@ pub async fn delete_user(
 
     match store.delete_user(&user_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => (StatusCode::NOT_FOUND, "user not found").into_response(),
+        Ok(false) => json_error(StatusCode::NOT_FOUND, "user not found"),
         Err(e) => {
             tracing::error!("failed to delete user: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "failed to delete user").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to delete user")
         }
     }
 }

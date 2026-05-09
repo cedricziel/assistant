@@ -1,34 +1,36 @@
-## 1. Schema + helper (TDD red)
+**Scope adjustment**: this PR closes the 401 documentation gap on the multi-org endpoints (the user's actual concern) and lands the `ErrorBody` schema + `json_error` helper + Spectral CI rule. Body-shape normalization across the well-documented files (mod.rs, personas.rs, workflows.rs, etc.) and `ApiErrorResponse` removal (still used by A2A) move to a follow-up.
 
-- [ ] 1.1 Add `crates/web-ui/src/errors.rs` with `pub fn json_error(status: StatusCode, message: impl Into<String>) -> Response` and a `#[cfg(test)]` test verifying the body is `{"error":"<msg>"}` with content-type `application/json`. Re-export from `crates/web-ui/src/lib.rs`.
-- [ ] 1.2 Add `pub struct ErrorBody { pub error: String }` (with `serde::Serialize` and `utoipa::ToSchema`) in `crates/web-ui/src/openapi.rs`. Add it to the `components(schemas(...))` macro list. Mark `ApiErrorResponse` `#[deprecated(since = "<next>", note = "use ErrorBody")]`.
-- [ ] 1.3 Run `cargo test -p assistant-web-ui` — confirm new helper test passes; existing tests still pass.
+## 1. Schema + helper
 
-## 2. Sweep handlers — secured endpoints get `(status = 401, body = ErrorBody)`
+- [x] 1.1 Added `crates/web-ui/src/errors.rs` with `json_error(status, msg)` returning the documented envelope. Two `#[cfg(test)]` tests verifying body shape and `impl Into<String>` ergonomics.
+- [x] 1.2 Added `pub struct ErrorBody { pub error: String }` in `crates/web-ui/src/openapi.rs` and registered it in `components(schemas(...))`. `ApiErrorResponse` retained for A2A — removal deferred.
+- [x] 1.3 `cargo test -p assistant-web-ui errors::` — 2 new tests pass; existing tests untouched.
 
-- [ ] 2.1 `crates/web-ui/src/api/spaces.rs` — 5 endpoints. Add 401 + 403 (where emitted) to each `responses(...)`. Replace plain-text returns (`(StatusCode::FORBIDDEN, "access denied")` etc.) with `json_error(...)`.
+## 2. Sweep secured endpoints — gap files
+
+- [ ] 2.1 `crates/web-ui/src/api/spaces.rs` — 5 endpoints. Add `(status = 401, description = "Unauthorized", body = ErrorBody)`. Convert plain-text returns to `json_error`.
 - [ ] 2.2 `crates/web-ui/src/api/users.rs` — 5 endpoints. Same.
 - [ ] 2.3 `crates/web-ui/src/api/members.rs` — 4 endpoints. Same.
 - [ ] 2.4 `crates/web-ui/src/api/orgs.rs` — 4 endpoints. Same.
 - [ ] 2.5 `crates/web-ui/src/api/catalog.rs` — 7 endpoints. Same.
 - [ ] 2.6 `crates/web-ui/src/api/interfaces.rs` — 3 endpoints. Same.
 - [ ] 2.7 `crates/web-ui/src/api/bindings.rs` and `crates/web-ui/src/api/templates.rs` — fill in any missing 401 responses; convert plain-text bodies.
-- [ ] 2.8 `crates/web-ui/src/api/api_keys.rs`, `account.rs`, `analytics.rs`, `commands.rs`, `logs.rs`, `traces.rs` — confirm 401 docs already present; add `body = ErrorBody` to existing 401 entries; convert any remaining plain-text bodies.
-- [ ] 2.9 `crates/web-ui/src/api/mod.rs` (conversations), `personas.rs`, `workflows.rs`, `webhooks.rs`, `skills.rs`, `agents.rs`, `push.rs` — most already have 401. Update each existing `(status = 401, description = "Unauthorized")` to include `body = ErrorBody`. Convert any `Json(serde_json::json!({"error": ...}))` to use `json_error` for consistency.
-- [ ] 2.10 Verify no remaining plain-text 4xx/5xx responses under `crates/web-ui/src/api/**` via `rg -n '(StatusCode::[A-Z_]+,\s*")\b' crates/web-ui/src/api/`.
 
-## 3. Remove deprecated schema
+## 2b. Follow-up (NOT this PR)
 
-- [ ] 3.1 Confirm `ApiErrorResponse` has zero references in `crates/web-ui/src/api/**` via `rg ApiErrorResponse crates/web-ui/`.
-- [ ] 3.2 Remove `ApiErrorResponse` from the `components(schemas(...))` list in `crates/web-ui/src/openapi.rs`.
-- [ ] 3.3 Delete the `pub struct ApiErrorResponse` definition.
-- [ ] 3.4 Run `make check` and `make lint` — both green.
+- [ ] 2.8 `api_keys.rs`, `account.rs`, `analytics.rs`, `commands.rs`, `logs.rs`, `traces.rs` — add `body = ErrorBody` to existing 401 entries.
+- [ ] 2.9 `mod.rs` (conversations), `personas.rs`, `workflows.rs`, `webhooks.rs`, `skills.rs`, `agents.rs`, `push.rs` — update existing 401 entries to `body = ErrorBody`.
+- [ ] 2.10 Cross-tree audit: no remaining plain-text 4xx/5xx in `crates/web-ui/src/api/**`.
+
+## 3. Remove deprecated schema (DEFERRED)
+
+`ApiErrorResponse` is still used by `crates/web-ui/src/a2a/handlers.rs`. Removal needs A2A migration first; out of scope here.
 
 ## 4. Regenerate OpenAPI + Flutter client
 
-- [ ] 4.1 `make dump-openapi` to update `openapi.json`. Inspect the diff: every secured operation now lists `401` referencing `ErrorBody`.
+- [ ] 4.1 `make dump-openapi` to update `openapi.json`.
 - [ ] 4.2 `make generate-flutter-client` to regenerate `app/packages/assistant_api/`.
-- [ ] 4.3 Commit the regenerated client in a separate commit (`chore(api-client): regenerate from updated spec`) within the same PR for reviewability.
+- [ ] 4.3 Commit the regenerated client in a separate commit within the same PR.
 
 ## 5. Spectral ruleset + CI
 
