@@ -30,6 +30,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _passwordVisible = false;
   bool _tokenVisible = false;
   _LoginMode _mode = _LoginMode.oauth2;
+  bool _bannerDismissed = false;
 
   String get _serverUrl {
     if (isMaterial && _isWebContext) {
@@ -94,6 +95,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
     });
 
+    final reason = GoRouterState.of(context).uri.queryParameters['reason'];
+    final showSessionEndedBanner =
+        reason == 'session-ended' && !_bannerDismissed;
+
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
@@ -106,6 +111,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (showSessionEndedBanner) ...[
+                    _SessionEndedBanner(
+                      onDismiss: () => setState(() => _bannerDismissed = true),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   Text(
                     'Sign in',
                     style: Theme.of(context).textTheme.headlineMedium,
@@ -294,6 +305,46 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Banner shown on `/login?reason=session-ended` to explain why the user was
+/// bounced back to the login screen — typically because the browser wiped
+/// the secure-storage crypto key.
+class _SessionEndedBanner extends StatelessWidget {
+  const _SessionEndedBanner({required this.onDismiss});
+
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const Key('session-ended-banner'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: colorScheme.onErrorContainer),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Your session was reset by the browser. Please log in again.',
+              style: TextStyle(color: colorScheme.onErrorContainer),
+            ),
+          ),
+          IconButton(
+            key: const Key('session-ended-banner-dismiss'),
+            tooltip: 'Dismiss',
+            icon: Icon(Icons.close, color: colorScheme.onErrorContainer),
+            onPressed: onDismiss,
+          ),
+        ],
       ),
     );
   }

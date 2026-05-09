@@ -202,7 +202,10 @@ pub async fn add_member(
 
     // Only org admins can grant SpaceAdmin.
     if role == Role::SpaceAdmin && !ctx.is_org_admin() {
-        return json_error(StatusCode::FORBIDDEN, "only org admins can grant space-admin");
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "only org admins can grant space-admin",
+        );
     }
 
     let now = Utc::now();
@@ -272,7 +275,10 @@ pub async fn update_member(
 
     // Only org admins can grant SpaceAdmin.
     if role == Role::SpaceAdmin && !ctx.is_org_admin() {
-        return json_error(StatusCode::FORBIDDEN, "only org admins can grant space-admin");
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "only org admins can grant space-admin",
+        );
     }
 
     let store = state.org_storage.membership_store();

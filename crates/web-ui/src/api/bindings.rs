@@ -107,7 +107,10 @@ pub async fn create_binding(
     }
 
     if body.persona_id.is_empty() || body.interface_instance_id.is_empty() {
-        return json_error(StatusCode::BAD_REQUEST, "persona_id and interface_instance_id are required");
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "persona_id and interface_instance_id are required",
+        );
     }
 
     // Verify the interface instance belongs to this org and space.
@@ -115,7 +118,10 @@ pub async fn create_binding(
     match ii_store.get_instance(&body.interface_instance_id).await {
         Ok(Some(inst)) if inst.org_id == org_id && inst.space_id == space_id => {}
         Ok(Some(_)) => {
-            return json_error(StatusCode::FORBIDDEN, "interface instance belongs to another org or space");
+            return json_error(
+                StatusCode::FORBIDDEN,
+                "interface instance belongs to another org or space",
+            );
         }
         Ok(None) => {
             return json_error(StatusCode::NOT_FOUND, "interface instance not found");
@@ -138,7 +144,10 @@ pub async fn create_binding(
     let store = state.org_storage.binding_store();
     if let Err(e) = store.create_binding(&binding).await {
         tracing::error!("failed to create binding: {e}");
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create binding");
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to create binding",
+        );
     }
 
     let resp = BindingResponse {

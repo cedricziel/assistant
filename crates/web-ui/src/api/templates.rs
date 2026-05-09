@@ -200,7 +200,10 @@ pub async fn create_from_template(
 
     if let Err(e) = result {
         tracing::error!("failed to create persona from template: {e}");
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create persona");
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to create persona",
+        );
     }
 
     let resp = PersonaFromTemplateResponse {

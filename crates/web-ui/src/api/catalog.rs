@@ -476,7 +476,10 @@ pub async fn delete_subscription(
     match store.get_subscription(&sub_id).await {
         Ok(Some(sub)) if sub.space_id == space_id => {}
         Ok(Some(_)) => {
-            return json_error(StatusCode::FORBIDDEN, "subscription belongs to another space");
+            return json_error(
+                StatusCode::FORBIDDEN,
+                "subscription belongs to another space",
+            );
         }
         Ok(None) => return json_error(StatusCode::NOT_FOUND, "subscription not found"),
         Err(e) => {

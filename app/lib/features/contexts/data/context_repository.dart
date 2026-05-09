@@ -104,8 +104,11 @@ class ContextRepository {
 
     // Re-attach tokens from secure storage.
     // Failures are caught per-context so that a single secure-storage error
-    // (common on web when the crypto key is unavailable after a hard reload)
-    // does not prevent the contexts list from loading at all.
+    // (common on web when the IndexedDB crypto key is wiped) does not
+    // prevent the contexts list from loading at all. The catch flips
+    // [AssistantContext.credentialsCorrupted] so the router can route the
+    // user to /login with an explanatory banner instead of leaving them on
+    // /chat with broken auth.
     final result = <AssistantContext>[];
     for (final ctx in contexts) {
       try {
@@ -124,11 +127,18 @@ class ContextRepository {
         }
         result.add(restored);
       } catch (_) {
-        result.add(ctx);
+        result.add(ctx.copyWith(credentialsCorrupted: true));
       }
     }
     return result;
   }
+
+  /// Test-only helper: returns the raw metadata JSON currently persisted in
+  /// SharedPreferences. Used to seed a second repository pointed at a
+  /// different secure-storage backend without round-tripping through the
+  /// public `saveContext` API.
+  @visibleForTesting
+  String? dumpMetadataJson() => _prefs.getString(_kContextsKey);
 
   // -- Write ----------------------------------------------------------------
 

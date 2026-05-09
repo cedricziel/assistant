@@ -133,7 +133,10 @@ pub async fn create_interface(
     let store = state.org_storage.interface_instance_store();
     if let Err(e) = store.create_instance(&instance).await {
         tracing::error!("failed to create interface instance: {e}");
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create instance");
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to create instance",
+        );
     }
 
     let resp = InterfaceInstanceResponse {
