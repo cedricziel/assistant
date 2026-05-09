@@ -11,6 +11,7 @@ import 'package:dio/dio.dart';
 import 'package:assistant_api/src/api_util.dart';
 import 'package:assistant_api/src/model/binding_response.dart';
 import 'package:assistant_api/src/model/create_binding_request.dart';
+import 'package:assistant_api/src/model/error_body.dart';
 import 'package:built_collection/built_collection.dart';
 
 class BindingsApi {

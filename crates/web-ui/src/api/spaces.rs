@@ -28,6 +28,9 @@ use assistant_core::store::Space;
 use assistant_core::{MembershipStore, SpaceStore};
 use assistant_storage::OrgStorageLayer;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -91,7 +94,8 @@ pub fn spaces_api_router() -> Router<SpacesApiState> {
     params(("org_id" = String, Path, description = "Organization ID")),
     responses(
         (status = 200, description = "List of spaces", body = Vec<SpaceSummary>),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_spaces(
@@ -101,7 +105,7 @@ pub async fn list_spaces(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_store = state.org_storage.space_store();
@@ -122,7 +126,7 @@ pub async fn list_spaces(
             }
             Err(e) => {
                 tracing::error!("failed to list spaces: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+                json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
             }
         }
     } else {
@@ -135,8 +139,7 @@ pub async fn list_spaces(
             Ok(m) => m,
             Err(e) => {
                 tracing::error!("failed to get memberships: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
-                    .into_response();
+                return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
             }
         };
 
@@ -168,8 +171,9 @@ pub async fn list_spaces(
     request_body = CreateSpaceRequest,
     responses(
         (status = 201, description = "Space created", body = SpaceDetail),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Forbidden"),
+        (status = 400, description = "Invalid request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn create_space(
@@ -180,14 +184,14 @@ pub async fn create_space(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
 
     if body.name.is_empty() || body.slug.is_empty() {
-        return (StatusCode::BAD_REQUEST, "name and slug are required").into_response();
+        return json_error(StatusCode::BAD_REQUEST, "name and slug are required");
     }
     let now = Utc::now();
     let space = Space {
@@ -202,7 +206,7 @@ pub async fn create_space(
     let store = state.org_storage.space_store();
     if let Err(e) = store.create_space(&space).await {
         tracing::error!("failed to create space: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to create space").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create space");
     }
 
     let detail = SpaceDetail {
@@ -228,8 +232,9 @@ pub async fn create_space(
     ),
     responses(
         (status = 200, description = "Space detail", body = SpaceDetail),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn get_space(
@@ -239,13 +244,13 @@ pub async fn get_space(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(id);
 
     if !ctx.is_org_admin() && ctx.role_in(&space_id).is_none() {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let store = state.org_storage.space_store();
@@ -261,11 +266,11 @@ pub async fn get_space(
             };
             Json(detail).into_response()
         }
-        Ok(Some(_)) => (StatusCode::NOT_FOUND, "space not found").into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, "space not found").into_response(),
+        Ok(Some(_)) => json_error(StatusCode::NOT_FOUND, "space not found"),
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "space not found"),
         Err(e) => {
             tracing::error!("failed to get space: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -283,8 +288,9 @@ pub async fn get_space(
     request_body = UpdateSpaceRequest,
     responses(
         (status = 200, description = "Space updated", body = SpaceDetail),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn update_space(
@@ -295,7 +301,7 @@ pub async fn update_space(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(id);
@@ -304,18 +310,18 @@ pub async fn update_space(
     if !ctx.is_org_admin() {
         match ctx.role_in(&space_id) {
             Some(assistant_core::identity::Role::SpaceAdmin) => {}
-            _ => return (StatusCode::FORBIDDEN, "space admin required").into_response(),
+            _ => return json_error(StatusCode::FORBIDDEN, "space admin required"),
         }
     }
 
     let store = state.org_storage.space_store();
     let space = match store.get_space(&space_id).await {
         Ok(Some(s)) if s.org_id == org_id => s,
-        Ok(Some(_)) => return (StatusCode::NOT_FOUND, "space not found").into_response(),
-        Ok(None) => return (StatusCode::NOT_FOUND, "space not found").into_response(),
+        Ok(Some(_)) => return json_error(StatusCode::NOT_FOUND, "space not found"),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "space not found"),
         Err(e) => {
             tracing::error!("failed to get space: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     };
 
@@ -327,7 +333,7 @@ pub async fn update_space(
 
     if let Err(e) = store.update_space(&space).await {
         tracing::error!("failed to update space: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to update space").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update space");
     }
 
     let detail = SpaceDetail {
@@ -353,8 +359,9 @@ pub async fn update_space(
     ),
     responses(
         (status = 204, description = "Space deleted"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn delete_space(
@@ -364,10 +371,10 @@ pub async fn delete_space(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
 
     let space_id = SpaceId::from(id);
@@ -376,22 +383,22 @@ pub async fn delete_space(
     // Verify space belongs to this org before deleting.
     match store.get_space(&space_id).await {
         Ok(Some(s)) if s.org_id != org_id => {
-            return (StatusCode::NOT_FOUND, "space not found").into_response();
+            return json_error(StatusCode::NOT_FOUND, "space not found");
         }
-        Ok(None) => return (StatusCode::NOT_FOUND, "space not found").into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "space not found"),
         Err(e) => {
             tracing::error!("failed to get space: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
         _ => {}
     }
 
     match store.delete_space(&space_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => (StatusCode::NOT_FOUND, "space not found").into_response(),
+        Ok(false) => json_error(StatusCode::NOT_FOUND, "space not found"),
         Err(e) => {
             tracing::error!("failed to delete space: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "failed to delete space").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to delete space")
         }
     }
 }

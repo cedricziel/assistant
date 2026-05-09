@@ -128,3 +128,10 @@ generate-flutter-client: openapi.json
 	  -c app/openapi-generator.yaml \
 	  --skip-validate-spec
 	cd app && dart format packages/assistant_api/lib packages/assistant_api/test
+	cd app/packages/assistant_api && dart run build_runner build
+
+# Lint the OpenAPI spec with Spectral. Enforces rules in openapi-spectral.yaml,
+# notably: every secured operation must document a 401 response that uses
+# the ErrorBody schema. Requires: @stoplight/spectral-cli (npm i -g).
+lint-openapi: openapi.json openapi-spectral.yaml
+	spectral lint openapi.json --ruleset openapi-spectral.yaml --fail-severity=error

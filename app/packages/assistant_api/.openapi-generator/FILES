@@ -61,6 +61,7 @@ doc/CreateUserRequest.md
 doc/CreateWebhookRequest.md
 doc/DeviceCodeOAuthFlow.md
 doc/DeviceCodeResponseSchema.md
+doc/ErrorBody.md
 doc/ExecuteCommandRequest.md
 doc/HttpAuthSecurityScheme.md
 doc/ImplicitOAuthFlow.md
@@ -267,6 +268,7 @@ lib/src/model/create_webhook_request.dart
 lib/src/model/date.dart
 lib/src/model/device_code_o_auth_flow.dart
 lib/src/model/device_code_response_schema.dart
+lib/src/model/error_body.dart
 lib/src/model/execute_command_request.dart
 lib/src/model/http_auth_security_scheme.dart
 lib/src/model/implicit_o_auth_flow.dart
@@ -371,3 +373,4 @@ lib/src/model/workflow_webhook_trigger_accepted.dart
 lib/src/model/write_persona_file_request.dart
 lib/src/serializers.dart
 pubspec.yaml
+test/error_body_test.dart

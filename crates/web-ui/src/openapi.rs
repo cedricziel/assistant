@@ -147,7 +147,20 @@ impl Modify for SecuritySchemesAddon {
     }
 }
 
-/// API error response body returned for 4xx and 5xx errors.
+/// Standard error envelope returned for every 4xx/5xx response from
+/// `/api/...` endpoints. Matches the project convention documented in
+/// `AGENTS.md`: `{"error": "...message..."}`.
+///
+/// OAuth2 endpoints under `/oauth/...` use [`crate::oauth::OAuthErrorResponse`]
+/// (RFC 6749 §5.2) and are intentionally exempt.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct ErrorBody {
+    /// Human-readable error message.
+    pub error: String,
+}
+
+/// Legacy error envelope. Replaced by [`ErrorBody`] across all `/api` routes.
+/// Removed in phase 3 of this change once no handler references it.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct ApiErrorResponse {
     /// Numeric error code.
@@ -460,6 +473,7 @@ pub struct ApiErrorResponse {
             crate::oauth::ClientRegistrationSchema,
             crate::oauth::ClientInfoSchema,
             // Common error response
+            ErrorBody,
             ApiErrorResponse,
             // Organization management types
             OrgSummary,

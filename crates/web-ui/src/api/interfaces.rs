@@ -25,6 +25,9 @@ use assistant_core::identity::{OrgId, SpaceId};
 use assistant_core::store::{InterfaceInstance, InterfaceInstanceStore};
 use assistant_storage::OrgStorageLayer;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -85,8 +88,9 @@ pub fn interfaces_api_router() -> Router<InterfacesApiState> {
     request_body = CreateInterfaceInstanceRequest,
     responses(
         (status = 201, description = "Created", body = InterfaceInstanceResponse),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Forbidden"),
+        (status = 400, description = "Invalid request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn create_interface(
@@ -97,7 +101,7 @@ pub async fn create_interface(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id_typed = SpaceId::from(space_id);
@@ -105,14 +109,13 @@ pub async fn create_interface(
         match ctx.role_in(&space_id_typed) {
             Some(assistant_core::identity::Role::SpaceAdmin) => {}
             _ => {
-                return (StatusCode::FORBIDDEN, "space admin or org admin required")
-                    .into_response();
+                return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
             }
         }
     }
 
     if body.interface_type.is_empty() {
-        return (StatusCode::BAD_REQUEST, "interface_type is required").into_response();
+        return json_error(StatusCode::BAD_REQUEST, "interface_type is required");
     }
 
     let config_value = body.config;
@@ -130,11 +133,7 @@ pub async fn create_interface(
     let store = state.org_storage.interface_instance_store();
     if let Err(e) = store.create_instance(&instance).await {
         tracing::error!("failed to create interface instance: {e}");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "failed to create instance",
-        )
-            .into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create instance");
     }
 
     let resp = InterfaceInstanceResponse {
@@ -159,7 +158,8 @@ pub async fn create_interface(
     ),
     responses(
         (status = 200, description = "Interface instances", body = Vec<InterfaceInstanceResponse>),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_interfaces(
@@ -169,7 +169,7 @@ pub async fn list_interfaces(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
@@ -194,7 +194,7 @@ pub async fn list_interfaces(
         }
         Err(e) => {
             tracing::error!("failed to list interfaces: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -212,8 +212,9 @@ pub async fn list_interfaces(
     ),
     responses(
         (status = 204, description = "Deleted"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn delete_interface(
@@ -223,7 +224,7 @@ pub async fn delete_interface(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
@@ -231,8 +232,7 @@ pub async fn delete_interface(
         match ctx.role_in(&space_id) {
             Some(assistant_core::identity::Role::SpaceAdmin) => {}
             _ => {
-                return (StatusCode::FORBIDDEN, "space admin or org admin required")
-                    .into_response();
+                return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
             }
         }
     }
@@ -242,20 +242,20 @@ pub async fn delete_interface(
     // Verify the instance belongs to this org and space.
     match store.get_instance(&id).await {
         Ok(Some(inst)) if inst.org_id == org_id && inst.space_id == space_id => {}
-        Ok(Some(_)) => return (StatusCode::FORBIDDEN, "access denied").into_response(),
-        Ok(None) => return (StatusCode::NOT_FOUND, "interface instance not found").into_response(),
+        Ok(Some(_)) => return json_error(StatusCode::FORBIDDEN, "access denied"),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "interface instance not found"),
         Err(e) => {
             tracing::error!("failed to get interface instance: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     }
 
     match store.delete_instance(&id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => (StatusCode::NOT_FOUND, "interface instance not found").into_response(),
+        Ok(false) => json_error(StatusCode::NOT_FOUND, "interface instance not found"),
         Err(e) => {
             tracing::error!("failed to delete interface instance: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }

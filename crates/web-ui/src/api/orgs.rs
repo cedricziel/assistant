@@ -27,6 +27,9 @@ use assistant_core::identity::OrgId;
 use assistant_core::store::Organization;
 use assistant_storage::OrgStorageLayer;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -90,7 +93,7 @@ pub fn orgs_api_router() -> Router<OrgsApiState> {
     security(("bearer_token" = []), ("oauth2" = [])),
     responses(
         (status = 200, description = "List of organizations", body = Vec<OrgSummary>),
-        (status = 401, description = "Unauthorized"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
     )
 )]
 pub async fn list_orgs(
@@ -112,7 +115,7 @@ pub async fn list_orgs(
         Ok(None) => Json(Vec::<OrgSummary>::new()).into_response(),
         Err(e) => {
             tracing::error!("failed to list orgs: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -126,8 +129,9 @@ pub async fn list_orgs(
     request_body = CreateOrgRequest,
     responses(
         (status = 201, description = "Organization created", body = OrgDetail),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Forbidden"),
+        (status = 400, description = "Invalid request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn create_org(
@@ -136,11 +140,11 @@ pub async fn create_org(
     Json(body): Json<CreateOrgRequest>,
 ) -> Response {
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
 
     if body.name.is_empty() || body.slug.is_empty() {
-        return (StatusCode::BAD_REQUEST, "name and slug are required").into_response();
+        return json_error(StatusCode::BAD_REQUEST, "name and slug are required");
     }
 
     let now = Utc::now();
@@ -156,7 +160,7 @@ pub async fn create_org(
     let store = state.org_storage.org_store();
     if let Err(e) = store.create_org(&org).await {
         tracing::error!("failed to create org: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to create org").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create org");
     }
 
     let detail = OrgDetail {
@@ -179,8 +183,9 @@ pub async fn create_org(
     params(("id" = String, Path, description = "Organization ID")),
     responses(
         (status = 200, description = "Organization detail", body = OrgDetail),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn get_org(
@@ -192,7 +197,7 @@ pub async fn get_org(
 
     // Users can only see their own org.
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let store = state.org_storage.org_store();
@@ -208,10 +213,10 @@ pub async fn get_org(
             };
             Json(detail).into_response()
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "org not found").into_response(),
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "org not found"),
         Err(e) => {
             tracing::error!("failed to get org: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -226,8 +231,9 @@ pub async fn get_org(
     request_body = UpdateOrgRequest,
     responses(
         (status = 200, description = "Organization updated", body = OrgDetail),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn update_org(
@@ -237,22 +243,22 @@ pub async fn update_org(
     Json(body): Json<UpdateOrgRequest>,
 ) -> Response {
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
 
     let org_id = OrgId::from(id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let store = state.org_storage.org_store();
 
     let mut org = match store.get_org(&org_id).await {
         Ok(Some(o)) => o,
-        Ok(None) => return (StatusCode::NOT_FOUND, "org not found").into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "org not found"),
         Err(e) => {
             tracing::error!("failed to get org: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     };
 
@@ -266,7 +272,7 @@ pub async fn update_org(
 
     if let Err(e) = store.update_org(&org).await {
         tracing::error!("failed to update org: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to update org").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update org");
     }
 
     let detail = OrgDetail {

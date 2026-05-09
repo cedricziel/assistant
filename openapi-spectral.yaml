@@ -1,0 +1,46 @@
+# Spectral ruleset for openapi.json.
+#
+# Enforces project-specific contracts on the assistant web-UI's OpenAPI spec:
+#   1. Every secured operation MUST document a 401 response.
+#   2. Every documented 401 MUST use the ErrorBody schema.
+#
+# Inherits the standard `spectral:oas` ruleset for general OpenAPI hygiene
+# (operationIds, descriptions, etc.) but downgrades a few rules that fire
+# noisily on the current spec; those are tracked as follow-ups.
+#
+# Run locally: `make lint-openapi` (requires `npm i -g @stoplight/spectral-cli`).
+
+extends:
+  - "spectral:oas"
+
+rules:
+  # Project-specific: secured operations document a 401 response.
+  # We only flag operations that declare a real auth scheme (bearer_token or
+  # oauth2). Endpoints that opt out via `security: [{}]` (e.g., /oauth/...)
+  # are correctly exempt.
+  secured-operations-document-401:
+    description: "Operations declaring a bearer/oauth security requirement must list a 401 response."
+    severity: error
+    given:
+      - "$.paths[*][?(@.security && @.security[?(@.bearer_token)])]"
+      - "$.paths[*][?(@.security && @.security[?(@.oauth2)])]"
+    then:
+      field: "responses.401"
+      function: truthy
+
+  # Project-specific: 401 response body must reference the shared ErrorBody schema.
+  "401-uses-error-body":
+    description: "401 response must use the ErrorBody schema (#/components/schemas/ErrorBody)."
+    severity: error
+    given: "$.paths[*][*].responses['401'].content['application/json'].schema"
+    then:
+      field: "$ref"
+      function: pattern
+      functionOptions:
+        match: "ErrorBody$"
+
+  # Downgrade noisy `spectral:oas` rules that don't match this codebase's
+  # conventions. These are tracked as follow-ups; they don't block CI today.
+  operation-operationId: off
+  operation-tag-defined: off
+  oas3-unused-component: off

@@ -440,6 +440,9 @@ jobs:
       - name: Lint OpenAPI spec with Redocly
         run: npx --yes @redocly/cli lint openapi.json
 
+      - name: Lint OpenAPI spec with Spectral (project rules)
+        run: npx --yes @stoplight/spectral-cli@6 lint openapi.json --ruleset openapi-spectral.yaml --fail-severity=error
+
   integration:
     name: Integration (smoke)
     if: github.event.action != 'closed'

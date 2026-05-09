@@ -25,6 +25,9 @@ use assistant_core::identity::{OrgId, SpaceId};
 use assistant_core::store::{BindingStore, InterfaceInstanceStore, PersonaBinding};
 use assistant_storage::OrgStorageLayer;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -77,8 +80,9 @@ pub fn bindings_api_router() -> Router<BindingsApiState> {
     request_body = CreateBindingRequest,
     responses(
         (status = 201, description = "Binding created", body = BindingResponse),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Forbidden"),
+        (status = 400, description = "Invalid request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn create_binding(
@@ -89,7 +93,7 @@ pub async fn create_binding(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
@@ -97,18 +101,13 @@ pub async fn create_binding(
         match ctx.role_in(&space_id) {
             Some(assistant_core::identity::Role::SpaceAdmin) => {}
             _ => {
-                return (StatusCode::FORBIDDEN, "space admin or org admin required")
-                    .into_response();
+                return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
             }
         }
     }
 
     if body.persona_id.is_empty() || body.interface_instance_id.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            "persona_id and interface_instance_id are required",
-        )
-            .into_response();
+        return json_error(StatusCode::BAD_REQUEST, "persona_id and interface_instance_id are required");
     }
 
     // Verify the interface instance belongs to this org and space.
@@ -116,18 +115,14 @@ pub async fn create_binding(
     match ii_store.get_instance(&body.interface_instance_id).await {
         Ok(Some(inst)) if inst.org_id == org_id && inst.space_id == space_id => {}
         Ok(Some(_)) => {
-            return (
-                StatusCode::FORBIDDEN,
-                "interface instance belongs to another org or space",
-            )
-                .into_response();
+            return json_error(StatusCode::FORBIDDEN, "interface instance belongs to another org or space");
         }
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, "interface instance not found").into_response();
+            return json_error(StatusCode::NOT_FOUND, "interface instance not found");
         }
         Err(e) => {
             tracing::error!("failed to get interface instance: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     }
 
@@ -143,11 +138,7 @@ pub async fn create_binding(
     let store = state.org_storage.binding_store();
     if let Err(e) = store.create_binding(&binding).await {
         tracing::error!("failed to create binding: {e}");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "failed to create binding",
-        )
-            .into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create binding");
     }
 
     let resp = BindingResponse {
@@ -171,7 +162,8 @@ pub async fn create_binding(
     ),
     responses(
         (status = 200, description = "Bindings", body = Vec<BindingResponse>),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_bindings(
@@ -181,7 +173,7 @@ pub async fn list_bindings(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
@@ -201,7 +193,7 @@ pub async fn list_bindings(
         }
         Err(e) => {
             tracing::error!("failed to list bindings: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -219,8 +211,9 @@ pub async fn list_bindings(
     ),
     responses(
         (status = 204, description = "Deleted"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn delete_binding(
@@ -230,7 +223,7 @@ pub async fn delete_binding(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = SpaceId::from(space_id);
@@ -238,8 +231,7 @@ pub async fn delete_binding(
         match ctx.role_in(&space_id) {
             Some(assistant_core::identity::Role::SpaceAdmin) => {}
             _ => {
-                return (StatusCode::FORBIDDEN, "space admin or org admin required")
-                    .into_response();
+                return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
             }
         }
     }
@@ -250,21 +242,21 @@ pub async fn delete_binding(
     match store.get_binding(&id).await {
         Ok(Some(b)) if b.space_id == space_id => {}
         Ok(Some(_)) => {
-            return (StatusCode::FORBIDDEN, "binding belongs to another space").into_response();
+            return json_error(StatusCode::FORBIDDEN, "binding belongs to another space");
         }
-        Ok(None) => return (StatusCode::NOT_FOUND, "binding not found").into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "binding not found"),
         Err(e) => {
             tracing::error!("failed to get binding: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     }
 
     match store.delete_binding(&id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => (StatusCode::NOT_FOUND, "binding not found").into_response(),
+        Ok(false) => json_error(StatusCode::NOT_FOUND, "binding not found"),
         Err(e) => {
             tracing::error!("failed to delete binding: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }

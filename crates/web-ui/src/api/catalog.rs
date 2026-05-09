@@ -31,6 +31,9 @@ use assistant_core::identity::OrgId;
 use assistant_core::store::{CatalogItem, CatalogItemStore, CatalogSubscriptionStore};
 use assistant_storage::OrgStorageLayer;
 
+use crate::errors::json_error;
+use crate::openapi::ErrorBody;
+
 // -- State -------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -130,8 +133,9 @@ fn item_to_response(item: &CatalogItem) -> CatalogItemResponse {
     request_body = PublishCatalogItemRequest,
     responses(
         (status = 201, description = "Published", body = CatalogItemResponse),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Forbidden"),
+        (status = 400, description = "Invalid request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn publish_catalog_item(
@@ -142,14 +146,14 @@ pub async fn publish_catalog_item(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
 
     if body.name.is_empty() {
-        return (StatusCode::BAD_REQUEST, "name is required").into_response();
+        return json_error(StatusCode::BAD_REQUEST, "name is required");
     }
 
     let item = CatalogItem {
@@ -164,7 +168,7 @@ pub async fn publish_catalog_item(
     let store = state.org_storage.catalog_item_store();
     if let Err(e) = store.create_item(&item).await {
         tracing::error!("failed to publish catalog item: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to publish").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to publish");
     }
 
     (StatusCode::CREATED, Json(item_to_response(&item))).into_response()
@@ -179,7 +183,8 @@ pub async fn publish_catalog_item(
     params(("org_id" = String, Path, description = "Organization ID")),
     responses(
         (status = 200, description = "Catalog items", body = Vec<CatalogItemResponse>),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_catalog(
@@ -189,7 +194,7 @@ pub async fn list_catalog(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let store = state.org_storage.catalog_item_store();
@@ -200,7 +205,7 @@ pub async fn list_catalog(
         }
         Err(e) => {
             tracing::error!("failed to list catalog: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -217,8 +222,9 @@ pub async fn list_catalog(
     ),
     responses(
         (status = 200, description = "Catalog items by type", body = Vec<CatalogItemResponse>),
-        (status = 400, description = "Invalid type"),
-        (status = 403, description = "Forbidden"),
+        (status = 400, description = "Invalid type", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_catalog_by_type(
@@ -228,13 +234,13 @@ pub async fn list_catalog_by_type(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let resource_type = match parse_resource_type(&type_str) {
         Some(rt) => rt,
         None => {
-            return (StatusCode::BAD_REQUEST, "invalid resource type").into_response();
+            return json_error(StatusCode::BAD_REQUEST, "invalid resource type");
         }
     };
 
@@ -246,7 +252,7 @@ pub async fn list_catalog_by_type(
         }
         Err(e) => {
             tracing::error!("failed to list catalog by type: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -263,8 +269,9 @@ pub async fn list_catalog_by_type(
     ),
     responses(
         (status = 204, description = "Deleted"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn delete_catalog_item(
@@ -274,10 +281,10 @@ pub async fn delete_catalog_item(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
     if !ctx.is_org_admin() {
-        return (StatusCode::FORBIDDEN, "org admin required").into_response();
+        return json_error(StatusCode::FORBIDDEN, "org admin required");
     }
 
     let store = state.org_storage.catalog_item_store();
@@ -285,20 +292,20 @@ pub async fn delete_catalog_item(
     // Verify the item belongs to this org.
     match store.get_item(&item_id).await {
         Ok(Some(item)) if item.org_id == org_id => {}
-        Ok(Some(_)) => return (StatusCode::FORBIDDEN, "access denied").into_response(),
-        Ok(None) => return (StatusCode::NOT_FOUND, "catalog item not found").into_response(),
+        Ok(Some(_)) => return json_error(StatusCode::FORBIDDEN, "access denied"),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "catalog item not found"),
         Err(e) => {
             tracing::error!("failed to get catalog item: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     }
 
     match store.delete_item(&item_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => (StatusCode::NOT_FOUND, "catalog item not found").into_response(),
+        Ok(false) => json_error(StatusCode::NOT_FOUND, "catalog item not found"),
         Err(e) => {
             tracing::error!("failed to delete catalog item: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -318,7 +325,8 @@ pub async fn delete_catalog_item(
     request_body = CreateSubscriptionRequest,
     responses(
         (status = 201, description = "Subscribed", body = SubscriptionResponse),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn create_subscription(
@@ -329,15 +337,14 @@ pub async fn create_subscription(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
     if !ctx.is_org_admin() {
         let space_id_ref = assistant_core::identity::SpaceId::from(space_id.clone());
         match ctx.role_in(&space_id_ref) {
             Some(assistant_core::identity::Role::SpaceAdmin) => {}
             _ => {
-                return (StatusCode::FORBIDDEN, "space admin or org admin required")
-                    .into_response();
+                return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
             }
         }
     }
@@ -347,12 +354,12 @@ pub async fn create_subscription(
     match catalog_store.get_item(&body.catalog_item_id).await {
         Ok(Some(item)) if item.org_id == org_id => {}
         Ok(Some(_)) => {
-            return (StatusCode::FORBIDDEN, "catalog item belongs to another org").into_response();
+            return json_error(StatusCode::FORBIDDEN, "catalog item belongs to another org");
         }
-        Ok(None) => return (StatusCode::NOT_FOUND, "catalog item not found").into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "catalog item not found"),
         Err(e) => {
             tracing::error!("failed to get catalog item: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     }
 
@@ -367,7 +374,7 @@ pub async fn create_subscription(
     let store = state.org_storage.catalog_subscription_store();
     if let Err(e) = store.create_subscription(&sub).await {
         tracing::error!("failed to create subscription: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "failed to subscribe").into_response();
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to subscribe");
     }
 
     let resp = SubscriptionResponse {
@@ -390,7 +397,8 @@ pub async fn create_subscription(
     ),
     responses(
         (status = 200, description = "Subscriptions", body = Vec<SubscriptionResponse>),
-        (status = 403, description = "Forbidden"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
     )
 )]
 pub async fn list_subscriptions(
@@ -400,7 +408,7 @@ pub async fn list_subscriptions(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = assistant_core::identity::SpaceId::from(space_id);
@@ -419,7 +427,7 @@ pub async fn list_subscriptions(
         }
         Err(e) => {
             tracing::error!("failed to list subscriptions: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
@@ -437,8 +445,9 @@ pub async fn list_subscriptions(
     ),
     responses(
         (status = 204, description = "Unsubscribed"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Not found"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
     )
 )]
 pub async fn delete_subscription(
@@ -448,7 +457,7 @@ pub async fn delete_subscription(
 ) -> Response {
     let org_id = OrgId::from(org_id);
     if ctx.org_id != org_id {
-        return (StatusCode::FORBIDDEN, "access denied").into_response();
+        return json_error(StatusCode::FORBIDDEN, "access denied");
     }
 
     let space_id = assistant_core::identity::SpaceId::from(space_id);
@@ -456,8 +465,7 @@ pub async fn delete_subscription(
         match ctx.role_in(&space_id) {
             Some(assistant_core::identity::Role::SpaceAdmin) => {}
             _ => {
-                return (StatusCode::FORBIDDEN, "space admin or org admin required")
-                    .into_response();
+                return json_error(StatusCode::FORBIDDEN, "space admin or org admin required");
             }
         }
     }
@@ -468,25 +476,21 @@ pub async fn delete_subscription(
     match store.get_subscription(&sub_id).await {
         Ok(Some(sub)) if sub.space_id == space_id => {}
         Ok(Some(_)) => {
-            return (
-                StatusCode::FORBIDDEN,
-                "subscription belongs to another space",
-            )
-                .into_response();
+            return json_error(StatusCode::FORBIDDEN, "subscription belongs to another space");
         }
-        Ok(None) => return (StatusCode::NOT_FOUND, "subscription not found").into_response(),
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "subscription not found"),
         Err(e) => {
             tracing::error!("failed to get subscription: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
         }
     }
 
     match store.delete_subscription(&sub_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => (StatusCode::NOT_FOUND, "subscription not found").into_response(),
+        Ok(false) => json_error(StatusCode::NOT_FOUND, "subscription not found"),
         Err(e) => {
             tracing::error!("failed to delete subscription: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
         }
     }
 }
