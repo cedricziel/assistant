@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-exporter-iceberg"
-version = "0.1.146"
+version = "0.1.147"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.147](https://github.com/cedricziel/assistant/compare/v0.1.146...v0.1.147) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** web session resilience — corruption detection, banner, persistence, SW versioning ([#687](https://github.com/cedricziel/assistant/issues/687)) ([dc25b9a](https://github.com/cedricziel/assistant/commit/dc25b9ac08aec0abcd50d3f43fcc8d03f6e5b8f4))
+
 ## [0.1.146](https://github.com/cedricziel/assistant/compare/v0.1.145...v0.1.146) (2026-05-09)
 
 
