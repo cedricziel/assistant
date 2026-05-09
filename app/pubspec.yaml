@@ -1,7 +1,7 @@
 name: assistant_app
 description: A new Flutter project.
 publish_to: none
-version: 0.1.146
+version: 0.1.147
 environment:
   sdk: ^3.11.4
 dependencies:
