@@ -8,12 +8,12 @@ import 'package:go_router/go_router.dart';
 
 import '../api/connectivity_provider.dart';
 import '../features/chat/chat_provider.dart';
-import '../features/contexts/providers/context_providers.dart';
 import '../features/notifications/agent_event_listener.dart';
 import '../features/pwa/pwa_provider.dart';
 import '../features/spaces/space_provider.dart';
 import '../features/updater/update_banner.dart';
 import '../router/app_router.dart';
+import 'auth_actions.dart';
 import 'platform/platform.dart';
 import 'space_switcher.dart';
 
@@ -652,9 +652,9 @@ class _NavShellState extends ConsumerState<NavShell> {
                       if (kIsWeb)
                         _LogoutButton(
                           onLogout: () async {
-                            await ref
-                                .read(activeContextProvider.notifier)
-                                .deactivate();
+                            await performWebLogout(
+                              ProviderScope.containerOf(context, listen: false),
+                            );
                             if (context.mounted) {
                               context.go(AppRoutes.login);
                             }
