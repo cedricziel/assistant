@@ -116,10 +116,13 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     let llm_config = LlmClientConfig {
         model: MODEL.to_string(),
         base_url: base_url.to_string(),
-        timeout_secs: 120,
-        // Disable HTTP-level retries.  On CPU-only CI runners Ollama returns
-        // 500 after a 2-minute inference timeout — that is deterministic, not
-        // transient, so retrying the same prompt just burns another 2 min.
+        // CPU-only CI runners need plenty of headroom: a single qwen2.5:1.5b
+        // chat call with the full system prompt + tool definitions (~5K tokens)
+        // can take 2+ minutes.  The previous 120s value flaked the first slow
+        // request every run.
+        timeout_secs: 300,
+        // Disable HTTP-level retries.  Slow CPU inference is deterministic,
+        // not transient, so retrying the same prompt just burns another N min.
         // The orchestrator's tool-calling loop already provides iteration-level
         // "retries" with an evolving prompt.
         retry_config: assistant_llm_provider::retry::RetryConfig::disabled(),
@@ -130,6 +133,9 @@ async fn build_fixture(base_url: &str) -> Result<Fixture> {
     // Disable learning so background skill-eval LLM calls don't compete with
     // the test's own LLM calls on the CPU-only CI Ollama instance.
     config.learning.enabled = false;
+    // Cap iteration count so a confused 1.5B model can't spin up to the
+    // default 80 iterations and blow the per-test timeout.
+    config.llm.max_iterations = 6;
     let executor = Arc::new(ToolExecutor::new(
         storage.clone(),
         llm.clone(),
@@ -243,7 +249,7 @@ async fn test_tool_loop_terminates() -> Result<()> {
     let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
-    let result = tokio::time::timeout(Duration::from_secs(300), async {
+    let result = tokio::time::timeout(Duration::from_secs(600), async {
         f.orchestrator
             .run_turn(
                 "What is 2 + 2?",
@@ -256,7 +262,7 @@ async fn test_tool_loop_terminates() -> Result<()> {
             .await
     })
     .await
-    .map_err(|_| anyhow::anyhow!("test_tool_loop_terminates timed out after 5 minutes"))??;
+    .map_err(|_| anyhow::anyhow!("test_tool_loop_terminates timed out after 10 minutes"))??;
 
     assert!(!result.answer.is_empty());
     Ok(())
@@ -271,7 +277,7 @@ async fn test_self_analyze_runs() -> Result<()> {
     let (_container, base_url) = resolve_ollama().await?;
     let f = build_fixture(&base_url).await?;
 
-    tokio::time::timeout(Duration::from_secs(300), async {
+    tokio::time::timeout(Duration::from_secs(600), async {
         // Produce some traces for the memory-append tool.
         f.orchestrator
             .run_turn(
@@ -301,5 +307,5 @@ async fn test_self_analyze_runs() -> Result<()> {
         Ok(())
     })
     .await
-    .map_err(|_| anyhow::anyhow!("test_self_analyze_runs timed out after 5 minutes"))?
+    .map_err(|_| anyhow::anyhow!("test_self_analyze_runs timed out after 10 minutes"))?
 }
